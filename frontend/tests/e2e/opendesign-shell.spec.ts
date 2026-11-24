@@ -54,10 +54,33 @@ test.describe("OpenDesign shell", () => {
         .getByRole("link", { name: "Collections" });
 
       await expect(upload).toHaveCSS("background-color", "rgb(77, 111, 155)");
-      await expect(upload).toHaveCSS("border-radius", "0px");
+      await expect(upload).toHaveCSS("border-radius", "6px");
       await expect(current).not.toHaveCSS("background-color", "rgb(77, 111, 155)");
     });
   }
+
+  test("uses the floating radius on the workspace menu", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "My workspace" }).click();
+    await expect(page.getByRole("menu")).toHaveCSS("border-radius", "8px");
+  });
+
+  test("uses the control radius on the native sort select", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("combobox", { name: "Sort models" })).toHaveCSS(
+      "border-radius",
+      "6px",
+    );
+  });
+
+  test("uses the floating radius on the native select picker", async ({ page }) => {
+    await page.goto("/");
+    const sort = page.getByRole("combobox", { name: "Sort models" });
+    await expect(sort).toBeVisible();
+    expect(
+      await sort.evaluate((element) => getComputedStyle(element, "::picker(select)").borderRadius),
+    ).toBe("8px");
+  });
 
   test("the phone navigation remains usable at 320 pixels", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 700 });

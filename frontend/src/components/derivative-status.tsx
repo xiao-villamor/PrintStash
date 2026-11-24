@@ -1,5 +1,7 @@
 "use client";
 
+import { Link } from "@/lib/link";
+
 /**
  * What is still being derived from one Artifact, and what failed.
  *
@@ -61,12 +63,14 @@ export function DerivativeStatus({
   fileId,
   canRetry,
   previewFailure = null,
+  showReady = false,
   api = DERIVATIVE_API,
 }: {
   modelId: number;
   fileId: number;
   canRetry: boolean;
   previewFailure?: StlPreviewFailure | null;
+  showReady?: boolean;
   api?: DerivativeStatusApi;
 }) {
   useUiLocale();
@@ -114,10 +118,15 @@ export function DerivativeStatus({
     failures.set(cause, [...(failures.get(cause) ?? []), item]);
   }
   const disabled = derivatives.some((item) => item.state === "disabled");
+  const previewJobs = derivatives.filter(
+    (item) => item.kind === "viewer_stl" || item.kind === "previews" || item.kind === "plates",
+  );
+  const previewDisabled = previewJobs.some((item) => item.state === "disabled");
+  const ready = showReady && previewJobs.some((item) => item.state === "ready");
   const previewMessage = previewFailure === null ? null : stlPreviewMessage(previewFailure);
   const showPreviewFailure =
     previewMessage !== null && ![...failures.keys()].some((cause) => cause === previewFailure);
-  if (preparing.length === 0 && failed.length === 0 && !disabled && !showPreviewFailure)
+  if (preparing.length === 0 && failed.length === 0 && !disabled && !showPreviewFailure && !ready)
     return null;
 
   return (
@@ -131,9 +140,21 @@ export function DerivativeStatus({
           </div>
         </li>
       )}
+      {ready && !previewDisabled && (
+        <li className="text-sm text-muted-foreground">{uiText("Preview ready")}</li>
+      )}
       {disabled && (
         <li role="status" className="text-2xs text-on-surface-variant">
-          {uiText("Processing disabled")}
+          {uiText(
+            showReady && previewDisabled
+              ? "3D preview processing is disabled"
+              : "Processing disabled",
+          )}
+          {showReady && previewDisabled && canRetry && (
+            <Link href="/settings?section=work" className="ms-2 text-sm underline">
+              {uiText("Processing settings")} ›
+            </Link>
+          )}
         </li>
       )}
       {preparing.length > 0 && (

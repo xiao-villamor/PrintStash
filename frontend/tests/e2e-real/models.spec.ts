@@ -30,13 +30,13 @@ test.describe("model library", () => {
 
     try {
       await selectModelDetailTab(page, /Activity/);
-      await page.getByRole("button", { name: "Add record", exact: true }).click();
-      const dialog = page.getByRole("dialog", { name: "Add print record" });
+      await page.getByRole("button", { name: "Record result", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Record result" });
       await dialog.getByRole("button", { name: "Printer", exact: true }).click();
       await page.getByRole("button", { name: "Other (not listed)…", exact: true }).click();
       await dialog.getByRole("textbox", { name: "Printer name" }).fill(printer);
       await dialog.getByRole("radio", { name: "Failed", exact: true }).check();
-      await dialog.getByRole("textbox", { name: "Error (opt.)" }).fill("Lifted corner");
+      await dialog.getByRole("textbox", { name: "What went wrong" }).fill("Lifted corner");
       const saved = page.waitForResponse(
         (response) =>
           response.url().endsWith(`${modelPath}/print-jobs`) &&

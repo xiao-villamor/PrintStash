@@ -593,12 +593,8 @@ describe("ModelDetail", () => {
         model: aModel({ collection: "parts/brackets", collection_label: "Parts/Brackets" }),
       });
 
-      const path = await screen.findByRole("list", { name: "Collection" });
-      expect(
-        within(path)
-          .getAllByRole("listitem")
-          .map((item) => item.textContent),
-      ).toEqual(["Parts", "Brackets"]);
+      const path = await screen.findByRole("link", { name: "Parts / Brackets" });
+      expect(path).toHaveAttribute("href", "/?c=parts%2Fbrackets");
       expect(
         requests().filter(
           (call) => new URL(call.url, "http://test").pathname === "/api/v1/collections",

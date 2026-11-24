@@ -196,7 +196,7 @@ test.describe("printer routes", () => {
 
   test("shows the same visible radio control in print history and the queue", async ({ page }) => {
     const scenarios = [
-      ["/models/1?tab=history", "Add record", "Result", "Completed", "Failed"],
+      ["/models/1?tab=history", "Record result", "Result", "Success", "Failed"],
       ["/printers?tab=queue", "Add to queue", "Priority", "Normal", "Rush"],
     ];
     for (const [route, action, group, initial, next] of scenarios) {

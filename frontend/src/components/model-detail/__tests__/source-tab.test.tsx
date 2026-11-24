@@ -107,6 +107,12 @@ const provenance: ModelProvenanceRead = {
   ],
 };
 
+async function editSource() {
+  await userEvent.click(
+    await screen.findByRole("button", { name: /^(Edit source|Editar origen)$/ }),
+  );
+}
+
 describe("SourceTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -151,7 +157,7 @@ describe("SourceTab", () => {
     render(<SourceTab modelId={1} canEdit={false} api={api} />);
 
     expect(
-      await screen.findByRole("link", { name: "https://example.test/canonical" }),
+      await screen.findByRole("link", { name: /^https:\/\/example.test\/canonical/ }),
     ).toHaveAttribute("href", "https://example.test/canonical");
   });
 
@@ -168,6 +174,7 @@ describe("SourceTab", () => {
     render(<SourceTab modelId={1} canEdit api={api} />, { locale: "es" });
 
     await screen.findByText("Printables");
+    await editSource();
     expect(screen.getByRole("button", { name: "Usar título de la fuente" })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Usar descripción de la fuente" }),
@@ -208,6 +215,7 @@ describe("SourceTab", () => {
     const user = userEvent.setup();
     render(<SourceTab modelId={1} canEdit api={api} />);
 
+    await editSource();
     const input = await screen.findByLabelText("Upload cover");
     expect(input).toHaveAttribute("accept", "image/jpeg,image/png,image/webp");
     await user.upload(input, new File(["cover"], "cover.png", { type: "image/png" }));
@@ -228,6 +236,7 @@ describe("SourceTab", () => {
       .mockResolvedValueOnce(aModel({ edit_version: 3 }));
     const user = userEvent.setup();
     render(<SourceTab modelId={1} canEdit api={api} />);
+    await editSource();
     await user.click(await screen.findByRole("button", { name: "Use source title" }));
     await user.click(screen.getByRole("button", { name: "Use source description" }));
     expect(updateModel).toHaveBeenNthCalledWith(
@@ -275,6 +284,7 @@ describe("SourceTab", () => {
 
     render(<SourceTab modelId={1} canEdit api={api} />);
 
+    await editSource();
     expect(await screen.findByRole("button", { name: "Edit Title" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit Description" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit License" })).toBeInTheDocument();
@@ -294,6 +304,7 @@ describe("SourceTab", () => {
     getProvenance.mockResolvedValue(overridden);
     patchProvenance.mockResolvedValue({ ...overridden, edit_version: 2 });
     render(<SourceTab modelId={1} canEdit api={api} />);
+    await editSource();
     await user.click(await screen.findByRole("button", { name: "Edit Title" }));
     const input = screen.getByRole("textbox", { name: "Title override" });
     await user.clear(input);
@@ -319,6 +330,7 @@ describe("SourceTab", () => {
     getProvenance.mockResolvedValue(withOverriddenTitle());
     patchProvenance.mockResolvedValue({ ...provenance, edit_version: 2 });
     render(<SourceTab modelId={1} canEdit api={api} />);
+    await editSource();
     await user.click(await screen.findByRole("button", { name: "Edit Title" }));
 
     await user.click(screen.getByRole("button", { name: "Restore captured value" }));
@@ -341,6 +353,7 @@ describe("SourceTab", () => {
     // has to happen here or a GIF reaches the server and 415s after the upload.
     const user = userEvent.setup({ applyAccept: false });
     render(<SourceTab modelId={1} canEdit api={api} />);
+    await editSource();
     const input = await screen.findByLabelText("Upload cover");
 
     await user.upload(input, new File(["x"], "cover.gif", { type: "image/gif" }));
@@ -352,6 +365,7 @@ describe("SourceTab", () => {
     // Rejecting after the bytes have gone up wastes the upload and the wait.
     const user = userEvent.setup();
     render(<SourceTab modelId={1} canEdit api={api} />);
+    await editSource();
     const input = await screen.findByLabelText("Upload cover");
     const huge = new File([new Uint8Array(1)], "cover.png", { type: "image/png" });
     Object.defineProperty(huge, "size", { value: 16 * 1024 * 1024 });
@@ -395,6 +409,7 @@ describe("SourceTab conditional editing", () => {
     const view = renderApp(<SourceTab modelId={1} canEdit />, {
       routes: { "GET /api/v1/models/1/provenance": json(snapshot) },
     });
+    await editSource();
     expect(await screen.findByRole("button", { name: "Replace cover" })).toBeInTheDocument();
     expect(view.requests().filter((r) => r.url.endsWith("/cover"))).toHaveLength(0);
   });
@@ -411,6 +426,7 @@ describe("SourceTab conditional editing", () => {
         },
       },
     });
+    await editSource();
     await user.click(await screen.findByRole("button", { name: "Edit Title" }));
     await user.clear(screen.getByRole("textbox", { name: "Title override" }));
     await user.type(screen.getByRole("textbox", { name: "Title override" }), "My draft");
@@ -466,6 +482,7 @@ describe("SourceTab conditional editing", () => {
         },
       },
     });
+    await editSource();
     await user.click(await screen.findByRole("button", { name: "Edit Title" }));
     await user.clear(screen.getByRole("textbox", { name: "Title override" }));
     await user.type(screen.getByRole("textbox", { name: "Title override" }), "My draft");
@@ -529,6 +546,7 @@ describe("SourceTab conflict recovery", () => {
             : json({ detail: "edit_conflict" }, options.status ?? 412),
       },
     });
+    await editSource();
     await user.click(await screen.findByRole("button", { name: "Edit Title" }));
     await user.clear(screen.getByRole("textbox", { name: "Title override" }));
     await user.type(screen.getByRole("textbox", { name: "Title override" }), "My draft");
@@ -650,6 +668,7 @@ describe("SourceTab conflict recovery", () => {
         },
       },
     });
+    await editSource();
     await user.upload(await screen.findByLabelText("Upload cover"), file);
     view.route({ "GET /api/v1/models/1/provenance": json({ ...provenance, edit_version: 7 }) });
     await user.click(await screen.findByRole("button", { name: "Review latest version" }));
@@ -689,6 +708,7 @@ describe("SourceTab conflict recovery", () => {
         },
       },
     });
+    await editSource();
     await user.click(await screen.findByRole("button", { name: button }));
     await waitFor(() => expect(view.client.getQueryData(queryKeys.model(1))).toMatchObject(saved));
     expect(base).toBe('"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"');
@@ -708,6 +728,7 @@ describe("SourceTab conflict recovery", () => {
         "PATCH /api/v1/models/1": json({ detail: "edit_conflict" }, 412),
       },
     });
+    await editSource();
     await user.click(await screen.findByRole("button", { name: "Use source title" }));
     view.route({ "GET /api/v1/models/1/provenance": json({ ...provenance, edit_version: 7 }) });
     await user.click(await screen.findByRole("button", { name: "Review latest version" }));
@@ -729,6 +750,7 @@ describe("SourceTab edit boundaries", () => {
         "PATCH /api/v1/models/1/provenance/8": json({ detail: "invalid_override" }, 422),
       },
     });
+    await editSource();
     await user.click(await screen.findByRole("button", { name: "Edit Title" }));
     await user.type(screen.getByRole("textbox", { name: "Title override" }), " draft");
     await user.click(screen.getByRole("button", { name: "Save override" }));
@@ -764,10 +786,12 @@ describe("SourceTab edit boundaries", () => {
         "GET /api/v1/models/2/provenance": json({ ...provenance, edit_version: 12 }),
       },
     });
+    await editSource();
     await user.click(await screen.findByRole("button", { name: "Edit Title" }));
     await user.click(screen.getByRole("button", { name: "Save override" }));
     view.rerender(<SourceTab modelId={2} canEdit />);
     await screen.findByText("Source title");
+    await editSource();
     expect(screen.getByRole("button", { name: "Edit Title" })).toBeEnabled();
     await act(async () => held.resolve(json({ ...provenance, edit_version: 9 })));
     await waitFor(() =>
@@ -809,6 +833,7 @@ describe("SourceTab edit boundaries", () => {
         },
       },
     });
+    await editSource();
     if (method === "PUT")
       await user.upload(
         await screen.findByLabelText("Replace cover"),
@@ -862,6 +887,7 @@ describe("SourceTab cover review", () => {
         "DELETE /api/v1/models/1/provenance/8/cover": json({ detail: "edit_conflict" }, 412),
       },
     });
+    await editSource();
     await user.click(await screen.findByRole("button", { name: "Delete cover" }));
     await user.click(
       within(screen.getByRole("dialog")).getByRole("button", { name: "Delete cover" }),

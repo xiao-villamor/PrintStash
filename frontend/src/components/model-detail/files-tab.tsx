@@ -4,15 +4,7 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { useState, type ReactNode } from "react";
-import {
-  ChevronRight,
-  Download,
-  FileText,
-  FolderSync,
-  MoreHorizontal,
-  RotateCcw,
-  Trash2,
-} from "lucide-react";
+import { FileText, FolderSync, MoreHorizontal, RotateCcw, Trash2 } from "lucide-react";
 
 import {
   downloadAuthenticatedFile,
@@ -179,8 +171,8 @@ export function FilesTab({
                     )}
                     <Button
                       type="button"
-                      variant="ghost"
-                      size="xs"
+                      variant="outline"
+                      size="sm"
                       onClick={() =>
                         downloadAuthenticatedFile(
                           `/api/v1/files/${f.id}/download`,
@@ -189,7 +181,6 @@ export function FilesTab({
                       }
                       title={uiText("Download")}
                     >
-                      <Download className="h-3.5 w-3.5" />
                       {uiText("Download")}
                     </Button>
                     <EntityTagsDialog
@@ -262,20 +253,22 @@ export function FilesTab({
                     </DropdownMenu>
                   </div>
                 </div>
+                <p className="flex flex-wrap items-baseline gap-2 text-sm text-muted-foreground">
+                  {uiText("File SHA-256")}
+                  <code className="text-foreground">{f.sha256.slice(0, 12)}…</code>
+                </p>
                 <DerivativeStatus
                   modelId={modelId}
                   fileId={f.id}
                   canRetry={canEdit}
+                  showReady
                   previewFailure={previewFailure?.fileId === f.id ? previewFailure.reason : null}
                 />
                 {details && (
-                  <details className="group">
-                    <summary className="flex w-fit items-center gap-2 py-1 text-sm font-medium focus-visible:outline-ring">
-                      <ChevronRight className="size-4 group-open:rotate-90" aria-hidden />
-                      {uiText("modelDetail.fileDetails")}
-                    </summary>
-                    <div className="mt-3 space-y-4">{details}</div>
-                  </details>
+                  <section className="mt-3 space-y-4 border-t border-border pt-3">
+                    <h3 className="text-sm font-medium">{uiText("modelDetail.fileDetails")}</h3>
+                    {details}
+                  </section>
                 )}
               </article>
             );

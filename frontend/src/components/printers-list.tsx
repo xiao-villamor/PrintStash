@@ -364,7 +364,7 @@ export function PrintersPage() {
                       </Button>
                     ) : undefined
                   }
-                  className="animate-panel-in rounded-lg border border-border bg-card shadow-sm"
+                  className="animate-panel-in rounded-none border border-border bg-card shadow-sm"
                 />
               ) : (
                 <div className="grid min-w-0 grid-cols-1 items-start gap-4 @5xl/fleet:grid-cols-[minmax(0,1fr)_minmax(17rem,24%)]">

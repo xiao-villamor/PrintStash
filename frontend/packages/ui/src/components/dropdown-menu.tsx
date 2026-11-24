@@ -313,6 +313,7 @@ export function DropdownMenu({
           ? "transition-[opacity,transform] duration-fast ease-out data-[state=closed]:opacity-0 data-[state=closed]:scale-content-enter motion-reduce:transition-none motion-reduce:data-[state=closed]:scale-100"
           : "transition-[opacity,transform] duration-press ease-out data-[state=closed]:opacity-0 data-[state=closed]:scale-95 motion-reduce:data-[state=closed]:scale-100",
         contentClassName,
+        "rounded-lg",
       )}
     >
       {field && !open ? lastOpenChildren : children}

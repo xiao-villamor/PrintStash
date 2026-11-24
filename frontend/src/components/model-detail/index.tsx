@@ -21,7 +21,9 @@ import { InlineTitleEditor } from "@/components/inline-title-editor";
 import { ModelGeometry, ModelInformation } from "./model-information";
 import { ModelSourceSummary } from "./source-summary";
 import { RelatedProfiles } from "./related-profiles";
+import { useRelatedProfiles } from "./use-related-profiles";
 import { ModelPrintSummary } from "./model-print-summary";
+import { summarizePrintEstimate } from "./print-estimate";
 import { ProjectProfile } from "./project-profile";
 import { useMeshGeometryMeasurement } from "./use-mesh-geometry-facts";
 import { RevisionPicker } from "./revision-picker";
@@ -46,7 +48,7 @@ import {
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import { useLocation } from "@tanstack/react-router";
-import { Files, FileText, Loader2, MoreHorizontal, Pencil, Star, Trash2 } from "lucide-react";
+import { Files, FileText, Loader2, MoreHorizontal, Star, Trash2 } from "lucide-react";
 
 import type {
   STLViewerControls,
@@ -95,9 +97,12 @@ import {
 import { PrintHistorySection } from "./print-history-section";
 import { ProductionCosting } from "./production-costing";
 import { RevisionsTab } from "./revisions-tab";
+import { RevisionDeliveryActions } from "./revision-delivery-actions";
+import { useRevisionUpdater } from "./use-revision-updater";
 import { SendToButtons } from "./send-to-buttons";
 import { ShareDialog } from "./share-dialog";
 import { SettingsTab } from "./settings-tab";
+import { safeHttpUrl } from "./source-url";
 import { SourceTab } from "./source-tab";
 import { useContentReveal } from "@/lib/use-content-reveal";
 import { DetailTabLoading } from "./tab-loading";
@@ -108,7 +113,6 @@ import { PlatePicker } from "./plate-picker";
 import { useFilePlates, useGcodePlates } from "@/lib/queries/file-plates";
 import { matchSlicedPlate } from "./plate-mapping";
 import { Localized } from "@/components/ui/localized";
-import { ModelTagsDialog } from "@/components/model-tags-dialog";
 
 const STLViewer = lazy(() =>
   import("@/components/stl-viewer").then((m) => ({ default: m.STLViewer })),
@@ -212,8 +216,9 @@ function ModelDetailPresentation({
   const auth = useRequireAuth();
   const { user } = useAuth();
   const [deleting, setDeleting] = useState(false);
-  const [editMode, setEditMode] = useState<"details" | "name" | null>(null);
-  const editing = editMode === "details";
+  const [editMode, setEditMode] = useState<"details" | "name" | "source" | null>(null);
+  const addingSource = editMode === "source";
+  const editing = editMode === "details" || addingSource;
   const renaming = editMode === "name";
   const editLifetime = useRef(0);
   useEffect(
@@ -229,8 +234,6 @@ function ModelDetailPresentation({
   const [reviewing, setReviewing] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  const [tagDialogOpen, setTagDialogOpen] = useState(false);
-  const [tagDialogSession, setTagDialogSession] = useState(0);
   const [saving, setSaving] = useState(false);
   const star = useLibraryStar();
   const starBusy = star.isPending;
@@ -287,7 +290,7 @@ function ModelDetailPresentation({
     },
   );
   const detailSidebarWidth = clampDetailSidebarWidth(
-    preferredDetailSidebarWidth ?? Math.min(1000, detailLayoutWidth * 0.45),
+    preferredDetailSidebarWidth ?? 490,
     detailLayoutWidth,
   );
   function setDetailSidebarWidth(width: number | ((current: number) => number)) {
@@ -352,6 +355,7 @@ function ModelDetailPresentation({
     if (origin === "settings") selectTab("revisions");
   }
   const [historyRevisionId, setHistoryRevisionId] = useState<number | null>(null);
+  const [sentModelId, setSentModelId] = useState<number | null>(null);
   const [historyDraft, setHistoryDraft] = useState<{
     fileId: number;
     state: "completed" | "failed";
@@ -510,7 +514,7 @@ function ModelDetailPresentation({
     }
   }
 
-  function enterEdit(mode: "details" | "name" = "details") {
+  function enterEdit(mode: "details" | "name" | "source" = "details") {
     if (saving || mode === editMode) return;
     editLifetime.current += 1;
     setEditBase(captureEditingBase(model));
@@ -566,7 +570,13 @@ function ModelDetailPresentation({
   }
 
   async function saveEdit(version = editBase) {
-    if (!editName.trim() || saving || !canEditModel || reviewedModel?.effective_role === "view")
+    if (
+      !editName.trim() ||
+      (addingSource && !safeHttpUrl(editSourceUrl.trim())) ||
+      saving ||
+      !canEditModel ||
+      reviewedModel?.effective_role === "view"
+    )
       return;
     const session = getSessionVersion();
     const lifetime = editLifetime.current;
@@ -577,13 +587,15 @@ function ModelDetailPresentation({
         model.id,
         renaming
           ? { name: editName.trim() }
-          : {
-              name: editName.trim() || undefined,
-              description: editDescription.trim() || null,
-              source_url: editSourceUrl.trim() || null,
-              collection: editCollection,
-              tags: editTags,
-            },
+          : addingSource
+            ? { source_url: editSourceUrl.trim() }
+            : {
+                name: editName.trim() || undefined,
+                description: editDescription.trim() || null,
+                source_url: editSourceUrl.trim() || null,
+                collection: editCollection,
+                tags: editTags,
+              },
         version,
       );
       requireSessionVersion(session);
@@ -850,13 +862,20 @@ function ModelDetailPresentation({
     dispatchPlate === null || !inspectedGcode
       ? undefined
       : slicedEstimates?.plate_metadata?.find((entry) => entry.number === dispatchPlate);
-  const summaryEstimates = overviewRevision?.id === slicedMetadataFile?.id ? slicedEstimates : null;
+  const summaryEstimates = useGcodePlates(
+    model.id,
+    overviewRevision?.original_filename.toLowerCase().endsWith(".3mf") ? overviewRevision.id : null,
+  );
+  const revisionEstimate =
+    overviewRevision && summarizePrintEstimate(overviewRevision, summaryEstimates);
+  const summaryProfiles = useRelatedProfiles(model.id, activeTab === "overview").data?.items;
   function inspectRecommended() {
     if (!overviewRevision) return;
     setCompareOrigin(null);
     setRevisionSelection({ modelId: model.id, fileId: overviewRevision.id });
     openSection("revisions");
   }
+  const revisionUpdater = useRevisionUpdater(model.id, setModel);
   function prepareRecommended() {
     if (!overviewRevision) return;
     setRevisionSelection({ modelId: model.id, fileId: overviewRevision.id });
@@ -883,6 +902,15 @@ function ModelDetailPresentation({
     }
     setAddRevisionOpen(true);
   }
+
+  const logPrint =
+    canViewPrinters && canEditModel && auth.isAuthenticated
+      ? (fileId: number, state: "completed" | "failed") => {
+          setRevisionSelection({ modelId: model.id, fileId });
+          setHistoryRevisionId(fileId);
+          setHistoryDraft({ fileId, state });
+        }
+      : undefined;
 
   const modelMetadataEditor: ModelMetaEditor = {
     collection: editCollection,
@@ -985,16 +1013,6 @@ function ModelDetailPresentation({
           open={shareOpen}
           onClose={() => setShareOpen(false)}
         />
-        <ModelTagsDialog
-          key={`${model.id}:${tagDialogSession}`}
-          model={model}
-          suggestions={tags}
-          open={tagDialogOpen}
-          onClose={() => setTagDialogOpen(false)}
-          onSaved={(nextTags, editVersion) => {
-            void setModel((current) => ({ ...current, tags: nextTags, ...editVersion }));
-          }}
-        />
         <Modal
           open={editing && reviewedModel !== null}
           onClose={() => setReviewedModel(null)}
@@ -1040,8 +1058,12 @@ function ModelDetailPresentation({
           onClose={() => {
             if (!saving) cancelEdit();
           }}
-          title={uiText("Edit Model details")}
-          className="absolute inset-y-0 right-0 h-dvh max-h-none max-w-[680px] rounded-none"
+          title={uiText(addingSource ? "modelDetail.addSourceLink" : "Edit Model details")}
+          className={
+            addingSource
+              ? undefined
+              : "absolute inset-y-0 right-0 h-dvh max-h-none max-w-[680px] rounded-none"
+          }
           bodyClassName="flex-1"
           footer={
             <>
@@ -1051,7 +1073,12 @@ function ModelDetailPresentation({
               <Button
                 onClick={() => void saveEdit()}
                 loading={saving}
-                disabled={!editName.trim() || editProblem !== null || !canEditModel}
+                disabled={
+                  !editName.trim() ||
+                  (addingSource && !safeHttpUrl(editSourceUrl.trim())) ||
+                  editProblem !== null ||
+                  !canEditModel
+                }
               >
                 {uiText("Save changes")}
               </Button>
@@ -1077,24 +1104,38 @@ function ModelDetailPresentation({
               </div>
             )}
 
-            <label className="block space-y-1.5 text-sm font-medium">
-              {uiText("Name (required)")}
-              <Input
-                ref={nameInput}
-                required
-                value={editName}
-                onChange={(event) => setEditName(event.target.value)}
-                aria-invalid={!editName.trim()}
-                aria-describedby={!editName.trim() ? "model-name-error" : undefined}
-                disabled={saving}
-              />
-            </label>
-            {!editName.trim() && (
-              <p id="model-name-error" className="text-sm text-destructive">
-                {uiText("Model name is required.")}
-              </p>
+            {addingSource ? (
+              <label className="block space-y-1.5 text-sm font-medium">
+                {uiText("Source URL")}
+                <Input
+                  type="url"
+                  value={editSourceUrl}
+                  onChange={(event) => setEditSourceUrl(event.target.value)}
+                  disabled={saving}
+                />
+              </label>
+            ) : (
+              <>
+                <label className="block space-y-1.5 text-sm font-medium">
+                  {uiText("Name (required)")}
+                  <Input
+                    ref={nameInput}
+                    required
+                    value={editName}
+                    onChange={(event) => setEditName(event.target.value)}
+                    aria-invalid={!editName.trim()}
+                    aria-describedby={!editName.trim() ? "model-name-error" : undefined}
+                    disabled={saving}
+                  />
+                </label>
+                {!editName.trim() && (
+                  <p id="model-name-error" className="text-sm text-destructive">
+                    {uiText("Model name is required.")}
+                  </p>
+                )}
+                <ModelMetadataFields editor={modelMetadataEditor} />
+              </>
             )}
-            <ModelMetadataFields editor={modelMetadataEditor} />
           </div>
         </Modal>
         {/* Detail Header */}
@@ -1264,6 +1305,20 @@ function ModelDetailPresentation({
             </header>
           }
         >
+          {canEditModel && auth.isAuthenticated && (
+            <Button
+              role="menuitem"
+              size="sm"
+              variant="ghost"
+              className="w-full justify-start"
+              onClick={() => {
+                setActionsOpen(false);
+                enterEdit();
+              }}
+            >
+              {uiText("Edit details")}
+            </Button>
+          )}
           <ModelSearchAction modelId={model.id} onSelect={() => setActionsOpen(false)} />
           {canEditModel && (
             <button
@@ -1277,20 +1332,6 @@ function ModelDetailPresentation({
             >
               <Files className="size-4" aria-hidden />
               {uiText("similarity.title")}
-            </button>
-          )}
-          {canEditModel && auth.isAuthenticated && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setActionsOpen(false);
-                enterEdit();
-              }}
-              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none"
-            >
-              <Pencil className="h-4 w-4" aria-hidden />
-              {uiText("Edit details")}
             </button>
           )}
           <button
@@ -1548,31 +1589,36 @@ function ModelDetailPresentation({
               />
             </div>
             {activePrimary === "revisions" && (
-              <nav
-                aria-label={uiText("modelDetail.printSections")}
-                className="mx-5 flex flex-wrap gap-1 border-b border-border py-2"
-              >
-                {PRINT_DETAIL_SECTIONS.map((section) => (
-                  <Button
-                    key={section}
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-current={section === activeTab ? "page" : undefined}
-                    className={
-                      section === activeTab ? "bg-accent text-accent-foreground" : undefined
-                    }
-                    onClick={() => {
-                      setCompareOrigin(null);
-                      openSection(section);
-                    }}
-                  >
-                    {section === "revisions"
-                      ? uiText("Revisions")
-                      : modelDetailSectionLabel(section)}
-                  </Button>
-                ))}
-              </nav>
+              <div className="mx-5 flex flex-wrap items-center justify-between gap-2 border-b border-border py-2">
+                <nav
+                  aria-label={uiText("modelDetail.printSections")}
+                  className="flex flex-wrap gap-1 rounded-md border border-border bg-muted p-1"
+                >
+                  {PRINT_DETAIL_SECTIONS.map((section) => (
+                    <Button
+                      key={section}
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-current={section === activeTab ? "page" : undefined}
+                      className={
+                        section === activeTab ? "bg-accent text-accent-foreground" : undefined
+                      }
+                      onClick={() => {
+                        setCompareOrigin(null);
+                        openSection(section);
+                      }}
+                    >
+                      {section === "revisions"
+                        ? uiText("Revisions")
+                        : modelDetailSectionLabel(section)}
+                    </Button>
+                  ))}
+                </nav>
+                {hasGcode && canViewPrinters && (
+                  <RevisionDeliveryActions className="ms-auto" onSend={() => setSendOpen(true)} />
+                )}
+              </div>
             )}
             <div
               ref={detailTabPanel}
@@ -1583,33 +1629,69 @@ function ModelDetailPresentation({
             >
               <div ref={detailTabBody} className="model-detail-tab-body space-y-4">
                 {activeTab === "overview" && (
-                  <>
+                  <div className="space-y-3.5">
                     <ModelPrintSummary
                       revision={overviewRevision}
                       estimates={summaryEstimates}
-                      selectedPlate={
-                        overviewRevision?.id === inspectedGcode?.id ? dispatchPlate : null
-                      }
+                      profiles={summaryProfiles?.filter((item) => item.model_id === model.id)}
+                      jobs={canViewPrinters && printJobQuery.isSuccess ? printJobs : null}
                       source={sliceableFile}
                       onReview={inspectRecommended}
+                      onMarkKnownGood={
+                        canEditModel &&
+                        auth.isAuthenticated &&
+                        overviewRevision &&
+                        revisionUpdater.saving === null
+                          ? () =>
+                              void revisionUpdater.update(overviewRevision, {
+                                revision_status: "known_good",
+                              })
+                          : undefined
+                      }
+                      sent={sentModelId === model.id}
                       onPrepare={canViewPrinters ? prepareRecommended : undefined}
+                      onRecordResult={
+                        overviewRevision && logPrint
+                          ? () => logPrint(overviewRevision.id, "completed")
+                          : undefined
+                      }
+                      onPlateEstimates={() => {
+                        if (overviewRevision)
+                          setRevisionSelection({ modelId: model.id, fileId: overviewRevision.id });
+                        openSection("settings");
+                      }}
                       onAddRevision={
                         canEditModel && auth.isAuthenticated ? requestAddRevision : undefined
                       }
                       onFiles={() => openSection("files")}
                     />
-                    <div className="grid items-start gap-y-6 @2xl:grid-cols-2 @2xl:gap-x-8">
+                    <div className="grid items-start gap-3.5 @2xl:grid-cols-2">
                       <ModelInformation
                         model={model}
-                        canEdit={canEditModel}
-                        onTags={() => {
-                          setTagDialogSession((value) => value + 1);
-                          setTagDialogOpen(true);
+                        canEdit={canEditModel && auth.isAuthenticated}
+                        tagSuggestions={tags}
+                        onTagsSaved={(nextTags, editVersion) => {
+                          void setModel((current) => ({
+                            ...current,
+                            tags: nextTags,
+                            ...editVersion,
+                          }));
                         }}
+                        onEditDetails={
+                          canEditModel && auth.isAuthenticated ? () => enterEdit() : undefined
+                        }
                       />
-                      <ModelSourceSummary modelId={model.id} sourceUrl={model.source_url} />
+                      <ModelSourceSummary
+                        modelId={model.id}
+                        sourceUrl={model.source_url}
+                        onAddSource={
+                          canEditModel && auth.isAuthenticated
+                            ? () => enterEdit("source")
+                            : undefined
+                        }
+                      />
                     </div>
-                  </>
+                  </div>
                 )}
 
                 {activeTab === "costing" && (
@@ -1733,9 +1815,6 @@ function ModelDetailPresentation({
                           }
                         : undefined
                     }
-                    printerless={printerless}
-                    plateEstimates={slicedEstimates}
-                    selectedPlate={selectedEstimatePlate}
                     onPreview={(fileId) => {
                       selectToolpathSource(fileId);
                       setViewerMode("gcode");
@@ -1757,17 +1836,8 @@ function ModelDetailPresentation({
                     }
                     comparisonMode={compareOrigin === "files" ? "source" : "gcode"}
                     jobs={canViewPrinters && printJobQuery.isSuccess ? printJobs : null}
-                    onSend={canViewPrinters ? () => setSendOpen(true) : undefined}
                     onSettings={() => selectTab("settings")}
-                    onLogPrint={
-                      canViewPrinters && canEditModel && auth.isAuthenticated
-                        ? (fileId, state) => {
-                            setHistoryRevisionId(fileId);
-                            setHistoryDraft({ fileId, state });
-                            selectTab("history");
-                          }
-                        : undefined
-                    }
+                    onLogPrint={logPrint}
                     modelId={model.id}
                     gcodeFiles={gcodeFiles}
                     allFiles={model.files}
@@ -1813,7 +1883,14 @@ function ModelDetailPresentation({
                       canEdit={canEditModel}
                       onModel={setModel}
                     />
-                    <RelatedProfiles modelId={model.id} />
+                    <RelatedProfiles
+                      modelId={model.id}
+                      revisionEstimate={
+                        revisionEstimate && "time" in revisionEstimate
+                          ? revisionEstimate
+                          : undefined
+                      }
+                    />
                     {auth.isAuthenticated && (
                       <DocumentBrowser key={model.id} modelId={model.id} canCreate={canEditModel} />
                     )}
@@ -1825,30 +1902,32 @@ function ModelDetailPresentation({
                     {uiText("Retry")}
                   </Button>
                 )}
-                {activeTab === "history" && canViewPrinters && !printJobQuery.isError && (
-                  <DetailTabLoading pending={printJobQuery.isPending} variant="history">
-                    {printJobQuery.data && (
-                      <PrintHistorySection
-                        modelName={model.name}
-                        initialEntry={historyDraft}
-                        jobs={printJobs}
-                        modelId={model.id}
-                        gcodeFiles={gcodeFiles}
-                        revisionFilter={historyRevisionId}
-                        onRevisionFilter={setHistoryRevisionId}
-                        onAddRevision={
-                          canEditModel && auth.isAuthenticated ? requestAddRevision : undefined
-                        }
-                        onOpenRevision={(fileId) => {
-                          setRevisionSelection({ modelId: model.id, fileId });
-                          openSection("revisions");
-                        }}
-                        onJobCreated={(job) => {
-                          setHistoryDraft(null);
-                          void printJobQuery.publish(job);
-                        }}
-                      />
-                    )}
+                {canViewPrinters && printJobQuery.data && (
+                  <PrintHistorySection
+                    key={historyDraft ? `${historyDraft.fileId}-${historyDraft.state}` : model.id}
+                    showHistory={activeTab === "history"}
+                    modelName={model.name}
+                    initialEntry={historyDraft}
+                    jobs={printJobs}
+                    modelId={model.id}
+                    gcodeFiles={gcodeFiles}
+                    revisionFilter={historyRevisionId}
+                    onRevisionFilter={setHistoryRevisionId}
+                    onAddRevision={
+                      canEditModel && auth.isAuthenticated ? requestAddRevision : undefined
+                    }
+                    onOpenRevision={(fileId) => {
+                      setRevisionSelection({ modelId: model.id, fileId });
+                      openSection("revisions");
+                    }}
+                    onViewActivity={() => openSection("history")}
+                    onDraftClosed={() => setHistoryDraft(null)}
+                    onJobCreated={(job) => void printJobQuery.publish(job)}
+                  />
+                )}
+                {activeTab === "history" && canViewPrinters && printJobQuery.isPending && (
+                  <DetailTabLoading pending variant="history">
+                    {null}
                   </DetailTabLoading>
                 )}
               </div>
@@ -1865,6 +1944,15 @@ function ModelDetailPresentation({
                 preselectPlate={dispatchPlate}
                 showPrinterStatus={false}
                 initialDeliveryMode={printerless ? "queue" : "send"}
+                dialogTitle={uiText("modelDetail.preparePrint")}
+                onDelivered={(fileId, message) => {
+                  setSentModelId(model.id);
+                  if (logPrint)
+                    toast.successAction(message, `${uiText("modelDetail.recordResult")} ›`, () =>
+                      logPrint(fileId, "completed"),
+                    );
+                  else toast.success(message);
+                }}
               />
             )}
           </div>

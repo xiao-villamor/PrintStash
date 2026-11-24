@@ -46,7 +46,8 @@
     --dialog-shadow: rgb(16 24 40 / 0.12);
     --input: #8190a3;
     --ring: #4d6f9b;
-    --radius: 0px;
+    --radius: 6px;
+    --radius-popover: 8px;
     color-scheme: light;
 
     /* Interaction shades of primary (hover = one step darker; soft = 40% for
@@ -245,8 +246,12 @@
     @apply bg-background text-foreground antialiased;
   }
 
+  select {
+    border-radius: var(--radius);
+  }
+
   /* Every single-choice <select> opens the same menu as the app's dropdown
-     menus (Sort, Display): square popover, 12px rows, neutral hover, the
+     menus (Sort, Display): rounded popover, 12px rows, neutral hover, the
      chosen row tinted with a trailing check. Browsers without customizable
      select keep their native list; the trigger styling below still applies. */
   @supports (appearance: base-select) {
@@ -281,7 +286,7 @@
       margin: 4px 0;
       padding: 4px;
       border: 1px solid var(--border);
-      border-radius: 0;
+      border-radius: var(--radius-popover);
       background: var(--popover);
       color: var(--popover-foreground);
       box-shadow:

@@ -1,37 +1,21 @@
-import { useQuery } from "@tanstack/react-query";
-import { getJson, downloadAuthenticatedFile } from "@/lib/api/request";
-import { Link } from "@/lib/link";
-import { useLocation } from "@tanstack/react-router";
-import { useSearchParams } from "@/lib/navigation";
+import { downloadAuthenticatedFile } from "@/lib/api/request";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import { queryKeys } from "@/lib/query-client";
+import { Badge } from "@/components/ui/badge";
+import { sourceProviderName } from "./presentation";
 import { Button } from "@/components/ui/button";
-import type { CaptureProfile } from "@/types/inbox";
+import { useRelatedProfiles } from "./use-related-profiles";
 import { ProfileFacts } from "./profile-facts";
 
-export interface RelatedProfile {
-  model_id: number;
-  model_name: string;
-  file_id: number;
-  filename: string;
-  provider: string;
-  captured_at: string;
-  profile: CaptureProfile;
-}
-export function RelatedProfiles({ modelId }: { modelId: number }) {
+export function RelatedProfiles({
+  modelId,
+  revisionEstimate,
+}: {
+  modelId: number;
+  revisionEstimate?: { time: number | null; weight: number | null };
+}) {
   useUiLocale();
-  const location = useLocation();
-  const returnTo = useSearchParams().get("return");
-  const query = useQuery({
-    queryKey: [...queryKeys.model(modelId), "related-profiles"],
-    queryFn: ({ signal }) =>
-      getJson<{ items: RelatedProfile[]; has_more: boolean }>(
-        `/api/v1/models/${modelId}/related-profiles`,
-        { signal },
-      ),
-    retry: false,
-  });
+  const query = useRelatedProfiles(modelId);
   if (query.isPending || (!query.isError && !query.data?.items.length)) return null;
   return (
     <section
@@ -45,13 +29,27 @@ export function RelatedProfiles({ modelId }: { modelId: number }) {
         </p>
       ) : (
         query.data.items.map((item) => {
-          const params = new URLSearchParams({ tab: "files", artifact: String(item.file_id) });
-          if (returnTo) params.set("return", returnTo);
           return (
             <article
               key={`${item.file_id}-${item.profile.id}`}
               className="space-y-2 border border-border p-3"
             >
+              <Badge variant="outline">
+                {uiText("Estimate from {value1}", { value1: sourceProviderName(item.provider) })}
+              </Badge>
+              {revisionEstimate &&
+                item.model_id === modelId &&
+                item.profile.origin === "provider" &&
+                ((item.profile.estimated_seconds != null &&
+                  revisionEstimate.time !== null &&
+                  item.profile.estimated_seconds !== revisionEstimate.time) ||
+                  (item.profile.filament_grams != null &&
+                    revisionEstimate.weight !== null &&
+                    item.profile.filament_grams !== revisionEstimate.weight)) && (
+                  <p className="text-sm text-muted-foreground">
+                    {uiText("Differs from the G-code estimate.")}
+                  </p>
+                )}
               <ProfileFacts profile={item.profile} />
               <p className="text-xs text-muted-foreground">
                 {item.provider} ·{" "}
@@ -59,14 +57,7 @@ export function RelatedProfiles({ modelId }: { modelId: number }) {
                   {new Date(item.captured_at).toLocaleDateString()}
                 </time>
               </p>
-              <Link
-                className="block text-xs underline wrap-anywhere"
-                href={`/models/${item.model_id}?${params}#artifact-${item.file_id}`}
-                state={location.state}
-                replace={item.model_id === modelId}
-              >
-                {uiText("Open profile file")}: {item.filename}
-              </Link>
+              <p className="text-sm wrap-anywhere">{item.filename}</p>
               <Button
                 size="xs"
                 variant="outline"

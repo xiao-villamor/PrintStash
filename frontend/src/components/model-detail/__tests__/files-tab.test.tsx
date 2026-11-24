@@ -296,7 +296,7 @@ describe("FilesTab recorded identity", () => {
     renderApp(
       <FilesTab
         modelId={1}
-        sourceFiles={[artifact]}
+        sourceFiles={[artifact, { ...artifact, id: 2 }]}
         canEdit={false}
         onModel={() => {}}
         onCompare={() => {
@@ -305,7 +305,7 @@ describe("FilesTab recorded identity", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Compare" }));
+    await userEvent.click(screen.getByRole("button", { name: "Compare source files" }));
 
     expect(comparing).toBe(true);
   });

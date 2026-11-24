@@ -1,98 +1,122 @@
 import { GeometryReport } from "./geometry-report";
 import { Fragment } from "react";
-import { ChevronRight, Pencil } from "lucide-react";
+import { InspectorSection, PropertyList, PropertyRow, SoftCard } from "./inspector-section";
+import { useLocation } from "@tanstack/react-router";
+import { AlignLeft, CalendarDays, ChevronRight, Folder, Tag } from "lucide-react";
+import { Link } from "@/lib/link";
+import type { EditingBase } from "@/types/editing";
+import { ModelTagsField } from "./model-tags-field";
 import { Button } from "@/components/ui/button";
 import { meshGeometryFacts, type useMeshGeometryMeasurement } from "./use-mesh-geometry-facts";
 import { currentLocale, uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import type { FileRead, ModelRead } from "@/types";
+import type { FileRead, ModelRead, TagRead } from "@/types";
 import { ModelDescription } from "./model-description";
+
+/** Display segments for a collection path; a parent repeated by its child adds nothing. */
+function collectionDisplaySegments(label: string): string[] {
+  return label
+    .split("/")
+    .filter((name, index, names) => index === names.length - 1 || name !== names[index + 1]);
+}
+
+/** Whether a description adds information beyond the Model's own name. */
+function describesBeyondName(description: string | null, name: string): boolean {
+  const text = description?.trim() ?? "";
+  return text !== "" && text.toLocaleLowerCase() !== name.trim().toLocaleLowerCase();
+}
 
 /** Model facts in Overview describe the Model independently of the inspected Revision. */
 export function ModelInformation({
   model,
   canEdit,
-  onTags,
+  tagSuggestions,
+  onTagsSaved,
+  onEditDetails,
 }: {
   model: ModelRead;
   canEdit: boolean;
-  onTags: () => void;
+  tagSuggestions: TagRead[];
+  onTagsSaved: (tags: string[], base: EditingBase) => void;
+  onEditDetails?: () => void;
 }) {
   useUiLocale();
-  const collectionNames = model.collection_label ? model.collection_label.split("/") : null;
+  const location = useLocation();
+  const segments = model.collection_label ? collectionDisplaySegments(model.collection_label) : [];
+  const description = describesBeyondName(model.description, model.name) ? model.description : null;
   return (
-    <section aria-label={uiText("Model details")} className="min-w-0 space-y-3">
-      <h2 className="text-base font-semibold">{uiText("Model details")}</h2>
-      {model.description?.trim() && <ModelDescription description={model.description} />}
-      <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-3 text-sm [&_dt]:text-xs [&_dt]:font-medium [&_dt]:text-muted-foreground">
-        {collectionNames && (
-          <div className="min-w-0 space-y-1">
-            <dt>{uiText("Collection")}</dt>
-            <dd>
-              <ol
-                role="list"
-                aria-label={uiText("Collection")}
-                className="flex flex-wrap gap-x-1.5"
+    <InspectorSection
+      title={uiText("Model details")}
+      actions={
+        onEditDetails && (
+          <Button type="button" variant="ghost" size="xs" onClick={onEditDetails}>
+            {uiText("Edit details")}
+          </Button>
+        )
+      }
+    >
+      <SoftCard>
+        <PropertyList>
+          <PropertyRow label={uiText("Description")} icon={<AlignLeft />}>
+            {description ? (
+              <ModelDescription description={description} />
+            ) : onEditDetails ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="-my-1 -ms-2 h-auto min-h-7 px-2 text-sm text-muted-foreground"
+                onClick={onEditDetails}
               >
-                {collectionNames.map((name, index) => (
-                  <li
+                {uiText("modelDetail.addDescription")}
+              </Button>
+            ) : (
+              <span className="text-muted-foreground">{uiText("None")}</span>
+            )}
+          </PropertyRow>
+          {model.collection && model.collection_label && (
+            <PropertyRow label={uiText("Collection")} icon={<Folder />}>
+              <Link
+                href={`/?c=${encodeURIComponent(model.collection)}`}
+                state={location.state}
+                aria-label={segments.join(" / ")}
+                title={segments.join(" / ")}
+                className="inline-flex min-w-0 max-w-full flex-wrap items-baseline gap-x-1.5 rounded-sm underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              >
+                {segments.map((name, index) => (
+                  <span
                     key={`${index}:${name}`}
-                    className="flex min-w-0 max-w-full items-baseline gap-1.5 text-muted-foreground last:font-semibold last:text-foreground"
+                    className="flex min-w-0 items-baseline gap-1.5 text-muted-foreground last:text-foreground"
                   >
                     {index > 0 && (
                       <ChevronRight
                         aria-hidden="true"
-                        className="size-3 shrink-0 self-start mt-1.5"
+                        className="mt-1 size-3 shrink-0 self-start"
                       />
                     )}
                     <span className="min-w-0 wrap-anywhere">{name}</span>
-                  </li>
+                  </span>
                 ))}
-              </ol>
-            </dd>
-          </div>
-        )}
-        <div className="col-start-2 space-y-1">
-          <dt>{uiText("Created")}</dt>
-          <dd>
+              </Link>
+            </PropertyRow>
+          )}
+          <PropertyRow label={uiText("Created")} icon={<CalendarDays />}>
             {new Date(model.created_at).toLocaleDateString(currentLocale(), {
               dateStyle: "medium",
             })}
-          </dd>
-        </div>
-        <div className="col-span-full min-w-0 space-y-1">
-          <dt>{uiText("Tags")}</dt>
-          <dd className="flex flex-wrap items-center gap-1.5">
-            {!canEdit && model.tags.length === 0 && uiText("None")}
-            {model.tags.map((tag) => (
-              <span
-                className="min-w-0 wrap-anywhere bg-muted px-2 py-1 text-sm text-muted-foreground"
-                key={tag}
-              >
-                {tag}
-              </span>
-            ))}
-            {canEdit && (
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                title={model.tags.length ? uiText("Edit tags") : uiText("Add tag")}
-                className="h-7 w-8 border border-dotted border-muted-foreground/70 text-muted-foreground hover:border-foreground"
-                aria-label={
-                  model.tags.length
-                    ? uiText("Edit tags for {value1}", { value1: model.name })
-                    : uiText("Add tags to {value1}", { value1: model.name })
-                }
-                onClick={onTags}
-              >
-                <Pencil className="size-3.5" aria-hidden />
-              </Button>
-            )}
-          </dd>
-        </div>
-      </dl>
-    </section>
+          </PropertyRow>
+          <PropertyRow label={uiText("Tags")} icon={<Tag />}>
+            <ModelTagsField
+              key={model.id}
+              model={model}
+              suggestions={tagSuggestions}
+              canEdit={canEdit}
+              onSaved={onTagsSaved}
+            />
+          </PropertyRow>
+        </PropertyList>
+      </SoftCard>
+    </InspectorSection>
   );
 }
 

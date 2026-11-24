@@ -12,7 +12,7 @@ import { useUiLocale } from "@/lib/i18n";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "@/lib/link";
-import { ExternalLink, ListPlus, Loader2, Send, WifiOff } from "lucide-react";
+import { ExternalLink, Loader2, Send, WifiOff } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 
 import {
@@ -93,6 +93,8 @@ export function SendToButtons({
   compact = false,
   showPrinterStatus = true,
   initialDeliveryMode = "send",
+  dialogTitle,
+  onDelivered,
 }: {
   modelName?: string;
   gcodeFiles: Pick<
@@ -116,8 +118,12 @@ export function SendToButtons({
   compact?: boolean;
   showPrinterStatus?: boolean;
   initialDeliveryMode?: "send" | "queue";
+  /** Matches the entry action that opened the composer, e.g. "Prepare print". */
+  dialogTitle?: string;
+  onDelivered?: (fileId: number, message: string) => void;
 }) {
   useUiLocale();
+  const preparingModel = onDelivered !== undefined;
   const commandClient = useQueryClient();
   const auth = useRequireAuth();
   const { user } = useAuth();
@@ -174,7 +180,9 @@ export function SendToButtons({
   useEffect(() => {
     if (showSend) setDeliveryMode(initialDeliveryMode);
   }, [showSend, initialDeliveryMode]);
-  const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy>("least_busy");
+  const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy>(
+    preparingModel ? "manual" : "least_busy",
+  );
   const [copies, setCopies] = useState("1");
   const quantity = Number(copies);
   const validQuantity = Number.isSafeInteger(quantity) && quantity > 0;
@@ -223,11 +231,11 @@ export function SendToButtons({
       const kept = current.filter((id) => capableIds.includes(id));
       return kept.length > 0
         ? kept
-        : showSend && preselectPrinterId !== undefined
+        : preparingModel || (showSend && preselectPrinterId !== undefined)
           ? []
           : [capableIds[0]];
     });
-  }, [printers, selectedFileFormat, showSend, preselectPrinterId]);
+  }, [printers, selectedFileFormat, showSend, preselectPrinterId, preparingModel]);
 
   const selectedPrinters = useMemo(
     () => printers.filter((printer) => selectedPrinterIds.includes(printer.id)),
@@ -289,11 +297,20 @@ export function SendToButtons({
     (printer) => !targetGroup || printer.group === targetGroup,
   );
   const requestedQueuePrinterId = queuePrinterId ?? preselectPrinterId ?? selectedPrinters[0]?.id;
-  const queuePrinter =
-    queuePrinters.find((printer) => printer.id === requestedQueuePrinterId) ??
-    (queuePrinterId === null && preselectPrinterId === undefined ? queuePrinters[0] : undefined);
+  const queuePrinter = preparingModel
+    ? queuePrinters.find((printer) => printer.id === queuePrinterId)
+    : (queuePrinters.find((printer) => printer.id === requestedQueuePrinterId) ??
+      (queuePrinterId === null && preselectPrinterId === undefined ? queuePrinters[0] : undefined));
+  const missingGroup =
+    preparingModel && routingStrategy !== "manual" && !groups.includes(targetGroup);
+
+  function reportDelivery(message: string) {
+    if (onDelivered) onDelivered(selectedFile, message);
+    else toast.success(message);
+  }
 
   async function send(allowMismatch = false) {
+    if (sending) return;
     const session = getSessionVersion();
     if (!selectedFile || !plateReady || (deliveryMode === "queue" && !validQuantity)) return;
     const targetPrinterIds =
@@ -321,7 +338,7 @@ export function SendToButtons({
       }
     }
     if (deliveryMode === "queue") {
-      if (routingStrategy === "manual" && !queuePrinter) return;
+      if (missingGroup || (routingStrategy === "manual" && !queuePrinter)) return;
       const spool =
         selectedSpoolId !== ""
           ? spools.find((candidate) => candidate.id === selectedSpoolId)
@@ -359,7 +376,7 @@ export function SendToButtons({
         requireSessionVersion(session);
         refreshFleet(commandClient, session);
         setShowSend(false);
-        toast.success(
+        reportDelivery(
           quantity > 1
             ? uiText("Created {value1}-copy batch", { value1: String(quantity) })
             : uiText("Added to fleet queue"),
@@ -372,7 +389,11 @@ export function SendToButtons({
       }
       return;
     }
-    if (selectedPrinters.length === 0) return;
+    if (
+      selectedPrinters.length === 0 ||
+      (preparingModel && onlineCount !== selectedPrinters.length)
+    )
+      return;
     if (startPrint && !selectedPrintersCanStart) {
       setError(uiText("One or more selected printers support upload only."));
       return;
@@ -464,7 +485,7 @@ export function SendToButtons({
           progress: 100,
         });
         setShowSend(false);
-        toast.success(
+        reportDelivery(
           startPrint
             ? uiText("printers.started", {
                 value1: String(successes.length),
@@ -519,12 +540,37 @@ export function SendToButtons({
     : null;
 
   const queuing = deliveryMode === "queue";
+  const blockedReasonId = useId();
+  // Say what is missing beside the disabled primary action instead of leaving it silent.
+  const blockedReason = !selectedFile
+    ? uiText("Choose revision")
+    : sliced && !plateReady
+      ? platesQuery.isPending
+        ? uiText("Loading sliced plates…")
+        : platesQuery.isError
+          ? uiText("Couldn’t load sliced plates")
+          : uiText("modelDetail.chooseSlicedPlate")
+      : queuing
+        ? missingGroup
+          ? uiText("Choose a target group to continue.")
+          : routingStrategy === "manual" && !queuePrinter
+            ? uiText("modelDetail.chooseQueuePrinter")
+            : !validQuantity
+              ? uiText("Enter a whole number of copies, at least 1.")
+              : null
+        : selectedPrinters.length === 0
+          ? uiText("modelDetail.choosePrinter")
+          : preparingModel && onlineCount !== selectedPrinters.length
+            ? uiText("Choose online printers to send now.")
+            : null;
   const queueDestination =
     routingStrategy === "manual"
       ? (queuePrinter?.name ?? uiText("Choose printer"))
-      : routingStrategy === "default"
-        ? uiText("Default printer")
-        : uiText("Least busy");
+      : preparingModel && targetGroup
+        ? targetGroup
+        : routingStrategy === "default"
+          ? uiText("Default printer")
+          : uiText("Least busy");
 
   return (
     <Localized>
@@ -680,35 +726,55 @@ export function SendToButtons({
             if (!sending) setShowSend(false);
           }}
           title={
-            queuing
-              ? uiText("Add to queue")
-              : selectedFileDetails
-                ? uiText("Send Rev {value1} to printer", {
-                    value1: String(
-                      selectedFileDetails.gcode_revision_number ?? selectedFileDetails.version,
-                    ),
-                  })
-                : uiText("Send to printer")
+            dialogTitle
+              ? dialogTitle
+              : queuing
+                ? uiText("Add to queue")
+                : selectedFileDetails
+                  ? uiText("Send Rev {value1} to printer", {
+                      value1: String(
+                        selectedFileDetails.gcode_revision_number ?? selectedFileDetails.version,
+                      ),
+                    })
+                  : uiText("Send to printer")
           }
           description={
-            fileContext ? <span className="wrap-anywhere">{fileContext}</span> : undefined
+            dialogTitle && selectedFileDetails ? (
+              <span className="wrap-anywhere">
+                {uiText("Rev {value1}", {
+                  value1: String(
+                    selectedFileDetails.gcode_revision_number ?? selectedFileDetails.version,
+                  ),
+                })}
+                {fileContext ? ` · ${fileContext}` : ""}
+              </span>
+            ) : fileContext ? (
+              <span className="wrap-anywhere">{fileContext}</span>
+            ) : undefined
           }
           dismissible={!sending}
           footer={
             queuing ? (
-              <QueueDialogActions
-                busy={sending}
-                canSubmit={
-                  !!selectedFile &&
-                  plateReady &&
-                  validQuantity &&
-                  (routingStrategy !== "manual" || !!queuePrinter)
-                }
-                onClose={() => setShowSend(false)}
-                submit={{ onClick: () => void send(queueAllowMismatch) }}
-              />
+              <>
+                {blockedReason && (
+                  <p id={blockedReasonId} className="me-auto text-sm text-muted-foreground">
+                    {blockedReason}
+                  </p>
+                )}
+                <QueueDialogActions
+                  busy={sending}
+                  canSubmit={blockedReason === null}
+                  onClose={() => setShowSend(false)}
+                  submit={{ onClick: () => void send(queueAllowMismatch) }}
+                />
+              </>
             ) : (
               <>
+                {blockedReason && (
+                  <p id={blockedReasonId} className="me-auto text-sm text-muted-foreground">
+                    {blockedReason}
+                  </p>
+                )}
                 <Button
                   size="sm"
                   variant="outline"
@@ -720,15 +786,10 @@ export function SendToButtons({
                 <Button
                   size="sm"
                   onClick={() => void send()}
+                  aria-describedby={blockedReason ? blockedReasonId : undefined}
                   loading={sending}
-                  disabled={
-                    !selectedFile ||
-                    !plateReady ||
-                    selectedPrinters.length === 0 ||
-                    (startPrint && !selectedPrintersCanStart)
-                  }
+                  disabled={blockedReason !== null || (startPrint && !selectedPrintersCanStart)}
                 >
-                  {!sending && <Send className="h-4 w-4" />}
                   {sending
                     ? uiText("Sending…")
                     : startPrint
@@ -738,7 +799,7 @@ export function SendToButtons({
               </>
             )
           }
-          className="print-task-dialog max-w-240"
+          className={preparingModel ? "h-180 max-w-220" : "print-task-dialog max-w-240"}
           bodyClassName="queue-compose-body flex-1 p-0"
         >
           <div data-testid="send-dialog-scroll-region" className="flex min-h-full min-w-0 flex-col">
@@ -747,13 +808,13 @@ export function SendToButtons({
               disabled={sending}
             >
               <legend className="sr-only">{uiText("Action")}</legend>
-              <div className="inline-flex max-w-full flex-wrap gap-1 border border-border bg-muted p-1">
+              <div className="inline-flex max-w-full flex-wrap gap-1 rounded-md border border-border bg-muted p-1">
                 {(
                   [
-                    { value: "send", label: uiText("Send now"), Icon: Send },
-                    { value: "queue", label: uiText("Add to queue"), Icon: ListPlus },
+                    { value: "send", label: uiText("Send now") },
+                    { value: "queue", label: uiText("Add to queue") },
                   ] as const
-                ).map(({ value, label, Icon }) => (
+                ).map(({ value, label }) => (
                   <label key={value} className="relative">
                     <input
                       type="radio"
@@ -772,7 +833,6 @@ export function SendToButtons({
                       }}
                     />
                     <span className="flex min-h-8 items-center gap-2 px-3 text-sm font-medium text-muted-foreground peer-checked:bg-accent peer-checked:text-accent-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-inset peer-focus-visible:ring-ring">
-                      <Icon size={15} aria-hidden />
                       {label}
                     </span>
                   </label>
@@ -812,6 +872,12 @@ export function SendToButtons({
                         }))}
                       />
                     </QueueRevisionPanel>
+                    {preparingModel && !sliced && (
+                      <div className="space-y-1 text-sm">
+                        <p className="font-medium">{uiText("Sliced plate")}</p>
+                        <p>{uiText("Single plate")}</p>
+                      </div>
+                    )}
                     {sliced && (
                       <div className="space-y-2">
                         {platesQuery.isError ? (
@@ -829,6 +895,15 @@ export function SendToButtons({
                               "This 3MF has no sliced G-code. Slice it in Bambu Studio or OrcaSlicer, then upload the sliced file.",
                             )}
                           </p>
+                        ) : preparingModel && plates.length === 1 ? (
+                          <div className="space-y-1 text-sm">
+                            <p className="font-medium">{uiText("Sliced plate")}</p>
+                            <p>
+                              {uiText("Plate {value1}", {
+                                value1: String(plates[0]).padStart(2, "0"),
+                              })}
+                            </p>
+                          </div>
                         ) : (
                           <ChoiceField
                             label={uiText("Sliced plate")}
@@ -861,7 +936,12 @@ export function SendToButtons({
                               return {
                                 value: index,
                                 label: name ? `${number} · ${name}` : number,
-                                description: facts.join(" · "),
+                                description: [
+                                  ...facts,
+                                  ...(selectedFile === preselectFileId && index === preselectPlate
+                                    ? [uiText("Selected in preview")]
+                                    : []),
+                                ].join(" · "),
                               };
                             })}
                             onChange={(index) => setPlateSelection({ fileId: selectedFile, index })}
@@ -909,7 +989,23 @@ export function SendToButtons({
                 <div className="min-w-0 space-y-5">
                   {deliveryMode === "queue" && (
                     <div className="grid gap-4">
-                      {user?.is_superuser && (
+                      {preparingModel && user?.is_superuser && (
+                        <ChoiceField<"manual" | "least_busy">
+                          label={uiText("Destination")}
+                          value={routingStrategy === "manual" ? "manual" : "least_busy"}
+                          options={[
+                            { value: "least_busy", label: uiText("Target group") },
+                            { value: "manual", label: uiText("One printer") },
+                          ]}
+                          inline
+                          disabled={sending}
+                          onChange={(strategy) => {
+                            setTargetGroup("");
+                            setRoutingStrategy(strategy);
+                          }}
+                        />
+                      )}
+                      {!preparingModel && user?.is_superuser && (
                         <QueueRoutingField
                           value={routingStrategy}
                           onChange={setRoutingStrategy}
@@ -940,19 +1036,30 @@ export function SendToButtons({
                             </span>
                           )}
                         </div>
-                        <QueueTargetGroupField
-                          groups={groups}
-                          value={targetGroup}
-                          onChange={(value) => {
-                            setTargetGroup(value);
-                            setQueuePrinterId(null);
-                          }}
-                          disabled={sending}
-                        />
+                        {preparingModel && routingStrategy !== "manual" && (
+                          <OptionPicker
+                            label={uiText("Target group")}
+                            value={targetGroup || null}
+                            options={groups.map((group) => ({ value: group, label: group }))}
+                            onChange={setTargetGroup}
+                            disabled={sending}
+                          />
+                        )}
+                        {!preparingModel && (
+                          <QueueTargetGroupField
+                            groups={groups}
+                            value={targetGroup}
+                            onChange={(value) => {
+                              setTargetGroup(value);
+                              setQueuePrinterId(null);
+                            }}
+                            disabled={sending}
+                          />
+                        )}
                       </div>
                       {routingStrategy === "manual" && (
                         <OptionPicker
-                          label={uiText("Destination")}
+                          label={uiText(preparingModel ? "Printer" : "Destination")}
                           searchPlaceholder={uiText("Search printers")}
                           placeholder={uiText("Choose printer")}
                           value={queuePrinter?.id ?? null}
@@ -1027,12 +1134,28 @@ export function SendToButtons({
                               className="flex min-w-0 items-center justify-between gap-2 py-2 text-sm"
                             >
                               <span className="min-w-0 wrap-anywhere">{printer.name}</span>
-                              <Link
-                                href={`/printers/${printer.id}`}
-                                className="shrink-0 text-xs text-muted-foreground hover:underline"
-                              >
-                                {uiText("Printer details")}
-                              </Link>
+                              {preparingModel ? (
+                                <Button
+                                  size="xs"
+                                  variant="ghost"
+                                  disabled={sending}
+                                  aria-label={uiText("Remove {value1}", { value1: printer.name })}
+                                  onClick={() =>
+                                    setSelectedPrinterIds((ids) =>
+                                      ids.filter((id) => id !== printer.id),
+                                    )
+                                  }
+                                >
+                                  {uiText("Remove")}
+                                </Button>
+                              ) : (
+                                <Link
+                                  href={`/printers/${printer.id}`}
+                                  className="shrink-0 text-xs text-muted-foreground hover:underline"
+                                >
+                                  {uiText("Printer details")}
+                                </Link>
+                              )}
                             </li>
                           ))}
                         </ul>

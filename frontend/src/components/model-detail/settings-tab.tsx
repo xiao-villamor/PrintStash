@@ -4,8 +4,6 @@ import { slicerDisplayName } from "./presentation";
 import type { ReactNode } from "react";
 import {
   formatCost,
-  formatDuration,
-  formatGrams,
   formatMillimeters,
   formatNumber,
   formatPercent,
@@ -19,6 +17,7 @@ import type { PrintSettingRow } from "./presentation";
 import { Localized } from "@/components/ui/localized";
 import type { GcodePlates } from "@/lib/api/plates";
 import { PlateEstimates } from "./plate-estimates";
+import { formatPlateEstimate } from "./format-plate-estimate";
 
 interface SettingValue {
   labelKey: MessageKey;
@@ -156,12 +155,16 @@ export function SettingsTab({
       rows: [
         {
           labelKey: "Estimated time",
-          value: number(meta?.estimated_time_s, formatDuration),
+          value: number(meta?.estimated_time_s, (value) =>
+            formatPlateEstimate("estimated_time_s", value),
+          ),
           visible: preferences.estimated_time,
         },
         {
           labelKey: "Filament weight",
-          value: number(meta?.filament_weight_g, formatGrams),
+          value: number(meta?.filament_weight_g, (value) =>
+            formatPlateEstimate("filament_weight_g", value),
+          ),
           visible: preferences.filament_weight && !resin,
         },
         {

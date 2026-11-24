@@ -2,6 +2,7 @@ import { useProjectProfile } from "@/lib/queries/project-profile";
 import { formatNumber } from "@/lib/format";
 import { useUiLocale } from "@/lib/i18n";
 import { uiText } from "@/lib/locale";
+import { formatPlateEstimate } from "./format-plate-estimate";
 
 /** Saved project-wide settings; object overrides and actual print results remain separate. */
 export function ProjectProfile({ modelId, fileId }: { modelId: number; fileId: number }) {
@@ -44,11 +45,13 @@ export function ProjectProfile({ modelId, fileId }: { modelId: number; fileId: n
               <dl key={plate.number} className="model-information-facts">
                 <dt>{uiText("Plate {value1}", { value1: String(plate.number) })}</dt>
                 <dd>
-                  {number(
-                    plate.estimated_seconds == null ? null : plate.estimated_seconds / 60,
-                    " min",
-                  )}{" "}
-                  · {number(plate.filament_grams, " g")}
+                  {plate.estimated_seconds == null
+                    ? unknown
+                    : formatPlateEstimate("estimated_time_s", plate.estimated_seconds)}{" "}
+                  ·{" "}
+                  {plate.filament_grams == null
+                    ? unknown
+                    : formatPlateEstimate("filament_weight_g", plate.filament_grams)}
                 </dd>
               </dl>
             ))

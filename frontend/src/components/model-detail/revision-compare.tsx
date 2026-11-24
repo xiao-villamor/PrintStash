@@ -386,8 +386,16 @@ export function RevisionCompare({
               row("Bed temperature", (file) =>
                 numeric(file.metadata?.bed_temperature_c, formatTemperature),
               ),
-              row("Estimated time", (file) => estimate(file, "estimated_time_s", formatDuration)),
-              row("Filament weight", (file) => estimate(file, "filament_weight_g", formatGrams)),
+              row("Estimated time", (file) =>
+                estimate(file, "estimated_time_s", (value) =>
+                  formatPlateEstimate("estimated_time_s", value),
+                ),
+              ),
+              row("Filament weight", (file) =>
+                estimate(file, "filament_weight_g", (value) =>
+                  formatPlateEstimate("filament_weight_g", value),
+                ),
+              ),
               row("Filament cost", (file) => estimate(file, "filament_cost", formatCost)),
               row("LAYERS", (file) => numeric(file.metadata?.layer_count, formatNumber)),
               ...(selectedLeft.file_type === "resin" || selectedRight.file_type === "resin"

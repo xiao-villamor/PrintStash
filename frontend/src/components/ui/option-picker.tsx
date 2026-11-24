@@ -103,7 +103,7 @@ export function OptionPicker<T extends string | number>(props: OptionPickerProps
         align="start"
         role="dialog"
         aria-label={label}
-        contentClassName="overflow-hidden border border-border bg-popover text-popover-foreground shadow-lg"
+        contentClassName="overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-lg"
         trigger={
           <Button
             id={id}

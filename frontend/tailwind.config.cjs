@@ -112,7 +112,7 @@ const config = {
       borderRadius: {
         DEFAULT: "var(--radius)",
         brand: "0.4375rem",
-        lg: "var(--radius)",
+        lg: "var(--radius-popover)",
         md: "var(--radius)",
         sm: "var(--radius)",
       },

@@ -12,7 +12,6 @@ function renderSummary(overrides: Partial<ComponentProps<typeof ModelPrintSummar
       revision={null}
       source={undefined}
       estimates={null}
-      selectedPlate={null}
       onReview={() => {}}
       onFiles={() => {}}
       {...overrides}
@@ -41,18 +40,19 @@ describe("ModelPrintSummary", () => {
       onPrepare: prepare,
       onReview: review,
     });
-    const summary = within(screen.getByRole("region", { name: "Print status" }));
+    const summary = within(screen.getByRole("region", { name: "Current revision" }));
     expect(summary.getByText("Rev 2 · Wall mount")).toBeVisible();
     expect(summary.getByText("Needs test")).toBeVisible();
-    expect(summary.getByText("PLA · 34m 56s · 13.7 g")).toBeVisible();
-    expect(summary.getByRole("img", { name: "Recommended revision" })).toBeVisible();
+    expect(summary.getByText("34m 56s · 13.7 g")).toBeVisible();
+    expect(summary.getByText("Recommended", { exact: true })).toBeVisible();
     await user.click(summary.getByRole("button", { name: "Prepare print" }));
     await user.click(summary.getByRole("button", { name: "Rev 2 · Wall mount" }));
     expect(prepare).toHaveBeenCalledOnce();
     expect(review).toHaveBeenCalledOnce();
   });
 
-  it("shows each plate's estimate and highlights the selected plate", () => {
+  it("summarizes the plates and links to their estimates", async () => {
+    const openSettings = vi.fn<() => void>();
     renderSummary({
       revision: aRevision({ original_filename: "wall-mount.gcode.3mf" }),
       estimates: {
@@ -72,15 +72,22 @@ describe("ModelPrintSummary", () => {
           },
         ],
       },
-      selectedPlate: 2,
+      onPlateEstimates: openSettings,
     });
-    const main = within(screen.getByRole("region", { name: "Plate 01" }));
-    const selected = within(screen.getByRole("region", { name: "Plate 02" }));
-    expect(main.getByText("Main plate")).toBeVisible();
-    expect(main.queryByText("Selected plate")).toBeNull();
-    expect(selected.getByText("Selected plate")).toBeVisible();
-    expect(selected.getByText("1m 1s")).toBeVisible();
-    expect(selected.getByText("2 g")).toBeVisible();
+    expect(screen.queryByText("Optional plate")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "2 plates" }));
+    expect(openSettings).toHaveBeenCalledOnce();
+  });
+
+  it("prioritizes recording once the Model has been sent", () => {
+    renderSummary({
+      revision: aRevision(),
+      onPrepare: () => {},
+      onRecordResult: () => {},
+      sent: true,
+    });
+    expect(screen.getByRole("button", { name: "Record result" })).toHaveClass("bg-primary");
+    expect(screen.getByRole("button", { name: "Prepare print" })).not.toHaveClass("bg-primary");
   });
 
   it("offers the source file and Add revision on an unsliced model", async () => {

@@ -33,7 +33,7 @@ export function SettingsCard({
       role="group"
       aria-label={title}
       className={cn(
-        "settings-card overflow-hidden rounded-lg border border-border bg-card text-card-foreground",
+        "settings-card overflow-hidden rounded-none border border-border bg-card text-card-foreground",
         className,
       )}
     >

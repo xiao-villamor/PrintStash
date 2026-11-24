@@ -467,7 +467,7 @@ function ChipEditor({
           <div
             id={nav.listboxId}
             role="listbox"
-            className="pop-in absolute left-0 right-0 top-full mt-1 z-dropdown bg-background border border-border rounded shadow-lg py-1 max-h-40 overflow-y-auto"
+            className="pop-in absolute left-0 right-0 top-full mt-1 z-dropdown bg-popover border border-border rounded-lg shadow-lg py-1 max-h-40 overflow-y-auto"
           >
             {filtered.map((t, i) => (
               <button

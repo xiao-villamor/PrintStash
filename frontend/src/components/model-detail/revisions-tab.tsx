@@ -1,6 +1,6 @@
 "use client";
 
-import { RevisionDeliveryActions } from "./revision-delivery-actions";
+import { RevisionStatusBadge } from "./model-print-summary";
 
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
@@ -8,7 +8,7 @@ import { useUiLocale } from "@/lib/i18n";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
-import { Box, ChevronRight, MoreHorizontal, Trash2, Star, Wifi } from "lucide-react";
+import { MoreVertical, Trash2, Wifi } from "lucide-react";
 
 import {
   batchSetRevisionLabels,
@@ -18,7 +18,7 @@ import {
   replaceFileTags,
 } from "@/lib/api";
 import { useTags } from "@/lib/queries";
-import { formatBytes, formatDuration, formatGrams, formatMillimeters, timeAgo } from "@/lib/format";
+import { formatBytes, formatMillimeters, timeAgo } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import {
   FileRead,
@@ -33,8 +33,6 @@ import { PRINT_JOB_PRESENTATION, revisionStatusLabel } from "./presentation";
 import { ChoiceField } from "./choice-field";
 import { Modal } from "@/components/ui/modal";
 import { RevisionCompare, type ComparisonMode } from "./revision-compare";
-import type { GcodePlates } from "@/lib/api/plates";
-import { PlateEstimates } from "./plate-estimates";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { HashValue } from "./file-hashes";
 import { Localized } from "@/components/ui/localized";
@@ -90,16 +88,12 @@ export function RevisionsTab({
   onAddRevision,
   canEdit,
   inspectedFileId,
-  plateEstimates,
-  selectedPlate = null,
   onPreview,
   onInspect,
   startComparing = false,
   backLabel = "Back to revisions",
   onReturnToOrigin,
   comparisonMode = "gcode",
-  printerless = false,
-  onSend,
   onSettings,
   onFiles,
   onActivity,
@@ -114,16 +108,12 @@ export function RevisionsTab({
   onAddRevision: () => void;
   canEdit: boolean;
   inspectedFileId?: number;
-  plateEstimates?: GcodePlates | null;
-  selectedPlate?: number | null;
   onPreview?: (fileId: number) => void;
   onInspect?: (id: number) => void;
   startComparing?: boolean;
   backLabel?: "Back to revisions" | "Back to files" | "Back to print settings";
   onReturnToOrigin?: () => void;
   comparisonMode?: ComparisonMode;
-  printerless?: boolean;
-  onSend?: () => void;
   onSettings?: () => void;
   onFiles?: () => void;
   onActivity?: (fileId: number) => void;
@@ -437,86 +427,66 @@ export function RevisionsTab({
               </Button>
             </div>
           )}
-          {!comparing && (gcodeFiles.length > 1 || selecting) && (
-            <div className="overflow-x-auto">
-              <table className="detail-revisions-table">
-                <thead>
-                  <tr>
-                    <th>{uiText("Revision")}</th>
-                    <th>{uiText("Printer results")}</th>
-                    <th>{uiText("Time")}</th>
-                  </tr>
-                </thead>
-                {gcodeFiles.map((file) => (
-                  <tbody
-                    key={file.id}
-                    className={file.id === selectedId ? "is-inspected" : undefined}
-                  >
-                    <tr>
-                      <th scope="row">
-                        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                          {selecting && (
-                            <Checkbox
-                              checked={selectedRevisionIds.has(file.id)}
-                              onChange={(checked) =>
-                                setSelectedRevisionIds((current) => {
-                                  const next = new Set(current);
-                                  if (checked) next.add(file.id);
-                                  else next.delete(file.id);
-                                  return next;
-                                })
-                              }
-                              ariaLabel={uiText("Select revision {value1}", {
-                                value1: String(file.gcode_revision_number ?? file.version),
-                              })}
-                            />
-                          )}
-                          <button
-                            type="button"
-                            data-revision-id={file.id}
-                            className="flex min-w-0 items-baseline gap-2 text-left"
-                            aria-pressed={file.id === selectedId}
-                            onClick={() => inspect(file.id)}
-                          >
-                            <strong className="whitespace-nowrap">
-                              {uiText("Rev {value1}", {
-                                value1: String(file.gcode_revision_number ?? file.version),
-                              })}
-                            </strong>
-                            {file.revision_label && (
-                              <span
-                                className="line-clamp-2 min-w-0 wrap-anywhere font-normal"
-                                title={file.revision_label}
-                              >
-                                {file.revision_label}
-                              </span>
-                            )}
-                          </button>
-                          {file.is_recommended && (
-                            <span className="inline-flex items-center gap-1 whitespace-nowrap text-xs font-normal text-muted-foreground">
-                              <Star className="h-3 w-3" />
-                              {uiText("Recommended")}
-                            </span>
-                          )}
-                        </div>
-                      </th>
-                      <td>
-                        <RevisionResults fileId={file.id} jobs={jobs} />
-                      </td>
-                      <td>
-                        {file.id === selectedId &&
-                        plateEstimates?.plate_metadata.some(
-                          (entry) => entry.metadata.estimated_time_s != null,
-                        ) &&
-                        plateEstimates.plates.length > 1
-                          ? uiText("Per plate")
-                          : formatDuration(file.metadata?.estimated_time_s ?? null)}
-                      </td>
-                    </tr>
-                  </tbody>
-                ))}
-              </table>
-            </div>
+          {!comparing && gcodeFiles.length > 0 && (
+            <ul
+              aria-label={uiText("Revisions")}
+              className="divide-y divide-border border border-border"
+            >
+              {gcodeFiles.map((file) => (
+                <li key={file.id} className={file.id === selectedId ? "bg-muted" : undefined}>
+                  <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+                    {selecting && (
+                      <Checkbox
+                        checked={selectedRevisionIds.has(file.id)}
+                        onChange={(checked) =>
+                          setSelectedRevisionIds((current) => {
+                            const next = new Set(current);
+                            if (checked) next.add(file.id);
+                            else next.delete(file.id);
+                            return next;
+                          })
+                        }
+                        ariaLabel={uiText("Select revision {value1}", {
+                          value1: String(file.gcode_revision_number ?? file.version),
+                        })}
+                      />
+                    )}
+                    <button
+                      type="button"
+                      data-revision-id={file.id}
+                      className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 text-left text-sm"
+                      aria-pressed={file.id === selectedId}
+                      onClick={() => inspect(file.id)}
+                    >
+                      <strong className="whitespace-nowrap">
+                        {uiText("Rev {value1}", {
+                          value1: String(file.gcode_revision_number ?? file.version),
+                        })}
+                      </strong>
+                      {file.revision_label && (
+                        <span
+                          className="line-clamp-2 min-w-0 wrap-anywhere font-normal"
+                          title={file.revision_label}
+                        >
+                          {file.revision_label}
+                        </span>
+                      )}
+                    </button>
+                    <RevisionStatusBadge status={file.revision_status} />
+                    {file.is_recommended && (
+                      <span className="text-sm text-muted-foreground">{uiText("Recommended")}</span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-baseline gap-x-3 px-3 pb-2 text-sm text-muted-foreground">
+                    {file.metadata?.material_type && <span>{file.metadata.material_type}</span>}
+                    <RevisionResults fileId={file.id} jobs={jobs} />
+                    <time className="whitespace-nowrap" dateTime={file.uploaded_at}>
+                      {timeAgo(file.uploaded_at)}
+                    </time>
+                  </div>
+                </li>
+              ))}
+            </ul>
           )}
           <div className="space-y-3">
             {gcodeFiles.length === 0 && (
@@ -545,21 +515,16 @@ export function RevisionsTab({
                           <h3
                             data-revision-id={f.id}
                             tabIndex={gcodeFiles.length === 1 ? 0 : undefined}
-                            className="flex min-w-0 flex-wrap items-baseline gap-2 text-xl font-semibold"
+                            className="flex min-w-0 flex-wrap items-baseline gap-2 text-base font-semibold"
                           >
                             <span className="whitespace-nowrap">
                               {uiText("Rev {value1}", {
                                 value1: String(f.gcode_revision_number ?? f.version),
                               })}
                             </span>
-                            {f.revision_status && (
-                              <span className="rounded border border-border px-2 py-0.5 text-xs font-medium">
-                                {revisionStatusLabel(f.revision_status)}
-                              </span>
-                            )}
+                            <RevisionStatusBadge status={f.revision_status} />
                             {f.is_recommended && (
-                              <span className="inline-flex items-center gap-1 whitespace-nowrap text-xs font-medium text-muted-foreground">
-                                <Star className="h-3.5 w-3.5" />
+                              <span className="whitespace-nowrap text-sm font-medium text-muted-foreground">
                                 {uiText("Recommended")}
                               </span>
                             )}
@@ -570,8 +535,7 @@ export function RevisionsTab({
                             )}
                           </h3>
                           {onPreview && (
-                            <Button variant="outline" onClick={() => onPreview(f.id)}>
-                              <Box className="h-4 w-4" />
+                            <Button size="sm" variant="outline" onClick={() => onPreview(f.id)}>
                               {uiText("Preview G-code")}
                             </Button>
                           )}
@@ -590,122 +554,71 @@ export function RevisionsTab({
                           )}
                         </div>
                       </div>
-                      <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
-                        {onSend && (
-                          <RevisionDeliveryActions printerless={printerless} onSend={onSend} />
-                        )}
-                        <div className="ml-auto flex flex-wrap items-center gap-2">
-                          <Button
-                            variant="outline"
-                            onClick={() =>
-                              void downloadAuthenticatedFile(
-                                `/api/v1/files/${f.id}/download`,
-                                f.original_filename,
-                              ).catch((error) => toast.error(error))
-                            }
-                          >
-                            {uiText("Download")}
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        {fileMeta?.material_type && (
-                          <p className="text-sm text-muted-foreground">
-                            {uiText("Material")} · {fileMeta.material_type}
-                          </p>
-                        )}
-                        {plateEstimates && plateEstimates.plates.length > 1 ? (
-                          <PlateEstimates data={plateEstimates} selected={selectedPlate} />
-                        ) : (
-                          <dl
-                            aria-label={uiText("modelDetail.gcodeEstimate")}
-                            className="flex flex-wrap gap-x-6 text-sm"
-                          >
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                {uiText("Estimated time")}
-                              </dt>
-                              <dd>{formatDuration(fileMeta?.estimated_time_s ?? null)}</dd>
-                            </div>
-                            <div>
-                              <dt className="text-xs text-muted-foreground">
-                                {uiText("Filament weight")}
-                              </dt>
-                              <dd>{formatGrams(fileMeta?.filament_weight_g)}</dd>
-                            </div>
-                          </dl>
-                        )}
-                      </div>
-                      <details className="group border-t border-border pt-3">
-                        <summary className="flex w-fit items-center gap-2 text-sm font-medium focus-visible:outline-ring">
-                          <ChevronRight
-                            className="size-4 group-open:rotate-90"
-                            aria-hidden="true"
-                          />
-                          {uiText("Print setup")}
-                        </summary>
-                        <div className="mt-3 space-y-3">
-                          <dl className="grid grid-cols-2 gap-3 @lg:grid-cols-4">
-                            {[
-                              [uiText("Printer profile"), fileMeta?.printer_model],
-                              [uiText("Material"), fileMeta?.material_type],
-                              [
-                                uiText("Layer height"),
-                                formatMillimeters(fileMeta?.layer_height_mm),
-                              ],
-                              [uiText("Nozzle"), formatMillimeters(fileMeta?.nozzle_diameter_mm)],
-                            ].map(([label, value]) => (
-                              <div key={label}>
-                                <dt className="text-xs text-muted-foreground">{label}</dt>
-                                <dd className="wrap-anywhere text-sm font-medium">
-                                  {value ?? uiText("Not recorded")}
-                                </dd>
-                              </div>
-                            ))}
-                          </dl>
+                      <section
+                        aria-labelledby={`print-setup-${f.id}`}
+                        className="space-y-3 border-t border-border pt-3"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <h4 id={`print-setup-${f.id}`} className="text-sm font-semibold">
+                            {uiText("Print setup")}
+                          </h4>
                           {onSettings && (
                             <Button size="xs" variant="ghost" onClick={onSettings}>
                               {uiText("Full print settings")}
                             </Button>
                           )}
                         </div>
-                      </details>
-                      <details className="group border-t border-border pt-3">
-                        <summary className="flex w-fit items-center gap-2 text-sm font-medium focus-visible:outline-ring">
-                          <ChevronRight
-                            className="size-4 group-open:rotate-90"
-                            aria-hidden="true"
-                          />
-                          {uiText("G-code file")}
-                        </summary>
-                        <div className="mt-3 space-y-2">
-                          <p className="wrap-anywhere text-sm text-muted-foreground">
-                            {f.original_filename}
-                          </p>
-                          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                            <span>
-                              {uiText("Added")} {timeAgo(f.uploaded_at)}
-                            </span>
-                            <span>{formatBytes(f.size_bytes)}</span>
-                            <HashValue
-                              sha={f.sha256}
-                              label={uiText("File SHA-256")}
-                              filename={f.original_filename}
-                            />
-                          </div>
-                          {uploadedTo.length > 0 && (
-                            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                              {uploadedTo.map((row) => (
-                                <span
-                                  key={`${row.printer_id}-${row.remote_filename}`}
-                                  className="inline-flex items-center gap-1"
-                                >
-                                  <Wifi className="h-3 w-3" />
-                                  {row.printer_name}
-                                </span>
-                              ))}
+                        <dl className="grid grid-cols-2 gap-3 @lg:grid-cols-4">
+                          {[
+                            [uiText("Printer profile"), fileMeta?.printer_model],
+                            [uiText("Material"), fileMeta?.material_type],
+                            [uiText("Layer height"), formatMillimeters(fileMeta?.layer_height_mm)],
+                            [uiText("Nozzle"), formatMillimeters(fileMeta?.nozzle_diameter_mm)],
+                          ].map(([label, value]) => (
+                            <div key={label}>
+                              <dt className="text-xs text-muted-foreground">{label}</dt>
+                              <dd className="wrap-anywhere text-sm font-medium">
+                                {value ?? uiText("Not recorded")}
+                              </dd>
                             </div>
-                          )}
+                          ))}
+                        </dl>
+                      </section>
+                      <section
+                        aria-labelledby={`gcode-file-${f.id}`}
+                        className="space-y-2 border-t border-border pt-3"
+                      >
+                        <h4 id={`gcode-file-${f.id}`} className="text-sm font-semibold">
+                          {uiText("G-code file")}
+                        </h4>
+                        <p className="wrap-anywhere text-sm text-muted-foreground">
+                          {f.original_filename}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                          <span>
+                            {uiText("Added")} {timeAgo(f.uploaded_at)}
+                          </span>
+                          <span>{formatBytes(f.size_bytes)}</span>
+                          <HashValue
+                            sha={f.sha256}
+                            label={uiText("File SHA-256")}
+                            filename={f.original_filename}
+                          />
+                        </div>
+                        {uploadedTo.length > 0 && (
+                          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                            {uploadedTo.map((row) => (
+                              <span
+                                key={`${row.printer_id}-${row.remote_filename}`}
+                                className="inline-flex items-center gap-1"
+                              >
+                                <Wifi className="h-3 w-3" aria-hidden />
+                                {row.printer_name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <div className="flex flex-wrap items-center gap-2">
                           <SlicerOpenButton
                             fileId={f.id}
                             fileType={
@@ -717,7 +630,7 @@ export function RevisionsTab({
                             showLabel
                           />
                         </div>
-                      </details>
+                      </section>
                       <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
                         <Button
                           size="sm"
@@ -738,21 +651,6 @@ export function RevisionsTab({
                           )}
                           onSave={(tags) => saveArtifactTags(f, tags)}
                         />
-                        {!f.is_recommended && canEdit && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            disabled={saving === f.id}
-                            onClick={() =>
-                              void update(f, {
-                                is_recommended: true,
-                                revision_status: "known_good",
-                              })
-                            }
-                          >
-                            {uiText("Recommend")}
-                          </Button>
-                        )}
                         <DropdownMenu
                           open={actionsFileId === f.id}
                           onOpenChange={(open) => setActionsFileId(open ? f.id : null)}
@@ -767,12 +665,74 @@ export function RevisionsTab({
                               aria-expanded={actionsFileId === f.id}
                               onClick={() => setActionsFileId(actionsFileId === f.id ? null : f.id)}
                             >
-                              <MoreHorizontal className="h-4 w-4" />
-                              {uiText("nav.more")}
+                              <MoreVertical className="h-4 w-4" />
+                              <span className="sr-only">{uiText("nav.more")}</span>
                             </Button>
                           }
                           contentClassName="w-48 rounded-md border border-border bg-popover p-1 shadow-lg"
                         >
+                          <Button
+                            role="menuitem"
+                            size="sm"
+                            variant="ghost"
+                            className="w-full justify-start"
+                            onClick={() => {
+                              setActionsFileId(null);
+                              void downloadAuthenticatedFile(
+                                `/api/v1/files/${f.id}/download`,
+                                f.original_filename,
+                              ).catch((error) => toast.error(error));
+                            }}
+                          >
+                            {uiText("Download G-code")}
+                          </Button>
+                          {onLogPrint && (
+                            <Button
+                              role="menuitem"
+                              size="sm"
+                              variant="ghost"
+                              className="w-full justify-start"
+                              onClick={() => {
+                                setActionsFileId(null);
+                                onLogPrint(f.id, "completed");
+                              }}
+                            >
+                              {uiText("modelDetail.recordResult")}
+                            </Button>
+                          )}
+                          {!f.is_recommended && canEdit && (
+                            <Button
+                              role="menuitem"
+                              size="sm"
+                              variant="ghost"
+                              className="w-full justify-start"
+                              disabled={saving === f.id}
+                              onClick={() => {
+                                setActionsFileId(null);
+                                void update(f, { is_recommended: true });
+                              }}
+                            >
+                              {uiText("Set as recommended")}
+                            </Button>
+                          )}
+                          <hr role="separator" className="my-1 border-border" />
+                          {canEdit && f.revision_status !== "archived" && (
+                            <>
+                              <Button
+                                role="menuitem"
+                                size="sm"
+                                variant="ghost"
+                                className="w-full justify-start text-destructive"
+                                disabled={saving === f.id}
+                                onClick={() => {
+                                  setActionsFileId(null);
+                                  void update(f, { revision_status: "archived" });
+                                }}
+                              >
+                                {uiText("Archive revision")}
+                              </Button>
+                            </>
+                          )}
                           <Button
                             role="menuitem"
                             size="sm"

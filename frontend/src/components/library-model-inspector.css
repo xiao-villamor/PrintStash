@@ -75,7 +75,7 @@
   font-weight: 400;
 }
 .library-model-inspector :is(button, .library-inspector-header a) {
-  border-radius: 0;
+  border-radius: var(--radius);
 }
 .library-inspector-tabs {
   display: flex;

@@ -206,7 +206,7 @@ describe("SettingsTab recorded values", () => {
 
     expect(setting("Layer height").getByText("0mm")).toBeVisible();
     expect(setting("Estimated time").getByText("0s")).toBeVisible();
-    expect(setting("Filament weight").getByText("0g")).toBeVisible();
+    expect(setting("Filament weight").getByText("0 g")).toBeVisible();
     expect(setting("Filament cost").getByText("0.00")).toBeVisible();
   });
   it("retains recorded zero walls", () => {

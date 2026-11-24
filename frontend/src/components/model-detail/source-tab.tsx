@@ -18,7 +18,6 @@ import { useOptionalI18n, type MessageKey } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 import { safeHttpUrl } from "@/components/model-detail/source-url";
-import { SourceLicenseFacts } from "./source-summary";
 import { sourceProviderName } from "./presentation";
 import type {
   ModelProvenanceRead,
@@ -137,7 +136,7 @@ function SourceField({
       {!editing && feedback}
       <div className="flex flex-col items-start gap-1">
         <h3 className="text-sm font-medium text-foreground">{label}</h3>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-sm text-muted-foreground">
           {provenanceOriginLabel(field.effective_origin, i18n)}
         </span>
       </div>
@@ -160,6 +159,13 @@ function SourceField({
               : t("source.notSuppliedGeneric"))
           )}
         </div>
+        {field.user_override_set && (
+          <p className="wrap-anywhere text-sm text-muted-foreground">
+            {uiText("Captured: {value1}", {
+              value1: field.captured_value || t("source.notSuppliedGeneric"),
+            })}
+          </p>
+        )}
         {canEdit && (
           <div className="flex shrink-0 flex-wrap gap-1">
             {(field.field_name === "title" || field.field_name === "description") && (
@@ -188,7 +194,7 @@ function SourceField({
         )}
       </div>
       {field.field_name === "license_text" && (
-        <p className="col-span-full mt-1 text-xs text-muted-foreground @xl/source:col-start-2">
+        <p className="col-span-full mt-1 text-sm text-muted-foreground @xl/source:col-start-2">
           {i18n?.t("source.licenseDisclaimer") ??
             uiText(
               "PrintStash preserves published license text and does not grant, interpret, or expand rights.",
@@ -401,7 +407,7 @@ function SourceCover({
         <h3 id={`cover-heading-${source.id}`} className="text-sm font-semibold">
           {t("source.cover")}
         </h3>
-        <p className="text-xs text-muted-foreground" aria-live="polite" role="status">
+        <p className="text-sm text-muted-foreground" aria-live="polite" role="status">
           {cover ? t("source.coverAvailable") : t("source.coverEmpty")}
         </p>
         {canEdit && (
@@ -410,7 +416,8 @@ function SourceCover({
               ref={inputRef}
               type="file"
               accept="image/jpeg,image/png,image/webp"
-              className="sr-only"
+              tabIndex={-1}
+              className="hidden"
               aria-label={cover ? t("source.coverReplace") : t("source.coverUpload")}
               onChange={(event) => {
                 selectFile(event.currentTarget.files?.[0]);
@@ -479,7 +486,7 @@ function SourceIdentityRow({
   useUiLocale();
   return (
     <div className="min-w-0 space-y-1">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dt className="text-sm text-muted-foreground">{label}</dt>
       <dd className="min-w-0 break-words text-sm text-foreground">{children}</dd>
     </div>
   );
@@ -511,6 +518,7 @@ function SourceTabContent({
     i18n?.t(key, values) ?? uiText(key, values);
   const editor = useSourceEditing(modelId, api);
   const { data, state } = editor;
+  const [editingSource, setEditingSource] = useState(false);
   if (!editor.active) return null;
   if (editor.denied || (!data && editor.query.isError))
     return (
@@ -526,7 +534,8 @@ function SourceTabContent({
       </div>
     );
   const blocked = state.phase !== "idle";
-  const editable = canEdit && !editor.editDenied && !blocked;
+  const canEditSource = canEdit && !editor.editDenied;
+  const editable = canEditSource && editingSource && !blocked;
   const reviewed = state.phase === "blocked" ? state.reviewed : null;
   const pending = state.phase === "blocked" ? state.pending.command : null;
   const fieldFeedback =
@@ -578,6 +587,18 @@ function SourceTabContent({
               <Button onClick={editor.retryRead}>{uiText("Retry")}</Button>
             </div>
           )}
+          {canEditSource && data.sources.length > 0 && (
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant={editingSource ? "default" : "outline"}
+                aria-pressed={editingSource}
+                onClick={() => setEditingSource((value) => !value)}
+              >
+                {editingSource ? uiText("Done") : uiText("Edit source")}
+              </Button>
+            </div>
+          )}
           {!fieldFeedback && feedback}
           {!data.sources.length && (
             <EmptyState title={t("source.emptyTitle")} description={t("source.emptyDescription")} />
@@ -588,46 +609,32 @@ function SourceTabContent({
             return (
               <article key={source.id} className="min-w-0">
                 <section aria-labelledby={`source-heading-${source.id}`}>
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <h2 id={`source-heading-${source.id}`} className="text-base font-semibold">
-                      {uiText("Source information")}
-                    </h2>
-                    {canonicalUrl && (
-                      <a
-                        href={canonicalUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-foreground hover:underline"
-                      >
-                        {uiText("Open source page")}
-                        <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-                      </a>
-                    )}
-                  </div>
+                  <h2 id={`source-heading-${source.id}`} className="text-base font-semibold">
+                    {uiText("Source information")}
+                  </h2>
                   <div className="space-y-3 border-b border-border py-4">
                     <h3 className="text-lg font-semibold">
                       {sourceProviderName(source.provider)}
-                      <span className="ml-2 text-xs font-normal normal-case text-muted-foreground">
+                      <span className="ml-2 text-sm font-normal normal-case text-muted-foreground">
                         {t("source.capturedStatus")}
                       </span>
                     </h3>
-                    <p className="break-words text-xs text-muted-foreground">
+                    <p className="break-words text-sm text-muted-foreground">
                       {canonicalUrl ? (
                         <a
                           href={canonicalUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="hover:underline"
+                          className="inline-flex max-w-full items-start gap-1 text-foreground underline-offset-4 hover:underline"
                         >
-                          {canonicalUrl}
+                          <span className="min-w-0 [overflow-wrap:anywhere]">{canonicalUrl}</span>
+                          <ExternalLink className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                          <span className="sr-only">{uiText("Opens in a new tab")}</span>
                         </a>
                       ) : (
                         source.canonical_url
                       )}
                     </p>
-                    <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 text-sm">
-                      <SourceLicenseFacts fields={source.fields} />
-                    </dl>
                     <dl
                       className="grid grid-cols-2 gap-4 @xl/source:grid-cols-4"
                       data-testid="source-identity-panel"

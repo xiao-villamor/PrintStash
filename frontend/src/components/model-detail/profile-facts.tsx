@@ -1,6 +1,7 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import type { CaptureProfile } from "@/types/inbox";
+import { formatPlateEstimate } from "./format-plate-estimate";
 
 export function ProfileFacts({ profile }: { profile: CaptureProfile }) {
   useUiLocale();
@@ -22,15 +23,13 @@ export function ProfileFacts({ profile }: { profile: CaptureProfile }) {
         <dd>
           {profile.estimated_seconds == null
             ? unknown
-            : uiText("{value1} min", {
-                value1: String(Math.round(profile.estimated_seconds / 60)),
-              })}
+            : formatPlateEstimate("estimated_time_s", profile.estimated_seconds)}
         </dd>
         <dt>{uiText("Filament")}</dt>
         <dd>
           {profile.filament_grams == null
             ? unknown
-            : uiText("{value1} g", { value1: String(profile.filament_grams) })}
+            : formatPlateEstimate("filament_weight_g", profile.filament_grams)}
         </dd>
         <dt>{uiText("Material")}</dt>
         <dd>{profile.materials?.length ? profile.materials.join(", ") : unknown}</dd>

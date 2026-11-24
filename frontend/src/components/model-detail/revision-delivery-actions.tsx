@@ -1,28 +1,24 @@
 import { Button } from "@/components/ui/button";
-import { Printer3D } from "@/components/ui/printer-3d";
-import { Link } from "@/lib/link";
 import { uiText } from "@/lib/locale";
 
+/** The print entry shared by Overview and Print. */
 export function RevisionDeliveryActions({
-  printerless,
-  size,
+  secondary = false,
+  className,
   onSend,
 }: {
-  printerless: boolean;
-  size?: "sm";
+  secondary?: boolean;
+  className?: string;
   onSend: () => void;
 }) {
   return (
-    <>
-      <Button size={size} onClick={onSend}>
-        <Printer3D className="size-4" aria-hidden />
-        {uiText("modelDetail.preparePrint")}
-      </Button>
-      {printerless && (
-        <Button asChild size={size} variant="outline">
-          <Link href="/printers">{uiText("Manage printers")}</Link>
-        </Button>
-      )}
-    </>
+    <Button
+      size="sm"
+      variant={secondary ? "outline" : "default"}
+      className={className}
+      onClick={onSend}
+    >
+      {uiText("modelDetail.preparePrint")}
+    </Button>
   );
 }

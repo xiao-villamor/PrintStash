@@ -264,8 +264,8 @@ test.describe("model detail route", () => {
       .toBeLessThanOrEqual(1);
     await expect
       .poll(() =>
-        page.getByRole("table").evaluate((table) => {
-          const time = table.querySelector("tbody:last-child td:last-child")!;
+        page.getByRole("list", { name: "Revisions" }).evaluate((list) => {
+          const time = list.querySelector("li:last-child time")!;
           const range = document.createRange();
           range.selectNodeContents(time);
           return range.getClientRects().length;
@@ -444,10 +444,10 @@ test.describe("model detail route", () => {
 
     await page.keyboard.press("2");
 
-    const record = page.getByRole("dialog", { name: "Add print record" });
+    const record = page.getByRole("dialog", { name: "Record result" });
     await expect(record).toBeVisible();
     await expect(record.getByRole("radio", { name: "Failed", exact: true })).toBeChecked();
-    await expect(record.getByRole("textbox", { name: "Error (opt.)" })).toBeFocused();
+    await expect(record.getByRole("textbox", { name: "What went wrong" })).toBeFocused();
     await expect(record.getByRole("button", { name: "G-code Revision", exact: true })).toHaveText(
       /Rev 1/,
     );
@@ -1221,7 +1221,7 @@ test.describe("model detail route", () => {
     await expect(page.getByRole("menuitem", { name: "Download original file" })).toBeVisible();
     await page.keyboard.press("Escape");
     await page.getByRole("tab", { name: /^Activity/ }).click();
-    await expect(page.getByRole("button", { name: "Add record", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Record result", exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "Add revision", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "Add G-code revision" })).toBeVisible();
   });
@@ -1299,7 +1299,7 @@ test.describe("model detail route", () => {
 
     const viewport = page.viewportSize()!;
     for (const [action, title] of [
-      ["Add record", "Add print record"],
+      ["Record result", "Record result"],
       ["Import from printer", "Import from printer"],
     ]) {
       const opener = page.getByRole("button", { name: action, exact: true });
@@ -1323,9 +1323,9 @@ test.describe("model detail route", () => {
     const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
     if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
     await expect(sidebar).toHaveAttribute("aria-expanded", "false");
-    await page.getByRole("button", { name: "Add record", exact: true }).click();
+    await page.getByRole("button", { name: "Record result", exact: true }).click();
 
-    const dialog = page.getByRole("dialog", { name: "Add print record" });
+    const dialog = page.getByRole("dialog", { name: "Record result" });
     const context = dialog.getByRole("region", { name: "Print context" });
     const outcome = dialog.getByRole("region", { name: "Observed outcome" });
     await expect(context).toBeVisible();
@@ -1339,7 +1339,7 @@ test.describe("model detail route", () => {
     await page.getByRole("button", { name: "Other (not listed)…", exact: true }).click();
     await context.getByRole("textbox", { name: "Printer name" }).fill("Workshop printer");
     await outcome.getByRole("radio", { name: "Failed", exact: true }).check();
-    await outcome.getByRole("textbox", { name: "Error (opt.)" }).fill("Lifted corner");
+    await outcome.getByRole("textbox", { name: "What went wrong" }).fill("Lifted corner");
     const save = dialog.getByRole("button", { name: "Save record", exact: true });
     await expect(save).toBeEnabled();
     await expect(save).toBeInViewport();
@@ -1374,8 +1374,8 @@ test.describe("model detail route", () => {
     const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
     if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
     await expect(sidebar).toHaveAttribute("aria-expanded", "false");
-    await page.getByRole("button", { name: "Add record", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Add print record" });
+    await page.getByRole("button", { name: "Record result", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Record result" });
     const initialHeight = (await dialog.boundingBox())!.height;
 
     for (const [field, count, term, match, label] of [
@@ -1501,11 +1501,11 @@ test.describe("model detail route", () => {
     await page.getByRole("tab", { name: /^Print/ }).click();
     await page.getByRole("heading", { name: /^Rev 1\b/ }).focus();
     await page.keyboard.press("2");
-    const dialog = page.getByRole("dialog", { name: "Add print record", exact: true });
+    const dialog = page.getByRole("dialog", { name: "Record result", exact: true });
     await expect(dialog.getByRole("radio", { name: "Failed", exact: true })).toBeChecked();
     await dialog.getByRole("button", { name: "Printer", exact: true }).click();
     await page.getByRole("option", { name: "ender", exact: true }).click();
-    await dialog.getByRole("textbox", { name: "Error (opt.)" }).fill("Corner lifted");
+    await dialog.getByRole("textbox", { name: "What went wrong" }).fill("Corner lifted");
     const saved = page.waitForRequest(
       (request) => request.method() === "POST" && request.url().endsWith("/models/1/print-jobs"),
     );

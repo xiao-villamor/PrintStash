@@ -133,8 +133,6 @@ describe("RevisionsTab", () => {
     renderRevisions({ revisions: [aRevision()] });
 
     const filename = await screen.findByText("part_0.2mm.gcode");
-    expect(filename).not.toBeVisible();
-    await userEvent.click(screen.getByText("G-code file", { exact: true }));
     expect(filename).toBeVisible();
     expect(screen.getAllByText("part_0.2mm.gcode")).toHaveLength(1);
   });
@@ -328,23 +326,19 @@ describe("RevisionsTab", () => {
         ],
       });
       expect(
-        within(screen.getByRole("table"))
-          .getAllByRole("columnheader")
-          .map((column) => column.textContent),
-      ).toEqual(["Revision", "Printer results", "Time"]);
+        within(screen.getByRole("list", { name: "Revisions" })).getAllByRole("listitem"),
+      ).toHaveLength(2);
 
       await user.click(screen.getByRole("button", { name: /^Rev 1\s*Draft$/ }));
       expect(screen.getByText("Check the fit.")).toBeVisible();
       expect(screen.queryByText("Fit confirmed.")).not.toBeInTheDocument();
       const profile = screen.getByText("Printer profile", { exact: true });
-      expect(profile).not.toBeVisible();
-      await user.click(screen.getByText("Print setup", { exact: true }));
       expect(profile).toBeVisible();
 
       await user.click(screen.getByRole("button", { name: /^Rev 2\s*Final$/ }));
       expect(screen.getByText("Fit confirmed.")).toBeVisible();
       expect(screen.queryByText("Check the fit.")).not.toBeInTheDocument();
-      expect(screen.getByText("Printer profile", { exact: true })).not.toBeVisible();
+      expect(screen.getByText("Printer profile", { exact: true })).toBeVisible();
     });
 
     it("shows a revision's label", async () => {

@@ -83,8 +83,8 @@ Primary actions and selected controls are deliberately different:
 
 ### Action hierarchy
 
-The model detail design proposes these rules; `Button` and the tokens do not
-implement them yet. Treat them as the target when that surface is built.
+The model detail inspector uses these action rules with the shared `Button`,
+`DropdownMenu`, and toast primitives.
 
 - One filled primary per surface, chosen by the next step rather than by
   position. In the model detail Print block, `Prepare print` is primary until
@@ -103,15 +103,18 @@ implement them yet. Treat them as the target when that surface is built.
 
 ### Radius, type, elevation
 
-- `--radius` in `frontend/src/globals.css` is `0px`, so
-  `rounded-sm|md|DEFAULT|lg` resolve to square corners today. The model detail
-  design proposes 6px for buttons, inputs and segmented controls, and 8px for
-  menus, popovers and toasts. Adopt it by changing the token and the
-  primitives together, not with per-component `rounded-[…]` values. Circular
-  avatars, status dots and count badges remain circular where their shape
-  communicates their role.
+- `--radius` gives buttons, inputs, selects, and segmented controls 6px corners
+  through the default, small, and medium radius utilities. `--radius-popover`
+  gives menus, floating lists, toasts, and dialogs 8px corners through the
+  large radius utility. Cards and panels use square corners. Circular
+  avatars, status dots, and count badges retain their shape.
 - Type ramp adds `text-2xs` (0.6875rem) and `text-3xs` (0.625rem) for the mono
   label style. No `text-[11px]`.
+- Text a person reads to decide something — field labels, values, status words,
+  estimate sources, empty-state guidance — is at least `text-sm`, including
+  in inspectors and detail panels. `text-muted-foreground` is for that secondary
+  layer at `text-sm` or larger; reserve `text-xs` muted for counts, timestamps
+  beside a larger value and keyboard hints. Check both themes at 1920×1080.
 - Layering uses the named scale: `z-dropdown` (50) for menus and popovers,
   `z-overlay` (100) for modals and drawers. No arbitrary `z-[60]`.
 
@@ -223,6 +226,42 @@ not for primary titles or prose. Keep primary blue for actions that start work;
 status and selection use their semantic tokens. On narrow screens, rows stack
 into a readable content band and a separate action band. Text gets `min-w-0`
 and may wrap; actions must remain reachable without horizontal scrolling.
+
+### Model detail inspector
+
+The model detail inspector is a tool panel, not a document. Its Overview never
+renders as loose `h2` headings followed by paragraphs; that reads as a Markdown
+file. Compose it from these blocks, in this order, using the shared parts in
+`components/model-detail/inspector-section.tsx`:
+
+1. **Current revision** — a full-width `InspectorSection`. The first row
+   holds the revision link, its outline status badge with a dot, and the muted
+   word `Recommended` when applicable. A `PropertyList` shows the last print,
+   material, estimate and its source, a link to multi-plate estimates, and the
+   upload date. The equal-width footer actions are `Record result` and
+   `Prepare print`. Print's section row places `Prepare print` at the right edge.
+2. **Model details** and **Source and license** — stacked at the default
+   inspector width and side-by-side from the `@2xl` container width. Each
+   body is a `PropertyList`: rows of a fixed label column and a value column,
+   separated by `divide-y divide-border`. Edit details is in the section header.
+   Source details is a navigation row. A missing value keeps its row and shows
+   the action that fills it (`Add description`, `Add source link`) instead of
+   removing the row.
+
+Inspector rules:
+
+- Labels in inspectors are `text-sm text-muted-foreground` Inter; values are
+  `text-sm` foreground. Mono uppercase micro-labels stay in technical tables.
+- A Model description renders at body size inside its row. Markdown headings
+  inside it never exceed `text-sm font-semibold`, and a description equal to
+  the Model name is not shown.
+- An external link always shows its destination name and the external icon; an
+  internal navigation is a button in the header bar. Never place the two side
+  by side with the same styling.
+- Use intentional section headers, never `details` disclosure triangles, for
+  print setup, file facts or per-file details.
+- Status words are text badges. A star means "favorite Model" only; the
+  recommended revision is the word `Recommended`.
 
 ## Cursors
 

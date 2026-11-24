@@ -488,6 +488,9 @@ function EstimateForm({
       onSubmit={submit}
     >
       <fieldset disabled={commands.save.isPending} className="space-y-4">
+        {!row.estimate && !estimatePlate && file.file_type === "gcode" && (
+          <p className="text-sm text-muted-foreground">{uiText("G-code estimate")}</p>
+        )}
         {estimatePlate && (
           <p className="text-sm text-muted-foreground">
             {uiText("modelDetail.plateCostSource", {

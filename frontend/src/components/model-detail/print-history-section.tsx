@@ -6,7 +6,7 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { useId, useState } from "react";
-import { CheckCircle2, ClipboardList, FileBox, XCircle } from "lucide-react";
+import { CheckCircle2, FileBox, XCircle } from "lucide-react";
 
 import { createManualPrintJob, getModelPrintJobs, importPrintJobsFromPrinter } from "@/lib/api";
 import { usePrinters, useSpoolmanStatus, useSpools } from "@/lib/queries";
@@ -19,6 +19,7 @@ import { printJobArtifactLabel } from "@/lib/print-job-reproducibility";
 
 import { PRINT_JOB_PRESENTATION } from "./presentation";
 import { Modal } from "@/components/ui/modal";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, inputClasses } from "@/components/ui/input";
 import { OptionPicker } from "@/components/ui/option-picker";
@@ -38,6 +39,9 @@ export function PrintHistorySection({
   onRevisionFilter,
   onAddRevision,
   onOpenRevision,
+  onViewActivity,
+  onDraftClosed,
+  showHistory = true,
 }: {
   jobs: ModelPrintJobRead[];
   modelName?: string;
@@ -49,6 +53,9 @@ export function PrintHistorySection({
   onRevisionFilter?: (fileId: number | null) => void;
   onAddRevision?: () => void;
   onOpenRevision?: (fileId: number) => void;
+  onViewActivity?: () => void;
+  onDraftClosed?: () => void;
+  showHistory?: boolean;
 }) {
   useUiLocale();
   const formId = useId();
@@ -70,6 +77,8 @@ export function PrintHistorySection({
   const [selectedFileId, setSelectedFileId] = useState<number | null>(
     initialEntry?.fileId ?? revisionFilter ?? gcodeFiles[0]?.id ?? null,
   );
+  const selectedRevision = gcodeFiles.find((file) => file.id === selectedFileId);
+  const estimatedFilament = selectedRevision?.metadata?.filament_weight_g;
   const [selectedSpoolId, setSelectedSpoolId] = useState<number | null>(null);
   const [jobState, setJobState] = useState<string>(initialEntry?.state ?? "completed");
   const [startedAt, setStartedAt] = useState("");
@@ -107,6 +116,17 @@ export function PrintHistorySection({
     ? adhocPrinterName.trim().length > 0
     : !!selectedPrinterId;
 
+  const blockedReason = !selectedFileId
+    ? uiText("Choose revision")
+    : !manualPrinterReady
+      ? uiText("modelDetail.choosePrinter")
+      : null;
+
+  function closeRecord() {
+    setShowAdd(false);
+    onDraftClosed?.();
+  }
+
   async function submitManual() {
     if (submitting || !manualPrinterReady || !selectedFileId) return;
     setSubmitting(true);
@@ -127,11 +147,17 @@ export function PrintHistorySection({
         spool_filament_id: spool ? spool.filament_id : null,
         started_at: startedAt || null,
         finished_at: finishedAt || null,
-        error: jobError || null,
+        error: jobState === "completed" ? null : jobError.trim() || null,
       });
       onJobCreated(job);
-      setShowAdd(false);
-      toast.success(uiText("Print record added"));
+      closeRecord();
+      if (onViewActivity)
+        toast.successAction(
+          uiText("Print record added"),
+          `${uiText("View activity")} ›`,
+          onViewActivity,
+        );
+      else toast.success(uiText("Print record added"));
     } catch (e) {
       toast.error(e);
     } finally {
@@ -171,68 +197,73 @@ export function PrintHistorySection({
   return (
     <Localized>
       <section>
-        <div className="detail-history-heading">
-          <h2>{uiText("Print history")}</h2>
-          {gcodeFiles.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={openAdd}>
-                {uiText("Add record")}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  openAdd();
-                  setMode("auto");
-                }}
-              >
-                {uiText("Import from printer")}
-              </Button>
+        {showHistory && (
+          <>
+            <div className="detail-history-heading">
+              <h2>{uiText("Print history")}</h2>
+              {gcodeFiles.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" onClick={openAdd}>
+                    {uiText("modelDetail.recordResult")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      openAdd();
+                      setMode("auto");
+                    }}
+                  >
+                    {uiText("Import from printer")}
+                  </Button>
+                </div>
+              ) : (
+                onAddRevision && (
+                  <Button size="sm" onClick={onAddRevision}>
+                    {uiText("Add revision")}
+                  </Button>
+                )
+              )}
             </div>
-          ) : (
-            onAddRevision && (
-              <Button size="sm" onClick={onAddRevision}>
-                {uiText("Add revision")}
-              </Button>
-            )
-          )}
-        </div>
-        <p className="detail-history-intro">
-          {uiText("Recorded results for each printer and revision.")}
-        </p>
+            <p className="detail-history-intro">
+              {uiText("Recorded results for each printer and revision.")}
+            </p>
 
-        {onRevisionFilter && (gcodeFiles.length > 1 || revisionFilter !== null) && (
-          <label className="my-3 flex flex-wrap items-center gap-2 text-sm">
-            {uiText("G-code Revision")}
-            <select
-              className={inputClasses}
-              value={revisionFilter ?? ""}
-              onChange={(event) => {
-                onRevisionFilter(
-                  gcodeFiles.find((file) => file.id === Number(event.target.value))?.id ?? null,
-                );
-              }}
-            >
-              <option value="">{uiText("modelDetail.allRevisions")}</option>
-              {gcodeFiles.map((file) => (
-                <option key={file.id} value={file.id}>
-                  {uiText("Rev {value1}", {
-                    value1: String(file.gcode_revision_number ?? file.version),
-                  })}
-                  {file.revision_label && ` · ${file.revision_label}`}
-                </option>
-              ))}
-            </select>
-          </label>
+            {onRevisionFilter && (gcodeFiles.length > 1 || revisionFilter !== null) && (
+              <label className="my-3 flex flex-wrap items-center gap-2 text-sm">
+                {uiText("G-code Revision")}
+                <select
+                  className={inputClasses}
+                  value={revisionFilter ?? ""}
+                  onChange={(event) => {
+                    onRevisionFilter(
+                      gcodeFiles.find((file) => file.id === Number(event.target.value))?.id ?? null,
+                    );
+                  }}
+                >
+                  <option value="">{uiText("modelDetail.allRevisions")}</option>
+                  {gcodeFiles.map((file) => (
+                    <option key={file.id} value={file.id}>
+                      {uiText("Rev {value1}", {
+                        value1: String(file.gcode_revision_number ?? file.version),
+                      })}
+                      {file.revision_label && ` · ${file.revision_label}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </>
         )}
-
         {/* Add record panel */}
         <Modal
           open={showAdd}
           onClose={() => {
-            if (!submitting && !importing) setShowAdd(false);
+            if (!submitting && !importing) closeRecord();
           }}
-          title={mode === "manual" ? uiText("Add print record") : uiText("Import from printer")}
+          title={
+            mode === "manual" ? uiText("modelDetail.recordResult") : uiText("Import from printer")
+          }
           description={
             mode === "manual"
               ? uiText(
@@ -241,15 +272,18 @@ export function PrintHistorySection({
               : undefined
           }
           dismissible={!submitting && !importing}
-          className={mode === "manual" ? "max-w-220" : undefined}
+          className={mode === "manual" ? "max-w-170" : undefined}
           bodyClassName={mode === "manual" ? "p-0" : undefined}
           footer={
             <>
+              {mode === "manual" && blockedReason && (
+                <p className="me-auto text-sm text-muted-foreground">{blockedReason}</p>
+              )}
               <Button
                 variant="outline"
                 size="sm"
                 disabled={submitting || importing}
-                onClick={() => setShowAdd(false)}
+                onClick={closeRecord}
               >
                 {uiText("Cancel")}
               </Button>
@@ -258,7 +292,7 @@ export function PrintHistorySection({
                   size="sm"
                   onClick={submitManual}
                   loading={submitting}
-                  disabled={!manualPrinterReady || !selectedFileId}
+                  disabled={blockedReason !== null}
                 >
                   {uiText("Save record")}
                 </Button>
@@ -343,6 +377,14 @@ export function PrintHistorySection({
                       onChange={setSelectedFileId}
                     />
                   </div>
+                  {estimatedFilament != null && (
+                    <div className="text-sm">
+                      <p>
+                        {uiText("Filament estimate")} · {formatGrams(estimatedFilament)}
+                      </p>
+                      <p className="text-muted-foreground">{uiText("G-code estimate")}</p>
+                    </div>
+                  )}
                   {adhocPrinter && (
                     <div>
                       <label className="mb-1 block text-sm font-medium" htmlFor={`${formId}-3`}>
@@ -393,14 +435,13 @@ export function PrintHistorySection({
                     id={`${formId}-outcome`}
                     className="flex items-center gap-2 text-sm font-semibold"
                   >
-                    <ClipboardList size={16} className="text-primary" aria-hidden />
                     {uiText("Observed outcome")}
                   </h3>
                   <ChoiceField
                     label={uiText("Result")}
                     value={jobState}
                     options={[
-                      { value: "completed", label: uiText("Completed") },
+                      { value: "completed", label: uiText("Success") },
                       { value: "failed", label: uiText("Failed") },
                       { value: "cancelled", label: uiText("Cancelled") },
                     ]}
@@ -434,7 +475,7 @@ export function PrintHistorySection({
                   {(jobState === "failed" || jobState === "cancelled") && (
                     <div>
                       <label className="mb-1 block text-sm font-medium" htmlFor={`${formId}-8`}>
-                        {uiText("Error (opt.)")}
+                        {uiText("What went wrong")}
                       </label>
                       <Input
                         id={`${formId}-8`}
@@ -526,83 +567,86 @@ export function PrintHistorySection({
           </div>
         </Modal>
 
-        {visibleJobs.length === 0 ? (
-          <p className="text-sm text-on-surface-variant">
-            {gcodeFiles.length === 0
-              ? uiText("modelDetail.historyNeedsRevision")
-              : revisionFilter === null
-                ? uiText("No print history yet. Add a record manually or import from a printer.")
-                : uiText("modelDetail.noRevisionActivity")}
-          </p>
-        ) : (
-          <div>
-            {visibleJobs.map((job) => {
-              const revision = gcodeFiles.find((file) => file.id === job.file_id);
-              const present = PRINT_JOB_PRESENTATION[job.state];
-              return (
-                <article key={job.id} className="detail-history-record">
-                  <div className="detail-history-identity">
-                    <span className="break-words">
-                      {job.source === "external"
-                        ? printJobArtifactLabel(job)
-                        : uiText("Rev {value1}", {
-                            value1: String(job.gcode_revision_number ?? "—"),
-                          })}
-                      {" · "}
-                      {job.printer_name}
-                      {" · "}
-                      <span
-                        className={
-                          present.tone === "error" ? "text-destructive" : "text-foreground"
-                        }
-                      >
-                        {present.label}
+        {showHistory &&
+          (visibleJobs.length === 0 ? (
+            <p className="text-sm text-on-surface-variant">
+              {gcodeFiles.length === 0
+                ? uiText("modelDetail.historyNeedsRevision")
+                : revisionFilter === null
+                  ? uiText("No print history yet. Add a record manually or import from a printer.")
+                  : uiText("modelDetail.noRevisionActivity")}
+            </p>
+          ) : (
+            <div>
+              {visibleJobs.map((job) => {
+                const revision = gcodeFiles.find((file) => file.id === job.file_id);
+                const present = PRINT_JOB_PRESENTATION[job.state];
+                return (
+                  <article key={job.id} className="detail-history-record">
+                    <div className="detail-history-identity">
+                      <span className="break-words">
+                        {job.source === "external"
+                          ? printJobArtifactLabel(job)
+                          : uiText("Rev {value1}", {
+                              value1: String(job.gcode_revision_number ?? "—"),
+                            })}
+                        {" · "}
+                        {job.printer_name}
+                        {" · "}
+                        <Badge variant="outline">
+                          {job.state === "completed" ? uiText("Success") : present.label}
+                        </Badge>
                       </span>
-                    </span>
-                    {revision && onOpenRevision && (
-                      <Button size="xs" variant="ghost" onClick={() => onOpenRevision(revision.id)}>
-                        {uiText("modelDetail.viewRevision")}
-                      </Button>
+                      {revision && onOpenRevision && (
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          onClick={() => onOpenRevision(revision.id)}
+                        >
+                          {uiText("modelDetail.viewRevision")}
+                        </Button>
+                      )}
+                    </div>
+                    <p className="text-xs text-on-surface-variant">
+                      {job.material_type ? `${job.material_type} · ` : ""}
+                      {timeAgo(job.created_at)}
+                    </p>
+                    {job.source === "external" && (
+                      <p className="text-xs uppercase tracking-wider text-on-surface-variant">
+                        {knownUiText(job.artifact_evidence)}
+                      </p>
                     )}
-                  </div>
-                  <p className="text-xs text-on-surface-variant">
-                    {job.material_type ? `${job.material_type} · ` : ""}
-                    {timeAgo(job.created_at)}
-                  </p>
-                  {job.source === "external" && (
-                    <p className="text-xs uppercase tracking-wider text-on-surface-variant">
-                      {knownUiText(job.artifact_evidence)}
-                    </p>
-                  )}
-                  <PrintJobReproducibility
-                    job={job}
-                    previewHref={`/models/${modelId}`}
-                    presentation="history"
-                  />
-                  {(job.actual_duration_s != null || job.filament_used_g != null) && (
-                    <p className="text-xs text-on-surface-variant">
-                      <span>{uiText("measured")}</span>
-                      {job.actual_duration_s != null
-                        ? ` · ${formatDuration(job.actual_duration_s)}`
-                        : ""}
-                      {job.filament_used_g != null ? ` · ${formatGrams(job.filament_used_g)}` : ""}
-                      {job.filament_cost != null && job.production_cost == null
-                        ? ` · ${formatCost(job.filament_cost)}`
-                        : ""}
-                    </p>
-                  )}
-                  {job.production_cost && <PrintJobCost cost={job.production_cost} />}
-                  {job.spool_name && (
-                    <p className="text-xs text-on-surface-variant">
-                      {uiText("spool · {value1}", { value1: String(job.spool_name ?? "") })}
-                    </p>
-                  )}
-                  {job.error && <p className="text-xs text-error break-words">{job.error}</p>}
-                </article>
-              );
-            })}
-          </div>
-        )}
+                    <PrintJobReproducibility
+                      job={job}
+                      previewHref={`/models/${modelId}`}
+                      presentation="history"
+                    />
+                    {(job.actual_duration_s != null || job.filament_used_g != null) && (
+                      <p className="text-xs text-on-surface-variant">
+                        <span>{uiText("measured")}</span>
+                        {job.actual_duration_s != null
+                          ? ` · ${formatDuration(job.actual_duration_s)}`
+                          : ""}
+                        {job.filament_used_g != null
+                          ? ` · ${formatGrams(job.filament_used_g)}`
+                          : ""}
+                        {job.filament_cost != null && job.production_cost == null
+                          ? ` · ${formatCost(job.filament_cost)}`
+                          : ""}
+                      </p>
+                    )}
+                    {job.production_cost && <PrintJobCost cost={job.production_cost} />}
+                    {job.spool_name && (
+                      <p className="text-xs text-on-surface-variant">
+                        {uiText("spool · {value1}", { value1: String(job.spool_name ?? "") })}
+                      </p>
+                    )}
+                    {job.error && <p className="text-xs text-error break-words">{job.error}</p>}
+                  </article>
+                );
+              })}
+            </div>
+          ))}
       </section>
     </Localized>
   );

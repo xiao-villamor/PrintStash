@@ -15,7 +15,7 @@ export async function selectModelDetailTab(page: Page, name: string | RegExp): P
   }
   if (name === "Source and license") {
     await inspector.getByRole("tab", { name: "Overview", exact: true }).click();
-    await inspector.getByRole("link", { name: "Source and license", exact: true }).click();
+    await inspector.getByRole("link", { name: "Source details", exact: true }).click();
     return;
   }
   const tab = inspector.getByRole("tab", { name, exact: true });

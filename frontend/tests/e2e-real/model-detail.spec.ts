@@ -8,7 +8,14 @@
  * keep cancelled name drafts out of the saved Model.
  */
 import { test, expect } from "./helpers";
-import { clickModelAction, modelCard, openModelPage, uploadGcodeModel } from "./util";
+import {
+  clickModelAction,
+  collapseNavigationSidebar,
+  gcodeFor,
+  modelCard,
+  openModelPage,
+  uploadGcodeModel,
+} from "./util";
 
 test.describe("model detail", () => {
   test("persists a Markdown description", async ({ page }) => {
@@ -152,26 +159,48 @@ test.describe("model detail", () => {
     await expect(page.getByText(renamed, { exact: true })).toHaveCount(0);
   });
 
-  test("log a manual print against an ad-hoc printer; it shows in history", async ({ page }) => {
+  test("record a result from Overview and reopen it from the Activity receipt", async ({
+    page,
+  }) => {
     const name = `e2e-hist-${Date.now()}`;
     const printerName = `E2E Rig ${Date.now()}`;
-    await uploadGcodeModel(page, name);
-
-    await openModelPage(page, name);
+    const upload = await page.request.post("/api/v1/ingest/orca", {
+      multipart: {
+        file: {
+          name: `${name}.gcode`,
+          mimeType: "text/plain",
+          buffer: Buffer.from(gcodeFor(name)),
+        },
+        model_name: name,
+      },
+    });
+    expect(upload.status()).toBe(202);
+    const jobPath = `/api/v1/jobs/${(await upload.json()).job_id}`;
+    await expect
+      .poll(async () => (await (await page.request.get(jobPath)).json()).state)
+      .toBe("completed");
+    const { model_id: modelId } = await (await page.request.get(jobPath)).json();
+    expect(modelId).toBeTruthy();
+    await page.goto(`/models/${modelId}`);
+    await collapseNavigationSidebar(page);
     await expect(page.getByRole("heading", { name })).toBeVisible();
-    await page.getByRole("tab", { name: /Activity/ }).click();
-    await page.getByRole("button", { name: "Add record", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Add print record" });
+    await page.getByRole("button", { name: "Record result", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Record result" });
 
+    await expect(dialog.getByText("Choose a printer to continue.")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Save record" })).toBeDisabled();
     await dialog.getByRole("button", { name: "Printer", exact: true }).click();
     await page.getByRole("button", { name: "Other (not listed)…", exact: true }).click();
     await dialog.getByRole("textbox", { name: "Printer name" }).fill(printerName);
-    await expect(dialog.getByRole("radio", { name: "Completed", exact: true })).toBeChecked();
+    await expect(dialog.getByRole("radio", { name: "Success", exact: true })).toBeChecked();
 
     await dialog.getByRole("button", { name: "Save record", exact: true }).click();
     await expect(dialog).toHaveCount(0);
+    await page.getByRole("button", { name: "View activity ›" }).click();
+    await expect(page.getByRole("heading", { name: "Print history" })).toBeVisible();
     await page.reload();
     await expect(page.getByText(printerName, { exact: false })).toBeVisible();
+    expect((await page.request.delete(`/api/v1/models/${modelId}`)).status()).toBe(204);
   });
 
   test("edit a model's tags: Cancel discards, Save persists", async ({ page }) => {

@@ -182,6 +182,7 @@ function spoolmanStatus(enabled: boolean): SpoolmanStatus {
 
 interface PanelOptions {
   preselectPlate?: number;
+  onDelivered?: (fileId: number, message: string) => void;
   initialDeliveryMode?: "send" | "queue";
   open?: boolean;
   preselectPrinterId?: number;
@@ -199,6 +200,7 @@ interface PanelOptions {
 // same shapes the API returns.
 function renderPanel({
   preselectPlate,
+  onDelivered,
   metadata = null,
   spools,
   filename = "cube.gcode",
@@ -223,6 +225,7 @@ function renderPanel({
         <AuthContext.Provider value={adminAuth}>
           <SendToButtons
             commands={commands}
+            onDelivered={onDelivered}
             preselectFileId={preselectPlate === undefined ? undefined : 42}
             preselectPlate={preselectPlate}
             initialDeliveryMode={initialDeliveryMode}
@@ -640,6 +643,22 @@ describe("SendToButtons sliced archives", () => {
     await userEvent.click(screen.getByRole("radio", { name: /^Plate 02/ }));
     expect(screen.getByRole("radio", { name: /^Plate 02/ })).toBeChecked();
   });
+  it("carries the preview plate into Prepare print while requiring a printer", async () => {
+    const onDelivered = vi.fn<(fileId: number, message: string) => void>();
+    renderPanel({
+      open: true,
+      onDelivered,
+      preselectPlate: 10,
+      filename: "project.gcode.3mf",
+      plates: [2, 10],
+    });
+    expect(
+      await screen.findByRole("radio", { name: /Plate 10.*Selected in preview/ }),
+    ).toBeChecked();
+    expect(screen.getByText("Choose a printer to continue.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Send to printer" })).toBeDisabled();
+  });
+
   it("requires a choice when several plates exist", async () => {
     renderPanel({ open: true, filename: "project.gcode.3mf", plates: [2, 10] });
     for (const choice of await screen.findAllByRole("radio", { name: /^Plate / })) {

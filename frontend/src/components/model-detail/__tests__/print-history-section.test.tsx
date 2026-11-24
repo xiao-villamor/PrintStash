@@ -116,7 +116,7 @@ function renderHistory(
 
 /** Open the add-a-print form. */
 async function openForm(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole("button", { name: "Add record" }));
+  await user.click(await screen.findByRole("button", { name: "Record result" }));
 }
 
 async function chooseVoron(user: ReturnType<typeof userEvent.setup>) {
@@ -174,7 +174,7 @@ describe("PrintHistorySection", () => {
 
       await openForm(user);
 
-      expect(screen.getByRole("dialog", { name: "Add print record" })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: "Record result" })).toBeInTheDocument();
     });
 
     it("offers importing from a printer instead", async () => {
@@ -224,7 +224,7 @@ describe("PrintHistorySection", () => {
     it("focuses the failure note from a revision shortcut", async () => {
       renderHistory({ initialEntry: { fileId: 20, state: "failed" } });
 
-      expect(await screen.findByRole("textbox", { name: "Error (opt.)" })).toHaveFocus();
+      expect(await screen.findByRole("textbox", { name: "What went wrong" })).toHaveFocus();
       expect(screen.getByRole("radio", { name: "Failed" })).toBeChecked();
     });
 
@@ -239,7 +239,7 @@ describe("PrintHistorySection", () => {
         },
       });
       await chooseVoron(user);
-      await user.type(screen.getByRole("textbox", { name: "Error (opt.)" }), "Corner lifted");
+      await user.type(screen.getByRole("textbox", { name: "What went wrong" }), "Corner lifted");
 
       await user.keyboard("{Control>}{Enter}{/Control}");
 
@@ -256,14 +256,14 @@ describe("PrintHistorySection", () => {
       const user = userEvent.setup();
       const view = renderHistory({ initialEntry: { fileId: 20, state: "failed" } });
       await user.type(
-        await screen.findByRole("textbox", { name: "Error (opt.)" }),
+        await screen.findByRole("textbox", { name: "What went wrong" }),
         "Corner lifted",
       );
 
       await user.keyboard("{Control>}{Enter}{/Control}");
 
       expect(view.requestsWithMethod("POST")).toEqual([]);
-      expect(screen.getByRole("textbox", { name: "Error (opt.)" })).toHaveValue("Corner lifted");
+      expect(screen.getByRole("textbox", { name: "What went wrong" })).toHaveValue("Corner lifted");
       expect(screen.getByRole("button", { name: "Save record" })).toBeDisabled();
     });
   });
@@ -298,7 +298,7 @@ describe("PrintHistorySection", () => {
       });
       await user.click(screen.getByRole("button", { name: "Import from printer" }));
       await user.click(await screen.findByRole("button", { name: "Add record manually" }));
-      expect(screen.getByRole("dialog", { name: "Add print record" })).toBeVisible();
+      expect(screen.getByRole("dialog", { name: "Record result" })).toBeVisible();
     });
     it("cannot import until a printer is chosen", async () => {
       // The import is scoped to one machine, so "which printer?" has no default.

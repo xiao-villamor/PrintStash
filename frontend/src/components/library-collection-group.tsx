@@ -85,7 +85,7 @@ export function LibraryCollectionGroup({
         <Folder className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
         <h3 className="min-w-0 truncate text-sm font-semibold">{collection.name}</h3>
         <span className="font-mono text-xs text-muted-foreground">{collection.model_count}</span>
-        <Button className="ml-auto rounded-none" size="xs" variant="ghost" asChild>
+        <Button className="ml-auto" size="xs" variant="ghost" asChild>
           <Link
             href={href}
             onClick={(event) => {
@@ -139,7 +139,7 @@ export function LibraryCollectionGroup({
       )}
       {(expanded || models.length > columns || browse.hasNextPage) && (
         <Button
-          className="mt-2 rounded-none"
+          className="mt-2"
           size="xs"
           variant="ghost"
           aria-expanded={expanded}

@@ -223,7 +223,7 @@
   margin: 0;
   padding: 0 8px;
   border: 1px dashed var(--border-strong);
-  border-radius: 0;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--foreground);
   font-size: 20px;

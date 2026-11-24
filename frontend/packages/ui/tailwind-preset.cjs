@@ -66,7 +66,7 @@ module.exports = {
       },
       borderRadius: {
         DEFAULT: "var(--radius)",
-        lg: "var(--radius)",
+        lg: "var(--radius-popover)",
         md: "var(--radius)",
         sm: "var(--radius)",
       },
