@@ -120,11 +120,9 @@ test.describe("profiles", () => {
     await expect(rowOf(reloaded).getByLabel(/Filament cost per kg/)).toHaveValue("42");
 
     // Delete it.
-    await page
-      .getByRole("dialog", { name: "Edit filament preset" })
-      .getByRole("button", { name: "Close", exact: true })
+    await rowOf(reloaded)
+      .getByRole("button", { name: `Delete filament preset ${name}` })
       .click();
-    await page.getByRole("button", { name: `Delete filament preset ${name}` }).click();
     await page
       .getByRole("dialog", { name: "Delete filament preset?" })
       .getByRole("button", { name: "Delete preset" })
