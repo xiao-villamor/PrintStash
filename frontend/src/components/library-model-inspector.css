@@ -427,17 +427,17 @@
   overflow-wrap: anywhere;
 }
 
-/* Groups share the control radius: the preview, the revision block, the origin
+/* Groups share the surface radius of menus and dialogs: the preview, the revision block, the origin
    facts and the collapsible sections each read as one rounded surface. */
 .library-inspector-preview {
   overflow: hidden;
-  border-radius: var(--radius);
+  border-radius: var(--radius-popover);
 }
 .library-inspector-workspace {
   margin-top: 14px;
   padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-popover);
   background: var(--card);
 }
 .library-inspector-origin,
@@ -446,7 +446,7 @@ details.library-inspector-section {
   padding-block: 0;
   padding-inline: 12px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-popover);
 }
 details.library-inspector-section > summary {
   min-height: 42px;
@@ -462,4 +462,12 @@ details.library-inspector-section > summary {
 .library-inspector-tabs button[aria-selected="true"] {
   background: var(--accent);
   color: var(--accent-foreground);
+}
+.library-inspector-eyebrow {
+  margin: 0 0 4px;
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }

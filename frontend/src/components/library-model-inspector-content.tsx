@@ -1,32 +1,11 @@
 "use client";
 
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowUpRight,
-  Box,
-  Check,
-  ChevronRight,
-  Download,
-  Loader2,
-  MoreHorizontal,
-  Star,
-  X,
-} from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowUpRight, Box, ChevronRight, Download, Loader2, MoreHorizontal } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
-import {
-  modelPrinterFilesOptions,
-  useModelDetail,
-  useModelPrintJobs,
-} from "@/features/library/model-detail";
-import { refreshLibraryMetadata } from "@/features/library/metadata";
-import {
-  createManualPrintJob,
-  downloadAuthenticatedFile,
-  getAssetUrl,
-  getModel,
-  updateModel,
-} from "@/lib/api";
+import { modelPrinterFilesOptions, useModelDetail } from "@/features/library/model-detail";
+import { downloadAuthenticatedFile, getAssetUrl, getModel, updateModel } from "@/lib/api";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { useAuth } from "@/lib/auth-context";
 import { usePrinters } from "@/lib/queries";
@@ -39,7 +18,6 @@ import {
   formatDuration,
   formatGrams,
   formatNumber,
-  timeAgo,
 } from "@/lib/format";
 import { ApiError, userMessage } from "@/lib/errors";
 import { isTypingTarget, keyboardOverlayOpen } from "@/lib/keyboard-commands";
@@ -48,7 +26,6 @@ import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { MarkdownView } from "@/components/markdown-view";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
-import { AddGcodeRevisionModal } from "@/components/model-detail/add-revision-modal";
 import { SendToButtons } from "@/components/model-detail/send-to-buttons";
 import { InspectorPreviewResize } from "./inspector-preview-resize";
 import {
@@ -92,7 +69,6 @@ export function InspectorContent({
 }) {
   useUiLocale();
   const { user } = useAuth();
-  const client = useQueryClient();
   const [session] = useState(getSessionVersion);
   const alive = useRef(true);
   useEffect(() => {
@@ -103,7 +79,6 @@ export function InspectorContent({
   }, []);
   const canEdit = canWrite && (model.effective_role === "edit" || model.effective_role === "admin");
   const administrator = !!user?.is_superuser;
-  const history = useModelPrintJobs(model.id, administrator);
   const printersQuery = usePrinters({ enabled: administrator });
   const printers = printersQuery.data ?? [];
   const files = normalizeRecommendedGcodeFiles(
@@ -120,17 +95,7 @@ export function InspectorContent({
     printers.find((item) => item.id === printerId) ??
     printers.find((item) => item.is_default) ??
     printers[0];
-  const [tab, setTab] = useState<"print" | "history" | "settings">("print");
-  const [failing, setFailing] = useState(false);
-  const [failNote, setFailNote] = useState("");
-  const [busy, setBusy] = useState(false);
-  const commandBusy = useRef(false);
   const [error, setError] = useState<string | null>(null);
-  const failureInput = useRef<HTMLTextAreaElement>(null);
-  const failedButton = useRef<HTMLButtonElement>(null);
-  const historyTab = useRef<HTMLButtonElement>(null);
-  const workspace = useRef<HTMLElement>(null);
-  const [addOpen, setAddOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
   const printerFiles = useQuery({
     ...modelPrinterFilesOptions(model.id),
@@ -223,11 +188,7 @@ export function InspectorContent({
   }
   const measurement = useMeshGeometryMeasurement(sourceFile ?? null);
   const geometry = meshGeometryFacts(sourceFile ?? null, measurement);
-  const jobs = (history.isError ? [] : (history.data ?? [])).filter(
-    (job) => job.file_id === file?.id,
-  );
   const printStats = file ? revisionStats(file.metadata) : [];
-  const canLog = canEdit && administrator && !!file && !!printer && !busy;
   const selectedFormat = file?.original_filename.toLowerCase().endsWith(".bgcode")
     ? "bgcode_binary"
     : "gcode_text";
@@ -242,7 +203,7 @@ export function InspectorContent({
       <span>{uiText("Printer")}</span>
       <select
         value={printer.id}
-        disabled={!administrator || busy || failing || printersQuery.isError}
+        disabled={!administrator || printersQuery.isError}
         aria-label={uiText("Printer for printing and logging")}
         onChange={(event) => setPrinterId(Number(event.target.value))}
       >
@@ -255,63 +216,6 @@ export function InspectorContent({
     </label>
   );
 
-  function cancelFailure() {
-    setFailing(false);
-    setFailNote("");
-    requestAnimationFrame(() => failedButton.current?.focus({ preventScroll: true }));
-  }
-  function beginFailure() {
-    if (!canLog || commandBusy.current) return;
-    setTab("history");
-    setFailing(true);
-    setFailNote("");
-    setError(null);
-    requestAnimationFrame(() => failureInput.current?.focus());
-  }
-  async function log(state: "completed" | "failed") {
-    if (!canLog || !file || !printer || commandBusy.current) return;
-    const intent = {
-      modelId: model.id,
-      fileId: file.id,
-      printerId: printer.id,
-      state,
-      note: state === "failed" ? failNote.trim() : "",
-    };
-    commandBusy.current = true;
-    setBusy(true);
-    setError(null);
-    try {
-      requireSessionVersion(session);
-      const job = await createManualPrintJob(intent.modelId, {
-        file_id: intent.fileId,
-        printer_id: intent.printerId,
-        state: intent.state,
-        error: intent.note || null,
-      });
-      requireSessionVersion(session);
-      if (
-        job.file_id !== intent.fileId ||
-        job.printer_id !== intent.printerId ||
-        job.state !== intent.state
-      )
-        throw new Error(uiText("Invalid print record acknowledgement"));
-      await history.publish(job);
-      requireSessionVersion(session);
-      refreshLibraryMetadata(client, session);
-      if (alive.current) {
-        setFailing(false);
-        setFailNote("");
-        setTab("history");
-        requestAnimationFrame(() => historyTab.current?.focus({ preventScroll: true }));
-        toast.success(uiText("Print record added"));
-      }
-    } catch (cause) {
-      if (session === getSessionVersion() && alive.current) setError(userMessage(cause));
-    } finally {
-      commandBusy.current = false;
-      if (session === getSessionVersion() && alive.current) setBusy(false);
-    }
-  }
   async function saveDescription(reviewedBase?: ModelRead) {
     if (
       !descriptionIntent ||
@@ -456,12 +360,6 @@ export function InspectorContent({
         keyboardOverlayOpen()
       )
         return;
-      if (event.key === "Escape" && failing) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        if (!commandBusy.current) cancelFailure();
-        return;
-      }
       if (isTypingTarget(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
       if (event.key === "Escape") {
         event.preventDefault();
@@ -469,26 +367,10 @@ export function InspectorContent({
         onClose();
         return;
       }
-      if (
-        !failing &&
-        workspace.current?.contains(document.activeElement) &&
-        (event.key === "1" || event.key === "2") &&
-        canLog
-      ) {
-        event.preventDefault();
-        if (event.key === "1") void log("completed");
-        else beginFailure();
-      }
     }
     window.addEventListener("keydown", keydown, true);
     return () => window.removeEventListener("keydown", keydown, true);
   });
-  function selectRevision(id: number) {
-    setSelectedId(id);
-    setFailing(false);
-    setFailNote("");
-    setError(null);
-  }
 
   return (
     <div className="library-inspector-body fade-in">
@@ -547,375 +429,92 @@ export function InspectorContent({
           {error}
         </p>
       )}
-      {revisions.length ? (
-        <section
-          id="rev-section"
-          ref={workspace}
-          aria-label={uiText("G-code revisions")}
-          className="library-inspector-workspace"
-        >
-          <header className="library-inspector-section-heading">
-            <h3>
-              {uiText("G-code revisions")} <span>{revisions.length}</span>
-            </h3>
-            <Button
-              className={sectionAction}
-              size="xs"
-              variant="ghost"
-              disabled={!canEdit}
-              onClick={() => setAddOpen(true)}
-            >
-              {uiText("Add revision")}
-            </Button>
-          </header>
-          <div
-            role="tablist"
-            aria-label={uiText("Revision details")}
-            className="library-inspector-tabs"
-            onKeyDown={(event) => {
-              const tabs = Array.from(
-                event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
-              );
-              const index = tabs.findIndex((button) => button === document.activeElement);
-              const next =
-                event.key === "ArrowRight"
-                  ? index + 1
-                  : event.key === "ArrowLeft"
-                    ? index - 1
-                    : event.key === "Home"
-                      ? 0
-                      : event.key === "End"
-                        ? tabs.length - 1
-                        : null;
-              if (next === null || index < 0) return;
-              event.preventDefault();
-              const target = tabs[(next + tabs.length) % tabs.length];
-              target?.click();
-              target?.focus();
-            }}
-          >
-            {(["print", "history", "settings"] as const).map((value) => (
-              <Button
-                variant="ghost"
-                size="xs"
-                key={value}
-                ref={value === "history" ? historyTab : undefined}
-                id={`inspector-tab-${value}`}
-                type="button"
-                role="tab"
-                aria-selected={tab === value}
-                aria-controls={`inspector-pane-${value}`}
-                tabIndex={tab === value ? 0 : -1}
-                onClick={() => {
-                  if (value !== "history" && !commandBusy.current) {
-                    setFailing(false);
-                    setFailNote("");
-                  }
-                  setTab(value);
-                }}
-              >
-                {value === "print" ? (
-                  uiText("Print")
-                ) : value === "history" ? (
-                  <>
-                    {uiText("History")} <span>{jobs.length}</span>
-                  </>
-                ) : (
-                  uiText("Settings")
-                )}
-              </Button>
-            ))}
-          </div>
-          {file && (
-            <>
-              <section
-                role="tabpanel"
-                id="inspector-pane-print"
-                aria-labelledby="inspector-tab-print"
-                hidden={tab !== "print"}
-              >
-                <div className="library-inspector-print-summary">
-                  <div className="library-inspector-revision">
-                    {revisions.length > 1 ? (
-                      <select
-                        disabled={busy}
-                        value={file.id}
-                        aria-label={uiText("Choose G-code revision")}
-                        title={revisionName(file)}
-                        onChange={(event) => selectRevision(Number(event.target.value))}
-                      >
-                        {revisions.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {revisionName(item)}
-                            {item.is_recommended ? ` · ★ ${uiText("Recommended")}` : ""}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <h4>{revisionName(file)}</h4>
-                    )}
-                    {file.is_recommended && revisions.length === 1 && (
-                      <span className="library-inspector-recommended">
-                        <Star className="size-3.5 shrink-0" aria-hidden />
-                        {uiText("Recommended")}
-                      </span>
-                    )}
-                    {!file.is_recommended && canEdit && (
-                      <Button
-                        className={sectionAction}
-                        variant="ghost"
-                        size="xs"
-                        disabled={revision.saving !== null}
-                        onClick={() => void revision.update(file, { is_recommended: true })}
-                      >
-                        {uiText("Recommend")}
-                      </Button>
-                    )}
-                  </div>
-                  {printStats.length > 0 && (
-                    <dl className="library-inspector-stats">
-                      {printStats.map(([label, value]) => (
-                        <div key={label}>
-                          <dt>{label}</dt>
-                          <dd>{value}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  )}
-                  {file.metadata?.printer_model && (
-                    <p className="library-inspector-caption wrap-anywhere">
-                      {uiText("Sliced for")}{" "}
-                      <span className="text-foreground">{file.metadata.printer_model}</span>
-                    </p>
-                  )}
-                </div>
-                <section
-                  className="library-inspector-print"
-                  aria-label={uiText("Print this revision")}
-                >
-                  {printerControl}
-                  {printersQuery.isError && (
-                    <p className="library-inspector-caption" role="alert">
-                      {userMessage(printersQuery.error)}
-                    </p>
-                  )}
-                  {printer && !canSend && (
-                    <p className="library-inspector-caption">
-                      {!canEdit
-                        ? uiText("Read-only")
-                        : !administrator
-                          ? uiText("Access restricted")
-                          : uiText("Download the G-code and transfer it to your printer.")}
-                    </p>
-                  )}
-                  <div className="library-inspector-delivery" data-library-revision-actions>
-                    {canSend && (
-                      <Button size="sm" onClick={() => setSendOpen(true)}>
-                        <Printer3D className="size-4 shrink-0" aria-hidden />
-                        {uiText("Send to printer")}
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      variant={canSend ? "ghost" : "default"}
-                      onClick={() => download(file)}
-                    >
-                      <Download className="size-4 shrink-0" aria-hidden />
-                      {uiText("Download G-code")}
-                    </Button>
-                  </div>
-                </section>
-              </section>
-              <section
-                role="tabpanel"
-                id="inspector-pane-history"
-                aria-labelledby="inspector-tab-history"
-                hidden={tab !== "history"}
-                className="library-inspector-history"
-              >
-                <div className="library-inspector-view-context">
-                  <h4>{revisionName(file)}</h4>
-                  <span>{uiText("Print history")}</span>
-                </div>
-                {!administrator ? (
-                  <p>{uiText("Access restricted")}</p>
-                ) : history.isPending ? (
-                  <p>{uiText("Loading...")}</p>
-                ) : history.isError ? (
-                  <div role="alert">
-                    <p>{userMessage(history.error)}</p>
-                    <Button size="xs" variant="outline" onClick={() => void history.refetch()}>
-                      {uiText("Retry")}
-                    </Button>
-                  </div>
-                ) : jobs.length ? (
-                  <ol>
-                    {jobs.map((job) => (
-                      <li key={job.id}>
-                        <div>
-                          <p>
-                            <strong>
-                              {job.state === "completed"
-                                ? uiText("Completed")
-                                : job.state === "failed"
-                                  ? uiText("Failed")
-                                  : job.state === "cancelled"
-                                    ? uiText("Cancelled")
-                                    : job.state}
-                            </strong>{" "}
-                            · {job.printer_name} · {timeAgo(job.finished_at ?? job.created_at)}
-                          </p>
-                          {job.error && <p className="text-foreground">{job.error}</p>}
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                ) : (
-                  <p>{uiText("No print results recorded yet.")}</p>
-                )}
-                {printer && canEdit && administrator && (
-                  <section
-                    className="library-inspector-results"
-                    aria-label={uiText("Log print outcome")}
-                  >
-                    <h4 className="font-medium">{uiText("Log print outcome")}</h4>
-                    {printerControl}
-                    {!failing && (
-                      <div className="library-inspector-actions" data-library-log-outcomes>
-                        <Button
-                          size="xs"
-                          variant="outline"
-                          disabled={!canLog}
-                          aria-keyshortcuts="1"
-                          onClick={() => void log("completed")}
-                        >
-                          <Check className="h-3.5 w-3.5" aria-hidden />
-                          {uiText("Successful")}
-                        </Button>
-                        <Button
-                          ref={failedButton}
-                          size="xs"
-                          variant="outline"
-                          disabled={!canLog}
-                          aria-keyshortcuts="2"
-                          onClick={beginFailure}
-                        >
-                          <X className="h-3.5 w-3.5" aria-hidden />
-                          {uiText("Failed")}
-                        </Button>
-                      </div>
-                    )}
-                    {failing && (
-                      <div
-                        className="library-inspector-failure"
-                        role="group"
-                        aria-label={uiText("Log a failed print")}
-                      >
-                        <p>{uiText("Log failed print")}</p>
-                        <label htmlFor="inspector-failure-note">
-                          {uiText("What went wrong?")}{" "}
-                          <span className="text-muted-foreground">{uiText("Optional")}</span>
-                        </label>
-                        <textarea
-                          ref={failureInput}
-                          id="inspector-failure-note"
-                          maxLength={300}
-                          rows={2}
-                          value={failNote}
-                          disabled={busy || !canEdit || !administrator}
-                          onChange={(event) => setFailNote(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (
-                              event.defaultPrevented ||
-                              event.nativeEvent.isComposing ||
-                              event.repeat ||
-                              event.altKey ||
-                              event.shiftKey ||
-                              event.getModifierState("AltGraph") ||
-                              !(event.metaKey || event.ctrlKey) ||
-                              event.key !== "Enter"
-                            )
-                              return;
-                            event.preventDefault();
-                            void log("failed");
-                          }}
-                          placeholder={uiText("e.g. Corner lifted at layer 112")}
-                        />
-                        <div className="flex items-center justify-end gap-2">
-                          <kbd className="mr-auto text-xs text-muted-foreground">
-                            {navigator.platform.includes("Mac") ? "⌘" : uiText("Ctrl")}
-                            {uiText("+Enter")}
-                          </kbd>
-                          <Button
-                            size="xs"
-                            variant="outline"
-                            disabled={busy}
-                            onClick={cancelFailure}
-                          >
-                            {uiText("Cancel")}
-                          </Button>
-                          <Button
-                            size="xs"
-                            variant="outline"
-                            loading={busy}
-                            disabled={!canLog}
-                            onClick={() => void log("failed")}
-                          >
-                            {uiText("Save failed print")}
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </section>
-                )}
-              </section>
-              <section
-                role="tabpanel"
-                id="inspector-pane-settings"
-                aria-labelledby="inspector-tab-settings"
-                hidden={tab !== "settings"}
-                className="library-inspector-settings"
-              >
-                <div className="library-inspector-view-context">
-                  <h4>{revisionName(file)}</h4>
-                  <span>{uiText("All slicer settings")}</span>
-                </div>
-                <p className="library-inspector-caption">{timeAgo(file.uploaded_at)}</p>
-                <p className="break-words font-mono text-xs">{file.original_filename}</p>
-                <dl className="library-inspector-properties divide-y divide-border">
-                  {settingFacts(file.metadata).map(([label, value, mono]) => (
-                    <div key={label}>
-                      <dt>{label}</dt>
-                      <dd className={mono ? "font-mono" : undefined}>{value}</dd>
-                    </div>
-                  ))}
-                </dl>
-                {file.metadata?.slicer_name && (
-                  <p className="library-inspector-caption">
-                    {file.metadata.slicer_name} {file.metadata.slicer_version}
-                  </p>
-                )}
-              </section>
-            </>
+      {file && (
+        <section aria-label={uiText("Print this revision")} className="library-inspector-workspace">
+          {file.is_recommended && (
+            <h3 className="library-inspector-eyebrow">{uiText("Recommended print")}</h3>
           )}
-        </section>
-      ) : (
-        <section className="library-inspector-section">
-          <header className="library-inspector-section-heading">
-            <h3>
-              {uiText("G-code revisions")} <span>{revisions.length}</span>
-            </h3>
-            <Button
-              className={sectionAction}
-              size="xs"
-              variant="ghost"
-              disabled={!canEdit}
-              onClick={() => setAddOpen(true)}
-            >
-              {uiText("Add revision")}
-            </Button>
-          </header>
-          <p className="text-muted-foreground">{uiText("No G-code revisions yet")}</p>
+          <div className="library-inspector-print-summary">
+            <div className="library-inspector-revision">
+              {revisions.length > 1 ? (
+                <select
+                  value={file.id}
+                  aria-label={uiText("Choose G-code revision")}
+                  title={revisionName(file)}
+                  onChange={(event) => setSelectedId(Number(event.target.value))}
+                >
+                  {revisions.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {revisionName(item)}
+                      {item.is_recommended ? ` · ★ ${uiText("Recommended")}` : ""}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <h4>{revisionName(file)}</h4>
+              )}
+              {!file.is_recommended && canEdit && (
+                <Button
+                  className={sectionAction}
+                  variant="ghost"
+                  size="xs"
+                  disabled={revision.saving !== null}
+                  onClick={() => void revision.update(file, { is_recommended: true })}
+                >
+                  {uiText("Recommend")}
+                </Button>
+              )}
+            </div>
+            {printStats.length > 0 && (
+              <dl className="library-inspector-stats">
+                {printStats.map(([label, value]) => (
+                  <div key={label}>
+                    <dt>{label}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+            {file.metadata?.printer_model && (
+              <p className="library-inspector-caption wrap-anywhere">
+                {uiText("Sliced for")}{" "}
+                <span className="text-foreground">{file.metadata.printer_model}</span>
+              </p>
+            )}
+          </div>
+          <div className="library-inspector-print">
+            {printerControl}
+            {printersQuery.isError && (
+              <p className="library-inspector-caption" role="alert">
+                {userMessage(printersQuery.error)}
+              </p>
+            )}
+            {printer && !canSend && (
+              <p className="library-inspector-caption">
+                {!canEdit
+                  ? uiText("Read-only")
+                  : !administrator
+                    ? uiText("Access restricted")
+                    : uiText("Download the G-code and transfer it to your printer.")}
+              </p>
+            )}
+            <div className="library-inspector-delivery" data-library-revision-actions>
+              {canSend && (
+                <Button size="sm" onClick={() => setSendOpen(true)}>
+                  <Printer3D className="size-4 shrink-0" aria-hidden />
+                  {uiText("Send to printer")}
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant={canSend ? "ghost" : "default"}
+                onClick={() => download(file)}
+              >
+                <Download className="size-4 shrink-0" aria-hidden />
+                {uiText("Download G-code")}
+              </Button>
+            </div>
+          </div>
         </section>
       )}
       <section className="library-inspector-section">
@@ -1197,22 +796,6 @@ export function InspectorContent({
           })}
         </ul>
       </details>
-      {addOpen && canEdit && (
-        <AddGcodeRevisionModal
-          modelId={model.id}
-          modelName={model.name}
-          currentRecommendedRevision={
-            revisions.find((item) => item.is_recommended)?.gcode_revision_number ?? undefined
-          }
-          onClose={() => setAddOpen(false)}
-          onUploaded={(saved) => {
-            if (session !== getSessionVersion()) return;
-            void publish(saved).then((accepted) => {
-              if (accepted && alive.current) setAddOpen(false);
-            });
-          }}
-        />
-      )}
       {sendOpen && canEdit && administrator && (
         <div className="hidden">
           <SendToButtons
@@ -1298,59 +881,4 @@ function revisionStats(meta: MetadataRead | null): [string, string][] {
     [uiText("Material"), meta?.material_type ?? null],
   ];
   return stats.filter((entry): entry is [string, string] => entry[1] !== null);
-}
-function settingFacts(meta: MetadataRead | null): [string, string, boolean?][] {
-  return [
-    [
-      uiText("Time"),
-      meta?.estimated_time_s != null
-        ? formatDuration(meta.estimated_time_s)
-        : uiText("Not recorded"),
-      true,
-    ],
-    [
-      uiText("Filament"),
-      meta?.filament_weight_g != null
-        ? formatGrams(meta.filament_weight_g)
-        : uiText("Not recorded"),
-      true,
-    ],
-    [
-      uiText("Layer height"),
-      meta?.layer_height_mm != null
-        ? `${formatNumber(meta.layer_height_mm)} mm`
-        : uiText("Not recorded"),
-      true,
-    ],
-    [uiText("Material"), meta?.material_type ?? uiText("Not recorded")],
-    [
-      uiText("Nozzle"),
-      meta?.nozzle_diameter_mm != null
-        ? `${formatNumber(meta.nozzle_diameter_mm)} mm`
-        : uiText("Not recorded"),
-      true,
-    ],
-    [
-      uiText("Infill"),
-      meta?.infill_percent != null
-        ? `${formatNumber(meta.infill_percent)}%`
-        : uiText("Not recorded"),
-      true,
-    ],
-    [
-      uiText("Nozzle temperature"),
-      meta?.nozzle_temperature_c != null
-        ? `${formatNumber(meta.nozzle_temperature_c)} °C`
-        : uiText("Not recorded"),
-      true,
-    ],
-    [
-      uiText("Bed temperature"),
-      meta?.bed_temperature_c != null
-        ? `${formatNumber(meta.bed_temperature_c)} °C`
-        : uiText("Not recorded"),
-      true,
-    ],
-    [uiText("Printer profile"), meta?.printer_model ?? uiText("Not recorded")],
-  ];
 }

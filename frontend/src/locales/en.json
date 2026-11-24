@@ -1383,6 +1383,7 @@
   "Klipper config": "Klipper config",
   "Layer": "Layer",
   "Weight": "Weight",
+  "Recommended print": "Recommended print",
   "Leave blank to keep current value": "Leave blank to keep current value",
   "Leave empty for AWS S3": "Leave empty for AWS S3",
   "Linked": "Linked",

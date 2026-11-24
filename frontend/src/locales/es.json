@@ -1383,6 +1383,7 @@
   "Klipper config": "Configuración de Klipper",
   "Layer": "Capa",
   "Weight": "Peso",
+  "Recommended print": "Impresión recomendada",
   "Leave blank to keep current value": "Déjalo vacío para conservar el valor actual",
   "Leave empty for AWS S3": "Déjalo vacío para AWS S3",
   "Linked": "Vinculado",
