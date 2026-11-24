@@ -323,6 +323,73 @@
         "title": "ArchiveSelectRequest",
         "type": "object"
       },
+      "ArtifactCostingRead": {
+        "properties": {
+          "costs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PieceCosts"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
+          "edit_version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Edit Version",
+            "type": "integer"
+          },
+          "estimate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductionEstimate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "edit_epoch",
+          "edit_version",
+          "currency",
+          "estimate",
+          "costs"
+        ],
+        "title": "ArtifactCostingRead",
+        "type": "object"
+      },
+      "ArtifactCostingUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "estimate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductionInputs"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "estimate"
+        ],
+        "title": "ArtifactCostingUpdate",
+        "type": "object"
+      },
       "ArtifactOutcomeRead": {
         "properties": {
           "average_duration_s": {
@@ -5681,6 +5748,68 @@
           "message"
         ],
         "title": "ConsoleEntry",
+        "type": "object"
+      },
+      "CostedMaterial": {
+        "additionalProperties": false,
+        "properties": {
+          "cost_per_kg": {
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Cost Per Kg",
+            "type": "number"
+          },
+          "grams": {
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Grams",
+            "type": "number"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "spool_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spool Id"
+          }
+        },
+        "required": [
+          "name",
+          "grams",
+          "cost_per_kg"
+        ],
+        "title": "CostedMaterial",
+        "type": "object"
+      },
+      "CostedPrinter": {
+        "additionalProperties": false,
+        "properties": {
+          "expenses": {
+            "$ref": "#/components/schemas/PrinterExpenses"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "expenses"
+        ],
+        "title": "CostedPrinter",
         "type": "object"
       },
       "CultsConnectRequest": {
@@ -16349,6 +16478,59 @@
         "title": "ParsedSearch",
         "type": "object"
       },
+      "PieceCosts": {
+        "properties": {
+          "amortization": {
+            "title": "Amortization",
+            "type": "number"
+          },
+          "electricity": {
+            "title": "Electricity",
+            "type": "number"
+          },
+          "extra": {
+            "title": "Extra",
+            "type": "number"
+          },
+          "final_price": {
+            "title": "Final Price",
+            "type": "number"
+          },
+          "maintenance": {
+            "title": "Maintenance",
+            "type": "number"
+          },
+          "material": {
+            "title": "Material",
+            "type": "number"
+          },
+          "price_before_tax": {
+            "title": "Price Before Tax",
+            "type": "number"
+          },
+          "production": {
+            "title": "Production",
+            "type": "number"
+          },
+          "tax": {
+            "title": "Tax",
+            "type": "number"
+          }
+        },
+        "required": [
+          "material",
+          "amortization",
+          "maintenance",
+          "electricity",
+          "extra",
+          "production",
+          "price_before_tax",
+          "tax",
+          "final_price"
+        ],
+        "title": "PieceCosts",
+        "type": "object"
+      },
       "PlanRequest": {
         "properties": {
           "plan_digest": {
@@ -16596,6 +16778,94 @@
         ],
         "title": "PreviewState",
         "type": "string"
+      },
+      "PricingRates": {
+        "additionalProperties": false,
+        "properties": {
+          "margin_percent": {
+            "maximum": 99.99,
+            "minimum": 0.0,
+            "title": "Margin Percent",
+            "type": "number"
+          },
+          "tax_percent": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Tax Percent",
+            "type": "number"
+          }
+        },
+        "required": [
+          "margin_percent",
+          "tax_percent"
+        ],
+        "title": "PricingRates",
+        "type": "object"
+      },
+      "PricingTemplateCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "margin_percent": {
+            "maximum": 99.99,
+            "minimum": 0.0,
+            "title": "Margin Percent",
+            "type": "number"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "tax_percent": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Tax Percent",
+            "type": "number"
+          }
+        },
+        "required": [
+          "margin_percent",
+          "tax_percent",
+          "name"
+        ],
+        "title": "PricingTemplateCreate",
+        "type": "object"
+      },
+      "PricingTemplateRead": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "margin_percent": {
+            "maximum": 99.99,
+            "minimum": 0.0,
+            "title": "Margin Percent",
+            "type": "number"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "tax_percent": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Tax Percent",
+            "type": "number"
+          }
+        },
+        "required": [
+          "margin_percent",
+          "tax_percent",
+          "name",
+          "id"
+        ],
+        "title": "PricingTemplateRead",
+        "type": "object"
       },
       "PrintArtifactFormat": {
         "description": "Stored print formats a provider can accept without conversion.",
@@ -18051,6 +18321,57 @@
         "title": "PrinterCreate",
         "type": "object"
       },
+      "PrinterExpenses": {
+        "additionalProperties": false,
+        "properties": {
+          "acquisition_cost": {
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Acquisition Cost",
+            "type": "number"
+          },
+          "electricity_per_kwh": {
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Electricity Per Kwh",
+            "type": "number"
+          },
+          "extra_per_hour": {
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Extra Per Hour",
+            "type": "number"
+          },
+          "lifetime_hours": {
+            "maximum": 1000000.0,
+            "minimum": 1.0,
+            "title": "Lifetime Hours",
+            "type": "number"
+          },
+          "lifetime_maintenance": {
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Lifetime Maintenance",
+            "type": "number"
+          },
+          "power_watts": {
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Power Watts",
+            "type": "number"
+          }
+        },
+        "required": [
+          "acquisition_cost",
+          "lifetime_hours",
+          "lifetime_maintenance",
+          "power_watts",
+          "electricity_per_kwh",
+          "extra_per_hour"
+        ],
+        "title": "PrinterExpenses",
+        "type": "object"
+      },
       "PrinterFileRead": {
         "properties": {
           "created_at": {
@@ -18340,6 +18661,16 @@
       "PrinterProfileCreate": {
         "additionalProperties": false,
         "properties": {
+          "expenses": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrinterExpenses"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "name": {
             "maxLength": 128,
             "minLength": 1,
@@ -18417,6 +18748,16 @@
             "exclusiveMinimum": 0.0,
             "title": "Edit Version",
             "type": "integer"
+          },
+          "expenses": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrinterExpenses"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "id": {
             "title": "Id",
@@ -18501,6 +18842,16 @@
       "PrinterProfileUpdate": {
         "additionalProperties": false,
         "properties": {
+          "expenses": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrinterExpenses"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "name": {
             "anyOf": [
               {
@@ -19320,6 +19671,109 @@
         ],
         "title": "ProcessRole",
         "type": "string"
+      },
+      "ProductionEstimate": {
+        "additionalProperties": false,
+        "properties": {
+          "currency": {
+            "maxLength": 3,
+            "minLength": 3,
+            "title": "Currency",
+            "type": "string"
+          },
+          "materials": {
+            "items": {
+              "$ref": "#/components/schemas/CostedMaterial"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Materials",
+            "type": "array"
+          },
+          "pieces": {
+            "maximum": 100000.0,
+            "minimum": 1.0,
+            "title": "Pieces",
+            "type": "integer"
+          },
+          "pricing": {
+            "$ref": "#/components/schemas/PricingRates"
+          },
+          "print_minutes": {
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Print Minutes",
+            "type": "number"
+          },
+          "printer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CostedPrinter"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "pieces",
+          "print_minutes",
+          "materials",
+          "printer",
+          "pricing",
+          "currency"
+        ],
+        "title": "ProductionEstimate",
+        "type": "object"
+      },
+      "ProductionInputs": {
+        "additionalProperties": false,
+        "properties": {
+          "materials": {
+            "items": {
+              "$ref": "#/components/schemas/CostedMaterial"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Materials",
+            "type": "array"
+          },
+          "pieces": {
+            "maximum": 100000.0,
+            "minimum": 1.0,
+            "title": "Pieces",
+            "type": "integer"
+          },
+          "pricing": {
+            "$ref": "#/components/schemas/PricingRates"
+          },
+          "print_minutes": {
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Print Minutes",
+            "type": "number"
+          },
+          "printer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CostedPrinter"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "pieces",
+          "print_minutes",
+          "materials",
+          "printer",
+          "pricing"
+        ],
+        "title": "ProductionInputs",
+        "type": "object"
       },
       "ProfileSettingsKind": {
         "enum": [
@@ -22413,6 +22867,17 @@
               }
             ],
             "title": "Color Hex"
+          },
+          "cost_per_kg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Per Kg"
           },
           "filament_id": {
             "anyOf": [
@@ -32312,6 +32777,144 @@
           }
         ],
         "summary": "The preview a slicer saved for one plate of a 3MF",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/v1/files/{file_id}/production-cost": {
+      "get": {
+        "operationId": "get_production_cost_api_v1_files__file_id__production_cost_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactCostingRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read a per-piece production estimate",
+        "tags": [
+          "files"
+        ]
+      },
+      "put": {
+        "operationId": "put_production_cost_api_v1_files__file_id__production_cost_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactCostingUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactCostingRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Save a per-piece production estimate",
         "tags": [
           "files"
         ]
@@ -45389,6 +45992,155 @@
         "summary": "Search",
         "tags": [
           "outliner"
+        ]
+      }
+    },
+    "/api/v1/pricing-templates": {
+      "get": {
+        "operationId": "list_templates_api_v1_pricing_templates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 51,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PricingTemplateRead"
+                  },
+                  "title": "Response List Templates Api V1 Pricing Templates Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List Templates",
+        "tags": [
+          "pricing-templates"
+        ]
+      },
+      "post": {
+        "operationId": "create_template_api_v1_pricing_templates_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricingTemplateCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingTemplateRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Create Template",
+        "tags": [
+          "pricing-templates"
+        ]
+      }
+    },
+    "/api/v1/pricing-templates/{template_id}": {
+      "delete": {
+        "operationId": "delete_template_api_v1_pricing_templates__template_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "title": "Template Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Delete Template",
+        "tags": [
+          "pricing-templates"
         ]
       }
     },

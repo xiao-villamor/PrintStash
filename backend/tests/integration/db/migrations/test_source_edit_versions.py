@@ -8,7 +8,7 @@ from sqlmodel import Session, create_engine
 
 from alembic import command
 from app.db.migrate import _alembic_config, run_migrations
-from app.db.models import ExternalLibrary, File
+from app.db.models import ExternalLibrary
 from app.db.url import normalize_database_url
 from tests.containers import fresh_postgres_database
 from tests.factories import build_external_library, build_file, build_model
@@ -76,9 +76,10 @@ class TestSourceEditMigration:
                 assert row.scan_schedule == original_secrets
                 assert row.enabled is False
                 assert row.edit_version == 1
-                child = session.get(File, 1)
-                assert child is not None
-                assert child.external_library_id == row.id
+                source_id = session.execute(
+                    text("SELECT external_library_id FROM files WHERE id=1")
+                ).scalar_one()
+                assert source_id == row.id
         finally:
             engine.dispose()
 

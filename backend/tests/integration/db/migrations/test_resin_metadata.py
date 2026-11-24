@@ -59,9 +59,13 @@ class TestResinMetadataMigration:
                     text("UPDATE files SET file_type='RESIN' WHERE id=:id"),
                     {"id": file_id},
                 )
-            with Session(engine) as session:
-                from app.db.models import File, FileType
-
-                assert session.get(File, file_id).file_type is FileType.RESIN
+            with engine.connect() as connection:
+                assert (
+                    connection.execute(
+                        text("SELECT file_type FROM files WHERE id=:id"),
+                        {"id": file_id},
+                    ).scalar_one()
+                    == "RESIN"
+                )
         finally:
             engine.dispose()
