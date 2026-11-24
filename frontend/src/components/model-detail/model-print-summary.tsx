@@ -258,8 +258,13 @@ export function ModelPrintSummary({
         {untested &&
           onMarkKnownGood &&
           jobs?.some((job) => job.file_id === revision.id && job.state === "completed") && (
-            <div className="border-t border-border px-4 py-3">
-              <Button size="sm" variant="outline" onClick={onMarkKnownGood}>
+            <div className="flex items-center gap-3 border-t border-border px-3.5 py-2.5 text-sm">
+              <span className="text-muted-foreground">
+                {uiText("Successful print recorded. Is Rev {value1} ready to reuse?", {
+                  value1: String(revision.gcode_revision_number ?? revision.version),
+                })}
+              </span>
+              <Button size="sm" variant="outline" className="ms-auto" onClick={onMarkKnownGood}>
                 {uiText("Mark known good")}
               </Button>
             </div>

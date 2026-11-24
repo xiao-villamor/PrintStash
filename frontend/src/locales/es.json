@@ -6065,5 +6065,11 @@
   },
   "No attachments yet. Add assembly guides, photos of finished prints or videos.": "Aún no hay adjuntos. Añade guías de montaje, fotos de impresiones terminadas o vídeos.",
   "Minutes": "Minutos",
-  "Grams": "Gramos"
+  "Grams": "Gramos",
+  "No print history yet.": "Aún no hay historial de impresión.",
+  "Record a result after each print, or import past jobs from a connected printer.": "Registra un resultado tras cada impresión o importa trabajos anteriores desde una impresora conectada.",
+  "Choose the observed outcome.": "Elige el resultado observado.",
+  "Choose the printer that ran it.": "Elige la impresora que la ejecutó.",
+  "Saved with the record and shown in Activity.": "Se guarda con el registro y aparece en Actividad.",
+  "Successful print recorded. Is Rev {value1} ready to reuse?": "Impresión correcta registrada. ¿La rev. {value1} está lista para reutilizar?"
 }

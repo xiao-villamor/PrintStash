@@ -6065,5 +6065,11 @@
   },
   "No attachments yet. Add assembly guides, photos of finished prints or videos.": "No attachments yet. Add assembly guides, photos of finished prints or videos.",
   "Minutes": "Minutes",
-  "Grams": "Grams"
+  "Grams": "Grams",
+  "No print history yet.": "No print history yet.",
+  "Record a result after each print, or import past jobs from a connected printer.": "Record a result after each print, or import past jobs from a connected printer.",
+  "Choose the observed outcome.": "Choose the observed outcome.",
+  "Choose the printer that ran it.": "Choose the printer that ran it.",
+  "Saved with the record and shown in Activity.": "Saved with the record and shown in Activity.",
+  "Successful print recorded. Is Rev {value1} ready to reuse?": "Successful print recorded. Is Rev {value1} ready to reuse?"
 }

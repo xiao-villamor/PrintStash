@@ -1586,7 +1586,7 @@ function ModelDetailPresentation({
               <div className="mx-5 flex flex-wrap items-center justify-between gap-2 border-b border-border py-2">
                 <nav
                   aria-label={uiText("modelDetail.printSections")}
-                  className="flex flex-wrap gap-1 rounded-md border border-border bg-muted p-1"
+                  className="inline-flex flex-wrap gap-0.5 rounded-lg border border-border bg-card p-0.75"
                 >
                   {PRINT_DETAIL_SECTIONS.map((section) => (
                     <Button
@@ -1596,7 +1596,9 @@ function ModelDetailPresentation({
                       size="sm"
                       aria-current={section === activeTab ? "page" : undefined}
                       className={
-                        section === activeTab ? "bg-accent text-accent-foreground" : undefined
+                        section === activeTab
+                          ? "h-7.5 bg-foreground/12 px-2.5 text-foreground"
+                          : "h-7.5 px-2.5 text-muted-foreground"
                       }
                       onClick={() => {
                         setCompareOrigin(null);

@@ -158,12 +158,16 @@ describe("PrintHistorySection", () => {
       renderHistory();
 
       expect(await screen.findAllByText(/Voron/)).not.toHaveLength(0);
+      expect(screen.getByRole("heading", { name: /Print history · 1/ })).toBeVisible();
+      expect(screen.getByText("Success")).toBeVisible();
     });
 
     it("says so when nothing has been printed", async () => {
       renderHistory({ jobs: [] });
 
-      await waitFor(() => expect(screen.queryByText(/3600/)).toBeNull());
+      expect(await screen.findByText("No print history yet.")).toBeVisible();
+      expect(screen.getByText(/Record a result after each print/)).toBeVisible();
+      expect(screen.getByRole("heading", { name: /Print history · 0/ })).toBeVisible();
     });
   });
 
@@ -193,6 +197,7 @@ describe("PrintHistorySection", () => {
         routes: { "POST /api/v1/models/1/print-jobs": json(aPrintJob({ id: 31 })) },
       });
       await openForm(user);
+      await user.click(screen.getByRole("radio", { name: "Success" }));
       await chooseVoron(user);
 
       await user.click(screen.getByRole("button", { name: "Save record" }));
@@ -204,6 +209,45 @@ describe("PrintHistorySection", () => {
       );
     });
 
+    it("names the next missing field and keeps Save record disabled until it is met", async () => {
+      const user = userEvent.setup();
+      renderHistory();
+      await openForm(user);
+      const save = screen.getByRole("button", { name: "Save record" });
+
+      expect(save).toBeDisabled();
+      expect(screen.getByText("Choose the observed outcome.")).toBeVisible();
+      expect(save).toHaveAccessibleDescription("Choose the observed outcome.");
+
+      await user.click(screen.getByRole("radio", { name: "Failed" }));
+      expect(screen.getByText("Choose the printer that ran it.")).toBeVisible();
+      expect(save).toBeDisabled();
+
+      await chooseVoron(user);
+      expect(save).toBeEnabled();
+      expect(screen.queryByText("Choose the printer that ran it.")).toBeNull();
+    });
+
+    it("sends the outcome, revision and failure note the user chose", async () => {
+      const user = userEvent.setup();
+      const view = renderHistory({
+        routes: { "POST /api/v1/models/1/print-jobs": json(aPrintJob({ id: 31 })) },
+      });
+      await openForm(user);
+      await user.click(screen.getByRole("radio", { name: "Cancelled" }));
+      await chooseVoron(user);
+      await user.type(screen.getByRole("textbox", { name: "What went wrong" }), "Out of filament");
+      await user.click(screen.getByRole("button", { name: "Save record" }));
+
+      await waitFor(() => expect(view.requestsWithMethod("POST")).toHaveLength(1));
+      expect(JSON.parse(view.requestsWithMethod("POST")[0].body ?? "{}")).toMatchObject({
+        printer_id: 4,
+        file_id: 20,
+        state: "cancelled",
+        error: "Out of filament",
+      });
+    });
+
     it("tells the page about the print it recorded", async () => {
       // The list above is the caller's state, so a job the section keeps to
       // itself is one the user cannot see until a reload.
@@ -212,6 +256,7 @@ describe("PrintHistorySection", () => {
         routes: { "POST /api/v1/models/1/print-jobs": json(aPrintJob({ id: 31 })) },
       });
       await openForm(user);
+      await user.click(screen.getByRole("radio", { name: "Success" }));
       await chooseVoron(user);
 
       await user.click(screen.getByRole("button", { name: "Save record" }));
