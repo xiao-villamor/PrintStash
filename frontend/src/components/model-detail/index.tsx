@@ -1289,12 +1289,12 @@ function ModelDetailPresentation({
                   {canEditModel && auth.isAuthenticated && !editing && (
                     <Button
                       variant="outline"
-                      size="icon-sm"
+                      size="icon"
                       aria-label={uiText("Edit details")}
                       title={uiText("Edit details")}
                       onClick={() => enterEdit()}
                     >
-                      <Pencil className="h-5 w-5" aria-hidden />
+                      <Pencil className="h-6 w-6 text-foreground" aria-hidden />
                     </Button>
                   )}
                   <Button
