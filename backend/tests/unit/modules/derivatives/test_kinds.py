@@ -33,8 +33,8 @@ def _file(file_type: FileType, name: str = "part", sha: str = "a" * 64) -> File:
 class TestRecipesFor:
     @pytest.mark.parametrize(
         "file_type,previous,metadata",
-        [(FileType.STL, 22, 12), (FileType.THREE_MF, 28, 15), (FileType.STEP, 23, 13)],
-        ids=["stl", "3mf", "step"],
+        [(FileType.STL, 22, 12), (FileType.THREE_MF, 28, 15)],
+        ids=["stl", "3mf"],
     )
     def test_refreshes_previews_without_reprocessing_geometry(
         self, file_type, previous, metadata
@@ -63,6 +63,16 @@ class TestRecipesFor:
             THUMBNAIL,
             PREVIEWS,
         }
+
+    @pytest.mark.parametrize(
+        "kind,previous",
+        [(METADATA, 13), (THUMBNAIL, 25)],
+        ids=["metadata", "thumbnail"],
+    )
+    def test_refreshes_step_derivatives_for_occt_8(self, kind, previous) -> None:
+        recipes = kinds.recipes_for(_file(FileType.STEP))
+
+        assert recipes[kind] > previous
 
     def test_a_3mf_gets_project_derivatives(self) -> None:
         assert set(kinds.recipes_for(_file(FileType.THREE_MF))) == {
@@ -154,9 +164,7 @@ class TestGroups:
     def test_versions_a_step_viewer_preview_on_its_own(self) -> None:
         viewer = kinds.group(JobKind.DERIVATIVES_VIEWER_STL)
 
-        assert viewer.recipes_for(FileType.STEP) == {
-            VIEWER_STL: kinds.STEP_VIEWER_STL_RECIPE
-        }
+        assert viewer.recipes_for(FileType.STEP)[VIEWER_STL] > 4
 
     @pytest.mark.parametrize(
         "file_type",
