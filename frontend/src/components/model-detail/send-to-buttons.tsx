@@ -12,7 +12,7 @@ import { useUiLocale } from "@/lib/i18n";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "@/lib/link";
-import { ExternalLink, Info, Loader2, Send, WifiOff } from "lucide-react";
+import { ExternalLink, Info, Loader2, Minus, Plus, Send, WifiOff, X } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 
 import {
@@ -190,6 +190,16 @@ export function SendToButtons({
   const estimate = sliced
     ? platesQuery.data?.plate_metadata?.find((plate) => plate.number === plateIndex)?.metadata
     : selectedFileDetails?.metadata;
+  const plateFacts = [
+    estimate?.estimated_time_s == null
+      ? null
+      : formatPlateEstimate("estimated_time_s", estimate.estimated_time_s),
+    estimate?.filament_weight_g == null
+      ? null
+      : formatPlateEstimate("filament_weight_g", estimate.filament_weight_g),
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const [priority, setPriority] = useState<JobPriority>("normal");
   const [queueAllowMismatch, setQueueAllowMismatch] = useState(false);
   const [targetGroup, setTargetGroup] = useState("");
@@ -571,6 +581,27 @@ export function SendToButtons({
         : routingStrategy === "default"
           ? uiText("Default printer")
           : uiText("Least busy");
+  const readyRevision = selectedFileDetails
+    ? uiText("Rev {value1}", {
+        value1: String(selectedFileDetails.gcode_revision_number ?? selectedFileDetails.version),
+      })
+    : null;
+  const readySummary =
+    blockedReason === null && readyRevision
+      ? [
+          readyRevision,
+          sliced && plateIndex !== null
+            ? uiText("Plate {value1}", { value1: String(plateIndex).padStart(2, "0") })
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") +
+        ` → ${
+          deliveryMode === "queue"
+            ? String(queueDestination)
+            : selectedPrinters.map((printer) => printer.name).join(", ")
+        }`
+      : null;
 
   return (
     <Localized>
@@ -795,6 +826,9 @@ export function SendToButtons({
           footer={
             queuing ? (
               <>
+{blockedReason === null && readySummary && (
+                  <p className="me-auto text-sm text-muted-foreground">{readySummary}</p>
+                )}
                 {blockedReason && (
                   <p
                     id={blockedReasonId}
@@ -813,6 +847,9 @@ export function SendToButtons({
               </>
             ) : (
               <>
+{blockedReason === null && readySummary && (
+                  <p className="me-auto text-sm text-muted-foreground">{readySummary}</p>
+                )}
                 {blockedReason && (
                   <p
                     id={blockedReasonId}
@@ -850,8 +887,12 @@ export function SendToButtons({
           bodyClassName="queue-compose-body flex-1 p-0"
         >
           <div data-testid="send-dialog-scroll-region" className="flex min-h-full min-w-0 flex-col">
-            <div className={queuing ? "queue-compose flex-1" : "flex-1 p-6"}>
-              <div className={queuing ? "queue-compose-fields" : "detail-delivery-layout"}>
+            <div className={queuing && !preparingModel ? "queue-compose flex-1" : "flex-1 p-6"}>
+              <div
+                className={
+                  queuing && !preparingModel ? "queue-compose-fields" : "detail-delivery-layout"
+                }
+              >
                 <div className="min-w-0 space-y-5">
                   <h3 className="prepare-group-heading">{uiText("What to print")}</h3>
                   <div className="space-y-4">
@@ -885,10 +926,7 @@ export function SendToButtons({
                       />
                     </QueueRevisionPanel>
                     {preparingModel && !sliced && (
-                      <div className="space-y-1 text-sm">
-                        <p className="font-medium">{uiText("Sliced plate")}</p>
-                        <p>{uiText("Single plate")}</p>
-                      </div>
+                      <SinglePlate label={uiText("Single plate")} facts={plateFacts} />
                     )}
                     {sliced && (
                       <div className="space-y-2">
@@ -908,14 +946,12 @@ export function SendToButtons({
                             )}
                           </p>
                         ) : preparingModel && plates.length === 1 ? (
-                          <div className="space-y-1 text-sm">
-                            <p className="font-medium">{uiText("Sliced plate")}</p>
-                            <p>
-                              {uiText("Plate {value1}", {
-                                value1: String(plates[0]).padStart(2, "0"),
-                              })}
-                            </p>
-                          </div>
+                          <SinglePlate
+                            label={uiText("Plate {value1}", {
+                              value1: String(plates[0]).padStart(2, "0"),
+                            })}
+                            facts={plateFacts}
+                          />
                         ) : (
                           <ChoiceField
                             label={uiText("Sliced plate")}
@@ -999,7 +1035,9 @@ export function SendToButtons({
                   )}
                 </div>
                 <div className="min-w-0 space-y-5">
-                  <h3 className="prepare-group-heading">{uiText("Where it goes")}</h3>
+                  <h3 className="prepare-group-heading">
+                    {uiText(deliveryMode === "queue" ? "Where to queue" : "Where to send")}
+                  </h3>
                   {deliveryMode === "queue" && (
                     <div className="grid gap-4">
                       {preparingModel && user?.is_superuser && (
@@ -1033,16 +1071,41 @@ export function SendToButtons({
                           >
                             {uiText("Copies")}
                           </label>
-                          <Input
-                            id={`${copiesErrorId}-input`}
-                            type="number"
-                            min={1}
-                            step={1}
-                            value={copies}
-                            aria-invalid={!validQuantity}
-                            aria-describedby={!validQuantity ? copiesErrorId : undefined}
-                            onChange={(event) => setCopies(event.target.value)}
-                          />
+                          <div className="flex items-center gap-1">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon-sm"
+                              aria-label={uiText("Fewer copies")}
+                              disabled={sending || !(Number(copies) > 1)}
+                              onClick={() =>
+                                setCopies(String(Math.max(1, Math.floor(Number(copies)) - 1)))
+                              }
+                            >
+                              <Minus className="size-4" aria-hidden />
+                            </Button>
+                            <Input
+                              id={`${copiesErrorId}-input`}
+                              type="number"
+                              min={1}
+                              step={1}
+                              value={copies}
+                              className="w-16 text-center"
+                              aria-invalid={!validQuantity}
+                              aria-describedby={!validQuantity ? copiesErrorId : undefined}
+                              onChange={(event) => setCopies(event.target.value)}
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon-sm"
+                              aria-label={uiText("More copies")}
+                              disabled={sending || !validQuantity}
+                              onClick={() => setCopies(String(Math.floor(Number(copies)) + 1))}
+                            >
+                              <Plus className="size-4" aria-hidden />
+                            </Button>
+                          </div>
                           {!validQuantity && (
                             <span id={copiesErrorId} className="block text-xs text-destructive">
                               {uiText("Enter a whole number of copies, at least 1.")}
@@ -1140,26 +1203,40 @@ export function SendToButtons({
                         })}
                       />
                       {selectedPrinters.length > 0 && (
-                        <ul className="max-h-32 divide-y divide-border overflow-y-auto">
+                        <ul className="space-y-2">
                           {selectedPrinters.map((printer) => (
                             <li
                               key={printer.id}
-                              className="flex min-w-0 items-center justify-between gap-2 py-2 text-sm"
+                              className="flex min-w-0 items-center gap-3 rounded-md border border-border px-3 py-2"
                             >
-                              <span className="min-w-0 wrap-anywhere">{printer.name}</span>
+                              <span
+                                aria-hidden
+                                className={`size-2 shrink-0 rounded-full ${printer.status === "idle" || printer.status === "ready" ? "bg-success" : "bg-muted-foreground"}`}
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className="block wrap-anywhere text-sm font-medium">
+                                  {printer.name}
+                                </span>
+                                <span className="block text-xs text-muted-foreground">
+                                  {[providerLabel(printer), knownUiText(printer.status)]
+                                    .filter(Boolean)
+                                    .join(" · ")}
+                                </span>
+                              </span>
                               {preparingModel ? (
                                 <Button
-                                  size="xs"
+                                  size="icon-sm"
                                   variant="ghost"
                                   disabled={sending}
                                   aria-label={uiText("Remove {value1}", { value1: printer.name })}
+                                  title={uiText("Remove")}
                                   onClick={() =>
                                     setSelectedPrinterIds((ids) =>
                                       ids.filter((id) => id !== printer.id),
                                     )
                                   }
                                 >
-                                  {uiText("Remove")}
+                                  <X className="size-4" aria-hidden />
                                 </Button>
                               ) : (
                                 <Link
@@ -1241,7 +1318,7 @@ export function SendToButtons({
                   )}
                 </div>
               </div>
-              {queuing && (
+              {queuing && !preparingModel && (
                 <QueueDispatchDetails
                   model={selectedFileDetails ? fileContext : undefined}
                   revision={selectedFileDetails ? revisionLabel(selectedFileDetails) : undefined}
@@ -1296,5 +1373,18 @@ export function SendToButtons({
         </Modal>
       </>
     </Localized>
+  );
+}
+
+/** The one plate a file has, shown as the same card a plate choice would use. */
+function SinglePlate({ label, facts }: { label: string; facts: string }) {
+  return (
+    <fieldset className="detail-choice-field">
+      <legend>{uiText("Sliced plate")}</legend>
+      <div className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5 text-sm">
+        <span className="min-w-0 font-medium wrap-anywhere">{label}</span>
+        {facts && <span className="shrink-0 text-xs text-muted-foreground">{facts}</span>}
+      </div>
+    </fieldset>
   );
 }

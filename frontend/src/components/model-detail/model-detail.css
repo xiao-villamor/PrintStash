@@ -587,3 +587,23 @@
     margin: 0;
   }
 }
+
+/* Prepare print: choices are bordered cards and the two columns share a divider. */
+.detail-visible-choices:not(.is-inline) {
+  display: grid;
+  gap: 8px;
+}
+.detail-visible-choices > label {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+.detail-visible-choices > label:has(input:checked) {
+  border-color: var(--ring);
+}
+@media (min-width: 900px) {
+  .detail-delivery-layout > :nth-child(2) {
+    padding-left: 32px;
+    border-left: 1px solid var(--border);
+  }
+}
