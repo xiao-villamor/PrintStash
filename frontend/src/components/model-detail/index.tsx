@@ -49,7 +49,16 @@ import {
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import { useLocation } from "@tanstack/react-router";
-import { Files, FileText, Loader2, MoreHorizontal, Star, Trash2 } from "lucide-react";
+import {
+  Files,
+  FileText,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  Share2,
+  Star,
+  Trash2,
+} from "lucide-react";
 
 import type {
   STLViewerControls,
@@ -1127,6 +1136,18 @@ function ModelDetailPresentation({
                     {uiText("Model name is required.")}
                   </p>
                 )}
+                <div className="space-y-1.5">
+                  <span className="block text-sm font-medium">{uiText("Cover")}</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={saving}
+                    onClick={() => setCoverOpen(true)}
+                  >
+                    {uiText("modelCover.edit")}
+                  </Button>
+                </div>
                 <ModelMetadataFields editor={modelMetadataEditor} />
               </>
             )}
@@ -1265,19 +1286,17 @@ function ModelDetailPresentation({
                       }
                     />
                   </Button>
-                  {canEditModel && auth.isAuthenticated && (
-                    <Button variant="outline" size="sm" onClick={() => setCoverOpen(true)}>
-                      {uiText("modelCover.edit")}
+                  {canEditModel && auth.isAuthenticated && !editing && (
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      aria-label={uiText("Edit details")}
+                      title={uiText("Edit details")}
+                      onClick={() => enterEdit()}
+                    >
+                      <Pencil className="h-5 w-5" aria-hidden />
                     </Button>
                   )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!auth.isAuthenticated || !canEditModel}
-                    onClick={() => setShareOpen(true)}
-                  >
-                    {uiText("Share")}
-                  </Button>
                   <Button
                     data-menu-trigger
                     variant="outline"
@@ -1299,20 +1318,19 @@ function ModelDetailPresentation({
             </header>
           }
         >
-          {canEditModel && auth.isAuthenticated && (
-            <Button
-              role="menuitem"
-              size="sm"
-              variant="ghost"
-              className="w-full justify-start"
-              onClick={() => {
-                setActionsOpen(false);
-                enterEdit();
-              }}
-            >
-              {uiText("Edit details")}
-            </Button>
-          )}
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!auth.isAuthenticated || !canEditModel}
+            onClick={() => {
+              setActionsOpen(false);
+              setShareOpen(true);
+            }}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+          >
+            <Share2 className="size-4" aria-hidden />
+            {uiText("Share")}
+          </button>
           <ModelSearchAction modelId={model.id} onSelect={() => setActionsOpen(false)} />
           {canEditModel && (
             <button
