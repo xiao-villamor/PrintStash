@@ -16957,6 +16957,39 @@
         "title": "PrintBatchRead",
         "type": "object"
       },
+      "PrintDataCoverageRead": {
+        "properties": {
+          "known_cost": {
+            "title": "Known Cost",
+            "type": "integer"
+          },
+          "recorded_filament": {
+            "title": "Recorded Filament",
+            "type": "integer"
+          },
+          "recorded_time": {
+            "title": "Recorded Time",
+            "type": "integer"
+          },
+          "slicer_filament": {
+            "title": "Slicer Filament",
+            "type": "integer"
+          },
+          "slicer_time": {
+            "title": "Slicer Time",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "recorded_time",
+          "slicer_time",
+          "recorded_filament",
+          "slicer_filament",
+          "known_cost"
+        ],
+        "title": "PrintDataCoverageRead",
+        "type": "object"
+      },
       "PrintJobIdentityRead": {
         "description": "Identity reported by a printer; absent values stay absent.",
         "properties": {
@@ -17645,6 +17678,24 @@
         "title": "PrintJobState",
         "type": "string"
       },
+      "PrintOutcomesRead": {
+        "properties": {
+          "cancelled": {
+            "title": "Cancelled",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "failed",
+          "cancelled"
+        ],
+        "title": "PrintOutcomesRead",
+        "type": "object"
+      },
       "PrintStatisticsRead": {
         "properties": {
           "avg_filament_g": {
@@ -17666,14 +17717,34 @@
             "title": "Cost Over Time",
             "type": "array"
           },
+          "data_coverage": {
+            "$ref": "#/components/schemas/PrintDataCoverageRead"
+          },
           "end_at": {
             "format": "date-time",
             "title": "End At",
             "type": "string"
           },
+          "outcomes": {
+            "$ref": "#/components/schemas/PrintOutcomesRead"
+          },
           "period": {
             "title": "Period",
             "type": "string"
+          },
+          "printer_failures": {
+            "items": {
+              "$ref": "#/components/schemas/PrinterFailuresRead"
+            },
+            "title": "Printer Failures",
+            "type": "array"
+          },
+          "printer_filaments": {
+            "items": {
+              "$ref": "#/components/schemas/PrinterFilamentStatRead"
+            },
+            "title": "Printer Filaments",
+            "type": "array"
           },
           "start_at": {
             "anyOf": [
@@ -17754,7 +17825,11 @@
         },
         "required": [
           "period",
-          "end_at"
+          "end_at",
+          "outcomes",
+          "printer_failures",
+          "data_coverage",
+          "printer_filaments"
         ],
         "title": "PrintStatisticsRead",
         "type": "object"
@@ -18370,6 +18445,114 @@
           "extra_per_hour"
         ],
         "title": "PrinterExpenses",
+        "type": "object"
+      },
+      "PrinterFailuresRead": {
+        "properties": {
+          "completed": {
+            "title": "Completed",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "printer_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printer Id"
+          }
+        },
+        "required": [
+          "printer_id",
+          "name",
+          "failed",
+          "completed"
+        ],
+        "title": "PrinterFailuresRead",
+        "type": "object"
+      },
+      "PrinterFilamentStatRead": {
+        "properties": {
+          "material_brand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Brand"
+          },
+          "material_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Type"
+          },
+          "print_count": {
+            "title": "Print Count",
+            "type": "integer"
+          },
+          "printer_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printer Id"
+          },
+          "printer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printer Name"
+          },
+          "total_g": {
+            "title": "Total G",
+            "type": "number"
+          }
+        },
+        "required": [
+          "printer_id",
+          "printer_name",
+          "material_type",
+          "material_brand",
+          "print_count",
+          "total_g"
+        ],
+        "title": "PrinterFilamentStatRead",
         "type": "object"
       },
       "PrinterFileRead": {

@@ -232,12 +232,15 @@ function PeriodSelector({
   );
 }
 
-function filamentLabel(f: FilamentStatRead): string {
+function filamentLabel(f: Pick<FilamentStatRead, "material_type" | "material_brand">): string {
   if (f.material_type && f.material_brand) return `${f.material_brand} ${f.material_type}`;
   return f.material_type || f.material_brand || uiText("Unknown");
 }
 
-type WidgetId = "collections" | "filaments" | "models" | "printers";
+type RankingId = "collections" | "filaments" | "models" | "printers";
+const PANEL_IDS = ["outcomes", "failures", "coverage", "printer-filaments"] as const;
+type PanelId = (typeof PANEL_IDS)[number];
+type WidgetId = RankingId | PanelId;
 const WIDGETS: { id: WidgetId; label: string }[] = [
   {
     id: "models",
@@ -263,8 +266,33 @@ const WIDGETS: { id: WidgetId; label: string }[] = [
       return uiText("Top collections");
     },
   },
+  {
+    id: "outcomes",
+    get label() {
+      return uiText("Print outcomes");
+    },
+  },
+  {
+    id: "failures",
+    get label() {
+      return uiText("Failures by printer");
+    },
+  },
+  {
+    id: "coverage",
+    get label() {
+      return uiText("Print data coverage");
+    },
+  },
+  {
+    id: "printer-filaments",
+    get label() {
+      return uiText("Filament by printer");
+    },
+  },
 ];
 const ALL_WIDGET_IDS: readonly WidgetId[] = WIDGETS.map((widget) => widget.id);
+const DEFAULT_WIDGETS: readonly RankingId[] = ["models", "printers", "filaments", "collections"];
 const WIDGET_PREFERENCE_KEY = "printstash:statistics-widgets";
 
 /**
@@ -272,17 +300,17 @@ const WIDGET_PREFERENCE_KEY = "printstash:statistics-widgets";
  *
  * The stored value is whatever a previous build wrote, so it is treated as
  * untrusted: anything that is not a JSON array of ids we still ship is
- * discarded and every widget is shown, which is also the first-visit default.
+ * discarded and the default ranking panels are shown, which is also the first-visit default.
  */
 function loadVisibleWidgets(): Set<WidgetId> {
   const saved = window.localStorage.getItem(WIDGET_PREFERENCE_KEY);
-  if (saved === null) return new Set(ALL_WIDGET_IDS);
+  if (saved === null) return new Set(DEFAULT_WIDGETS);
   try {
     const parsed: unknown = JSON.parse(saved);
-    if (!Array.isArray(parsed)) return new Set(ALL_WIDGET_IDS);
+    if (!Array.isArray(parsed)) return new Set(DEFAULT_WIDGETS);
     return new Set(ALL_WIDGET_IDS.filter((id) => parsed.includes(id)));
   } catch {
-    return new Set(ALL_WIDGET_IDS);
+    return new Set(DEFAULT_WIDGETS);
   }
 }
 
@@ -294,7 +322,7 @@ function RankingCard({
   formatValue = (value) => String(value),
 }: {
   title: string;
-  data: { name: string; value: number }[];
+  data: { name: string; value: number; detail?: string }[];
   valueLabel: string;
   tone?: "blue" | "cyan" | "violet";
   formatValue?: (value: number) => string;
@@ -335,6 +363,9 @@ function RankingCard({
                 <span className="font-mono text-2xs tabular-nums text-muted-foreground">
                   {formatValue(item.value)}
                 </span>
+                {item.detail && (
+                  <span className="col-span-2 text-xs text-muted-foreground">{item.detail}</span>
+                )}
                 <div className="col-span-2 h-1.5 overflow-hidden rounded-full bg-muted">
                   <div
                     className={`h-full origin-left rounded-full ${fill}`}
@@ -392,11 +423,13 @@ function TimeSeriesCard({
       axisLine={false}
       tickMargin={10}
       tick={AXIS_TICK}
-      tickFormatter={(value) =>
-        new Intl.DateTimeFormat(currentLocale(), { month: "short", day: "numeric" }).format(
-          new Date(`${value}T00:00:00`),
-        )
-      }
+      tickFormatter={(value: string) => {
+        const monthly = value.length === 7;
+        return new Intl.DateTimeFormat(currentLocale(), {
+          month: "short",
+          ...(monthly ? { year: "numeric" } : { day: "numeric" }),
+        }).format(new Date(`${monthly ? `${value}-01` : value}T00:00:00`));
+      }}
     />
   );
   const yAxis = (
@@ -508,6 +541,131 @@ function TimeSeriesCard({
   );
 }
 
+function OutcomePanels({ stats, visible }: { stats: PrintStatisticsRead; visible: Set<WidgetId> }) {
+  const { failed, cancelled } = stats.outcomes;
+  const completed = stats.total_prints;
+  const decided = completed + failed;
+  const settled = decided + cancelled;
+  const coverage = stats.data_coverage;
+  const outcomes = [
+    { label: uiText("Completed"), count: completed, color: "bg-chart-blue" },
+    { label: uiText("Failed"), count: failed, color: "bg-chart-violet" },
+    { label: uiText("Cancelled"), count: cancelled, color: "bg-chart-cyan" },
+  ];
+  const sources = [
+    [uiText("Recorded print time"), coverage.recorded_time],
+    [uiText("Slicer time estimate"), coverage.slicer_time],
+    [uiText("Recorded filament weight"), coverage.recorded_filament],
+    [uiText("Slicer filament estimate"), coverage.slicer_filament],
+    [uiText("Known filament cost"), coverage.known_cost],
+  ] as const;
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      {visible.has("outcomes") && (
+        <Card className="min-w-0">
+          <CardHeader className="border-b p-4">
+            <CardTitle className="text-sm">{uiText("Print outcomes")}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 p-4">
+            <dl className="grid grid-cols-2 gap-3">
+              <div>
+                <dt className="text-xs text-muted-foreground">{uiText("Success rate")}</dt>
+                <dd className="text-2xl font-semibold tabular-nums">
+                  {decided > 0
+                    ? formatNumber(completed / decided, {
+                        style: "percent",
+                        maximumFractionDigits: 1,
+                      })
+                    : "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">{uiText("Finished jobs")}</dt>
+                <dd className="text-2xl font-semibold tabular-nums">{formatNumber(settled)}</dd>
+              </div>
+            </dl>
+            <div className="flex h-2 overflow-hidden bg-muted" aria-hidden="true">
+              {outcomes
+                .filter(({ count }) => count > 0)
+                .map(({ label, color, count }) => (
+                  <div key={label} className={color} style={{ flex: count }} />
+                ))}
+            </div>
+            <dl className="grid grid-cols-3 gap-2 text-xs">
+              {outcomes.map(({ label, color, count }) => (
+                <div key={label} className="min-w-0">
+                  <dt className="flex items-center gap-1.5 break-words text-muted-foreground">
+                    <span className={`size-2 shrink-0 ${color}`} aria-hidden="true" />
+                    {label}
+                  </dt>
+                  <dd className="mt-1 font-mono tabular-nums">{formatNumber(count)}</dd>
+                </div>
+              ))}
+            </dl>
+            <p className="text-xs text-muted-foreground">
+              {uiText("Success rate uses completed and failed jobs.")}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+      {visible.has("failures") && (
+        <RankingCard
+          title={uiText("Failures by printer")}
+          valueLabel={uiText("Failed jobs")}
+          tone="violet"
+          data={stats.printer_failures.map((printer) => ({
+            name: printer.name ?? uiText("Unassigned / manual"),
+            value: printer.failed,
+            detail: uiText("{count} completed", { count: formatNumber(printer.completed) }),
+          }))}
+          formatValue={formatNumber}
+        />
+      )}
+      {visible.has("coverage") && (
+        <Card className="min-w-0">
+          <CardHeader className="border-b p-4">
+            <CardTitle className="text-sm">{uiText("Print data coverage")}</CardTitle>
+          </CardHeader>
+          <CardContent className="p-4">
+            <dl className="grid gap-3 text-xs">
+              {sources.map(([label, count]) => (
+                <div key={label} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+                  <dt>{label}</dt>
+                  <dd className="font-mono tabular-nums">
+                    {uiText("{known} of {total}", {
+                      known: formatNumber(count),
+                      total: formatNumber(completed),
+                    })}
+                  </dd>
+                  <dd aria-hidden="true" className="col-span-2 h-1.5 overflow-hidden bg-muted">
+                    <span
+                      className="block h-full origin-left bg-chart-cyan rtl:origin-right"
+                      style={{ transform: `scaleX(${completed > 0 ? count / completed : 0})` }}
+                    />
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </CardContent>
+        </Card>
+      )}
+      {visible.has("printer-filaments") && (
+        <RankingCard
+          title={uiText("Filament by printer")}
+          valueLabel={uiText("Filament weight")}
+          data={stats.printer_filaments.map((row) => ({
+            name: filamentLabel(row),
+            value: row.total_g,
+            detail: row.printer_name ?? uiText("Unassigned / manual"),
+          }))}
+          formatValue={formatFilament}
+          tone="cyan"
+        />
+      )}
+    </div>
+  );
+}
+
 function StatsContent({
   stats,
   currency,
@@ -521,25 +679,32 @@ function StatsContent({
 }) {
   useUiLocale();
   const { locale, t } = useI18n();
+  const panels =
+    section === "overview" && PANEL_IDS.some((id) => visibleWidgets.has(id)) ? (
+      <OutcomePanels stats={stats} visible={visibleWidgets} />
+    ) : null;
   if (stats.total_prints === 0) {
     return (
-      <Card className="animate-panel-in">
-        <CardContent className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-          <BarChart3 className="h-8 w-8 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">
-            {translateUiText(locale, "No completed prints in this period.")}
-          </p>
-          <p className="max-w-md text-sm text-muted-foreground">
-            {translateUiText(
-              locale,
-              "Statistics use completed print jobs. Review the selected period or manage your printers.",
-            )}
-          </p>
-          <Button variant="outline" className="mt-2" asChild>
-            <Link href="/printers">{translateUiText(locale, "Manage printers")}</Link>
-          </Button>
-        </CardContent>
-      </Card>
+      <div className="space-y-4">
+        {panels}
+        <Card className="animate-panel-in">
+          <CardContent className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+            <BarChart3 className="h-8 w-8 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">
+              {translateUiText(locale, "No completed prints in this period.")}
+            </p>
+            <p className="max-w-md text-sm text-muted-foreground">
+              {translateUiText(
+                locale,
+                "Material and time totals use completed jobs. Review the selected period or manage your printers.",
+              )}
+            </p>
+            <Button variant="outline" className="mt-2" asChild>
+              <Link href="/printers">{translateUiText(locale, "Manage printers")}</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
@@ -613,7 +778,7 @@ function StatsContent({
         />
       ),
     },
-  ] satisfies { id: WidgetId; card: React.ReactNode }[];
+  ] satisfies { id: RankingId; card: React.ReactNode }[];
   const rankings = rankingCards.filter(({ id }) => visibleWidgets.has(id));
   const [previewRanking, ...remainingRankings] = rankings;
 
@@ -656,6 +821,7 @@ function StatsContent({
         </div>
       </div>
 
+      {panels}
       <div
         className={
           section === "rankings"
@@ -728,7 +894,7 @@ export default function StatisticsPage() {
               contentClassName="w-64 rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-md"
             >
               <p className="px-2 pb-2 text-xs font-semibold">
-                {translateUiText(locale, "Visible ranking charts")}
+                {uiText("Visible statistics panels")}
               </p>
               {WIDGETS.map((widget) => (
                 <label

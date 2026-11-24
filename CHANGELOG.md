@@ -6,6 +6,7 @@
 
 - Model costing saves per-piece production estimates for STL and G-code Artifacts. Use filament presets or individual Spoolman spools, enter print time or copy it from measured print history, and include printer amortization, maintenance, electricity, and other hourly costs. Apply reusable profit margin and tax templates to calculate a price.
 - Filament presets can calculate cost per kilogram from a spool's purchase price and net filament weight. Printer presets can store operating costs for reuse in estimates.
+- Add optional Statistics panels for print outcomes, failures by printer, filament use by printer, and coverage of recorded measurements, slicer estimates, and material costs.
 
 ### Security
 
@@ -168,6 +169,8 @@
 - The default number of simultaneous mesh jobs is now one per usable CPU (it was one more). With admission no longer stalling, the extra job only competed for the CPU: on a 3-CPU, 8 GB install a 60-file archive's thumbnails finish in 38.7 s instead of 44.9 s, at the same CPU cost. `VAULT_MAX_RENDER_JOBS` and *Models processed at once* still override it.
 
 ### Fixed
+
+- Statistics excludes the internal `__external__` model from rankings while keeping its jobs in the totals. All-time activity charts handle monthly data.
 
 - Background mesh thumbnail generation uses temporary space on the PrintStash data volume, so a full system temp directory no longer blocks it.
 

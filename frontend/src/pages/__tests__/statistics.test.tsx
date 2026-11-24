@@ -35,6 +35,16 @@ function statistics(over: Partial<PrintStatisticsRead> = {}): PrintStatisticsRea
     start_at: "2026-01-01T00:00:00Z",
     end_at: "2026-01-31T00:00:00Z",
     total_prints: 12,
+    outcomes: { failed: 0, cancelled: 0 },
+    printer_failures: [],
+    data_coverage: {
+      recorded_time: 0,
+      slicer_time: 0,
+      recorded_filament: 0,
+      slicer_filament: 0,
+      known_cost: 0,
+    },
+    printer_filaments: [],
     total_cost: 34.5,
     total_filament_g: 900,
     avg_filament_g: 75,
@@ -309,6 +319,88 @@ describe("StatisticsPage", () => {
   });
 
   describe("choosing which widgets to show", () => {
+    it("opts into print outcomes with cancellations excluded from success rate", async () => {
+      const user = userEvent.setup();
+      renderStatistics({ stats: statistics({ outcomes: { failed: 4, cancelled: 8 } }) });
+      await screen.findByText("Total cost");
+      expect(screen.queryByText("Success rate")).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Customize" }));
+      await user.click(screen.getByRole("checkbox", { name: "Print outcomes" }));
+      await user.keyboard("{Escape}");
+
+      expect(await screen.findByText("75%")).toBeInTheDocument();
+      expect(screen.getByText("24")).toBeInTheDocument();
+      expect(JSON.parse(window.localStorage.getItem(WIDGET_PREFERENCE_KEY) ?? "[]")).toContain(
+        "outcomes",
+      );
+    });
+
+    it("lists the same material separately for each printer", async () => {
+      window.localStorage.setItem(WIDGET_PREFERENCE_KEY, JSON.stringify(["printer-filaments"]));
+      renderStatistics({
+        stats: statistics({
+          printer_filaments: [
+            {
+              printer_id: 4,
+              printer_name: "North",
+              material_type: "PLA",
+              material_brand: null,
+              print_count: 3,
+              total_g: 110,
+            },
+            {
+              printer_id: null,
+              printer_name: "Workshop",
+              material_type: "PLA",
+              material_brand: null,
+              print_count: 1,
+              total_g: 42,
+            },
+          ],
+        }),
+      });
+
+      expect(await screen.findByText("Filament by printer")).toBeInTheDocument();
+      expect(screen.getAllByText("PLA")).toHaveLength(2);
+      expect(screen.getByText("North").closest("li")).toHaveTextContent("110 g");
+      expect(screen.getByText("Workshop").closest("li")).toHaveTextContent("42 g");
+    });
+
+    it("shows failures in a period without a completed print", async () => {
+      window.localStorage.setItem(WIDGET_PREFERENCE_KEY, JSON.stringify(["failures"]));
+      renderStatistics({
+        stats: statistics({
+          total_prints: 0,
+          outcomes: { failed: 2, cancelled: 0 },
+          printer_failures: [{ printer_id: 4, name: "North", failed: 2, completed: 0 }],
+        }),
+      });
+
+      expect(await screen.findByText("No completed prints in this period.")).toBeInTheDocument();
+      expect(screen.getByText("North").closest("li")).toHaveTextContent("2");
+    });
+
+    it("shows the source breakdown for completed jobs", async () => {
+      window.localStorage.setItem(WIDGET_PREFERENCE_KEY, JSON.stringify(["coverage"]));
+      renderStatistics({
+        stats: statistics({
+          data_coverage: {
+            recorded_time: 9,
+            slicer_time: 2,
+            recorded_filament: 5,
+            slicer_filament: 3,
+            known_cost: 6,
+          },
+        }),
+      });
+
+      expect((await screen.findByText("Recorded print time")).parentElement).toHaveTextContent(
+        "9 of 12",
+      );
+      expect(screen.getByText("Slicer time estimate").parentElement).toHaveTextContent("2 of 12");
+      expect(screen.getByText("Known filament cost").parentElement).toHaveTextContent("6 of 12");
+    });
+
     it("offers the customisation menu", async () => {
       const user = userEvent.setup();
       renderStatistics();
@@ -372,12 +464,12 @@ describe("StatisticsPage", () => {
     it.each([
       [
         "en",
-        "Statistics use completed print jobs. Review the selected period or manage your printers.",
+        "Material and time totals use completed jobs. Review the selected period or manage your printers.",
         "Manage printers",
       ],
       [
         "es",
-        "Las estadísticas usan trabajos de impresión completados. Revisa el periodo seleccionado o gestiona tus impresoras.",
+        "Los totales de material y tiempo usan los trabajos completados. Revisa el periodo seleccionado o gestiona tus impresoras.",
         "Gestionar impresoras",
       ],
     ] as const)(

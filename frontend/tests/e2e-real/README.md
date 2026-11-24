@@ -142,6 +142,9 @@ and consistency judgments. This command does not install or execute Impeccable.
 
 ## Coverage
 
+`statistics.spec.ts` switches the reporting period across tabs and verifies a saved
+panel choice after recording a failed print on a manually named printer.
+
 `library-inspector.spec.ts` uploads a real G-code Model, selects a loopback printer
 emulator, records a failed outcome through the inline inspector's revision shortcut
 and Mod+Enter note action, verifies the exact persisted record, then reloads the

@@ -563,6 +563,35 @@ class PrinterStatRead(BaseModel):
     print_time_s: int = 0
 
 
+class PrintOutcomesRead(BaseModel):
+    failed: int
+    cancelled: int
+
+
+class PrinterFailuresRead(BaseModel):
+    printer_id: int | None
+    name: str | None
+    failed: int
+    completed: int
+
+
+class PrintDataCoverageRead(BaseModel):
+    recorded_time: int
+    slicer_time: int
+    recorded_filament: int
+    slicer_filament: int
+    known_cost: int
+
+
+class PrinterFilamentStatRead(BaseModel):
+    printer_id: int | None
+    printer_name: str | None
+    material_type: str | None
+    material_brand: str | None
+    print_count: int
+    total_g: float
+
+
 class PrintStatisticsRead(BaseModel):
     period: str
     start_at: Optional[datetime] = None
@@ -577,6 +606,10 @@ class PrintStatisticsRead(BaseModel):
     top_models: List[ModelStatRead] = []
     top_printers: List[PrinterStatRead] = []
     cost_over_time: List[TimeBucketRead] = []
+    outcomes: PrintOutcomesRead
+    printer_failures: list[PrinterFailuresRead]
+    data_coverage: PrintDataCoverageRead
+    printer_filaments: list[PrinterFilamentStatRead]
 
 
 class ModelCoverSource(BaseModel):

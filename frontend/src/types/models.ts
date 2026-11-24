@@ -436,6 +436,25 @@ export interface PrintStatisticsRead {
   top_models: ModelStatRead[];
   top_printers: PrinterStatRead[];
   cost_over_time: TimeBucketRead[];
+  outcomes: { failed: number; cancelled: number };
+  printer_failures: {
+    printer_id: number | null;
+    name: string | null;
+    failed: number;
+    completed: number;
+  }[];
+  data_coverage: {
+    recorded_time: number;
+    slicer_time: number;
+    recorded_filament: number;
+    slicer_filament: number;
+    known_cost: number;
+  };
+  printer_filaments: (Pick<FilamentStatRead, "material_type" | "material_brand" | "print_count"> & {
+    printer_id: number | null;
+    printer_name: string | null;
+    total_g: number;
+  })[];
 }
 
 export interface ModelUpdate {
