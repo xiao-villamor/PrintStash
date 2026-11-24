@@ -133,9 +133,10 @@
 }
 .library-status-filters {
   gap: 2px;
-  padding: 2px;
+  padding: 3px;
   border: 1px solid var(--border);
-  background: var(--muted);
+  border-radius: var(--radius-popover);
+  background: var(--card);
 }
 .library-status-filters > button {
   height: 28px;
@@ -143,7 +144,10 @@
   gap: 6px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--secondary);
+  color: var(--muted-foreground);
+}
+.library-status-filters > button:hover {
+  color: var(--foreground);
 }
 .library-status-filters > button[aria-checked="true"] {
   background: var(--accent);
@@ -161,8 +165,25 @@
   font-size: 12px;
   font-weight: 400;
 }
+.library-status-filters > button[aria-checked="true"] > span.font-mono {
+  color: inherit;
+  opacity: 0.7;
+}
+/* Each dot carries the tone of its status badge, with the same soft halo. */
+.library-status-ready {
+  background: var(--success);
+  box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--success) 22%, transparent);
+}
 .library-status-test {
   background: var(--status-test-dot);
+  box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--status-test-dot) 22%, transparent);
+}
+.library-status-failed {
+  background: var(--destructive);
+  box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--destructive) 22%, transparent);
+}
+.library-status-filters > button > span.rounded-full {
+  margin-inline: 2px 1px;
 }
 .library-status-none {
   background: var(--border-strong);

@@ -179,7 +179,6 @@ import {
   ListChecks,
   SlidersHorizontal,
   ScanSearch,
-  Search,
   FolderTree,
   Boxes,
 } from "lucide-react";
@@ -318,58 +317,6 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 
 type MenuTriggerSize = "xs" | "sm";
 type MenuTriggerVariant = "outline" | "ghost";
-
-/** Narrows the current folder (and everything below it) by name, without leaving it. */
-function FolderSearch({
-  value,
-  onCommit,
-  placeholder,
-}: {
-  value: string;
-  onCommit: (value: string) => void;
-  placeholder: string;
-}) {
-  const [draft, setDraft] = useState(value);
-  const [committed, setCommitted] = useState(value);
-  // Navigation (back, a cleared filter chip) replaces the URL value; follow it.
-  if (value !== committed) {
-    setCommitted(value);
-    setDraft(value);
-  }
-  useEffect(() => {
-    if (draft.trim() === value.trim()) return;
-    const timer = window.setTimeout(() => onCommit(draft), 150);
-    return () => window.clearTimeout(timer);
-  }, [draft, value, onCommit]);
-  return (
-    <label className="library-folder-search relative flex min-w-0 items-center">
-      <Search
-        aria-hidden
-        className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-muted-foreground"
-      />
-      <input
-        type="search"
-        data-library-search
-        value={draft}
-        aria-label={placeholder}
-        placeholder={placeholder}
-        onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") onCommit(draft);
-          if (event.key === "Escape" && draft) {
-            event.preventDefault();
-            setDraft("");
-            onCommit("");
-          }
-        }}
-        className="h-8 w-full min-w-0 border border-input bg-card pl-8 pr-7 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      />
-      <kbd className="pointer-events-none absolute right-2 font-mono text-xs text-muted-foreground">
-        /
-      </kbd>
-    </label>
-  );
-}
 
 const COMPACT_COLLECTION_HEIGHT = 60;
 
@@ -957,15 +904,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const params = new URLSearchParams(searchParams.toString());
     params.set("scope", next);
     router.replace(`/?${params}`);
-  }
-
-  function setFolderQuery(next: string) {
-    const params = new URLSearchParams(searchParams.toString());
-    const value = next.trim();
-    if (value) params.set("q", value);
-    else params.delete("q");
-    const qs = params.toString();
-    router.replace(qs ? `/?${qs}` : "/");
   }
 
   function setStructuredFilter(key: LibraryFilterField, values: string[]) {
@@ -3272,49 +3210,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               </Button>
             )}
             {filterControl("shrink-0")}
-            {canViewPrinters && (
-              <div className="min-w-0 max-w-full">
-                <select
-                  aria-label={uiText("Printer")}
-                  className={cn(FILTER_SELECT, "library-toolbar-printer w-36 max-w-full")}
-                  value={
-                    selectedPrinterId !== null
-                      ? String(selectedPrinterId)
-                      : (selectedPrinterPresence ?? "")
-                  }
-                  onFocus={() => startup.request("filters")}
-                  onPointerDown={() => startup.request("filters")}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    if (value === "any" || value === "none") setSelectedPrinterPresence(value);
-                    else setSelectedPrinterId(value ? Number(value) : null);
-                  }}
-                >
-                  <option value="">{uiText("Any printer")}</option>
-                  <option value="any">{uiText("On a printer")}</option>
-                  <option value="none">{uiText("Vault only")}</option>
-                  {printers.map((printer) => (
-                    <option key={printer.id} value={printer.id}>
-                      {printer.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
           </div>
           <div className="library-display-controls ml-auto flex min-w-0 flex-wrap items-center gap-2">
-            {docView === "models" && (
-              <FolderSearch
-                value={query}
-                onCommit={setFolderQuery}
-                placeholder={
-                  selectedName
-                    ? uiText("Search in {value1}", { value1: selectedName })
-                    : uiText("Search models")
-                }
-              />
-            )}
-            {libraryActions}
             <select
               aria-label={uiText("Sort models")}
               className={cn(FILTER_SELECT, "library-toolbar-sort w-32 max-w-full")}
