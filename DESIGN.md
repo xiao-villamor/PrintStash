@@ -131,9 +131,9 @@ title carries inline metadata (printer detail's provider/beta badges, model
 detail) render their own `<h1>` instead of composing `PageHeader`; that is the
 only sanctioned exception, and it does not license a third heading style.
 
-Fleet cards reserve one labeled Actions menu for Settings and Remove printer.
-The menu sits beside the connection details and names its printer for assistive
-technology.
+Fleet cards show printer status, work, and connection details. The Manage
+printers tab groups connection settings and removal next to the device name,
+address, and status. Removal opens the shared confirmation for that device.
 
 ### Framed work surfaces
 

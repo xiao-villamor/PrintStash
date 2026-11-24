@@ -39,6 +39,9 @@ harness and the relevant browser flow before reporting the change complete.
 
 ## Prototype fidelity
 
+Use the [PrintStash design skill](../../printstash-design/SKILL.md) for design
+work and visual feedback.
+
 For a redesign, write down the operator's next decision before moving controls.
 Use Mobbin when reference research is requested or the current interface has no
 good precedent. Record the structural choices in the references and translate

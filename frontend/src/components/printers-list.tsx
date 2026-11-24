@@ -33,7 +33,6 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { FormField } from "@/components/ui/form-field";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
@@ -56,7 +55,7 @@ import {
 import { printerArtwork } from "@/lib/orca-printer-images";
 import { formatNumber, parseApiInstant } from "@/lib/format";
 import { PrinterProgress } from "@/components/printer-telemetry";
-import { ArrowUpRight, ChevronDown, Fan, ListOrdered, Plus, RefreshCw, Pencil } from "lucide-react";
+import { ArrowUpRight, Fan, ListOrdered, Plus, RefreshCw, Pencil } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { printJobArtifactLabel } from "@/lib/print-job-reproducibility";
 import type { PrintJobState } from "@/types";
@@ -113,17 +112,17 @@ export function PrintersPage() {
   const artworkPreference = usePrinterArtworkPreference();
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const searchParams = useSearchParams();
-  const [activeView, setActiveView] = useState<"fleet" | "queue" | "maintenance">(() =>
-    searchParams.get("tab") === "queue" ? "queue" : "fleet",
+  const [requestedView, setActiveView] = useState<"fleet" | "queue" | "maintenance" | "manage">(
+    () => (searchParams.get("tab") === "queue" ? "queue" : "fleet"),
   );
   const [queueView, setQueueView] = useState<FleetQueueView>("queued");
   const [healthFilter, setHealthFilter] = useState<"ready" | "attention" | null>(null);
   const canSeeQueue = Boolean(
     user?.is_superuser || printers.some((printer) => printer.access.can_print),
   );
-  const canSeeMaintenance = Boolean(
-    user?.is_superuser || printers.some((printer) => printer.access.can_admin),
-  );
+  const manageablePrinters = printers.filter((printer) => printer.access.can_admin);
+  const canManagePrinters = Boolean(user?.is_superuser || manageablePrinters.length);
+  const activeView = requestedView === "manage" && !canManagePrinters ? "fleet" : requestedView;
   const visiblePrinters = useMemo(
     () =>
       printers
@@ -205,13 +204,17 @@ export function PrintersPage() {
         <div className="@container/fleet flex w-full min-w-0 flex-col gap-4">
           <PageHeader
             title={uiText("Printers")}
-            description={uiText(
-              activeView === "queue"
-                ? "Route saved G-code and follow jobs across the fleet."
-                : activeView === "maintenance"
-                  ? "Routing, scheduled maintenance windows and service records for each printer."
-                  : "Live activity, queued work and maintenance in one place.",
-            )}
+            description={
+              activeView === "manage"
+                ? undefined
+                : uiText(
+                    activeView === "queue"
+                      ? "Route saved G-code and follow jobs across the fleet."
+                      : activeView === "maintenance"
+                        ? "Routing, scheduled maintenance windows and service records for each printer."
+                        : "Live activity, queued work and maintenance in one place.",
+                  )
+            }
             actions={
               <>
                 <Button
@@ -260,8 +263,14 @@ export function PrintersPage() {
                 ...(canSeeQueue
                   ? [{ key: "queue" as const, label: translateUiText(locale, "Queue") }]
                   : []),
-                ...(canSeeMaintenance
-                  ? [{ key: "maintenance" as const, label: translateUiText(locale, "Maintenance") }]
+                ...(canManagePrinters
+                  ? [
+                      {
+                        key: "maintenance" as const,
+                        label: translateUiText(locale, "Maintenance"),
+                      },
+                      { key: "manage" as const, label: translateUiText(locale, "Manage printers") },
+                    ]
                   : []),
               ]}
               active={activeView}
@@ -316,14 +325,17 @@ export function PrintersPage() {
             )}
           </div>
 
+          {(activeView === "fleet" || activeView === "manage") && error && (
+            <div
+              role="alert"
+              className="animate-panel-in rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+            >
+              {error}
+            </div>
+          )}
+
           {activeView === "fleet" && (
             <>
-              {error && (
-                <div className="animate-panel-in rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-                  {error}
-                </div>
-              )}
-
               {summaryQuery.isError && (
                 <p role="status" className="text-xs text-muted-foreground">
                   {uiText("Fleet job data unavailable")}
@@ -370,8 +382,6 @@ export function PrintersPage() {
                           printer={printer}
                           row={fleetRows.get(printer.id)}
                           artworkPreference={artworkPreference}
-                          onSettings={() => setSettingsTarget(printer)}
-                          onRemove={() => setDeleteTarget(printer)}
                         />
                       ))}
                     </div>
@@ -392,9 +402,20 @@ export function PrintersPage() {
               printers={printers.filter((printer) => printer.access.can_print)}
             />
           )}
+          {activeView === "manage" &&
+            (loading ? (
+              <Skeleton className="h-24 w-full" />
+            ) : !error || printersQuery.data ? (
+              <PrinterManagement
+                printers={manageablePrinters}
+                onSettings={setSettingsTarget}
+                onRemove={setDeleteTarget}
+              />
+            ) : null)}
+
           {activeView === "maintenance" && (
             <FleetMaintenancePanel
-              printers={printers.filter((printer) => printer.access.can_admin)}
+              printers={manageablePrinters}
               onPrintersChanged={() => {
                 void printersQuery.refetch();
               }}
@@ -627,27 +648,111 @@ function FleetActivity({
   );
 }
 
+function PrinterManagement({
+  printers,
+  onSettings,
+  onRemove,
+}: {
+  printers: PrinterRead[];
+  onSettings: (printer: PrinterRead) => void;
+  onRemove: (printer: PrinterRead) => void;
+}) {
+  if (printers.length === 0) {
+    return (
+      <EmptyState
+        icon={Printer3D}
+        title={uiText("No printers configured yet.")}
+        className="border border-border bg-card"
+      />
+    );
+  }
+
+  return (
+    <section
+      aria-label={uiText("Manage printers")}
+      className="max-w-5xl overflow-x-auto border border-border bg-card"
+    >
+      <table className="w-full text-left text-sm">
+        <thead className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
+          <tr>
+            <th scope="col" className="px-4 py-3 font-medium">
+              {uiText("Name")}
+            </th>
+            <th scope="col" className="px-4 py-3 font-medium">
+              {uiText("Connection")}
+            </th>
+            <th scope="col" className="px-4 py-3 font-medium">
+              {uiText("Status")}
+            </th>
+            <th scope="col" className="px-4 py-3 text-end font-medium">
+              {uiText("Actions")}
+            </th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {printers.map((printer) => {
+            const address = providerAddress(printer);
+            return (
+              <tr key={printer.id}>
+                <td className="px-4 py-3">
+                  <Link
+                    href={`/printers/${printer.id}`}
+                    className="wrap-anywhere font-semibold hover:underline"
+                  >
+                    {printer.name}
+                  </Link>
+                  {printer.group && (
+                    <p className="wrap-anywhere text-xs text-muted-foreground">{printer.group}</p>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  {providerLabel(printer)}
+                  {address && (
+                    <p className="wrap-anywhere text-xs text-muted-foreground">{address}</p>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium capitalize">
+                    <span
+                      className={`size-2 shrink-0 rounded-full ${STATUS_DOT[printer.status]}`}
+                      aria-hidden
+                    />
+                    {knownUiText(printer.status)}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex flex-wrap items-center justify-end gap-1">
+                    <Button variant="outline" size="xs" onClick={() => onSettings(printer)}>
+                      {uiText("Settings")}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => onRemove(printer)}
+                    >
+                      {uiText("Remove printer")}
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
 function FleetPrinterCard({
   printer,
   row,
   artworkPreference,
-  onSettings,
-  onRemove,
 }: {
   printer: PrinterRead;
   row: FleetPrinterRow | undefined;
   artworkPreference: PrinterArtworkPreference;
-  onSettings: () => void;
-  onRemove: () => void;
 }) {
-  const [actionsOpen, setActionsOpen] = useState(false);
-  const actionsTrigger = useRef<HTMLButtonElement>(null);
-  const actionsLabel = uiText("Actions for {value1}", { value1: printer.name });
-  function chooseAction(action: () => void) {
-    setActionsOpen(false);
-    actionsTrigger.current?.focus();
-    action();
-  }
   const hold = routingHold(printer, row);
   const progress = row?.progress == null ? null : row.progress * 100;
   // Older servers publish only the display label for each loaded slot.
@@ -774,7 +879,7 @@ function FleetPrinterCard({
           })}
         </div>
       )}
-      <div className="flex min-h-12 items-center justify-between gap-2 border-t border-border bg-muted/30 px-4 py-2">
+      <div className="min-h-12 border-t border-border bg-muted/30 px-4 py-2">
         <div className="min-w-0 space-y-0.5">
           <div
             className={
@@ -798,54 +903,6 @@ function FleetPrinterCard({
             <p className="truncate text-2xs text-muted-foreground">{printer.notes}</p>
           )}
         </div>
-        {printer.access.can_admin && (
-          <DropdownMenu
-            open={actionsOpen}
-            onOpenChange={setActionsOpen}
-            aria-label={actionsLabel}
-            className="z-20 shrink-0"
-            contentClassName="min-w-40 border border-border-strong bg-popover p-1 text-popover-foreground shadow-dialog"
-            portal
-            trigger={
-              <Button
-                ref={actionsTrigger}
-                type="button"
-                variant="ghost"
-                size="xs"
-                className="aria-expanded:bg-accent aria-expanded:text-accent-foreground"
-                data-menu-trigger
-                aria-label={actionsLabel}
-                aria-haspopup="menu"
-                aria-expanded={actionsOpen}
-                onClick={() => setActionsOpen((open) => !open)}
-              >
-                {uiText("Actions")}
-                <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden />
-              </Button>
-            }
-          >
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              role="menuitem"
-              className="w-full justify-start hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:ring-inset focus-visible:ring-offset-0"
-              onClick={() => chooseAction(onSettings)}
-            >
-              {uiText("Settings")}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              role="menuitem"
-              className="w-full justify-start text-destructive hover:bg-popover-hover hover:text-destructive focus-visible:bg-popover-hover focus-visible:ring-inset focus-visible:ring-offset-0"
-              onClick={() => chooseAction(onRemove)}
-            >
-              {uiText("Remove printer")}
-            </Button>
-          </DropdownMenu>
-        )}
       </div>
     </article>
   );

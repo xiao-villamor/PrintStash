@@ -82,13 +82,11 @@ test.describe("printers", () => {
     await page.reload();
     await expect(page.getByRole("link", { name: new RegExp(name) })).toBeVisible();
 
-    await card
-      .locator("xpath=ancestor::article")
-      .getByRole("button", { name: `Actions for ${name}`, exact: true })
-      .press("Enter");
+    await page.getByRole("tab", { name: "Manage printers", exact: true }).press("Enter");
     await page
-      .getByRole("menu", { name: `Actions for ${name}`, exact: true })
-      .getByRole("menuitem", { name: "Remove printer", exact: true })
+      .getByRole("row")
+      .filter({ has: card })
+      .getByRole("button", { name: "Remove printer", exact: true })
       .click();
     const confirmation = page.getByRole("dialog", { name: "Remove printer?" });
     await expect(confirmation).toHaveAccessibleDescription(

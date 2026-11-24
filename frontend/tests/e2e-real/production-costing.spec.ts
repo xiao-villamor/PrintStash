@@ -275,11 +275,11 @@ test.describe("production costing", () => {
       await page.goto("/printers");
       await collapseNavigationSidebar(page);
       const card = page.getByRole("link", { name: new RegExp(name) });
-      const actions = card
-        .locator("xpath=ancestor::article")
-        .getByRole("button", { name: `Actions for ${name}`, exact: true });
-      const settings = page.getByRole("menuitem", { name: "Settings", exact: true });
-      await actions.click();
+      await page.getByRole("tab", { name: "Manage printers", exact: true }).click();
+      const settings = page
+        .getByRole("row")
+        .filter({ has: card })
+        .getByRole("button", { name: "Settings", exact: true });
       await settings.click();
       const dialog = page.getByRole("dialog", { name: "Edit printer connection" });
       const picker = dialog.getByRole("combobox", { name: "Cost profile" });
@@ -293,7 +293,6 @@ test.describe("production costing", () => {
       const receipt = await page.request.get(`/api/v1/printers/${printer.id}`);
       expect((await receipt.json()).cost_profile_id).toBe(profile.id);
 
-      await actions.click();
       await settings.click();
       await expect(picker).toHaveValue(String(profile.id));
       const catalogTab = page.waitForEvent("popup");

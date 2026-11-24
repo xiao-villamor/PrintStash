@@ -81,12 +81,21 @@ const ADMIN_AUTH: AuthState = {
   logout: vi.fn<AuthState["logout"]>(),
   refresh: vi.fn<AuthState["refresh"]>(),
 };
+const MEMBER_AUTH: AuthState = {
+  ...ADMIN_AUTH,
+  user: { id: 2, username: "member", email: null, is_superuser: false },
+};
 
 /** FleetQueuePanel's history window is part of its query key. */
 const FLEET_QUEUE_HISTORY_LIMIT = 20;
 
 function renderPrintersPage(
-  seed: { printers?: PrinterRead[]; summary?: FleetSummary; jobs?: PrintJobRead[] } = {},
+  seed: {
+    printers?: PrinterRead[];
+    summary?: FleetSummary;
+    jobs?: PrintJobRead[];
+    auth?: AuthState;
+  } = {},
 ) {
   const client = new QueryClient({
     defaultOptions: {
@@ -101,7 +110,7 @@ function renderPrintersPage(
   return render(
     <TestRouter>
       <QueryClientProvider client={client}>
-        <AuthContext.Provider value={ADMIN_AUTH}>
+        <AuthContext.Provider value={seed.auth ?? ADMIN_AUTH}>
           <PrintersPage />
         </AuthContext.Provider>
       </QueryClientProvider>
@@ -608,13 +617,10 @@ describe("PrinterCard", () => {
 describe("PrintersPage", () => {
   describe("removing a printer", () => {
     async function selectAction(name: string, action: "Settings" | "Remove printer") {
-      const label = `Actions for ${name}`;
-      await userEvent.click(screen.getByRole("button", { name: label }));
-      await userEvent.click(
-        within(await screen.findByRole("menu", { name: label })).getByRole("menuitem", {
-          name: action,
-        }),
-      );
+      await userEvent.click(screen.getByRole("tab", { name: "Manage printers" }));
+      const list = screen.getByRole("region", { name: "Manage printers" });
+      const row = within(list).getByRole("link", { name }).closest("tr");
+      await userEvent.click(within(row!).getByRole("button", { name: action }));
     }
 
     beforeAll(async () => {
@@ -653,7 +659,7 @@ describe("PrintersPage", () => {
       await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
       expect(screen.getByRole("link", { name: "Voron 2.4" })).toBeVisible();
-      expect(screen.getByRole("button", { name: "Actions for Voron 2.4" })).toHaveFocus();
+      expect(screen.getByRole("button", { name: "Remove printer" })).toHaveFocus();
       expect(requestsWithMethod("DELETE")).toHaveLength(0);
     });
 
@@ -673,6 +679,7 @@ describe("PrintersPage", () => {
     it("offers no removal to somebody who may not administer it", async () => {
       // The connection is visible, while administrative actions remain unavailable.
       renderPrintersPage({
+        auth: MEMBER_AUTH,
         printers: [
           makePrinter({
             access: {
@@ -686,10 +693,38 @@ describe("PrintersPage", () => {
         ],
       });
 
-      expect(
-        screen.queryByRole("button", { name: "Actions for Voron 2.4" }),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByRole("tab", { name: "Manage printers" })).not.toBeInTheDocument();
       expect(requestsWithMethod("DELETE")).toEqual([]);
+    });
+
+    it("lists only printers the member can administer", async () => {
+      const managed = makePrinter();
+      const viewOnly = makePrinter({
+        id: 2,
+        name: "View-only printer",
+        access: {
+          role: "view",
+          can_view: true,
+          can_print: false,
+          can_control: false,
+          can_admin: false,
+        },
+      });
+      renderPrintersPage({ auth: MEMBER_AUTH, printers: [managed, viewOnly] });
+
+      await userEvent.click(screen.getByRole("tab", { name: "Manage printers" }));
+
+      const list = within(screen.getByRole("region", { name: "Manage printers" }));
+      expect(list.getByRole("link", { name: managed.name })).toBeVisible();
+      expect(list.queryByRole("link", { name: viewOnly.name })).not.toBeInTheDocument();
+    });
+
+    it("shows an empty management view before the first printer is added", async () => {
+      renderPrintersPage();
+
+      await userEvent.click(screen.getByRole("tab", { name: "Manage printers" }));
+
+      expect(screen.getByText("No printers configured yet.")).toBeVisible();
     });
   });
 
