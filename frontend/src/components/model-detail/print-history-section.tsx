@@ -20,7 +20,7 @@ import { printJobArtifactLabel } from "@/lib/print-job-reproducibility";
 import { PRINT_JOB_PRESENTATION } from "./presentation";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, inputClasses } from "@/components/ui/input";
 import { OptionPicker } from "@/components/ui/option-picker";
 import { ChoiceField } from "./choice-field";
 import { Localized } from "@/components/ui/localized";
@@ -34,6 +34,10 @@ export function PrintHistorySection({
   gcodeFiles,
   onJobCreated,
   initialEntry,
+  revisionFilter = null,
+  onRevisionFilter,
+  onAddRevision,
+  onOpenRevision,
 }: {
   jobs: ModelPrintJobRead[];
   modelName?: string;
@@ -41,6 +45,10 @@ export function PrintHistorySection({
   gcodeFiles: FileRead[];
   onJobCreated: (job: ModelPrintJobRead) => void;
   initialEntry?: { fileId: number; state: "completed" | "failed" } | null;
+  revisionFilter?: number | null;
+  onRevisionFilter?: (fileId: number | null) => void;
+  onAddRevision?: () => void;
+  onOpenRevision?: (fileId: number) => void;
 }) {
   useUiLocale();
   const formId = useId();
@@ -60,7 +68,7 @@ export function PrintHistorySection({
   const [adhocPrinter, setAdhocPrinter] = useState(false);
   const [adhocPrinterName, setAdhocPrinterName] = useState("");
   const [selectedFileId, setSelectedFileId] = useState<number | null>(
-    initialEntry?.fileId ?? gcodeFiles[0]?.id ?? null,
+    initialEntry?.fileId ?? revisionFilter ?? gcodeFiles[0]?.id ?? null,
   );
   const [selectedSpoolId, setSelectedSpoolId] = useState<number | null>(null);
   const [jobState, setJobState] = useState<string>(initialEntry?.state ?? "completed");
@@ -84,7 +92,7 @@ export function PrintHistorySection({
     setSelectedPrinterId(null);
     setAdhocPrinter(false);
     setAdhocPrinterName("");
-    setSelectedFileId(gcodeFiles[0]?.id ?? null);
+    setSelectedFileId(revisionFilter ?? gcodeFiles[0]?.id ?? null);
     setSelectedSpoolId(null);
     setJobState("completed");
     setStartedAt("");
@@ -157,30 +165,66 @@ export function PrintHistorySection({
     }
   }
 
+  const visibleJobs =
+    revisionFilter === null ? jobs : jobs.filter((job) => job.file_id === revisionFilter);
+
   return (
     <Localized>
       <section>
         <div className="detail-history-heading">
           <h2>{uiText("Print history")}</h2>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" onClick={openAdd}>
-              {uiText("Add record")}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                openAdd();
-                setMode("auto");
-              }}
-            >
-              {uiText("Import from printer")}
-            </Button>
-          </div>
+          {gcodeFiles.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" onClick={openAdd}>
+                {uiText("Add record")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  openAdd();
+                  setMode("auto");
+                }}
+              >
+                {uiText("Import from printer")}
+              </Button>
+            </div>
+          ) : (
+            onAddRevision && (
+              <Button size="sm" onClick={onAddRevision}>
+                {uiText("Add revision")}
+              </Button>
+            )
+          )}
         </div>
         <p className="detail-history-intro">
           {uiText("Recorded results for each printer and revision.")}
         </p>
+
+        {onRevisionFilter && (gcodeFiles.length > 1 || revisionFilter !== null) && (
+          <label className="my-3 flex flex-wrap items-center gap-2 text-sm">
+            {uiText("G-code Revision")}
+            <select
+              className={inputClasses}
+              value={revisionFilter ?? ""}
+              onChange={(event) => {
+                onRevisionFilter(
+                  gcodeFiles.find((file) => file.id === Number(event.target.value))?.id ?? null,
+                );
+              }}
+            >
+              <option value="">{uiText("modelDetail.allRevisions")}</option>
+              {gcodeFiles.map((file) => (
+                <option key={file.id} value={file.id}>
+                  {uiText("Rev {value1}", {
+                    value1: String(file.gcode_revision_number ?? file.version),
+                  })}
+                  {file.revision_label && ` · ${file.revision_label}`}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         {/* Add record panel */}
         <Modal
@@ -482,13 +526,18 @@ export function PrintHistorySection({
           </div>
         </Modal>
 
-        {jobs.length === 0 ? (
+        {visibleJobs.length === 0 ? (
           <p className="text-sm text-on-surface-variant">
-            {uiText("No print history yet. Add a record manually or import from a printer.")}
+            {gcodeFiles.length === 0
+              ? uiText("modelDetail.historyNeedsRevision")
+              : revisionFilter === null
+                ? uiText("No print history yet. Add a record manually or import from a printer.")
+                : uiText("modelDetail.noRevisionActivity")}
           </p>
         ) : (
           <div>
-            {jobs.map((job) => {
+            {visibleJobs.map((job) => {
+              const revision = gcodeFiles.find((file) => file.id === job.file_id);
               const present = PRINT_JOB_PRESENTATION[job.state];
               return (
                 <article key={job.id} className="detail-history-record">
@@ -510,6 +559,11 @@ export function PrintHistorySection({
                         {present.label}
                       </span>
                     </span>
+                    {revision && onOpenRevision && (
+                      <Button size="xs" variant="ghost" onClick={() => onOpenRevision(revision.id)}>
+                        {uiText("modelDetail.viewRevision")}
+                      </Button>
+                    )}
                   </div>
                   <p className="text-xs text-on-surface-variant">
                     {job.material_type ? `${job.material_type} · ` : ""}

@@ -158,7 +158,7 @@ describe("SourceTab", () => {
   it("keeps cover controls out of a view-only Source tab", async () => {
     render(<SourceTab modelId={1} canEdit={false} api={api} />);
 
-    await screen.findByText("printables");
+    await screen.findByText("Printables");
     expect(screen.queryByRole("button", { name: "Upload cover" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Upload cover")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Source tags")).toHaveTextContent("calibration");
@@ -167,7 +167,7 @@ describe("SourceTab", () => {
   it("localizes Source UI without translating provider, tag, or captured values", async () => {
     render(<SourceTab modelId={1} canEdit api={api} />, { locale: "es" });
 
-    await screen.findByText("printables");
+    await screen.findByText("Printables");
     expect(screen.getByRole("button", { name: "Usar título de la fuente" })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Usar descripción de la fuente" }),
@@ -186,7 +186,7 @@ describe("SourceTab", () => {
 
     render(<SourceTab modelId={1} canEdit={false} api={api} />);
 
-    await screen.findByText("printables");
+    await screen.findByText("Printables");
     expect(screen.getAllByText("Source", { exact: true }).length).toBeGreaterThan(0);
     expect(screen.getByText("Inferred", { exact: true })).toBeInTheDocument();
   });

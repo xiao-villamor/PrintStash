@@ -51,11 +51,12 @@ test.describe("fleet queue", () => {
     await uploadGcodeModel(page, modelName);
     await openModelPage(page, modelName);
     await expect(page.getByRole("heading", { name: modelName })).toBeVisible();
-    await page.getByRole("tab", { name: /^Revisions/ }).click();
+    await page.getByRole("tab", { name: /^Print/ }).click();
     await page
-      .getByRole("tabpanel", { name: /^Revisions/ })
-      .getByRole("button", { name: "Add to queue", exact: true })
+      .getByRole("tabpanel", { name: /^Print/ })
+      .getByRole("button", { name: "Prepare print", exact: true })
       .click();
+    await page.getByRole("radio", { name: "Add to queue", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Add to queue", exact: true });
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Add to queue", exact: true }).click();

@@ -3,8 +3,16 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useState } from "react";
-import { Download, FileText, FolderSync, MoreHorizontal, RotateCcw, Trash2 } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import {
+  ChevronRight,
+  Download,
+  FileText,
+  FolderSync,
+  MoreHorizontal,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 
 import {
   downloadAuthenticatedFile,
@@ -37,6 +45,7 @@ export function FilesTab({
   canEdit,
   onModel,
   onCompare,
+  fileDetails,
 }: {
   modelId: number;
   sourceFiles: FileRead[];
@@ -45,6 +54,7 @@ export function FilesTab({
   canEdit: boolean;
   onModel: (model: ModelRead) => void;
   onCompare?: () => void;
+  fileDetails?: (file: FileRead) => ReactNode;
 }) {
   useUiLocale();
   const { data: availableTags = [] } = useTags();
@@ -117,7 +127,7 @@ export function FilesTab({
           </h2>
           {onCompare && (
             <Button variant="ghost" size="xs" data-compare-origin onClick={onCompare}>
-              {uiText("Compare")}
+              {uiText("Compare source files")}
             </Button>
           )}
         </div>
@@ -129,134 +139,147 @@ export function FilesTab({
           </p>
         )}
         <div>
-          {sourceFiles.map((f) => (
-            <article
-              key={f.id}
-              id={`artifact-${f.id}`}
-              aria-label={f.original_filename}
-              className="@container/source-file min-w-0 space-y-3 border-b border-border py-5.5 @lg/source-file:py-5"
-            >
-              <div className="flex min-w-0 flex-col gap-3 @lg/source-file:grid @lg/source-file:gap-x-6 @lg/source-file:gap-y-1.5">
-                <div className="flex min-w-0 items-start gap-2 @lg/source-file:col-start-1 @lg/source-file:row-start-1">
-                  <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0">
-                    <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm text-on-surface font-medium">
-                      <span className="min-w-0 wrap-anywhere">{f.original_filename}</span>
-                      {f.is_external && (
-                        <span
-                          title={uiText(
-                            "Indexed from a library source; original bytes stay in external storage",
-                          )}
-                          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider text-primary"
-                        >
-                          <FolderSync className="h-3 w-3" />
-                          {uiText("Linked")}
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                </div>
-                <p className="-mt-1.5 ml-6 text-xs text-muted-foreground @lg/source-file:col-start-1 @lg/source-file:row-start-2 @lg/source-file:mt-0 @lg/source-file:ml-6">
-                  {f.file_type.toUpperCase()} · {uiText("v{value1}", { value1: String(f.version) })}{" "}
-                  · {formatBytes(f.size_bytes)} · {new Date(f.uploaded_at).toLocaleDateString()}
-                </p>
-                <div className="flex flex-wrap items-center gap-1 @lg/source-file:col-start-1 @lg/source-file:col-span-2 @lg/source-file:row-start-3 @lg/source-file:mt-1.5">
-                  {SLICEABLE_TYPES.has(f.file_type) && (
-                    <SlicerOpenButton fileId={f.id} fileType={f.file_type} size="sm" showLabel />
-                  )}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    onClick={() =>
-                      downloadAuthenticatedFile(
-                        `/api/v1/files/${f.id}/download`,
-                        f.original_filename,
-                      ).catch((e) => toast.error(e))
-                    }
-                    title={uiText("Download")}
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    {uiText("Download")}
-                  </Button>
-                  <EntityTagsDialog
-                    triggerMode="command"
-                    entityLabel={f.original_filename}
-                    tags={f.tags}
-                    availableTags={availableTags}
-                    canEdit={canEdit}
-                    help={uiText(
-                      "Artifact tags make the owning Model discoverable without changing the Model’s direct tags.",
-                    )}
-                    onSave={(tags) => saveTags(f, tags)}
-                  />
-                  <DropdownMenu
-                    open={menuFileId === f.id}
-                    onOpenChange={(open) => setMenuFileId(open ? f.id : null)}
-                    portal
-                    trigger={
-                      <Button
-                        type="button"
-                        data-menu-trigger
-                        variant="ghost"
-                        size="xs"
-                        aria-haspopup="menu"
-                        aria-expanded={menuFileId === f.id}
-                        aria-label={uiText("Actions for {value1}", {
-                          value1: f.original_filename,
-                        })}
-                        onClick={() => setMenuFileId(menuFileId === f.id ? null : f.id)}
-                      >
-                        <MoreHorizontal className="h-3.5 w-3.5" />
-                        {uiText("nav.more")}
-                      </Button>
-                    }
-                    contentClassName="w-56 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg"
-                  >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted focus-visible:bg-muted"
-                      onClick={() => {
-                        setMenuFileId(null);
-                        void copyText(f.sha256).then(
-                          () => toast.success(uiText("modelHashes.copied")),
-                          () => toast.error(uiText("modelHashes.copyFailed")),
-                        );
-                      }}
-                    >
-                      {uiText("Copy SHA-256")}
-                    </button>
-                    {f.is_external ? (
-                      <p className="px-3 py-2 text-xs text-muted-foreground">
-                        {uiText("Linked source files stay in their Library source.")}
+          {sourceFiles.map((f) => {
+            const details = fileDetails?.(f);
+            return (
+              <article
+                key={f.id}
+                id={`artifact-${f.id}`}
+                aria-label={f.original_filename}
+                className="@container/source-file min-w-0 space-y-3 border-b border-border py-5.5 @lg/source-file:py-5"
+              >
+                <div className="flex min-w-0 flex-col gap-3 @lg/source-file:grid @lg/source-file:gap-x-6 @lg/source-file:gap-y-1.5">
+                  <div className="flex min-w-0 items-start gap-2 @lg/source-file:col-start-1 @lg/source-file:row-start-1">
+                    <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0">
+                      <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm text-on-surface font-medium">
+                        <span className="min-w-0 wrap-anywhere">{f.original_filename}</span>
+                        {f.is_external && (
+                          <span
+                            title={uiText(
+                              "Indexed from a library source; original bytes stay in external storage",
+                            )}
+                            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider text-primary"
+                          >
+                            <FolderSync className="h-3 w-3" />
+                            {uiText("Linked")}
+                          </span>
+                        )}
                       </p>
-                    ) : (
+                    </div>
+                  </div>
+                  <p className="-mt-1.5 ml-6 text-xs text-muted-foreground @lg/source-file:col-start-1 @lg/source-file:row-start-2 @lg/source-file:mt-0 @lg/source-file:ml-6">
+                    {f.file_type.toUpperCase()} ·{" "}
+                    {uiText("v{value1}", { value1: String(f.version) })} ·{" "}
+                    {formatBytes(f.size_bytes)} · {new Date(f.uploaded_at).toLocaleDateString()}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-1 @lg/source-file:col-start-1 @lg/source-file:col-span-2 @lg/source-file:row-start-3 @lg/source-file:mt-1.5">
+                    {SLICEABLE_TYPES.has(f.file_type) && (
+                      <SlicerOpenButton fileId={f.id} fileType={f.file_type} size="sm" showLabel />
+                    )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={() =>
+                        downloadAuthenticatedFile(
+                          `/api/v1/files/${f.id}/download`,
+                          f.original_filename,
+                        ).catch((e) => toast.error(e))
+                      }
+                      title={uiText("Download")}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      {uiText("Download")}
+                    </Button>
+                    <EntityTagsDialog
+                      triggerMode="command"
+                      entityLabel={f.original_filename}
+                      tags={f.tags}
+                      availableTags={availableTags}
+                      canEdit={canEdit}
+                      help={uiText(
+                        "Artifact tags make the owning Model discoverable without changing the Model’s direct tags.",
+                      )}
+                      onSave={(tags) => saveTags(f, tags)}
+                    />
+                    <DropdownMenu
+                      open={menuFileId === f.id}
+                      onOpenChange={(open) => setMenuFileId(open ? f.id : null)}
+                      portal
+                      trigger={
+                        <Button
+                          type="button"
+                          data-menu-trigger
+                          variant="ghost"
+                          size="xs"
+                          aria-haspopup="menu"
+                          aria-expanded={menuFileId === f.id}
+                          aria-label={uiText("Actions for {value1}", {
+                            value1: f.original_filename,
+                          })}
+                          onClick={() => setMenuFileId(menuFileId === f.id ? null : f.id)}
+                        >
+                          <MoreHorizontal className="h-3.5 w-3.5" />
+                          {uiText("nav.more")}
+                        </Button>
+                      }
+                      contentClassName="w-56 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+                    >
                       <button
                         type="button"
                         role="menuitem"
-                        disabled={!canEdit || busyFileId !== null}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted focus-visible:bg-muted"
                         onClick={() => {
                           setMenuFileId(null);
-                          setDeleteTarget(f);
+                          void copyText(f.sha256).then(
+                            () => toast.success(uiText("modelHashes.copied")),
+                            () => toast.error(uiText("modelHashes.copyFailed")),
+                          );
                         }}
-                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
                       >
-                        <Trash2 className="h-4 w-4" />
-                        {uiText("Move to trash")}
+                        {uiText("Copy SHA-256")}
                       </button>
-                    )}
-                  </DropdownMenu>
+                      {f.is_external ? (
+                        <p className="px-3 py-2 text-xs text-muted-foreground">
+                          {uiText("Linked source files stay in their Library source.")}
+                        </p>
+                      ) : (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={!canEdit || busyFileId !== null}
+                          onClick={() => {
+                            setMenuFileId(null);
+                            setDeleteTarget(f);
+                          }}
+                          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          {uiText("Move to trash")}
+                        </button>
+                      )}
+                    </DropdownMenu>
+                  </div>
                 </div>
-              </div>
-              <DerivativeStatus
-                modelId={modelId}
-                fileId={f.id}
-                canRetry={canEdit}
-                previewFailure={previewFailure?.fileId === f.id ? previewFailure.reason : null}
-              />
-            </article>
-          ))}
+                <DerivativeStatus
+                  modelId={modelId}
+                  fileId={f.id}
+                  canRetry={canEdit}
+                  previewFailure={previewFailure?.fileId === f.id ? previewFailure.reason : null}
+                />
+                {details && (
+                  <details className="group">
+                    <summary className="flex w-fit items-center gap-2 py-1 text-sm font-medium focus-visible:outline-ring">
+                      <ChevronRight className="size-4 group-open:rotate-90" aria-hidden />
+                      {uiText("modelDetail.fileDetails")}
+                    </summary>
+                    <div className="mt-3 space-y-4">{details}</div>
+                  </details>
+                )}
+              </article>
+            );
+          })}
         </div>
         {trashedSourceFiles.length > 0 && (
           <div className="mt-4">

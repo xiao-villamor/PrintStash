@@ -66,7 +66,7 @@ test.describe("printer routes", () => {
     const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
     if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
     await expect(sidebar).toHaveAttribute("aria-expanded", "false");
-    await page.getByRole("button", { name: "Send to printer", exact: true }).first().click();
+    await page.getByRole("button", { name: "Prepare print", exact: true }).first().click();
     const direct = page.getByRole("dialog", { name: /^Send Rev/ });
     await direct.getByRole("radio", { name: /^Plate 02/ }).check();
     const firstFrame = (await direct.boundingBox())!;
@@ -149,7 +149,12 @@ test.describe("printer routes", () => {
       const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
       if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
       await expect(sidebar).toHaveAttribute("aria-expanded", "false");
-      await page.getByRole("button", { name: "Add to queue", exact: true }).first().click();
+      if (route.startsWith("/models")) {
+        await page.getByRole("button", { name: "Prepare print", exact: true }).click();
+        await page.getByRole("radio", { name: "Add to queue", exact: true }).click();
+      } else {
+        await page.getByRole("button", { name: "Add to queue", exact: true }).first().click();
+      }
       const dialog = page.getByRole("dialog", { name: "Add to queue", exact: true });
       const details = dialog.getByRole("complementary", { name: "Dispatch details" });
       await expect(details).toBeVisible();

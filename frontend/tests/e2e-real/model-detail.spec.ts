@@ -16,7 +16,8 @@ test.describe("model detail", () => {
     await uploadGcodeModel(page, name);
     await openModelPage(page, name);
     const modelId = new URL(page.url()).pathname.split("/").at(-1);
-    await page.getByRole("button", { name: "Edit details", exact: true }).click();
+    await page.getByRole("button", { name: "More model actions" }).click();
+    await page.getByRole("menuitem", { name: "Edit details", exact: true }).click();
     const description =
       "## Assembly instructions\n\n- Fit **both** clips.\n- Check [the source](https://www.printables.com/).\n\n| Part | Count |\n| --- | --- |\n| Clip | 2 |";
     const editor = page.getByRole("dialog", { name: "Edit Model details" });
@@ -158,7 +159,7 @@ test.describe("model detail", () => {
 
     await openModelPage(page, name);
     await expect(page.getByRole("heading", { name })).toBeVisible();
-    await page.getByRole("tab", { name: /History/ }).click();
+    await page.getByRole("tab", { name: /Activity/ }).click();
     await page.getByRole("button", { name: /Add Record/ }).click();
 
     // Free-text printer name path: pick "Other (not listed)…" and type a name.
@@ -209,7 +210,7 @@ test.describe("model detail", () => {
 
     await openModelPage(page, name);
     await expect(page.getByRole("heading", { name })).toBeVisible();
-    await page.getByRole("tab", { name: "Revisions" }).click();
+    await page.getByRole("tab", { name: "Print" }).click();
 
     const [download] = await Promise.all([
       page.waitForEvent("download"),

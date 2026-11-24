@@ -648,7 +648,8 @@ describe("ModelDetail", () => {
           ],
         }),
       });
-      await userEvent.click(await screen.findByRole("tab", { name: "Print settings" }));
+      await userEvent.click(await screen.findByRole("tab", { name: /^Print/ }));
+      await userEvent.click(await screen.findByRole("button", { name: "Print settings" }));
       expect(await screen.findByText("2.5 ml", { exact: true })).toBeVisible();
       expect(screen.getByText("120", { exact: true })).toBeVisible();
       expect(screen.getByText("2.5 s", { exact: true })).toBeVisible();
@@ -786,7 +787,7 @@ describe("ModelDetail", () => {
         }),
       });
 
-      expect(await screen.findByRole("tab", { name: /Revisions\s*1/ })).toBeInTheDocument();
+      expect(await screen.findByRole("tab", { name: /Print\s*1/ })).toBeInTheDocument();
     });
   });
 
@@ -801,13 +802,14 @@ describe("ModelDetail", () => {
       expect(screen.getByLabelText("Current detail location")).toHaveTextContent(
         "return=%2F%3Fc%3Dparts&tab=files",
       );
-      await userEvent.click(screen.getByRole("tab", { name: /Similar/ }));
+      await openActions(userEvent.setup());
+      await userEvent.click(screen.getByRole("menuitem", { name: "Similar models" }));
       expect(screen.getByLabelText("Registered library origin")).toHaveTextContent("/?c=parts");
     });
     it("restores the Similar tab from a comparison return URL", async () => {
       renderDetail({ at: "/models/1?tab=similar&return_entry=library-position" });
 
-      expect(await screen.findByRole("tab", { name: /Similar/ })).toHaveAttribute(
+      expect(await screen.findByRole("tab", { name: "Overview" })).toHaveAttribute(
         "aria-selected",
         "true",
       );
@@ -816,12 +818,16 @@ describe("ModelDetail", () => {
 
     it("preserves the library return context while selecting a tab", async () => {
       renderDetail({ at: "/models/1?return_entry=library-position&collection=parts" });
-      await userEvent.click(await screen.findByRole("tab", { name: /Similar/ }));
+      await openActions(userEvent.setup());
+      await userEvent.click(screen.getByRole("menuitem", { name: "Similar models" }));
 
       expect(screen.getByLabelText("Current detail location")).toHaveTextContent(
         "/models/1?return_entry=library-position&collection=parts&tab=similar",
       );
-      expect(screen.getByRole("tab", { name: /Similar/ })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
     });
 
     it("restores the tab when browser history changes the current model URL", async () => {
@@ -831,7 +837,10 @@ describe("ModelDetail", () => {
       expect(screen.getByRole("tab", { name: /Files/ })).toHaveAttribute("aria-selected", "true");
 
       await userEvent.click(screen.getByRole("button", { name: "Previous detail" }));
-      expect(screen.getByRole("tab", { name: /Similar/ })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: "Overview" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
     });
 
     it("uses Overview for an unsupported tab URL", async () => {
@@ -880,13 +889,37 @@ describe("ModelDetail", () => {
           ],
         }),
       });
-      await user.click(await screen.findByRole("tab", { name: /Print settings/ }));
+      await user.click(await screen.findByRole("tab", { name: /^Print/ }));
+      await user.click(await screen.findByRole("button", { name: /^Print settings$/ }));
       await user.click(await screen.findByRole("button", { name: "Compare" }));
       await user.click(await screen.findByRole("button", { name: "Back to print settings" }));
       await waitFor(() => expect(screen.getByRole("button", { name: "Compare" })).toHaveFocus());
-      expect(screen.getByRole("tab", { name: /Print settings/ })).toHaveAttribute(
-        "aria-selected",
-        "true",
+      expect(screen.getByRole("button", { name: /^Print settings$/ })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+    });
+
+    it("compares two source files inside Files and restores focus", async () => {
+      const user = userEvent.setup();
+      renderDetail({
+        at: "/models/1?tab=files",
+        model: aModel({
+          files: [
+            aFile({ id: 21, file_type: "stl", original_filename: "first.stl" }),
+            aFile({ id: 22, file_type: "stl", original_filename: "second.stl", version: 2 }),
+          ],
+        }),
+      });
+      const compare = await screen.findByRole("button", {
+        name: /^Compare source files$/,
+      });
+      await user.click(compare);
+      expect(screen.getByRole("tab", { name: /^Files/ })).toHaveAttribute("aria-selected", "true");
+      expect(await screen.findByRole("heading", { name: /^Compare source files$/ })).toBeVisible();
+      await user.click(screen.getByRole("button", { name: /^Back to files$/ }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /^Compare source files$/ })).toHaveFocus(),
       );
     });
 
@@ -905,11 +938,12 @@ describe("ModelDetail", () => {
       renderDetail();
       await screen.findByText("Benchy");
 
-      await user.click(screen.getByRole("tab", { name: /Print settings/ }));
+      await user.click(screen.getByRole("tab", { name: /^Print/ }));
+      await user.click(screen.getByRole("button", { name: /^Print settings$/ }));
 
-      expect(screen.getByRole("tab", { name: /Print settings/ })).toHaveAttribute(
-        "aria-selected",
-        "true",
+      expect(screen.getByRole("button", { name: /^Print settings$/ })).toHaveAttribute(
+        "aria-current",
+        "page",
       );
     });
 
@@ -931,14 +965,14 @@ describe("ModelDetail", () => {
     it("offers it to someone who can see printers", async () => {
       renderDetail();
 
-      expect(await screen.findByRole("tab", { name: /History/ })).toBeInTheDocument();
+      expect(await screen.findByRole("tab", { name: /Activity/ })).toBeInTheDocument();
     });
 
     it("withholds it from someone who cannot", async () => {
       renderDetail({ auth: memberSession() });
 
       await screen.findByText("Benchy");
-      expect(screen.queryByRole("tab", { name: /History/ })).toBeNull();
+      expect(screen.queryByRole("tab", { name: /Activity/ })).toBeNull();
     });
 
     it("asks for no print history on that user's behalf", async () => {
@@ -1145,7 +1179,7 @@ describe("ModelDetail", () => {
       renderDetail();
 
       await screen.findByText("Benchy");
-      expect(screen.getByRole("tab", { name: /Print settings/ })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: /^Print/ })).toBeInTheDocument();
     });
 
     it("keeps a view-only user out of destructive actions", async () => {
@@ -1513,9 +1547,7 @@ describe("ModelDetail", () => {
     it("opens the share dialog", async () => {
       const user = userEvent.setup();
       renderDetail();
-      await openActions(user);
-
-      await user.click(screen.getByRole("menuitem", { name: /Share/ }));
+      await user.click(await screen.findByRole("button", { name: /^Share$/ }));
 
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
     });
@@ -1523,11 +1555,9 @@ describe("ModelDetail", () => {
     it("offers no sharing to a view-only user", async () => {
       // A share link hands the model to anybody holding it, which is more than
       // the viewer's own grant.
-      const user = userEvent.setup();
       renderDetail({ model: aModel({ effective_role: "view" }), auth: memberSession() });
-      await openActions(user);
 
-      expect(screen.getByRole("menuitem", { name: /Share/ })).toBeDisabled();
+      expect(await screen.findByRole("button", { name: /^Share$/ })).toBeDisabled();
     });
   });
   describe("resizing the details panel", () => {
@@ -1661,7 +1691,7 @@ describe("ModelDetail", () => {
         }),
       });
       await screen.findByText("Benchy");
-      await user.click(screen.getByRole("tab", { name: /Revisions/ }));
+      await user.click(screen.getByRole("tab", { name: /Print/ }));
 
       await user.click(await screen.findByRole("button", { name: "Add revision" }));
 
@@ -1680,7 +1710,7 @@ describe("ModelDetail", () => {
         auth: memberSession(),
       });
       await screen.findByText("Benchy");
-      await user.click(screen.getByRole("tab", { name: /Revisions/ }));
+      await user.click(screen.getByRole("tab", { name: /Print/ }));
 
       await user.click(await screen.findByRole("button", { name: "Add revision" }));
 

@@ -29,7 +29,7 @@ test.describe("model library", () => {
     const modelPath = new URL(page.url()).pathname;
 
     try {
-      await selectModelDetailTab(page, /History/);
+      await selectModelDetailTab(page, /Activity/);
       await page.getByRole("button", { name: "Add record", exact: true }).click();
       const dialog = page.getByRole("dialog", { name: "Add print record" });
       await dialog.getByRole("button", { name: "Printer", exact: true }).click();

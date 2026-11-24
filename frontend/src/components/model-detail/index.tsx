@@ -19,6 +19,9 @@ import { getSessionVersion, requireSessionVersion } from "@/lib/session-transpor
 import { Modal } from "@/components/ui/modal";
 import { InlineTitleEditor } from "@/components/inline-title-editor";
 import { ModelGeometry, ModelInformation } from "./model-information";
+import { ModelSourceSummary } from "./source-summary";
+import { RelatedProfiles } from "./related-profiles";
+import { ModelPrintSummary } from "./model-print-summary";
 import { ProjectProfile } from "./project-profile";
 import { useMeshGeometryMeasurement } from "./use-mesh-geometry-facts";
 import { RevisionPicker } from "./revision-picker";
@@ -43,18 +46,7 @@ import {
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import { useLocation } from "@tanstack/react-router";
-import {
-  Check,
-  ChevronDown,
-  FileText,
-  Link2,
-  Loader2,
-  MoreHorizontal,
-  Pencil,
-  Star,
-  Trash2,
-  Wifi,
-} from "lucide-react";
+import { Files, FileText, Loader2, MoreHorizontal, Pencil, Star, Trash2 } from "lucide-react";
 
 import type {
   STLViewerControls,
@@ -92,7 +84,9 @@ import { DocumentBrowser } from "@/components/document-browser";
 import { FilesTab } from "./files-tab";
 import { ModelMetadataFields, type ModelMetaEditor } from "./model-metadata-fields";
 import {
-  TABS,
+  DETAIL_SECTIONS,
+  modelDetailParent,
+  modelDetailSectionLabel,
   TabKey,
   buildPrintSettingRows,
   normalizeRecommendedGcodeFiles,
@@ -148,7 +142,8 @@ interface BedSize {
 }
 
 const DETAIL_SIDEBAR_STORAGE_KEY = "ps-model-detail-inspector-preferred-width";
-const DETAIL_PRIMARY_TABS = new Set<TabKey>(["overview", "revisions", "files"]);
+const DETAIL_PRIMARY_TABS = ["overview", "files", "revisions", "history"] as const;
+const PRINT_DETAIL_SECTIONS = ["revisions", "settings", "costing"] as const;
 const DETAIL_SIDEBAR_MIN_WIDTH = 400;
 const DETAIL_SIDEBAR_MAX_WIDTH = 1100;
 
@@ -259,14 +254,17 @@ function ModelDetailPresentation({
   // there is nothing to re-sync while this view is open.
   const [metadataPreferences] = useState(readMetadataPreferences);
   const [addRevisionOpen, setAddRevisionOpen] = useState(false);
-  const requestedTab = TABS.find((tab) => tab.key === searchParams.get("tab"))?.key ?? "overview";
+  const requestedTab = DETAIL_SECTIONS.find((tab) => tab === searchParams.get("tab")) ?? "overview";
   const tabIntent = useRef(requestedTab);
   function selectTab(tab: TabKey) {
     // A click back to the visible tab must still supersede a pending navigation.
     if (tab === activeTab && tabIntent.current === tab) return;
     tabIntent.current = tab;
-    if (tab !== "revisions") setCompareOrigin(null);
-    if (tab !== "history") setHistoryDraft(null);
+    if (tab !== "revisions" && tab !== "files") setCompareOrigin(null);
+    if (tab !== "history") {
+      setHistoryDraft(null);
+      setHistoryRevisionId(null);
+    }
     const params = new URLSearchParams(searchParams);
     params.set("tab", tab);
     router.replace(`/models/${model.id}?${params}`, {
@@ -351,9 +349,9 @@ function ModelDetailPresentation({
   const compareFocus = useRef<TabKey | null>(null);
   function openComparison(origin: keyof typeof compareBackLabel) {
     setCompareOrigin(origin);
-    selectTab("revisions");
+    if (origin === "settings") selectTab("revisions");
   }
-  const [deliveryMode, setDeliveryMode] = useState<"send" | "queue">("send");
+  const [historyRevisionId, setHistoryRevisionId] = useState<number | null>(null);
   const [historyDraft, setHistoryDraft] = useState<{
     fileId: number;
     state: "completed" | "failed";
@@ -417,84 +415,25 @@ function ModelDetailPresentation({
     (!canEditModel && requestedTab === "similar")
       ? "overview"
       : requestedTab;
+  const activePrimary = modelDetailParent(activeTab);
   useLayoutEffect(() => {
-    if (compareFocus.current === activeTab) {
-      detailLayout.current?.querySelector<HTMLButtonElement>("[data-compare-origin]")?.focus();
-    }
+    if (compareFocus.current !== activeTab) return;
+    detailLayout.current?.querySelector<HTMLButtonElement>("[data-compare-origin]")?.focus();
     compareFocus.current = null;
-  }, [activeTab]);
+  }, [activeTab, compareOrigin]);
   const detailTabBody = useContentReveal(activeTab, { scroll: "parent" });
   const detailTabPanel = useRef<HTMLDivElement>(null);
-  const focusRevisionFromOverview = useRef(false);
+  const focusSection = useRef(false);
   useLayoutEffect(() => {
-    if (!focusRevisionFromOverview.current) return;
-    focusRevisionFromOverview.current = false;
-    if (activeTab === "revisions") detailTabPanel.current?.focus({ preventScroll: true });
+    if (!focusSection.current) return;
+    focusSection.current = false;
+    detailTabPanel.current?.focus({ preventScroll: true });
   }, [activeTab]);
-  const visibleTabs = useMemo(
-    () =>
-      TABS.filter(
-        (tab) =>
-          (tab.key !== "history" || canViewPrinters) && (tab.key !== "similar" || canEditModel),
-      ),
-    [canViewPrinters, canEditModel],
-  );
 
-  const [moreTabsOpen, setMoreTabsOpen] = useState(false);
-  const moreTabsButton = useRef<HTMLButtonElement>(null);
-  const [overflowKeys, setOverflowKeys] = useState<string[]>([]);
-  const tabsRow = useRef<HTMLDivElement>(null);
-  const measuredTabs = useRef<HTMLDivElement>(null);
-  const measuredMore = useRef<HTMLSpanElement>(null);
-  useLayoutEffect(() => {
-    const row = tabsRow.current;
-    const measurements = measuredTabs.current;
-    const more = measuredMore.current;
-    if (!row || !measurements || !more) return;
-    const fit = () => {
-      const available = row.clientWidth;
-      if (measurements.getBoundingClientRect().width <= available) {
-        setOverflowKeys((current) => (current.length === 0 ? current : []));
-        setMoreTabsOpen(false);
-        return;
-      }
-      const gap = Number.parseFloat(getComputedStyle(measurements).columnGap);
-      const widths = new Map(
-        Array.from(measurements.children, (element) => [
-          element.getAttribute("data-measured-tab"),
-          element.getBoundingClientRect().width,
-        ]),
-      );
-      let remaining =
-        available -
-        more.getBoundingClientRect().width -
-        Number.parseFloat(getComputedStyle(row).columnGap);
-      for (const tab of visibleTabs) {
-        if (DETAIL_PRIMARY_TABS.has(tab.key)) remaining -= (widths.get(tab.key) ?? 0) + gap;
-      }
-      const secondary = visibleTabs.filter((tab) => !DETAIL_PRIMARY_TABS.has(tab.key));
-      const visibleCount = secondary.findIndex((tab) => {
-        remaining -= (widths.get(tab.key) ?? 0) + gap;
-        return remaining < 0;
-      });
-      const next = secondary
-        .slice(visibleCount < 0 ? secondary.length : visibleCount)
-        .map((tab) => tab.key);
-      setOverflowKeys((current) =>
-        current.length === next.length && current.every((key, index) => key === next[index])
-          ? current
-          : next,
-      );
-    };
-    fit();
-    const observer = new ResizeObserver(fit);
-    observer.observe(row);
-    observer.observe(measurements);
-    observer.observe(more);
-    return () => observer.disconnect();
-  }, [previewExpanded, visibleTabs]);
-  const overflowTabs = visibleTabs.filter((tab) => overflowKeys.includes(tab.key));
-  const selectedOverflowTab = overflowTabs.find((tab) => tab.key === activeTab);
+  function openSection(tab: TabKey) {
+    if (tab !== activeTab) focusSection.current = true;
+    selectTab(tab);
+  }
 
   // Thumbnails and metadata arrive after upload, derived in the background.
   useDerivativeRefresh(model.id);
@@ -791,34 +730,34 @@ function ModelDetailPresentation({
     () => sortedFiles.filter((f) => f.file_type !== "gcode"),
     [sortedFiles],
   );
-  const tabItems = visibleTabs.map((tab) => {
-    const count =
-      tab.key === "revisions"
-        ? gcodeFiles.length
-        : tab.key === "files"
+  const tabItems = DETAIL_PRIMARY_TABS.filter((tab) => tab !== "history" || canViewPrinters).map(
+    (key) => {
+      const count =
+        key === "files"
           ? sourceFiles.length
-          : tab.key === "history"
-            ? printJobs.length
-            : 0;
-    return {
-      key: tab.key,
-      label: (
-        <>
-          {tab.label}
-          {count > 0 && <span className="model-detail-tab-count">{count}</span>}
-        </>
-      ),
-    };
-  });
+          : key === "revisions"
+            ? gcodeFiles.length
+            : key === "history"
+              ? printJobs.length
+              : 0;
+      return {
+        key,
+        label: (
+          <>
+            {modelDetailSectionLabel(key)}
+            {count > 0 && <span className="model-detail-tab-count"> {count}</span>}
+          </>
+        ),
+      };
+    },
+  );
 
   const recommendedGcode = gcodeFiles.find((f) => f.is_recommended) ?? null;
   const inspectedGcode = inspectedRevision(
     gcodeFiles,
     revisionSelection?.modelId === model.id ? revisionSelection.fileId : null,
   );
-  const latestFile = inspectedGcode ?? sortedFiles[sortedFiles.length - 1];
-  const meta = latestFile?.metadata;
-  const printSettingRows = buildPrintSettingRows(meta, metadataPreferences);
+  const overviewRevision = recommendedGcode ?? inspectedGcode;
   const requestedArtifact = Number(searchParams.get("artifact"));
   const meshCandidates = model.files.filter(
     (f) =>
@@ -837,6 +776,7 @@ function ModelDetailPresentation({
     meshCandidates.find((file) => file.id === requestedArtifact) ?? meshCandidates[0];
   const geometryMeasurement = useMeshGeometryMeasurement(meshFile ?? null);
   const hasGcode = gcodeFiles.length > 0;
+  const sliceableFile = sourceFiles.find((file) => ["stl", "3mf", "obj"].includes(file.file_type));
   const { sources: toolpathFiles, availability: toolpathAvailability } =
     useToolpathSources(sortedFiles);
   const hasToolpathPreview = toolpathAvailability === "available";
@@ -859,6 +799,20 @@ function ModelDetailPresentation({
       setToolpathSource({ modelId: model.id, revisionId: inspectedGcode?.id ?? null, fileId });
     }
   }
+  const previewRevision = gcodeFiles.find((file) => file.id === previewSource?.id);
+  const toolpathPlate =
+    inspectedSlicedPlate?.fileId === previewSource?.id ? inspectedSlicedPlate : null;
+  const toolpathLabel = [
+    previewRevision &&
+      uiText("Rev {value1}", {
+        value1: String(previewRevision.gcode_revision_number ?? previewRevision.version),
+      }),
+    toolpathPlate &&
+      uiText("Plate {value1}", { value1: String(toolpathPlate.number).padStart(2, "0") }),
+    previewSource?.original_filename,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const filePlates = useFilePlates(model.id, meshFile?.file_type === "3mf" ? meshFile.id : null);
   // A single plate is the whole build; only a multi-plate project offers a choice.
   const plates = filePlates !== null && filePlates.plates.length > 1 ? filePlates.plates : [];
@@ -873,6 +827,8 @@ function ModelDetailPresentation({
     !inspectedGcode && previewSource?.sliced_geometry === "gcode_only"
       ? previewSource
       : inspectedGcode;
+  const printSettingsFile =
+    slicedMetadataFile ?? sortedFiles.findLast((file) => file.file_type === "resin");
   const slicedEstimates = useGcodePlates(
     model.id,
     slicedMetadataFile?.original_filename.toLowerCase().endsWith(".3mf")
@@ -890,6 +846,22 @@ function ModelDetailPresentation({
       ? inspectedSlicedPlate.number
       : null
     : selectedEstimatePlate;
+  const costingPlate =
+    dispatchPlate === null || !inspectedGcode
+      ? undefined
+      : slicedEstimates?.plate_metadata?.find((entry) => entry.number === dispatchPlate);
+  const summaryEstimates = overviewRevision?.id === slicedMetadataFile?.id ? slicedEstimates : null;
+  function inspectRecommended() {
+    if (!overviewRevision) return;
+    setCompareOrigin(null);
+    setRevisionSelection({ modelId: model.id, fileId: overviewRevision.id });
+    openSection("revisions");
+  }
+  function prepareRecommended() {
+    if (!overviewRevision) return;
+    setRevisionSelection({ modelId: model.id, fileId: overviewRevision.id });
+    setSendOpen(true);
+  }
   const thumbUrl = useAuthenticatedAssetUrl(
     !meshFile && !hasToolpathPreview
       ? (model.previews?.large_cover_url ?? model.thumbnail_url)
@@ -1293,34 +1265,34 @@ function ModelDetailPresentation({
           }
         >
           <ModelSearchAction modelId={model.id} onSelect={() => setActionsOpen(false)} />
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setActionsOpen(false);
-              if (auth.isAuthenticated && canEditModel) setShareOpen(true);
-              else auth.showAuthRequiredToast();
-            }}
-            disabled={!auth.isAuthenticated || !canEditModel}
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
-          >
-            <Link2 className="h-4 w-4" />
-            {uiText(" Share")}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setActionsOpen(false);
-              if (auth.isAuthenticated && canEditModel) enterEdit();
-              else auth.showAuthRequiredToast();
-            }}
-            disabled={!auth.isAuthenticated || !canEditModel}
-            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
-          >
-            <Pencil className="h-4 w-4" />
-            {uiText(" Edit details")}
-          </button>
+          {canEditModel && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setActionsOpen(false);
+                openSection("similar");
+              }}
+              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none"
+            >
+              <Files className="size-4" aria-hidden />
+              {uiText("similarity.title")}
+            </button>
+          )}
+          {canEditModel && auth.isAuthenticated && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setActionsOpen(false);
+                enterEdit();
+              }}
+              className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none"
+            >
+              <Pencil className="h-4 w-4" aria-hidden />
+              {uiText("Edit details")}
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"
@@ -1502,7 +1474,7 @@ function ModelDetailPresentation({
                     viewerReady={viewerMode === "gcode" ? toolpathReady : viewerReady}
                     filename={
                       viewerMode === "gcode"
-                        ? previewSource?.original_filename
+                        ? toolpathLabel
                         : shownPlate && meshFile
                           ? `${meshFile.original_filename} · ${uiText("Plate {value1}", { value1: plateLabel(shownPlate) })}`
                           : meshFile?.original_filename
@@ -1561,123 +1533,88 @@ function ModelDetailPresentation({
               <span className="absolute left-1/2 top-1/2 h-10 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-border transition-colors duration-press group-hover:bg-primary group-focus-visible:bg-primary" />
             </div>
 
-            <div
-              ref={tabsRow}
-              className="model-detail-tabs relative flex shrink-0 items-center border-b"
-            >
-              <div
-                aria-hidden="true"
-                className="pointer-events-none invisible absolute inset-0 overflow-hidden"
-              >
-                <div ref={measuredTabs} className="model-detail-tab-list flex w-max">
-                  {tabItems.map((tab) => (
-                    <span
-                      key={tab.key}
-                      data-measured-tab={tab.key}
-                      className="model-detail-tab-label"
-                    >
-                      {tab.label}
-                    </span>
-                  ))}
-                </div>
-                <span
-                  ref={measuredMore}
-                  className="inline-flex w-max items-center gap-1 text-sm font-medium"
-                >
-                  {uiText("nav.more")}
-                  <ChevronDown className="h-3.5 w-3.5" />
-                </span>
-              </div>
+            <div className="model-detail-tabs shrink-0 overflow-x-auto border-b">
               <TabBar
-                tabs={tabItems.filter((tab) => !overflowKeys.includes(tab.key))}
-                active={selectedOverflowTab ? null : activeTab}
-                onChange={selectTab}
+                tabs={tabItems}
+                active={activePrimary}
+                onChange={(tab) => {
+                  setCompareOrigin(null);
+                  selectTab(tab);
+                }}
                 showIndicator={false}
                 className="model-detail-tab-list"
                 tabClassName="model-detail-tab-label relative h-10 px-0 py-0 text-secondary hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 activeTabClassName="text-foreground"
               />
-              {overflowTabs.length > 0 && (
-                <DropdownMenu
-                  portal
-                  open={moreTabsOpen}
-                  onOpenChange={setMoreTabsOpen}
-                  returnFocusRef={moreTabsButton}
-                  aria-label={uiText("More tabs")}
-                  contentClassName="w-44 border border-border bg-popover p-1 text-popover-foreground shadow-lg"
-                  className="ml-auto shrink-0"
-                  trigger={
-                    <Button
-                      ref={moreTabsButton}
-                      type="button"
-                      variant="ghost"
-                      aria-label={uiText("More tabs")}
-                      aria-haspopup="menu"
-                      aria-expanded={moreTabsOpen}
-                      title={selectedOverflowTab?.label}
-                      data-active={selectedOverflowTab ? "true" : undefined}
-                      className="model-detail-tab-overflow relative h-10 gap-1 rounded-none px-0 text-sm font-medium"
-                      onClick={() => setMoreTabsOpen((open) => !open)}
-                    >
-                      {uiText("nav.more")}
-                      <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-                    </Button>
-                  }
-                >
-                  {overflowTabs.map((tab) => (
-                    <Button
-                      key={tab.key}
-                      variant="ghost"
-                      role="menuitemradio"
-                      aria-checked={activeTab === tab.key}
-                      className="w-full justify-between"
-                      onClick={() => {
-                        selectTab(tab.key);
-                        setMoreTabsOpen(false);
-                        moreTabsButton.current?.focus();
-                      }}
-                    >
-                      {tab.label}
-                      {activeTab === tab.key && <Check className="h-4 w-4" aria-hidden />}
-                    </Button>
-                  ))}
-                </DropdownMenu>
-              )}
             </div>
+            {activePrimary === "revisions" && (
+              <nav
+                aria-label={uiText("modelDetail.printSections")}
+                className="mx-5 flex flex-wrap gap-1 border-b border-border py-2"
+              >
+                {PRINT_DETAIL_SECTIONS.map((section) => (
+                  <Button
+                    key={section}
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-current={section === activeTab ? "page" : undefined}
+                    className={
+                      section === activeTab ? "bg-accent text-accent-foreground" : undefined
+                    }
+                    onClick={() => {
+                      setCompareOrigin(null);
+                      openSection(section);
+                    }}
+                  >
+                    {section === "revisions"
+                      ? uiText("Revisions")
+                      : modelDetailSectionLabel(section)}
+                  </Button>
+                ))}
+              </nav>
+            )}
             <div
               ref={detailTabPanel}
               role="tabpanel"
               tabIndex={0}
-              aria-label={visibleTabs.find((tab) => tab.key === activeTab)?.label}
+              aria-label={modelDetailSectionLabel(activeTab)}
               className="model-detail-content focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring flex-1 min-h-0 overflow-y-auto p-4"
             >
               <div ref={detailTabBody} className="model-detail-tab-body space-y-4">
                 {activeTab === "overview" && (
-                  <ModelInformation
-                    model={model}
-                    canEdit={canEditModel}
-                    recommendedRevision={
-                      recommendedGcode
-                        ? {
-                            file: recommendedGcode,
-                            open: () => {
-                              setCompareOrigin(null);
-                              setRevisionSelection({
-                                modelId: model.id,
-                                fileId: recommendedGcode.id,
-                              });
-                              focusRevisionFromOverview.current = true;
-                              selectTab("revisions");
-                            },
-                          }
-                        : null
-                    }
-                    onEdit={() => enterEdit("details")}
-                    onTags={() => {
-                      setTagDialogSession((value) => value + 1);
-                      setTagDialogOpen(true);
-                    }}
-                  />
+                  <>
+                    <ModelPrintSummary
+                      revision={overviewRevision}
+                      estimates={summaryEstimates}
+                      selectedPlate={
+                        overviewRevision?.id === inspectedGcode?.id ? dispatchPlate : null
+                      }
+                      results={
+                        printJobQuery.isSuccess && overviewRevision
+                          ? printJobs.filter((job) => job.file_id === overviewRevision.id).length
+                          : null
+                      }
+                      source={sliceableFile}
+                      onReview={inspectRecommended}
+                      onPrepare={canViewPrinters ? prepareRecommended : undefined}
+                      onAddRevision={
+                        canEditModel && auth.isAuthenticated ? requestAddRevision : undefined
+                      }
+                      onFiles={() => openSection("files")}
+                    />
+                    <div className="grid items-start gap-y-6 @2xl:grid-cols-2 @2xl:gap-x-8">
+                      <ModelInformation
+                        model={model}
+                        canEdit={canEditModel}
+                        onTags={() => {
+                          setTagDialogSession((value) => value + 1);
+                          setTagDialogOpen(true);
+                        }}
+                      />
+                      <ModelSourceSummary modelId={model.id} sourceUrl={model.source_url} />
+                    </div>
+                  </>
                 )}
 
                 {activeTab === "costing" && (
@@ -1688,21 +1625,39 @@ function ModelDetailPresentation({
                       (file) => file.file_type === "stl" || file.file_type === "gcode",
                     )}
                     initialFileId={inspectedGcode?.id ?? meshFile?.id ?? null}
+                    plateEstimate={
+                      costingPlate && inspectedGcode
+                        ? {
+                            fileId: inspectedGcode.id,
+                            number: costingPlate.number,
+                            metadata: costingPlate.metadata,
+                          }
+                        : undefined
+                    }
                     jobs={printJobs}
                     canEdit={canEditModel && auth.isAuthenticated}
                     admin={canViewPrinters}
+                    onAddRevision={
+                      canEditModel && auth.isAuthenticated ? requestAddRevision : undefined
+                    }
+                    onFiles={() => openSection("files")}
                   />
                 )}
 
                 {activeTab === "settings" && (
                   <SettingsTab
-                    meta={meta}
-                    printSettingRows={printSettingRows}
+                    meta={printSettingsFile?.metadata}
+                    printSettingRows={buildPrintSettingRows(
+                      printSettingsFile?.metadata,
+                      metadataPreferences,
+                    )}
                     preferences={metadataPreferences}
                     hasSlicedRevision={gcodeFiles.length > 0 || gcodeOnly}
-                    sourceProject={
-                      meshFile?.file_type === "3mf" ? (
-                        <ProjectProfile modelId={model.id} fileId={meshFile.id} />
+                    emptyAction={
+                      !printSettingsFile ? (
+                        <Button size="sm" variant="outline" onClick={() => openSection("files")}>
+                          {uiText("View source files")}
+                        </Button>
                       ) : undefined
                     }
                     plateEstimates={slicedEstimates}
@@ -1755,16 +1710,14 @@ function ModelDetailPresentation({
                   />
                 )}
 
+                {(activeTab === "similar" || activeTab === "source") && (
+                  <Button size="sm" variant="outline" onClick={() => openSection("overview")}>
+                    {uiText("Back to overview")}
+                  </Button>
+                )}
                 {activeTab === "similar" && canEditModel && <SimilarityQueue modelId={model.id} />}
                 {activeTab === "source" && (
-                  <>
-                    <ModelGeometry
-                      modelId={model.id}
-                      sourceFile={meshFile ?? null}
-                      measurement={geometryMeasurement}
-                    />
-                    <SourceTab modelName={model.name} modelId={model.id} canEdit={canEditModel} />
-                  </>
+                  <SourceTab modelName={model.name} modelId={model.id} canEdit={canEditModel} />
                 )}
 
                 {activeTab === "revisions" && canViewPrinters && printerFileQuery.isError && (
@@ -1772,8 +1725,19 @@ function ModelDetailPresentation({
                     {uiText("Retry")}
                   </Button>
                 )}
-                {activeTab === "revisions" && (
+                {(activeTab === "revisions" ||
+                  (activeTab === "files" && compareOrigin === "files")) && (
                   <RevisionsTab
+                    key={activeTab}
+                    onFiles={() => openSection("files")}
+                    onActivity={
+                      canViewPrinters
+                        ? (fileId) => {
+                            setHistoryRevisionId(fileId);
+                            openSection("history");
+                          }
+                        : undefined
+                    }
                     printerless={printerless}
                     plateEstimates={slicedEstimates}
                     selectedPlate={selectedEstimatePlate}
@@ -1791,24 +1755,19 @@ function ModelDetailPresentation({
                       compareOrigin
                         ? () => {
                             compareFocus.current = compareOrigin;
+                            setCompareOrigin(null);
                             selectTab(compareOrigin);
                           }
                         : undefined
                     }
                     comparisonMode={compareOrigin === "files" ? "source" : "gcode"}
                     jobs={canViewPrinters && printJobQuery.isSuccess ? printJobs : null}
-                    onSend={
-                      canViewPrinters
-                        ? (mode) => {
-                            setDeliveryMode(mode);
-                            setSendOpen(true);
-                          }
-                        : undefined
-                    }
+                    onSend={canViewPrinters ? () => setSendOpen(true) : undefined}
                     onSettings={() => selectTab("settings")}
                     onLogPrint={
                       canViewPrinters && canEditModel && auth.isAuthenticated
                         ? (fileId, state) => {
+                            setHistoryRevisionId(fileId);
                             setHistoryDraft({ fileId, state });
                             selectTab("history");
                           }
@@ -1824,11 +1783,29 @@ function ModelDetailPresentation({
                   />
                 )}
 
-                {activeTab === "files" && (
+                {activeTab === "files" && compareOrigin !== "files" && (
                   <div className="space-y-5">
                     <FilesTab
                       modelId={model.id}
-                      onCompare={() => openComparison("files")}
+                      onCompare={
+                        sourceFiles.length >= 2 ? () => openComparison("files") : undefined
+                      }
+                      fileDetails={(file) =>
+                        file.file_type === "3mf" || meshFile?.id === file.id ? (
+                          <>
+                            {file.file_type === "3mf" && (
+                              <ProjectProfile modelId={model.id} fileId={file.id} />
+                            )}
+                            {meshFile?.id === file.id && (
+                              <ModelGeometry
+                                modelId={model.id}
+                                sourceFile={file}
+                                measurement={geometryMeasurement}
+                              />
+                            )}
+                          </>
+                        ) : null
+                      }
                       sourceFiles={sourceFiles}
                       previewFailure={
                         meshFile &&
@@ -1841,6 +1818,7 @@ function ModelDetailPresentation({
                       canEdit={canEditModel}
                       onModel={setModel}
                     />
+                    <RelatedProfiles modelId={model.id} />
                     {auth.isAuthenticated && (
                       <DocumentBrowser key={model.id} modelId={model.id} canCreate={canEditModel} />
                     )}
@@ -1861,6 +1839,15 @@ function ModelDetailPresentation({
                         jobs={printJobs}
                         modelId={model.id}
                         gcodeFiles={gcodeFiles}
+                        revisionFilter={historyRevisionId}
+                        onRevisionFilter={setHistoryRevisionId}
+                        onAddRevision={
+                          canEditModel && auth.isAuthenticated ? requestAddRevision : undefined
+                        }
+                        onOpenRevision={(fileId) => {
+                          setRevisionSelection({ modelId: model.id, fileId });
+                          openSection("revisions");
+                        }}
                         onJobCreated={(job) => {
                           setHistoryDraft(null);
                           void printJobQuery.publish(job);
@@ -1872,37 +1859,19 @@ function ModelDetailPresentation({
               </div>
             </div>
 
-            {/* Klipper Sync Panel */}
-            <div className="detail-context-footer border-t border-outline-variant bg-surface-container-low shrink-0 space-y-2">
-              {gcodeFiles.length > 0 && canViewPrinters && (
-                <SendToButtons
-                  modelName={model.name}
-                  gcodeFiles={gcodeFiles}
-                  printerFiles={printerFiles}
-                  open={sendOpen}
-                  onOpenChange={setSendOpen}
-                  preselectFileId={inspectedGcode?.id}
-                  preselectPlate={dispatchPlate}
-                  compact
-                  initialDeliveryMode={deliveryMode}
-                />
-              )}
-              {!hasGcode && (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs text-on-surface-variant uppercase tracking-wider">
-                      {uiText("Sync status")}
-                    </span>
-                    <div className="flex items-center gap-1.5 px-2 py-1 bg-surface-container-lowest border border-outline-variant rounded">
-                      <Wifi className="h-3 w-3 text-on-surface-variant" />
-                      <span className="font-mono text-xs text-on-surface-variant">
-                        {uiText("No G-code revision")}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
+            {hasGcode && canViewPrinters && (
+              <SendToButtons
+                modelName={model.name}
+                gcodeFiles={gcodeFiles}
+                printerFiles={printerFiles}
+                open={sendOpen}
+                onOpenChange={setSendOpen}
+                preselectFileId={inspectedGcode?.id}
+                preselectPlate={dispatchPlate}
+                showPrinterStatus={false}
+                initialDeliveryMode={printerless ? "queue" : "send"}
+              />
+            )}
           </div>
         </div>
       </div>

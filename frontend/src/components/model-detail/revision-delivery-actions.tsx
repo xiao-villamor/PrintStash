@@ -10,29 +10,17 @@ export function RevisionDeliveryActions({
 }: {
   printerless: boolean;
   size?: "sm";
-  onSend: (mode: "queue" | "send") => void;
+  onSend: () => void;
 }) {
   return (
     <>
-      {!printerless && (
-        <Button size={size} onClick={() => onSend("send")}>
-          <Printer3D className="size-4" aria-hidden />
-          {uiText("Send to printer")}
-        </Button>
-      )}
-      <Button
-        size={size}
-        variant={printerless ? "default" : "outline"}
-        onClick={() => onSend("queue")}
-      >
-        {uiText("Add to queue")}
+      <Button size={size} onClick={onSend}>
+        <Printer3D className="size-4" aria-hidden />
+        {uiText("modelDetail.preparePrint")}
       </Button>
       {printerless && (
         <Button asChild size={size} variant="outline">
-          <Link href="/printers">
-            <Printer3D className="size-4" aria-hidden />
-            {uiText("Manage printers")}
-          </Link>
+          <Link href="/printers">{uiText("Manage printers")}</Link>
         </Button>
       )}
     </>

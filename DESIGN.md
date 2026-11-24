@@ -150,11 +150,10 @@ information; when several technical views need separation, use the existing
 for a small set of related status values instead of a row of decorative badges.
 For current storage, lead with the provider and one active safety state. Keep
 paths readable but secondary; explain migration in its workflow, not in the
-status card. Similar candidates belong in each Model's Similar tab. The library-wide Similar
+status card. Model similarity is opened from the Model actions menu. The library-wide Similar
 models page, New collection and Select actions stay visible beside Filters in
 the library toolbar. On narrow panes, the actions wrap within the same toolbar.
-Keep these actions out of the sidebar and global header. Keep Model detail
-tabs in one row, with horizontal scrolling only when their labels cannot fit.
+Keep these actions out of the sidebar and global header. Keep Overview, Files, Print, and Activity in one row, with horizontal scrolling only when their labels cannot fit. Show print settings and costing within Print. Keep the first applicable print action with its state in Overview.
 Async settings cards keep their header and reserve the shape of their content
 with skeletons until initial reads settle. Do not expose a partial form whose
 provider fields appear later. Remote storage uses the same visible category and

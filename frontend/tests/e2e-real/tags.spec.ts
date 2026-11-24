@@ -26,7 +26,7 @@ test.describe("tags", () => {
 
     await page.reload();
     await expect(
-      page.getByRole("region", { name: "About this model" }).getByText(tag, { exact: true }),
+      page.getByRole("region", { name: "Model details" }).getByText(tag, { exact: true }),
     ).toBeVisible();
   });
 

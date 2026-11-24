@@ -91,6 +91,7 @@ export function SendToButtons({
   preselectPrinterId,
   commands = API_COMMANDS,
   compact = false,
+  showPrinterStatus = true,
   initialDeliveryMode = "send",
 }: {
   modelName?: string;
@@ -113,6 +114,7 @@ export function SendToButtons({
   preselectPrinterId?: number;
   commands?: SendToCommands;
   compact?: boolean;
+  showPrinterStatus?: boolean;
   initialDeliveryMode?: "send" | "queue";
 }) {
   useUiLocale();
@@ -540,135 +542,137 @@ export function SendToButtons({
           )}
           confirmLabel={uiText("Print anyway")}
         />
-        <div className={compact ? "detail-printer-status" : "space-y-3"}>
-          {compact ? (
-            <div className="detail-printer-summary">
-              <strong>{uiText("Printer status")}</strong>
-              {printersLoading ? (
-                <span>{uiText("Checking…")}</span>
-              ) : printers.length === 0 ? (
-                <span>{uiText("No printers")}</span>
-              ) : (
-                <>
-                  <span data-status={ready > 0 ? "ready" : undefined}>
-                    <i aria-hidden="true" />
-                    {uiText("{count} ready", { count: ready })}
-                  </span>
-                  {busy > 0 && (
-                    <span data-status="printing">
-                      <i aria-hidden="true" />
-                      {uiText("{count} in use", { count: busy })}
-                    </span>
-                  )}
-                  {unavailable > 0 && (
-                    <span>
-                      <i aria-hidden="true" />
-                      {uiText("{count} unavailable", { count: unavailable })}
-                    </span>
-                  )}
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="flex items-center justify-between gap-3">
-              <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                {uiText("Printer status")}
-              </span>
-              <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1">
+        {showPrinterStatus && (
+          <div className={compact ? "detail-printer-status" : "space-y-3"}>
+            {compact ? (
+              <div className="detail-printer-summary">
+                <strong>{uiText("Printer status")}</strong>
                 {printersLoading ? (
-                  <>
-                    <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {uiText("Checking…")}
-                    </span>
-                  </>
+                  <span>{uiText("Checking…")}</span>
                 ) : printers.length === 0 ? (
-                  <>
-                    <WifiOff className="h-3 w-3 text-muted-foreground" />
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {uiText("No printers")}
-                    </span>
-                  </>
-                ) : selectedPrinters.length > 0 && onlineCount > 0 ? (
-                  <>
-                    <span className="h-2 w-2 rounded-full bg-success" />
-                    <span className="font-mono text-xs font-bold tracking-wider text-success">
-                      {uiText("{value1}/{value2} online", {
-                        value1: String(onlineCount ?? ""),
-                        value2: String(selectedPrinters.length ?? ""),
-                      })}
-                    </span>
-                  </>
+                  <span>{uiText("No printers")}</span>
                 ) : (
                   <>
-                    <WifiOff className="h-3 w-3 text-warning" />
-                    <span className="font-mono text-xs capitalize text-warning">
-                      {uiText("No selected printer online")}
+                    <span data-status={ready > 0 ? "ready" : undefined}>
+                      <i aria-hidden="true" />
+                      {uiText("{count} ready", { count: ready })}
                     </span>
+                    {busy > 0 && (
+                      <span data-status="printing">
+                        <i aria-hidden="true" />
+                        {uiText("{count} in use", { count: busy })}
+                      </span>
+                    )}
+                    {unavailable > 0 && (
+                      <span>
+                        <i aria-hidden="true" />
+                        {uiText("{count} unavailable", { count: unavailable })}
+                      </span>
+                    )}
                   </>
                 )}
               </div>
-            </div>
-          )}
-          {displayError && !showSend && (
-            <div className="rounded border border-error/30 bg-error-container/20 p-2 text-2xs text-error font-mono break-words">
-              {displayError}
-            </div>
-          )}
-
-          {compact ? (
-            <Button asChild variant="ghost" size="sm">
-              <Link href="/printers">{uiText("Manage printers")}</Link>
-            </Button>
-          ) : printers.length === 0 ? (
-            <div className="space-y-2 rounded border border-outline-variant bg-surface-container-lowest p-3">
-              <div className="flex items-center gap-2">
-                <WifiOff className="h-4 w-4 text-on-surface-variant" />
-                <span className="font-mono text-xs uppercase tracking-wider text-on-surface">
-                  {uiText("No printers configured")}
+            ) : (
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+                  {uiText("Printer status")}
                 </span>
+                <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1">
+                  {printersLoading ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {uiText("Checking…")}
+                      </span>
+                    </>
+                  ) : printers.length === 0 ? (
+                    <>
+                      <WifiOff className="h-3 w-3 text-muted-foreground" />
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {uiText("No printers")}
+                      </span>
+                    </>
+                  ) : selectedPrinters.length > 0 && onlineCount > 0 ? (
+                    <>
+                      <span className="h-2 w-2 rounded-full bg-success" />
+                      <span className="font-mono text-xs font-bold tracking-wider text-success">
+                        {uiText("{value1}/{value2} online", {
+                          value1: String(onlineCount ?? ""),
+                          value2: String(selectedPrinters.length ?? ""),
+                        })}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <WifiOff className="h-3 w-3 text-warning" />
+                      <span className="font-mono text-xs capitalize text-warning">
+                        {uiText("No selected printer online")}
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
-              <p className="font-mono text-2xs text-on-surface-variant leading-relaxed">
-                {uiText("Connect a supported printer to send files directly from the Vault.")}
-              </p>
-              <Button asChild size="sm" className="mt-1 w-full">
-                <Link href="/printers">
-                  <Printer3D className="h-4 w-4" />
-                  {uiText(" Configure printer")}
-                </Link>
-              </Button>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              <Button
-                onClick={() => {
-                  if (!auth.isAuthenticated) {
-                    auth.showAuthRequiredToast();
-                    return;
-                  }
-                  setShowSend(true);
-                }}
-                disabled={!auth.isAuthenticated}
-                className="w-full"
-              >
-                {!auth.isAuthenticated ? (
-                  <>
-                    <Send className="h-4 w-4" />
-                    {uiText(" Sign in to send")}
-                  </>
-                ) : (
-                  <>
-                    <Send className="h-4 w-4" />
-                    {uiText(" Send to printer")}
-                  </>
-                )}
-              </Button>
-              <Button asChild variant="outline" size="sm" className="w-full">
+            )}
+            {displayError && !showSend && (
+              <div className="rounded border border-error/30 bg-error-container/20 p-2 text-2xs text-error font-mono break-words">
+                {displayError}
+              </div>
+            )}
+
+            {compact ? (
+              <Button asChild variant="ghost" size="sm">
                 <Link href="/printers">{uiText("Manage printers")}</Link>
               </Button>
-            </div>
-          )}
-        </div>
+            ) : printers.length === 0 ? (
+              <div className="space-y-2 rounded border border-outline-variant bg-surface-container-lowest p-3">
+                <div className="flex items-center gap-2">
+                  <WifiOff className="h-4 w-4 text-on-surface-variant" />
+                  <span className="font-mono text-xs uppercase tracking-wider text-on-surface">
+                    {uiText("No printers configured")}
+                  </span>
+                </div>
+                <p className="font-mono text-2xs text-on-surface-variant leading-relaxed">
+                  {uiText("Connect a supported printer to send files directly from the Vault.")}
+                </p>
+                <Button asChild size="sm" className="mt-1 w-full">
+                  <Link href="/printers">
+                    <Printer3D className="h-4 w-4" />
+                    {uiText(" Configure printer")}
+                  </Link>
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <Button
+                  onClick={() => {
+                    if (!auth.isAuthenticated) {
+                      auth.showAuthRequiredToast();
+                      return;
+                    }
+                    setShowSend(true);
+                  }}
+                  disabled={!auth.isAuthenticated}
+                  className="w-full"
+                >
+                  {!auth.isAuthenticated ? (
+                    <>
+                      <Send className="h-4 w-4" />
+                      {uiText(" Sign in to send")}
+                    </>
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4" />
+                      {uiText(" Send to printer")}
+                    </>
+                  )}
+                </Button>
+                <Button asChild variant="outline" size="sm" className="w-full">
+                  <Link href="/printers">{uiText("Manage printers")}</Link>
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
 
         <Modal
           open={showSend}

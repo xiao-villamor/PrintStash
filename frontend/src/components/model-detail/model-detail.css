@@ -153,9 +153,6 @@
 .detail-printer-status > div {
   flex: 1;
 }
-.detail-context-footer {
-  padding: 8px 20px;
-}
 .detail-choice-field {
   min-width: 0;
 }
@@ -539,8 +536,7 @@
   transform: scale(var(--scale-detail-enter));
   transition-duration: 0s;
 }
-.model-detail-tabs [role="tab"]::after,
-.model-detail-tab-overflow::after {
+.model-detail-tabs [role="tab"]::after {
   content: "";
   position: absolute;
   inset-inline: 0;

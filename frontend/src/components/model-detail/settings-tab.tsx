@@ -63,6 +63,7 @@ export function SettingsTab({
   revisionPicker,
   actions,
   sourceProject,
+  emptyAction,
   hasSlicedRevision = false,
   plateEstimates,
   selectedSlicedPlate = null,
@@ -74,6 +75,7 @@ export function SettingsTab({
   revisionPicker?: ReactNode;
   actions?: ReactNode;
   sourceProject?: ReactNode;
+  emptyAction?: ReactNode;
   hasSlicedRevision?: boolean;
   plateEstimates?: GcodePlates | null;
   selectedSlicedPlate?: number | null;
@@ -253,6 +255,15 @@ export function SettingsTab({
       },
     ],
   };
+  if (emptyAction) {
+    return (
+      <section className="space-y-2">
+        <h2 className="text-base font-semibold">{uiText("Print settings")}</h2>
+        <p className="text-sm text-muted-foreground">{uiText("No sliced G-code revisions yet.")}</p>
+        {emptyAction}
+      </section>
+    );
+  }
   return (
     <Localized>
       <section className="@container/settings space-y-5">

@@ -18,6 +18,8 @@ import { useOptionalI18n, type MessageKey } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 import { safeHttpUrl } from "@/components/model-detail/source-url";
+import { SourceLicenseFacts } from "./source-summary";
+import { sourceProviderName } from "./presentation";
 import type {
   ModelProvenanceRead,
   ModelSourceCoverRead,
@@ -603,8 +605,8 @@ function SourceTabContent({
                     )}
                   </div>
                   <div className="space-y-3 border-b border-border py-4">
-                    <h3 className="text-lg font-semibold capitalize">
-                      {source.provider}
+                    <h3 className="text-lg font-semibold">
+                      {sourceProviderName(source.provider)}
                       <span className="ml-2 text-xs font-normal normal-case text-muted-foreground">
                         {t("source.capturedStatus")}
                       </span>
@@ -623,6 +625,9 @@ function SourceTabContent({
                         source.canonical_url
                       )}
                     </p>
+                    <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5 text-sm">
+                      <SourceLicenseFacts fields={source.fields} />
+                    </dl>
                     <dl
                       className="grid grid-cols-2 gap-4 @xl/source:grid-cols-4"
                       data-testid="source-identity-panel"

@@ -1,3 +1,4 @@
+import { selectModelDetailTab } from "../../model-detail-navigation";
 /**
  * Inspect an existing Model using its real Artifacts, metadata and printer state.
  * This opt-in review opens controls without submitting edits, shares or prints.
@@ -67,7 +68,12 @@ test.describe("Existing Model review", () => {
           });
         };
         const tab = async (label: string) => {
-          await page.getByRole("tab", { name: new RegExp(`^${label}\\b`) }).click();
+          await selectModelDetailTab(
+            page,
+            new Set(["Overview", "Files", "Print", "Activity"]).has(label)
+              ? new RegExp(`^${label}\\b`)
+              : label,
+          );
           await expect(inspector).toHaveAttribute("aria-label", label);
         };
         const dismiss = async () => {
@@ -102,11 +108,11 @@ test.describe("Existing Model review", () => {
             // ── Every detail tab, retaining the data and empty states actually present ──
             for (const label of [
               "Overview",
-              "Source info",
+              "Source and license",
               "Print settings",
-              "Revisions",
+              "Print",
               "Files",
-              "History",
+              "Activity",
               "Similar",
             ]) {
               await tab(label);
@@ -117,14 +123,14 @@ test.describe("Existing Model review", () => {
               await capturePanel(label.toLowerCase().replaceAll(" ", "-"));
               if (label === "Overview") {
                 await expect(
-                  inspector.getByRole("heading", { name: "About this model" }),
+                  inspector.getByRole("heading", { name: "Model details" }),
                 ).toBeVisible();
                 await expect(
-                  inspector.getByRole("button", { name: /Recommended revision/ }),
+                  inspector.getByRole("button", { name: "View revision", exact: true }),
                 ).toBeVisible();
                 await expect(
-                  inspector.getByRole("button", { name: "Send to printer", exact: true }),
-                ).toHaveCount(0);
+                  inspector.getByRole("button", { name: "Prepare print", exact: true }),
+                ).toBeVisible();
               }
             }
             await inspector.getByRole("button", { name: "Filters", exact: true }).click();
@@ -150,15 +156,19 @@ test.describe("Existing Model review", () => {
             ).toBeVisible();
             await review.capture("source-file-tags-editor");
             await dismiss();
-            await tab("Revisions");
+            await tab("Print");
             const revisionButton = inspector.getByRole("button", {
               name: new RegExp(`^Rev ${sliced!.gcode_revision_number}\\b`),
             });
             if (revisions.length > 1) await revisionButton.click();
-            const revisionTab = page.getByRole("tab", { name: /^Revisions/ });
+            const revisionTab = page.getByRole("tab", { name: /^Print/ });
             await revisionTab.focus();
             await page.keyboard.press("Tab");
-            await expect(inspector).toBeFocused();
+            await expect(
+              page
+                .getByRole("navigation", { name: "Print sections" })
+                .getByRole("button", { name: "Revisions", exact: true }),
+            ).toBeFocused();
             const revisionEstimates = inspector.getByRole("region", { name: "Plate estimates" });
             if (slicedPlates.plates.length > 1) {
               await expect(revisionEstimates).toBeVisible();
@@ -272,7 +282,7 @@ test.describe("Existing Model review", () => {
             await expect(inspector.getByText(shared.printer_model!, { exact: true })).toBeVisible();
             await expect(inspector.getByText(shared.material_type!, { exact: true })).toBeVisible();
             await capturePanel("print-settings-extracted-values");
-            await tab("Revisions");
+            await tab("Print");
             await review.capture("revision-original-download");
             await inspector.getByRole("button", { name: "Edit revision", exact: true }).click();
             await review.capture("revision-editor");
@@ -287,7 +297,12 @@ test.describe("Existing Model review", () => {
                 .getByRole("button", { name: "Cancel selection", exact: true })
                 .click();
             }
-            await inspector.getByRole("button", { name: "Compare", exact: true }).click();
+            await inspector
+              .getByRole("button", {
+                name: revisions.length > 1 ? "Compare revisions" : "Compare files",
+                exact: true,
+              })
+              .click();
             if (revisions.length === 1 && model.files.length > 1) {
               await expect(
                 inspector.getByRole("heading", { name: "Compare files", exact: true }),
@@ -329,9 +344,11 @@ test.describe("Existing Model review", () => {
             await inspector.getByRole("button", { name: "Back to revisions", exact: true }).click();
 
             for (const [origin, triggerName, backName] of [
-              ["Files", "Compare", "Back to files"],
+              ["Files", "Compare source files", "Back to files"],
               ["Print settings", "Compare", "Back to print settings"],
             ] as const) {
+              if (origin === "Files" && model.files.length - revisions.length < 2) continue;
+              if (origin === "Print settings" && revisions.length < 2) continue;
               await tab(origin);
               const trigger = inspector.getByRole("button", { name: triggerName, exact: true });
               await trigger.click();
@@ -342,7 +359,7 @@ test.describe("Existing Model review", () => {
 
             // ── Inspect dialogs without saving, uploading, sharing or starting prints ──
             await tab("Files");
-            await tab("Revisions");
+            await tab("Print");
             await page.getByRole("button", { name: "More model actions", exact: true }).click();
             await review.capture("model-actions-menu");
             await page.getByRole("menuitem", { name: "Edit details" }).click();
@@ -364,7 +381,7 @@ test.describe("Existing Model review", () => {
             await page.getByRole("button", { name: "Share", exact: true }).click();
             await review.capture("share-dialog");
             await dismiss();
-            await tab("Revisions");
+            await tab("Print");
             await inspector.getByRole("button", { name: "Preview G-code" }).click();
             const slicedPicker = page.getByRole("group", { name: "Sliced plates", exact: true });
             await slicedPicker
@@ -372,16 +389,10 @@ test.describe("Existing Model review", () => {
                 name: new RegExp("^Plate " + String(slicedPlates.plates[1]).padStart(2, "0")),
               })
               .click();
-            const queue = inspector.getByRole("button", { name: "Add to queue", exact: true });
-            if (await page.getByText("No printers", { exact: true }).isVisible()) {
-              await expect(
-                inspector.getByRole("link", { name: "Manage printers" }),
-              ).toHaveAttribute("href", "/printers");
-              await expect(
-                inspector.getByRole("button", { name: "Send to printer", exact: true }),
-              ).toHaveCount(0);
-            }
-            const printerless = await page.getByText("No printers", { exact: true }).isVisible();
+            const prepare = inspector.getByRole("button", { name: "Prepare print", exact: true });
+            const printerless = await inspector
+              .getByRole("link", { name: "Manage printers", exact: true })
+              .isVisible();
             const expectedEstimates = new Map<number, string[]>();
             for (const number of slicedPlates.plates.slice(0, 2)) {
               const plate = revisionEstimates.getByRole("region", {
@@ -396,8 +407,9 @@ test.describe("Existing Model review", () => {
                 ),
               );
             }
-            await queue.click();
+            await prepare.click();
             const send = page.getByRole("dialog");
+            await send.getByRole("radio", { name: "Add to queue", exact: true }).check();
             const plateOption = (number: number) =>
               send.getByRole("group", { name: "Sliced plate", exact: true }).getByRole("radio", {
                 name: new RegExp("^Plate " + String(number).padStart(2, "0") + "\\b"),
@@ -449,7 +461,7 @@ test.describe("Existing Model review", () => {
             ).toBeVisible();
             await review.capture("queue-plate-selected");
             await dismiss();
-            await tab("History");
+            await tab("Activity");
             await page.getByRole("button", { name: "Add record", exact: true }).click();
             await review.capture("history-record-editor");
             await dismiss();
@@ -468,7 +480,7 @@ test.describe("Existing Model review", () => {
             );
             await page.reload();
             await collapseNavigationSidebar(page);
-            await tab("Source info");
+            await tab("Source and license");
             await expect(
               inspector.getByRole("button", { name: "Retry", exact: true }),
             ).toBeVisible();
@@ -487,7 +499,7 @@ test.describe("Existing Model review", () => {
             await capturePanel("source-recovered");
           } else {
             // ── Source plates: capture before/after Fit instead of hiding framing faults ──
-            await tab("Source info");
+            await tab("Source and license");
             await expect(
               page.getByRole("heading", { name: "Whole source geometry", exact: true }),
             ).toBeVisible();

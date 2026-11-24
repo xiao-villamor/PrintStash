@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Model details lead with the next print action, group revisions and production costs under Print, and keep source files, publication data, and recorded results in their own sections. Opening a source or profile preserves the return to the original library view.
+
 ### Added
 
 - Assign a printer cost profile to a connected printer. Prints launched from PrintStash show an estimated production cost, then record the cost of the completed, failed, or stopped run using available measurements. History identifies estimates and partial costs.

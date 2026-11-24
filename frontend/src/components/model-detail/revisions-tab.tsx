@@ -101,6 +101,8 @@ export function RevisionsTab({
   printerless = false,
   onSend,
   onSettings,
+  onFiles,
+  onActivity,
   onLogPrint,
   jobs = null,
 }: {
@@ -121,8 +123,10 @@ export function RevisionsTab({
   onReturnToOrigin?: () => void;
   comparisonMode?: ComparisonMode;
   printerless?: boolean;
-  onSend?: (mode: "send" | "queue") => void;
+  onSend?: () => void;
   onSettings?: () => void;
+  onFiles?: () => void;
+  onActivity?: (fileId: number) => void;
   onLogPrint?: (fileId: number, state: "completed" | "failed") => void;
   jobs?: ModelPrintJobRead[] | null;
 }) {
@@ -381,7 +385,7 @@ export function RevisionsTab({
                     setComparing(true);
                   }}
                 >
-                  {uiText("Compare")}
+                  {gcodeFiles.length >= 2 ? uiText("Compare revisions") : uiText("Compare files")}
                 </Button>
               )}
               {gcodeFiles.length > 1 && (
@@ -516,9 +520,15 @@ export function RevisionsTab({
           )}
           <div className="space-y-3">
             {gcodeFiles.length === 0 && (
-              <p className="font-mono text-xs text-on-surface-variant">
-                {uiText("No sliced G-code revisions yet.")}
-              </p>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p>{uiText("No sliced G-code revisions yet.")}</p>
+                <p>{uiText("modelDetail.sliceThenAdd")}</p>
+                {onFiles && (
+                  <Button size="sm" variant="outline" onClick={onFiles}>
+                    {uiText("View source files")}
+                  </Button>
+                )}
+              </div>
             )}
             {!comparing &&
               !selecting &&
@@ -571,7 +581,14 @@ export function RevisionsTab({
                             {f.revision_notes}
                           </p>
                         )}
-                        {gcodeFiles.length === 1 && <RevisionResults fileId={f.id} jobs={jobs} />}
+                        <div className="flex flex-wrap items-center gap-2 text-sm">
+                          <RevisionResults fileId={f.id} jobs={jobs} />
+                          {onActivity && (
+                            <Button size="xs" variant="ghost" onClick={() => onActivity(f.id)}>
+                              {uiText("modelDetail.viewActivity")}
+                            </Button>
+                          )}
+                        </div>
                       </div>
                       <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
                         {onSend && (
@@ -590,6 +607,34 @@ export function RevisionsTab({
                             {uiText("Download")}
                           </Button>
                         </div>
+                      </div>
+                      <div className="space-y-2">
+                        {fileMeta?.material_type && (
+                          <p className="text-sm text-muted-foreground">
+                            {uiText("Material")} · {fileMeta.material_type}
+                          </p>
+                        )}
+                        {plateEstimates && plateEstimates.plates.length > 1 ? (
+                          <PlateEstimates data={plateEstimates} selected={selectedPlate} />
+                        ) : (
+                          <dl
+                            aria-label={uiText("modelDetail.gcodeEstimate")}
+                            className="flex flex-wrap gap-x-6 text-sm"
+                          >
+                            <div>
+                              <dt className="text-xs text-muted-foreground">
+                                {uiText("Estimated time")}
+                              </dt>
+                              <dd>{formatDuration(fileMeta?.estimated_time_s ?? null)}</dd>
+                            </div>
+                            <div>
+                              <dt className="text-xs text-muted-foreground">
+                                {uiText("Filament weight")}
+                              </dt>
+                              <dd>{formatGrams(fileMeta?.filament_weight_g)}</dd>
+                            </div>
+                          </dl>
+                        )}
                       </div>
                       <details className="group border-t border-border pt-3">
                         <summary className="flex w-fit items-center gap-2 text-sm font-medium focus-visible:outline-ring">
@@ -618,24 +663,6 @@ export function RevisionsTab({
                               </div>
                             ))}
                           </dl>
-                          {plateEstimates && plateEstimates.plates.length > 1 ? (
-                            <PlateEstimates data={plateEstimates} selected={selectedPlate} />
-                          ) : (
-                            <dl className="flex flex-wrap gap-x-6 text-sm">
-                              <div>
-                                <dt className="text-xs text-muted-foreground">
-                                  {uiText("Estimated time")}
-                                </dt>
-                                <dd>{formatDuration(fileMeta?.estimated_time_s ?? null)}</dd>
-                              </div>
-                              <div>
-                                <dt className="text-xs text-muted-foreground">
-                                  {uiText("Filament weight")}
-                                </dt>
-                                <dd>{formatGrams(fileMeta?.filament_weight_g)}</dd>
-                              </div>
-                            </dl>
-                          )}
                           {onSettings && (
                             <Button size="xs" variant="ghost" onClick={onSettings}>
                               {uiText("Full print settings")}

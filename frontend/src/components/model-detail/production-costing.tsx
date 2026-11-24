@@ -24,6 +24,15 @@ import type {
 } from "@/types/production-costing";
 import { PricingTemplateControls } from "./pricing-template-controls";
 
+type PlateCostInput = {
+  fileId: number;
+  number: number;
+  metadata: {
+    estimated_time_s: number | null;
+    filament_weight_g: number | null;
+  };
+};
+
 type MaterialDraft = {
   key: number;
   name: string;
@@ -44,7 +53,7 @@ function blankMaterial(key: number): MaterialDraft {
   return { key, name: "", grams: "", rate: "", spoolId: null };
 }
 
-function makeDraft(file: FileRead, row: ArtifactCostingRead): Draft {
+function makeDraft(file: FileRead, row: ArtifactCostingRead, plate?: PlateCostInput): Draft {
   const saved = row.estimate;
   if (saved) {
     return {
@@ -63,11 +72,11 @@ function makeDraft(file: FileRead, row: ArtifactCostingRead): Draft {
     };
   }
   const metadata = file.metadata;
-  const grams = metadata?.filament_weight_g;
-  const time = metadata?.estimated_time_s;
+  const grams = plate ? plate.metadata.filament_weight_g : metadata?.filament_weight_g;
+  const time = plate ? plate.metadata.estimated_time_s : metadata?.estimated_time_s;
   return {
     pieces: "1",
-    minutes: time == null ? "" : String(time / 60),
+    minutes: time == null ? "" : String(Math.round((time / 60) * 100) / 100),
     materials: [
       {
         ...blankMaterial(0),
@@ -189,29 +198,54 @@ export function ProductionCosting({
   modelId,
   files,
   initialFileId,
+  plateEstimate,
   jobs,
   canEdit,
   admin,
+  onAddRevision,
+  onFiles,
 }: {
   modelId: number;
   files: FileRead[];
   initialFileId: number | null;
+  plateEstimate?: PlateCostInput;
   jobs: ModelPrintJobRead[];
   canEdit: boolean;
   admin: boolean;
+  onAddRevision?: () => void;
+  onFiles?: () => void;
 }) {
   const [selected, setSelected] = useState(initialFileId);
   const file = files.find((item) => item.id === selected) ?? files[0];
 
   if (!file)
     return (
-      <p className="text-sm text-muted-foreground">
-        {uiText("Add an STL or G-code file to estimate production costs.")}
-      </p>
+      <section className="space-y-3">
+        <h2 className="text-base font-semibold">{uiText("Costing")}</h2>
+        <p className="text-sm text-muted-foreground">
+          {uiText("Add an STL or G-code file to estimate production costs.")}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {onAddRevision && (
+            <Button size="sm" onClick={onAddRevision}>
+              {uiText("Add revision")}
+            </Button>
+          )}
+          {onFiles && (
+            <Button size="sm" variant="outline" onClick={onFiles}>
+              {uiText("View source files")}
+            </Button>
+          )}
+        </div>
+      </section>
     );
   return (
     <div className="space-y-4">
-      <FormField label={uiText("Artifact")}>
+      <div className="space-y-1">
+        <h2 className="text-base font-semibold">{uiText("Costing")}</h2>
+        <p className="text-sm text-muted-foreground">{uiText("modelDetail.costFileScope")}</p>
+      </div>
+      <FormField label={uiText("File")}>
         <select
           className={inputClasses}
           value={file.id}
@@ -219,6 +253,12 @@ export function ProductionCosting({
         >
           {files.map((item) => (
             <option key={item.id} value={item.id}>
+              {item.file_type === "gcode"
+                ? uiText("Rev {value1}", {
+                    value1: String(item.gcode_revision_number ?? item.version),
+                  })
+                : item.file_type.toUpperCase()}
+              {" · "}
               {item.original_filename}
             </option>
           ))}
@@ -228,6 +268,7 @@ export function ProductionCosting({
         key={file.id}
         modelId={modelId}
         file={file}
+        plate={plateEstimate?.fileId === file.id ? plateEstimate : undefined}
         jobs={jobs}
         canEdit={canEdit}
         admin={admin}
@@ -239,12 +280,14 @@ export function ProductionCosting({
 function ArtifactEstimate({
   modelId,
   file,
+  plate,
   jobs,
   canEdit,
   admin,
 }: {
   modelId: number;
   file: FileRead;
+  plate?: PlateCostInput;
   jobs: ModelPrintJobRead[];
   canEdit: boolean;
   admin: boolean;
@@ -332,6 +375,7 @@ function ArtifactEstimate({
       {canEdit && editing && (
         <EstimateForm
           file={file}
+          plate={plate}
           row={editing}
           jobs={jobs}
           admin={admin}
@@ -387,6 +431,7 @@ function ArtifactEstimate({
 
 function EstimateForm({
   file,
+  plate,
   row,
   jobs,
   admin,
@@ -396,6 +441,7 @@ function EstimateForm({
   onCancel,
 }: {
   file: FileRead;
+  plate?: PlateCostInput;
   row: ArtifactCostingRead;
   jobs: ModelPrintJobRead[];
   admin: boolean;
@@ -404,7 +450,8 @@ function EstimateForm({
   onSave: (estimate: ProductionInputs) => void;
   onCancel: () => void;
 }) {
-  const [draft, setDraft] = useState(() => makeDraft(file, row));
+  const [estimatePlate] = useState(() => (row.estimate ? undefined : plate));
+  const [draft, setDraft] = useState(() => makeDraft(file, row, estimatePlate));
   const focusFirstField = useCallback((field: HTMLInputElement | null) => {
     field?.focus();
   }, []);
@@ -441,6 +488,13 @@ function EstimateForm({
       onSubmit={submit}
     >
       <fieldset disabled={commands.save.isPending} className="space-y-4">
+        {estimatePlate && (
+          <p className="text-sm text-muted-foreground">
+            {uiText("modelDetail.plateCostSource", {
+              value1: String(estimatePlate.number).padStart(2, "0"),
+            })}
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <FormField label={uiText("Pieces per print")}>
             <Input

@@ -153,11 +153,11 @@ test.describe("Sliced G-code plates", () => {
           previewBox!.y + previewBox!.height,
         );
         const information = await page
-          .getByRole("region", { name: "About this model", exact: true })
+          .getByRole("region", { name: "Model details", exact: true })
           .boundingBox();
         expect(information!.x).toBeGreaterThanOrEqual(previewBox!.x + previewBox!.width);
         await page.keyboard.press("Control+Alt+b");
-        await expect(page.getByRole("heading", { name: "About this model" })).toBeHidden();
+        await expect(page.getByRole("heading", { name: "Model details" })).toBeHidden();
         expect(await clippedControls(panel)).toEqual([]);
         expect(await coveredControls(panel)).toEqual([]);
         await preview.scrollIntoViewIfNeeded();
@@ -167,8 +167,9 @@ test.describe("Sliced G-code plates", () => {
         });
 
         await page.keyboard.press("Escape");
-        await expect(page.getByRole("heading", { name: "About this model" })).toBeVisible();
-        await selectModelDetailTab(page, "Source info");
+        await expect(page.getByRole("heading", { name: "Model details" })).toBeVisible();
+        await selectModelDetailTab(page, /^Files/);
+        await page.getByText("File details", { exact: true }).click();
         await expect(panel.getByRole("tab", { name: "View", exact: true })).toHaveAttribute(
           "aria-selected",
           "true",
@@ -289,7 +290,7 @@ test.describe("Sliced G-code plates", () => {
     expect(addedPrinter.status()).toBe(201);
     const printerId = (await addedPrinter.json()).id;
     try {
-      await page.getByRole("tab", { name: /Revisions/ }).click();
+      await page.getByRole("tab", { name: /Print/ }).click();
       await page.getByRole("button", { name: "Add revision", exact: true }).click();
       const upload = page.getByRole("dialog", { name: "Add G-code revision" });
       await upload.locator("input[type=file]").setInputFiles({
@@ -313,7 +314,7 @@ test.describe("Sliced G-code plates", () => {
         .getByRole("button", { name: "Plate 02" })
         .click();
       await expect(page.getByRole("slider")).toBeVisible();
-      await page.getByRole("button", { name: "Send to printer", exact: true }).last().click();
+      await page.getByRole("button", { name: "Prepare print", exact: true }).click();
       const send = page.getByRole("dialog", { name: "Send Rev 2 to printer" });
       await expect(
         send

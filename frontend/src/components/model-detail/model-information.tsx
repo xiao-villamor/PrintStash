@@ -1,68 +1,32 @@
-import { RelatedProfiles } from "./related-profiles";
 import { GeometryReport } from "./geometry-report";
-import { ModelSourceSummary } from "./source-summary";
 import { Fragment } from "react";
-import { ChevronRight, ExternalLink, Star } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { meshGeometryFacts, type useMeshGeometryMeasurement } from "./use-mesh-geometry-facts";
 import { currentLocale, uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import type { FileRead, ModelRead } from "@/types";
-import { safeHttpUrl } from "./source-url";
 import { ModelDescription } from "./model-description";
 
 /** Model facts in Overview describe the Model independently of the inspected Revision. */
 export function ModelInformation({
   model,
   canEdit,
-  recommendedRevision,
-  onEdit,
   onTags,
 }: {
   model: ModelRead;
   canEdit: boolean;
-  recommendedRevision?: { file: FileRead; open: () => void } | null;
-  onEdit: () => void;
   onTags: () => void;
 }) {
   useUiLocale();
-  const sourceUrl = model.source_url ? safeHttpUrl(model.source_url) : null;
   const collectionNames = model.collection_label ? model.collection_label.split("/") : null;
-  const revision = recommendedRevision?.file;
   return (
-    <section aria-label={uiText("About this model")} className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold">{uiText("About this model")}</h2>
-        {canEdit && (
-          <Button size="sm" variant="outline" onClick={onEdit}>
-            {uiText("Edit details")}
-          </Button>
-        )}
-      </div>
-      {recommendedRevision && revision && (
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={recommendedRevision.open}
-          className="h-auto min-h-10 w-full justify-start gap-2.5 whitespace-normal border border-border px-3 py-2 text-start"
-        >
-          <Star className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-          <span className="flex min-w-0 grow flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <span className="text-muted-foreground">{uiText("Recommended revision")}</span>
-            <span className="min-w-0 font-semibold wrap-anywhere">
-              {uiText("Rev {value1}", {
-                value1: String(revision.gcode_revision_number ?? revision.version),
-              })}
-              {revision.revision_label && ` · ${revision.revision_label}`}
-            </span>
-          </span>
-          <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        </Button>
-      )}
+    <section aria-label={uiText("Model details")} className="min-w-0 space-y-3">
+      <h2 className="text-base font-semibold">{uiText("Model details")}</h2>
       {model.description?.trim() && <ModelDescription description={model.description} />}
-      <dl className="flex flex-wrap gap-x-10 gap-y-4 text-base [&_dt]:text-sm [&_dt]:font-medium [&_dt]:text-muted-foreground">
+      <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-3 text-sm [&_dt]:text-xs [&_dt]:font-medium [&_dt]:text-muted-foreground">
         {collectionNames && (
-          <div className="min-w-0 basis-full space-y-1">
+          <div className="min-w-0 space-y-1">
             <dt>{uiText("Collection")}</dt>
             <dd>
               <ol
@@ -88,7 +52,15 @@ export function ModelInformation({
             </dd>
           </div>
         )}
-        <div className="min-w-0 space-y-1">
+        <div className="col-start-2 space-y-1">
+          <dt>{uiText("Created")}</dt>
+          <dd>
+            {new Date(model.created_at).toLocaleDateString(currentLocale(), {
+              dateStyle: "medium",
+            })}
+          </dd>
+        </div>
+        <div className="col-span-full min-w-0 space-y-1">
           <dt>{uiText("Tags")}</dt>
           <dd className="flex flex-wrap items-center gap-1.5">
             {!canEdit && model.tags.length === 0 && uiText("None")}
@@ -116,29 +88,7 @@ export function ModelInformation({
             )}
           </dd>
         </div>
-        <div className="space-y-1">
-          <dt>{uiText("Created")}</dt>
-          <dd>{new Date(model.created_at).toLocaleDateString(currentLocale())}</dd>
-        </div>
-        {sourceUrl && (
-          <div className="space-y-1">
-            <dt>{uiText("Source")}</dt>
-            <dd>
-              <a
-                href={sourceUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 text-foreground underline-offset-4 hover:underline"
-              >
-                <ExternalLink className="size-3.5" aria-hidden="true" />
-                {uiText("Source model")}
-              </a>
-            </dd>
-          </div>
-        )}
       </dl>
-      <ModelSourceSummary modelId={model.id} />
-      <RelatedProfiles modelId={model.id} />
     </section>
   );
 }
