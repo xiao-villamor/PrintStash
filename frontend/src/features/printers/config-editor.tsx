@@ -96,7 +96,7 @@ function FileTree({
             size="sm"
             aria-current={file.path === selected ? "true" : undefined}
             disabled={disabled}
-            className="w-full justify-start gap-2 overflow-hidden aria-[current=true]:bg-accent aria-[current=true]:text-accent-foreground"
+            className="w-full justify-start gap-2 overflow-hidden aria-[current=true]:bg-foreground/10 aria-[current=true]:text-foreground"
             title={file.path}
             onClick={() => select(file.path)}
           >
@@ -374,7 +374,7 @@ function ConfigFileWorkspace({
                 </p>
               </div>
               <div
-                className="printer-config-editor border bg-background font-mono text-sm focus-within:ring-2 focus-within:ring-ring"
+                className="printer-config-editor rounded-lg border bg-background font-mono text-sm focus-within:ring-2 focus-within:ring-ring"
                 style={editorStyle}
               >
                 <div
@@ -422,9 +422,9 @@ function ConfigFileWorkspace({
                 </p>
               )}
               {reviewed && (
-                <section className="mt-3 space-y-2 rounded-md border p-3">
+                <section className="mt-3 space-y-2 rounded-lg border p-3">
                   <h3 className="text-sm font-semibold">{uiText("Current printer file")}</h3>
-                  <pre className="max-h-40 overflow-auto whitespace-pre border bg-muted/25 p-2 font-mono text-sm">
+                  <pre className="max-h-40 overflow-auto whitespace-pre rounded-md border bg-muted/25 p-2 font-mono text-sm">
                     {reviewed.content}
                   </pre>
                   <div className="flex flex-wrap gap-2">

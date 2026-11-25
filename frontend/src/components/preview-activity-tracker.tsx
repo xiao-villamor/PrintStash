@@ -2,9 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 
 import { getPreviewActivity } from "@/lib/api/work";
+import { derivativeFailureCause, derivativeFailureDetail } from "@/lib/derivative-failures";
 import { queryKeys } from "@/lib/query-client";
 import { previewProgress } from "@/lib/preview-activity";
-import { uiText } from "@/lib/locale";
+import { uiMessage, uiText } from "@/lib/locale";
 import { useLibraryStartup } from "@/lib/library-startup-context";
 import { createTask, updateTask } from "@/lib/task-center";
 
@@ -29,30 +30,53 @@ export function PreviewActivityTracker({ enabled }: { enabled: boolean }) {
     refetchInterval: (query) =>
       query.state.data !== undefined && query.state.data.remaining > 0 ? BUSY_MS : IDLE_MS,
   });
-  const taskId = useRef<string | null>(null);
+  const run = useRef<{ id: string; failureBaseline: number | null } | null>(null);
+  const lastObservedFailureAt = useRef<number | null | undefined>(undefined);
 
   useEffect(() => {
     if (!enabled || jobs.data === undefined) return;
-    const { remaining, failed } = jobs.data;
+    const { remaining, latest_failure: failure } = jobs.data;
+    const failureAt = failure ? Date.parse(failure.at) : null;
+    const previouslyObservedFailureAt = lastObservedFailureAt.current;
+    lastObservedFailureAt.current = failureAt;
     const progress = previewProgress(jobs.data);
     if (remaining > 0) {
       const patch = {
         status: "running",
         ...progress,
       } as const;
-      if (taskId.current === null) {
-        taskId.current = createTask({
-          title: uiText("Preparing previews"),
-          ambient: true,
-          ...patch,
-        });
-      } else updateTask(taskId.current, patch);
-    } else if (taskId.current !== null) {
-      updateTask(taskId.current, {
+      if (run.current === null) {
+        run.current = {
+          id: createTask({
+            title: uiText("Preparing previews"),
+            ambient: true,
+            ...patch,
+          }),
+          // Counts cover the entire library, including failures from earlier runs.
+          failureBaseline:
+            previouslyObservedFailureAt === undefined ? failureAt : previouslyObservedFailureAt,
+        };
+      } else updateTask(run.current.id, patch);
+    } else if (run.current !== null) {
+      const { failureBaseline } = run.current;
+      const newFailure =
+        failureAt !== null && (failureBaseline === null || failureAt > failureBaseline)
+          ? failure
+          : null;
+      const detail = newFailure
+        ? derivativeFailureDetail(derivativeFailureCause(newFailure.reason))
+        : progress.failed > 0
+          ? uiMessage(
+              "{completed} ready · {skipped} skipped · Earlier library failures ({failed})",
+              { completed: progress.succeeded, skipped: progress.skipped, failed: progress.failed },
+            )
+          : progress.detail;
+      updateTask(run.current.id, {
         ...progress,
-        status: failed > 0 ? "failed" : "completed",
+        status: newFailure ? "failed" : "completed",
+        detail,
       });
-      taskId.current = null;
+      run.current = null;
     }
   }, [enabled, jobs.data]);
 

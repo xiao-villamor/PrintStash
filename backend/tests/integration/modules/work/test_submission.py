@@ -212,7 +212,7 @@ class TestSubmit:
         self, work_engine, make_job, make_user, make_model, make_file, db_session
     ):
         from app.db.models import Job
-        from app.modules.derivatives.source import subject_key
+        from app.modules.derivatives.kinds import subject_key
         from app.modules.work import service
 
         actor = make_user()

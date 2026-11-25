@@ -222,7 +222,7 @@ describe("NotificationsPanel", () => {
       .mockResolvedValue({ ...EDIT_BASE, enabled: true, channels: [aChannel()] });
     renderPanel({ getNotificationsSettings: read });
     expect(await screen.findByRole("alert")).toBeVisible();
-    expect(screen.queryByText("No notification channels yet")).not.toBeInTheDocument();
+    expect(screen.queryByText(/No notification channels yet/)).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Retry notification settings" }));
     expect(await screen.findByText("Workshop webhook")).toBeVisible();
@@ -356,7 +356,7 @@ describe("NotificationsPanel", () => {
         .fn<NotificationsPanelDeps["setNotificationsEnabled"]>()
         .mockResolvedValue({ ...EDIT_BASE, enabled: true }),
     });
-    const toggle = await screen.findByRole("checkbox");
+    const toggle = await screen.findByRole("switch", { name: "Notifications" });
 
     await userEvent.click(toggle);
 
@@ -500,7 +500,7 @@ describe("NotificationsPanel", () => {
         .mockResolvedValue(receipt),
     });
 
-    await userEvent.click(await screen.findByRole("checkbox"));
+    await userEvent.click(await screen.findByRole("switch", { name: "Notifications" }));
 
     await waitFor(() =>
       expect(client.getQueryData<NotificationsSettings>(notificationKeys.settings)).toMatchObject(
@@ -711,12 +711,14 @@ describe("NotificationsPanel", () => {
       .mockRejectedValueOnce(failure)
       .mockResolvedValue({ ...EDIT_BASE, edit_version: 3, enabled: false });
     renderPanel({ getNotificationsSettings: read, setNotificationsEnabled: write });
-    await userEvent.click(await screen.findByRole("checkbox"));
+    await userEvent.click(await screen.findByRole("switch", { name: "Notifications" }));
 
     await userEvent.click(await screen.findByRole("button", { name: "Review current values" }));
     await userEvent.click(await screen.findByRole("button", { name: "Save revised changes" }));
 
-    await waitFor(() => expect(screen.getByRole("checkbox")).not.toBeChecked());
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: "Notifications" })).not.toBeChecked(),
+    );
     expect(write).toHaveBeenLastCalledWith(false, {
       base: { ...EDIT_BASE, edit_version: 2 },
       signal: expect.any(AbortSignal),
@@ -805,14 +807,14 @@ describe("NotificationsPanel", () => {
         .fn<NotificationsPanelDeps["setNotificationsEnabled"]>()
         .mockRejectedValue(new ApiError(412, "edit_conflict", "edit_conflict")),
     });
-    await userEvent.click(await screen.findByRole("checkbox"));
+    await userEvent.click(await screen.findByRole("switch", { name: "Notifications" }));
 
     await userEvent.click(await screen.findByRole("button", { name: "Review current values" }));
 
     expect(await screen.findByRole("button", { name: "Save revised changes" })).toBeDisabled();
     await userEvent.click(screen.getByRole("button", { name: "Use current values" }));
-    expect(screen.getByRole("checkbox")).not.toBeChecked();
-    expect(screen.getByRole("checkbox")).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "Notifications" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Notifications" })).toBeEnabled();
   });
 
   it("preserves a newer observed master receipt", async () => {
@@ -821,7 +823,7 @@ describe("NotificationsPanel", () => {
       .fn<NotificationsPanelDeps["setNotificationsEnabled"]>()
       .mockReturnValue(pending.promise);
     const { client } = renderPanel({ setNotificationsEnabled: write });
-    await userEvent.click(await screen.findByRole("checkbox"));
+    await userEvent.click(await screen.findByRole("switch", { name: "Notifications" }));
     await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
 
     act(() =>
@@ -837,7 +839,7 @@ describe("NotificationsPanel", () => {
       await pending.promise;
     });
 
-    expect(screen.getByRole("checkbox")).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Notifications" })).toBeChecked();
     expect(
       client.getQueryData<NotificationsSettings>(notificationKeys.settings)?.edit_version,
     ).toBe(3);
@@ -860,7 +862,7 @@ describe("NotificationsPanel", () => {
         .fn<NotificationsPanelDeps["setNotificationsEnabled"]>()
         .mockRejectedValue(new ApiError(412, "edit_conflict", "edit_conflict")),
     });
-    await userEvent.click(await screen.findByRole("checkbox"));
+    await userEvent.click(await screen.findByRole("switch", { name: "Notifications" }));
     await userEvent.click(await screen.findByRole("button", { name: "Review current values" }));
     await screen.findByRole("button", { name: "Use current values" });
     act(() =>
@@ -874,8 +876,10 @@ describe("NotificationsPanel", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Use current values" }));
 
-    await waitFor(() => expect(screen.getByRole("checkbox")).toBeEnabled());
-    expect(screen.getByRole("checkbox")).toBeChecked();
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: "Notifications" })).toBeEnabled(),
+    );
+    expect(screen.getByRole("switch", { name: "Notifications" })).toBeChecked();
     expect(client.getQueryData<NotificationsSettings>(notificationKeys.settings)?.edit_epoch).toBe(
       "b".repeat(32),
     );
@@ -896,14 +900,14 @@ describe("NotificationsPanel", () => {
     it("reads as on when notifications are enabled", async () => {
       renderPanel();
 
-      expect(await screen.findByRole("checkbox")).toBeChecked();
+      expect(await screen.findByRole("switch", { name: "Notifications" })).toBeChecked();
     });
 
     it("turns notifications off when the operator asks", async () => {
       const user = userEvent.setup();
       const { deps } = renderPanel();
 
-      await user.click(await screen.findByRole("checkbox"));
+      await user.click(await screen.findByRole("switch", { name: "Notifications" }));
 
       await waitFor(() =>
         expect(deps.setNotificationsEnabled).toHaveBeenCalledWith(false, {
@@ -922,7 +926,7 @@ describe("NotificationsPanel", () => {
           .fn<(enabled: boolean) => Promise<NotificationsSettings>>()
           .mockRejectedValue(new Error("nope")),
       });
-      const toggle = await screen.findByRole("checkbox");
+      const toggle = await screen.findByRole("switch", { name: "Notifications" });
 
       await user.click(toggle);
 
@@ -970,7 +974,7 @@ describe("NotificationsPanel", () => {
           .mockResolvedValue({ ...EDIT_BASE, enabled: true, channels: [] }),
       });
 
-      expect(await screen.findByText("No notification channels yet")).toBeInTheDocument();
+      expect(await screen.findByText(/No notification channels yet/)).toBeInTheDocument();
     });
 
     it("distinguishes a channel that disabled itself from one the operator turned off", async () => {
@@ -1335,7 +1339,7 @@ describe("NotificationsPanel", () => {
         pending.resolve();
         await pending.promise;
       });
-      expect(await screen.findByText("No notification channels yet")).toBeVisible();
+      expect(await screen.findByText(/No notification channels yet/)).toBeVisible();
     });
   });
 

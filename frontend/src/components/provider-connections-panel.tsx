@@ -2,11 +2,11 @@
 
 import { ImportReadiness } from "./import-readiness";
 
-import { SettingsGroupHead } from "@/components/settings-card";
+import { SettingsCard } from "@/components/settings-card";
 import { currentLocale } from "@/lib/locale";
 
 import { useEffect, useRef, useState } from "react";
-import { CloudUpload, ExternalLink } from "lucide-react";
+import {} from "lucide-react";
 
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Modal } from "@/components/ui/modal";
@@ -242,19 +242,11 @@ export function ProviderConnectionsPanel({
         checkedAt={Math.min(devicesQuery.dataUpdatedAt, connectionsQuery.dataUpdatedAt)}
       />
       <fieldset disabled={busy !== null || Boolean(loadError)} className="min-w-0">
-        <section
-          aria-labelledby="provider-connections-title"
-          className="overflow-hidden rounded border border-border bg-card"
+        <SettingsCard
+          title={t("settings.providerConnections.title")}
+          description={t("settings.providerConnections.description")}
         >
-          <SettingsGroupHead
-            icon={CloudUpload}
-            level={2}
-            id="provider-connections-title"
-            title={t("settings.providerConnections.title")}
-            description={t("settings.providerConnections.description")}
-            className="settings-card-head--flush"
-          />
-          <div className="space-y-0 px-4 pb-4 sm:pl-16 sm:pr-5">
+          <div className="space-y-0 px-4 pb-4 sm:px-5">
             {error && (
               <p role="alert" className="text-sm text-destructive">
                 {error}
@@ -362,31 +354,23 @@ export function ProviderConnectionsPanel({
               </Modal>
             </div>
           </div>
-        </section>
+        </SettingsCard>
 
-        <section
-          aria-labelledby="paired-browsers-title"
-          className="overflow-hidden rounded border border-border bg-card"
+        <SettingsCard
+          title={t("settings.pairedBrowsers.title")}
+          description={t("settings.pairedBrowsers.description")}
+          action={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void createPairing()}
+              loading={busy === "pairing"}
+            >
+              {t("settings.pairedBrowsers.createCode")}
+            </Button>
+          }
         >
-          <SettingsGroupHead
-            icon={ExternalLink}
-            level={2}
-            id="paired-browsers-title"
-            title={t("settings.pairedBrowsers.title")}
-            description={t("settings.pairedBrowsers.description")}
-            action={
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void createPairing()}
-                loading={busy === "pairing"}
-              >
-                {t("settings.pairedBrowsers.createCode")}
-              </Button>
-            }
-            className="settings-card-head--flush"
-          />
-          <div className="space-y-4 px-4 pb-4 sm:pl-16 sm:pr-5">
+          <div className="space-y-4 px-4 pb-4 sm:px-5">
             {pairing && (
               <div className="border border-border bg-card p-3" role="status">
                 <p className="text-xs text-muted-foreground">
@@ -429,7 +413,7 @@ export function ProviderConnectionsPanel({
               </div>
             )}
           </div>
-        </section>
+        </SettingsCard>
 
         <ConfirmModal
           open={disconnectTarget !== null}

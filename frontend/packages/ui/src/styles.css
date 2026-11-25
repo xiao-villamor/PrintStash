@@ -22,6 +22,9 @@
     --accent-foreground: #101828;
     --destructive: #b42318;
     --destructive-foreground: #ffffff;
+    --destructive-action: #a11c27;
+    --destructive-action-foreground: #ffffff;
+    --destructive-action-hover: #861726;
     --border: #e4e7ec;
     --border-strong: #cdd3db;
     --overlay-scrim: rgb(16 24 40 / 0.28);
@@ -29,7 +32,8 @@
     --dialog-shadow: rgb(16 24 40 / 0.12);
     --input: #8190a3;
     --ring: #4d6f9b;
-    --radius: 0px;
+    --radius: 6px;
+    --radius-popover: 8px;
     --primary-hover: #41638e;
     --primary-soft: rgb(77 111 155 / 0.4);
     --success: #067647;
@@ -59,8 +63,10 @@
     --muted-foreground: #8c97a8;
     --accent: rgb(255 255 255 / 0.08);
     --accent-foreground: #edf1f7;
-    --destructive: #f87171;
-    --destructive-foreground: #450a0a;
+    --destructive: #e08585;
+    --destructive-foreground: #2b1214;
+    --destructive-action: #8a3a40;
+    --destructive-action-hover: #9c474d;
     --border: #232a35;
     --border-strong: #36404e;
     --overlay-scrim: rgb(0 0 0 / 0.45);

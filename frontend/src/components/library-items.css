@@ -120,11 +120,11 @@
   opacity: 1;
 }
 
+/* Rings are box-shadows so they follow the card's rounded corners. */
 .library-model-card[data-inspected],
 .library-model-row[data-inspected] {
   border-color: var(--ring);
-  outline: 1px solid var(--ring);
-  outline-offset: -1px;
+  box-shadow: 0 0 0 1px var(--ring);
 }
 
 .library-model-card:not([data-favorites]) :is(.library-preview, .library-preview-controls) {
@@ -170,6 +170,7 @@
 .library-card-revision-line strong {
   flex-shrink: 0;
   white-space: nowrap;
+  color: var(--foreground);
   font: 600 13px/1.4 var(--font-mono);
 }
 .library-card-recommended,
@@ -246,19 +247,6 @@
     padding-right: 68px;
   }
 }
-.library-card-status {
-  position: absolute;
-  right: 6px;
-  top: 6px;
-  max-width: calc(100% - 56px);
-}
-.library-card-status > span {
-  height: 20px;
-  padding: 0 2px;
-  gap: 5px;
-  font-weight: 500;
-  background: transparent;
-}
 .library-model-card:has(.library-preview[data-image-kind="photo"])
   > div
   > [role="checkbox"]:not([aria-checked="true"]),
@@ -267,13 +255,6 @@
   > div
   > [role="checkbox"]:not([aria-checked="true"]) {
   border-color: var(--muted-foreground);
-}
-.library-preview[data-image-kind="photo"] .library-card-status > span,
-.dark .library-preview[data-image-kind="slicer_render"] .library-card-status > span {
-  padding-inline: 6px;
-  background: var(--card);
-  color: var(--card-foreground);
-  border: 1px solid var(--border);
 }
 @media (prefers-reduced-motion: reduce) {
   .library-card-revision-actions {
@@ -329,15 +310,18 @@
 .library-card-summary-container .library-card-facts > span + span::before {
   margin-left: 6px;
 }
-.library-card-status > span {
-  color: var(--secondary);
-}
-.library-card-status [data-revision-status="needs_test"] > span:first-child {
-  background: var(--status-test-dot);
-}
 
 .library-model-card {
   container-type: inline-size;
+  isolation: isolate;
+}
+
+/* An image on its own compositing layer can escape its parent's rounded clip, so the
+   preview rounds its own top corners (one pixel inside the card's border). */
+.library-model-card .library-preview {
+  border-start-start-radius: calc(var(--radius-popover) - 1px);
+  border-start-end-radius: calc(var(--radius-popover) - 1px);
+  isolation: isolate;
 }
 /* Keep the selected surface opaque beneath the overlapping revision actions. */
 .library-model-card[data-selected]:not([data-favorites]) {
@@ -350,7 +334,16 @@
 }
 
 .library-model-card:not([data-inspected]):hover {
-  border-color: var(--border-strong);
+  border-color: color-mix(in srgb, var(--primary) 80%, var(--border-strong));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent),
+    0 12px 28px -12px rgb(0 0 0 / 0.6);
+}
+
+/* Keyboard focus rings the whole card, not the square link inside it. */
+.library-model-card:not([data-inspected]):has(:focus-visible) {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 1px var(--ring);
 }
 
 .library-model-card:not([data-favorites]) .library-preview {
@@ -358,12 +351,10 @@
   align-items: center;
   justify-content: center;
 }
-/* Clears the corner row so the status never sits against the part. */
+/* Thumbnails are 4:3, the card's image frame, so they fill it edge to edge. */
 .library-card-thumbnail {
-  box-sizing: border-box;
   width: 100%;
   height: 100%;
-  padding: 18px 10px 10px;
   object-fit: contain;
 }
 
@@ -383,25 +374,59 @@
 /* Preview shape and type stay consistent as the shared track grows. */
 .collection-card-collage {
   aspect-ratio: 2 / 1;
+  border-start-start-radius: calc(var(--radius-popover) - 1px);
+  border-start-end-radius: calc(var(--radius-popover) - 1px);
 }
 [data-compact] .collection-card-collage {
-  width: 72px;
-  height: 44px;
+  width: 100px;
+  height: 64px;
   aspect-ratio: auto;
+  border-radius: var(--radius);
+}
+
+/* A collection card answers the pointer like a model card does, in rounded rings. */
+.library-collection-card:not(:has(> button:disabled)):hover {
+  border-color: color-mix(in srgb, var(--primary) 80%, var(--border-strong));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent),
+    0 12px 28px -12px rgb(0 0 0 / 0.6);
+}
+.library-collection-card:has(> button:focus-visible) {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 1px var(--ring);
 }
 .collection-card-name {
   font-size: 1rem;
 }
 [data-compact] .collection-card-name {
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
+}
+[data-compact] .collection-card-count {
+  font-size: 0.8125rem;
 }
 
-/* A compact collection card's frame (44px collage + 14px padding + 2px border),
+/* A compact collection card's frame (64px collage + 18px padding + 2px border),
    so the reserved row has the height of the row that replaces it. */
 .library-collection-placeholder {
-  height: 60px;
+  height: 84px;
   border: 1px solid var(--border);
+  border-radius: var(--radius-popover);
   background: var(--card);
+}
+
+/* The find bar's current match: a steady ring, unlike the tree spotlight's fade. */
+.library-find-current {
+  position: relative;
+}
+
+.library-find-current::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  pointer-events: none;
+  border: 2px solid var(--ring);
+  border-radius: var(--radius-popover);
+  content: "";
 }
 
 .library-tree-spotlight {
@@ -427,5 +452,39 @@
 @media (prefers-reduced-motion: reduce) {
   .library-tree-spotlight::after {
     animation: none;
+  }
+}
+
+/* Status badge, revision and actions share one line; data and date share the next. */
+.library-card-revision-line {
+  gap: 8px;
+}
+.library-card-send {
+  color: var(--primary);
+}
+.library-card-data-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 17px;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font: 400 12px/1.4 var(--font-mono);
+}
+.library-card-data-row > .library-card-facts {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.library-card-data-row > time {
+  flex-shrink: 0;
+}
+/* Material joins the data line only when the card is wide enough to keep it whole. */
+.library-card-material {
+  display: none;
+}
+@container (min-width: 320px) {
+  .library-card-material {
+    display: inline;
   }
 }

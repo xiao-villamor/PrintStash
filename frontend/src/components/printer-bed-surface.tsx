@@ -1,5 +1,6 @@
 import { useId, useState, type CSSProperties } from "react";
 
+import { RefreshCw, Ruler } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { printerControlAvailability } from "@/features/printers/controls";
@@ -222,6 +223,7 @@ export function PrinterBedSurface({
             disabled={isFetching || measuring}
             onClick={() => void refresh()}
           >
+            <RefreshCw className="size-3.5" aria-hidden="true" />
             {uiText("Refresh bed mesh")}
           </Button>
           {permitted && (
@@ -231,6 +233,7 @@ export function PrinterBedSurface({
               disabled={!canMeasure}
               onClick={() => setConfirmation({ printerId, session })}
             >
+              <Ruler className="size-3.5" aria-hidden="true" />
               {uiText("Measure bed")}
             </Button>
           )}

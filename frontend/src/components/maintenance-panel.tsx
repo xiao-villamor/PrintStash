@@ -2,14 +2,13 @@ import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, Database, HardDrive, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle2, HardDrive, HeartPulse } from "lucide-react";
 
 import { AuditSchedulePanel } from "@/components/audit-schedule-panel";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { SettingsCard, SettingsGroupHead } from "@/components/settings-card";
+import { SettingsCard, SettingsEmptyRow } from "@/components/settings-card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -165,44 +164,36 @@ export function MaintenancePanel() {
   if (commands.retired) return null;
   return (
     <div className="settings-grouped settings-maintenance">
-      <Card role="region" aria-labelledby="maintenance-heading" className="overflow-hidden">
-        <SettingsGroupHead
-          icon={ShieldCheck}
-          level={2}
-          id="maintenance-heading"
+      <section aria-label={t("maintenance.checkNow")}>
+        <SettingsCard
           title={t("maintenance.checkNow")}
           description={t("maintenance.checkNowDescription")}
-          className="settings-card-head--flush"
-        />
-        <CardContent className="space-y-4 px-4 pb-4 pt-0 sm:pl-16 sm:pr-5">
-          <div className="divide-y divide-border">
-            <div className="flex flex-col items-stretch gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-                <h3 className="text-sm font-semibold">{t("auditSchedule.quick")}</h3>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t("maintenance.quickDescription")}
-                </p>
-              </div>
+        >
+          <div className="settings-list-row">
+            <div>
+              <h3 className="settings-list-title">{t("auditSchedule.quick")}</h3>
+              <p className="settings-list-meta">{t("maintenance.quickDescription")}</p>
+            </div>
+            <div>
               <Button
                 size="sm"
-                className="w-full sm:w-auto"
                 onClick={() => void start("quick")}
                 loading={busy}
                 disabled={busy || history.isPending || history.isError || denied || isActive(run)}
               >
+                <HeartPulse className="size-3.5" aria-hidden />
                 {t("maintenance.runQuick")}
               </Button>
             </div>
-            <div className="flex flex-col items-stretch gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-                <h3 className="text-sm font-semibold">{t("auditSchedule.full")}</h3>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t("maintenance.fullDescription")}
-                </p>
-              </div>
+          </div>
+          <div className="settings-list-row">
+            <div>
+              <h3 className="settings-list-title">{t("auditSchedule.full")}</h3>
+              <p className="settings-list-meta">{t("maintenance.fullDescription")}</p>
+            </div>
+            <div>
               <Button
                 size="sm"
-                className="w-full sm:w-auto"
                 variant="outline"
                 onClick={() => void start("full")}
                 loading={busy}
@@ -212,6 +203,10 @@ export function MaintenancePanel() {
               </Button>
             </div>
           </div>
+        </SettingsCard>
+      </section>
+      <SettingsCard title={uiText("Latest results")}>
+        <div className="space-y-4 py-4">
           {history.isError || denied ? (
             <div role="alert">
               <p>{t("auditSchedule.historyLoadFailed")}</p>
@@ -426,16 +421,15 @@ export function MaintenancePanel() {
               )}
             </>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </SettingsCard>
       <AuditSchedulePanel />
 
       <SettingsCard
-        icon={Database}
         title={t("maintenance.backupTitle")}
         description={t("maintenance.backupDescription")}
       >
-        <div className="settings-section-body">
+        <div>
           {catalog.isError ? (
             <div role="alert">
               <p>{t("maintenance.backupLoadFailed")}</p>
@@ -446,7 +440,7 @@ export function MaintenancePanel() {
           ) : catalog.isPending ? (
             <p role="status">{t("auditSchedule.loading")}</p>
           ) : backups.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t("maintenance.noBackups")}</p>
+            <SettingsEmptyRow>{t("maintenance.noBackups")}</SettingsEmptyRow>
           ) : (
             backups.map((item) => {
               const sourceRef = sourceKey(item);
@@ -532,6 +526,7 @@ export function MaintenancePanel() {
         onClose={() => setRepairTarget(null)}
         onConfirm={() => void confirmRepair()}
         title={uiText("Repair this finding?")}
+        variant="default"
         description={uiText(
           "PrintStash will apply the targeted repair and record the action in the audit log. Original Artifact bytes are never replaced by thumbnail or metadata repairs.",
         )}

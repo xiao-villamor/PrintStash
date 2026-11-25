@@ -32,8 +32,8 @@ from app.db.models import (
 )
 from app.modules.derivatives import kinds
 from app.modules.derivatives import source as source_module
-from app.modules.derivatives.kinds import group
-from app.modules.derivatives.source import DerivativeSource, file_id_of, subject_key
+from app.modules.derivatives.kinds import file_id_of, group, subject_key
+from app.modules.derivatives.source import DerivativeSource
 
 MESH = DerivativeSource(group(JobKind.DERIVATIVES_MESH))
 

@@ -4,7 +4,7 @@ import { uiText } from "@/lib/locale";
 import { useI18n, useUiLocale } from "@/lib/i18n";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { Loader2, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { SettingsCard, SettingsSwitch } from "@/components/settings-card";
@@ -20,6 +20,8 @@ import type { EditingBase } from "@/types/editing";
 import { parseApiError } from "@/lib/errors";
 import { toast } from "@/lib/toast";
 import type { VaultConfigRead, VaultConfigUpdate } from "@/types";
+
+const EXAMPLE_ISSUER_URL = "https://auth.example.com";
 
 type OidcDraft = Pick<
   VaultConfigRead,
@@ -221,7 +223,6 @@ function OidcEditor({
     <Localized>
       <div className="settings-grouped">
         <SettingsCard
-          icon={ShieldCheck}
           title={uiText("OpenID Connect")}
           description={uiText(
             "Connect Authentik, Authelia, Keycloak, or another standards-compatible identity provider. Local login stays available.",
@@ -331,7 +332,7 @@ function OidcEditor({
               label={uiText("Issuer URL")}
               value={draft.oidc_issuer_url}
               onChange={(event) => set("oidc_issuer_url", event.target.value)}
-              placeholder="https://auth.example.com/application/o/printstash"
+              placeholder={EXAMPLE_ISSUER_URL}
               disabled={loading || saving || retired}
             />
             <Field
@@ -398,7 +399,6 @@ function OidcEditor({
         </SettingsCard>
 
         <SettingsCard
-          icon={SlidersHorizontal}
           title={uiText("Advanced mapping")}
           description={uiText("Scopes, claims and callback overrides for your identity provider.")}
           footer={

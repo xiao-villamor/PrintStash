@@ -59,6 +59,7 @@ function aPrinterProfile(over: Partial<PrinterProfileRead> = {}): PrinterProfile
     printer_model: "Voron 2.4",
     slicer_name: null,
     nozzle_diameter_mm: 0.4,
+    expenses: null,
     notes: null,
     usage_count: 0,
     created_at: FROZEN_NOW,
@@ -72,7 +73,7 @@ async function openProfileRows() {
   for (const button of screen.queryAllByRole("button", { name: /^View details for / })) {
     await userEvent.click(button);
   }
-  for (const button of screen.queryAllByRole("button", { name: /^Edit profile / })) {
+  for (const button of screen.queryAllByRole("button", { name: /^Edit preset / })) {
     await userEvent.click(button);
   }
   const heading =
@@ -189,7 +190,7 @@ describe("FilamentProfilesCard", () => {
       fireEvent.change(await screen.findByRole("textbox", { name: "Filament preset name 1" }), {
         target: { value: "Local draft" },
       });
-      await user.click(screen.getByRole("button", { name: "New filament profile" }));
+      await user.click(screen.getByRole("button", { name: "New filament preset" }));
       await user.type(
         within(screen.getByRole("form", { name: "Create filament preset" })).getByRole("textbox", {
           name: "Name",
@@ -197,7 +198,7 @@ describe("FilamentProfilesCard", () => {
         "Second preset",
       );
 
-      await user.click(screen.getByRole("button", { name: "Add profile" }));
+      await user.click(screen.getByRole("button", { name: "Add preset" }));
 
       await waitFor(() =>
         expect(
@@ -287,7 +288,7 @@ describe("FilamentProfilesCard", () => {
       });
       fireEvent.change(existingName, { target: { value: "Unsaved existing row" } });
       const opener = screen.getByRole("button", {
-        name: kind === "filament" ? "New filament profile" : "New printer profile",
+        name: kind === "filament" ? "New filament preset" : "New printer preset",
       });
       await user.click(opener);
       const formName = kind === "filament" ? "Create filament preset" : "Create printer preset";
@@ -319,7 +320,7 @@ describe("FilamentProfilesCard", () => {
         if (kind === "printer") await user.click(screen.getByRole("tab", { name: /Printers/ }));
         await openProfileRows();
         const opener = screen.getByRole("button", {
-          name: kind === "filament" ? "New filament profile" : "New printer profile",
+          name: kind === "filament" ? "New filament preset" : "New printer preset",
         });
         await user.click(opener);
         const formName = kind === "filament" ? "Create filament preset" : "Create printer preset";
@@ -358,7 +359,7 @@ describe("FilamentProfilesCard", () => {
         seed: [[queryKeys.vaultConfig, config]],
         routes: { "GET /api/v1/config": json(config) },
       });
-      await userEvent.click(screen.getByRole("button", { name: "New filament profile" }));
+      await userEvent.click(screen.getByRole("button", { name: "New filament preset" }));
       expect(await screen.findByLabelText("Cost per kg (EUR)")).toHaveAccessibleDescription(
         "Euro per kilogram. Enter zero or a positive amount.",
       );
@@ -370,8 +371,9 @@ describe("FilamentProfilesCard", () => {
         auth: memberSession(),
         seed: [[queryKeys.vaultConfig, aVaultConfig({ currency: "EUR" })]],
       });
-      await userEvent.click(screen.getByRole("button", { name: "New filament profile" }));
-      expect(screen.getByLabelText("Cost per kg")).toHaveAccessibleDescription(
+      await userEvent.click(screen.getByRole("button", { name: "New filament preset" }));
+      const dialog = screen.getByRole("dialog", { name: "New filament preset" });
+      expect(within(dialog).getByLabelText("Cost per kg")).toHaveAccessibleDescription(
         "Enter zero or a positive amount.",
       );
       expect(
@@ -389,7 +391,7 @@ describe("FilamentProfilesCard", () => {
 
       await openForm(user);
 
-      expect(screen.getByRole("button", { name: "Add profile" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Add preset" })).toBeDisabled();
     });
 
     it("POSTs the preset the user described", async () => {
@@ -403,7 +405,7 @@ describe("FilamentProfilesCard", () => {
       await user.type(screen.getByPlaceholderText("Everyday PLA"), "PETG");
       await user.type(screen.getByPlaceholderText("PLA, PETG…"), "PETG");
 
-      await user.click(screen.getByRole("button", { name: "Add profile" }));
+      await user.click(screen.getByRole("button", { name: "Add preset" }));
 
       await waitFor(() =>
         expect(
@@ -427,7 +429,7 @@ describe("FilamentProfilesCard", () => {
       await openForm(user);
       await user.type(screen.getByPlaceholderText("Everyday PLA"), "PETG");
 
-      await user.click(screen.getByRole("button", { name: "Add profile" }));
+      await user.click(screen.getByRole("button", { name: "Add preset" }));
 
       await waitFor(() =>
         expect(
@@ -1400,6 +1402,35 @@ describe("FilamentProfilesCard", () => {
   });
 
   describe("creating a printer preset", () => {
+    it("saves operating expenses during initial creation", async () => {
+      const user = userEvent.setup();
+      const app = await renderCard({
+        at: "/profiles?tab=printers",
+        expand: false,
+        routes: {
+          "POST /api/v1/printer-profiles": json(aPrinterProfile({ id: 2, name: "Workshop" }), 201),
+        },
+      });
+      await user.click(screen.getByRole("button", { name: "New printer preset" }));
+      const dialog = screen.getByRole("dialog", { name: "New printer preset" });
+      await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "Workshop");
+      fireEvent.change(within(dialog).getByLabelText(/Purchase cost/), {
+        target: { value: "500" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("Expected lifetime (print hours)"), {
+        target: { value: "1000" },
+      });
+      await user.click(within(dialog).getByRole("button", { name: "Add preset" }));
+      await waitFor(() => {
+        const request = app
+          .requestsWithMethod("POST")
+          .find((entry) => entry.url.includes("printer-profiles"));
+        expect(JSON.parse(request?.body ?? "{}")).toMatchObject({
+          expenses: { acquisition_cost: 500, lifetime_hours: 1000 },
+        });
+      });
+    });
+
     it("POSTs the preset the user described", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = await renderCard({
@@ -1413,7 +1444,7 @@ describe("FilamentProfilesCard", () => {
       await user.click(screen.getByRole("button", { name: /New printer/ }));
       await user.type(screen.getByPlaceholderText("Voron 2.4 — 0.4 mm"), "Prusa MK4");
 
-      await user.click(screen.getByRole("button", { name: "Add profile" }));
+      await user.click(screen.getByRole("button", { name: "Add preset" }));
 
       await waitFor(() =>
         expect(
@@ -1547,7 +1578,10 @@ describe("Integrated profile settings", () => {
   it("offers settings within the existing tabs", async () => {
     const user = userEvent.setup();
     await renderCard();
-    expect(await screen.findByRole("button", { name: "Hide slicer settings" })).toBeVisible();
+    const settings = await screen.findByRole("button", { name: "Slicer settings and variants" });
+    expect(settings).toHaveAttribute("aria-expanded", "false");
+    await user.click(settings);
+    expect(settings).toHaveAttribute("aria-expanded", "true");
     expect(screen.queryByRole("tab", { name: "Detected settings" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: /Printers/ }));
     await openProfileRows();
@@ -1618,7 +1652,7 @@ describe("Profile selection", () => {
     expect(
       screen.queryByRole("textbox", { name: "Filament preset name 2" }),
     ).not.toBeInTheDocument();
-    const edit = screen.getByRole("button", { name: "Edit profile Workshop PETG" });
+    const edit = screen.getByRole("button", { name: "Edit preset Workshop PETG" });
     edit.focus();
     await user.keyboard("{Enter}");
     expect(screen.getByRole("textbox", { name: "Filament preset name 2" })).toBeVisible();
@@ -1646,7 +1680,7 @@ describe("Profile selection", () => {
     await closeProfileEditor();
     await userEvent.click(screen.getByRole("button", { name: /^Workshop PETG/ }));
     await userEvent.click(screen.getByRole("button", { name: /^Everyday PLA/ }));
-    await userEvent.click(screen.getByRole("button", { name: "Edit profile Everyday PLA" }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit preset Everyday PLA" }));
     expect(screen.getByRole("textbox", { name: "Filament cost per kg 1" })).toHaveValue("-1");
     expect(screen.getByText("Cost must be 0 or more.")).toBeVisible();
     expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
@@ -1671,6 +1705,41 @@ describe("Profile selection", () => {
 });
 
 describe("Profile consultation and editing", () => {
+  it("opens a linked printer profile from its URL", async () => {
+    await renderCard({
+      at: "/profiles?tab=printers&profile=2",
+      expand: false,
+      printers: [aPrinterProfile(), aPrinterProfile({ id: 2, name: "Bambu P1S" })],
+    });
+    const details = await screen.findByRole("complementary");
+    expect(within(details).getByRole("heading", { name: "Bambu P1S" })).toBeVisible();
+    expect(within(details).getByText("Cost not configured")).toBeVisible();
+  });
+
+  it("shows the configured machine rate in the selected profile", async () => {
+    await renderCard({
+      expand: false,
+      at: "/profiles?tab=printers",
+      printers: [
+        aPrinterProfile({
+          expenses: {
+            acquisition_cost: 500,
+            lifetime_hours: 1000,
+            lifetime_maintenance: 100,
+            power_watts: 200,
+            electricity_per_kwh: 0.25,
+            extra_per_hour: 1,
+          },
+        }),
+      ],
+    });
+    const details = await screen.findByRole("complementary");
+    expect(within(details).getByText("Machine cost per print hour")).toBeVisible();
+    expect(within(details).getByText(/1\.65/)).toBeVisible();
+    const electricity = within(details).getByText("Electricity").parentElement;
+    expect(electricity).toHaveTextContent("0.05");
+  });
+
   it("isolates selection by preset kind", async () => {
     await renderCard({ expand: false });
     await userEvent.click(screen.getByRole("tab", { name: /Printers/ }));
@@ -1679,7 +1748,7 @@ describe("Profile consultation and editing", () => {
       "true",
     );
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Edit profile Voron 2.4 — 0.4 mm" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Edit preset Voron 2.4 — 0.4 mm" })).toBeVisible();
     await userEvent.click(screen.getByRole("tab", { name: /Filaments/ }));
     expect(screen.getByRole("button", { name: /^Everyday PLA/ })).toHaveAttribute(
       "aria-pressed",
@@ -1697,7 +1766,7 @@ describe("Profile consultation and editing", () => {
       });
       if (kind === "printer") await userEvent.click(screen.getByRole("tab", { name: /Printers/ }));
       expect(await screen.findByText("Calibration notes")).toBeVisible();
-      expect(screen.getByRole("button", { name: /^Edit profile / })).toBeVisible();
+      expect(screen.getByRole("button", { name: /^Edit preset / })).toBeVisible();
       expect(screen.getByRole("button", { name: /^Delete .* preset / })).toBeVisible();
       expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
       expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
@@ -1713,7 +1782,7 @@ describe("Profile consultation and editing", () => {
     expect(
       screen.queryByRole("textbox", { name: "Filament cost per kg 1" }),
     ).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Edit profile Everyday PLA" }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit preset Everyday PLA" }));
     expect(screen.getByRole("textbox", { name: "Filament cost per kg 1" })).toHaveValue("-1");
     expect(screen.getByText("Cost must be 0 or more.")).toBeVisible();
     expect(app.requestsWithMethod("PATCH")).toHaveLength(0);

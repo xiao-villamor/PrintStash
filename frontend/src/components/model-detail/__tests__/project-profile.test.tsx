@@ -26,7 +26,7 @@ describe("ProjectProfile", () => {
       },
     });
     expect(await screen.findByText("0.20mm Standard")).toBeVisible();
-    expect(screen.getByText("10 min · 12.5 g")).toBeVisible();
+    expect(screen.getByText("10m 0s · 12.5 g")).toBeVisible();
     expect(screen.getByText("Estimate included in the file")).toBeVisible();
     expect(screen.getByText(/Estimates are not measured print results/)).toBeVisible();
     expect(screen.queryByText("Provider estimate")).not.toBeInTheDocument();

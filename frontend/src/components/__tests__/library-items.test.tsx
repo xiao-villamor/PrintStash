@@ -1,16 +1,27 @@
-/** The Library grid reflows with the Collections pane as one motion, keeping card identity. */
+/** Library grid resizing, card identity, and right-inspector motion. */
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useMemo, useRef, useState } from "react";
 import { LibraryItems } from "@/components/library-items";
-import { PANE_SETTLED_EVENT, PaneMovingEvent } from "@/components/use-collections-pane-motion";
+import { PANE_SETTLED_EVENT } from "@/components/use-collections-pane-motion";
+import { InspectorWillMoveEvent } from "@/components/use-inspector-motion";
 import type { LibraryReadingRenderer } from "@/features/library/reading-position";
 
 let width = 1000;
 const ITEMS = Array.from({ length: 6 }, (_, index) => index);
 
-function Grid({ count = 6, virtualize = false }: { count?: number; virtualize?: boolean }) {
+function Grid({
+  count = 6,
+  virtualize = false,
+  keepCollectionCardWidth = false,
+  singleRow = false,
+}: {
+  count?: number;
+  virtualize?: boolean;
+  keepCollectionCardWidth?: boolean;
+  singleRow?: boolean;
+}) {
   // The scroller is known before the grid mounts, as in the Library.
   const [node, setNode] = useState<HTMLDivElement | null>(null);
   const scroll = useMemo(() => ({ current: node }), [node]);
@@ -27,6 +38,8 @@ function Grid({ count = 6, virtualize = false }: { count?: number; virtualize?: 
           readingId="test"
           layout="grid"
           virtualize={virtualize}
+          keepCollectionCardWidth={keepCollectionCardWidth}
+          singleRow={singleRow}
         />
       )}
     </div>
@@ -38,6 +51,18 @@ const flights = new Map<string, Keyframe[]>();
 const animate = HTMLElement.prototype.animate;
 
 const grid = () => document.querySelector<HTMLElement>(".library-virtual-row")!;
+
+function enableCardMotion() {
+  const matchMedia = window.matchMedia;
+  vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+    ...matchMedia(query),
+    matches: false,
+  }));
+  const root = grid().parentElement!;
+  root.style.setProperty("--duration-fast", "200ms");
+  root.style.setProperty("--ease-dock", "ease-out");
+  return root.parentElement!;
+}
 
 beforeEach(() => {
   width = 1000;
@@ -100,93 +125,132 @@ describe("LibraryItems", () => {
   it("lays native cards out in one grid, so a column change keeps each card element", () => {
     render(<Grid />);
     expect(document.querySelectorAll(".library-virtual-row")).toHaveLength(1);
-    expect(grid().style.gridTemplateColumns).toBe("repeat(4, 238px)");
+    expect(grid().style.gridTemplateColumns).toBe("repeat(3, 322px)");
     const card = screen.getByText("Card 5").closest("[data-library-key]");
 
     width = 1250;
-    document.documentElement.dataset.paneMoving = "";
     act(() => {
-      window.dispatchEvent(
-        new PaneMovingEvent({
-          opening: false,
-          contentDelta: 250,
-          durationMs: 300,
-          progress: [0, 0.5, 1],
-        }),
-      );
+      window.dispatchEvent(new Event(PANE_SETTLED_EVENT));
     });
 
     expect(screen.getByText("Card 5").closest("[data-library-key]")).toBe(card);
   });
 
-  it("switches to the resting columns when the pane starts moving, not when it rests", () => {
+  it("keeps Collections tracks fixed while the workspace is moving", () => {
     render(<Grid />);
     document.documentElement.dataset.paneMoving = "";
-    act(() => {
-      window.dispatchEvent(
-        new PaneMovingEvent({
-          opening: false,
-          contentDelta: 250,
-          durationMs: 300,
-          progress: [0, 0.5, 1],
-        }),
-      );
-    });
-    // The content is still 1000 px wide; the grid already holds 1250 px of tracks.
-    expect(grid().style.gridTemplateColumns).toBe("repeat(5, 237px)");
-
     width = 1250;
-    delete document.documentElement.dataset.paneMoving;
+
+    act(() => window.dispatchEvent(new Event(PANE_SETTLED_EVENT)));
+
+    expect(grid().style.gridTemplateColumns).toBe("repeat(3, 322px)");
+    expect(flights.size).toBe(0);
+  });
+
+  it("keeps a collapsed strip on one row after its tracks narrow", () => {
+    width = 1250;
+    render(<Grid singleRow />);
+    expect(screen.getByRole("link", { name: "Card 3" })).toBeVisible();
+    width = 1000;
+
+    act(() => window.dispatchEvent(new Event(PANE_SETTLED_EVENT)));
+
+    expect(grid().style.gridTemplateColumns).toBe("repeat(3, 322px)");
+    expect(screen.queryByRole("link", { name: "Card 3" })).toBeNull();
+  });
+
+  it("fades a newly visible card on close within the same column count", () => {
+    render(
+      <>
+        <aside id="model-drawer" />
+        <Grid />
+      </>,
+    );
+    const scroller = enableCardMotion();
+    const card = screen.getByText("Card 2").closest("[data-library-key]")!;
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1100, 500));
+    vi.spyOn(document.getElementById("model-drawer")!, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(660, 0, 440, 500),
+    );
+    vi.spyOn(card, "getBoundingClientRect").mockImplementation(() =>
+      width === 1000 ? new DOMRect(676, 0, 322, 200) : new DOMRect(706, 0, 337, 200),
+    );
+
+    act(() => {
+      window.dispatchEvent(new InspectorWillMoveEvent("closing"));
+      width = 1045;
+      window.dispatchEvent(new Event(PANE_SETTLED_EVENT));
+    });
+
+    expect(grid().style.gridTemplateColumns).toBe("repeat(3, 337px)");
+    expect(flights.get("item:2")).toEqual([
+      { opacity: 0.4, transform: "translateY(16px)" },
+      { opacity: 1, transform: "none" },
+    ]);
+  });
+
+  it("slides a card that wraps to the previous row on close", () => {
+    render(<Grid />);
+    const scroller = enableCardMotion();
+    const card = screen.getByText("Card 3").closest("[data-library-key]")!;
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1250, 500));
+    vi.spyOn(card, "getBoundingClientRect").mockImplementation(() =>
+      width === 1000 ? new DOMRect(0, 216, 322, 200) : new DOMRect(951, 0, 300, 200),
+    );
+
+    act(() => {
+      window.dispatchEvent(new InspectorWillMoveEvent("closing"));
+      width = 1250;
+      window.dispatchEvent(new Event(PANE_SETTLED_EVENT));
+    });
+
+    expect(flights.get("item:3")).toEqual([
+      { opacity: 0.65, transform: "translateY(16px)" },
+      { opacity: 1, transform: "none" },
+    ]);
+  });
+
+  it("preserves collection card width when the sidebar changes how many columns fit", () => {
+    let paneWidth = 0;
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(
+      function (this: HTMLElement) {
+        return this.hasAttribute("data-collections-pane") ? paneWidth : width;
+      },
+    );
+    width = 1150;
+    render(
+      <>
+        <aside data-collections-pane />
+        <Grid keepCollectionCardWidth />
+      </>,
+    );
+    expect(grid().style.gridTemplateColumns).toBe("repeat(3, 372px)");
+    for (const sidebarOpen of [true, false]) {
+      paneWidth = sidebarOpen ? 320 : 0;
+      width = 1150 - paneWidth;
+      act(() => window.dispatchEvent(new Event(PANE_SETTLED_EVENT)));
+      expect(grid().style.gridTemplateColumns).toBe(`repeat(${sidebarOpen ? 2 : 3}, 372px)`);
+    }
+  });
+
+  it("keeps the viewport at the top when a lower grid changes width", async () => {
+    render(<Grid />);
+    const card = screen.getByText("Card 0").closest("[data-library-key]")!;
+    const scroller = grid().closest("[data-library-renderer]")!.parentElement!;
+    vi.spyOn(card, "getBoundingClientRect").mockImplementation(
+      () =>
+        new DOMRect(
+          0,
+          grid().style.gridTemplateColumns === "repeat(3, 322px)" ? 200 : 360,
+          300,
+          200,
+        ),
+    );
+    width = 1250;
     act(() => {
       window.dispatchEvent(new Event(PANE_SETTLED_EVENT));
     });
-    expect(grid().style.gridTemplateColumns).toBe("repeat(5, 237px)");
-  });
-
-  it("carries a card that wraps a row in behind its new neighbour, without crossing the grid", () => {
-    // Cards sit on the grid's current tracks (16 px gap), 200 px tall.
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: HTMLElement) {
-        const key = this.dataset.libraryKey;
-        if (!key) return new DOMRect(0, 0, width, 800);
-        const [, columns, track] = (
-          /repeat\((\d+), (\d+)px\)/.exec(grid()?.style.gridTemplateColumns ?? "") ?? [0, 4, 238]
-        ).map(Number);
-        const index = Number(key.slice("item:".length));
-        const pitch = track! + 16;
-        return new DOMRect(
-          (index % columns!) * pitch,
-          Math.floor(index / columns!) * 216,
-          track,
-          200,
-        );
-      },
-    );
-    width = 1250;
-    render(<Grid />);
-    expect(grid().style.gridTemplateColumns).toBe("repeat(5, 237px)");
-    act(() => {
-      window.dispatchEvent(
-        new PaneMovingEvent({
-          opening: true,
-          contentDelta: -250,
-          durationMs: 300,
-          progress: [0, 0.5, 1],
-        }),
-      );
-    });
-    expect(grid().style.gridTemplateColumns).toBe("repeat(4, 238px)");
-
-    // 5 → 4 columns: card 5 keeps row 1 and slides one cell right…
-    expect(flights.get("item:5")?.[0]).toMatchObject({ transform: "translate(-254px, 0px)" });
-    // …and card 4, leaving row 0, enters row 1 one cell further left, behind it.
-    expect(flights.get("item:4")?.[0]).toMatchObject({
-      transform: "translate(-253px, 0px)",
-      opacity: 0,
-    });
-    expect(flights.get("item:4")?.[1]).toMatchObject({ opacity: 1 });
-    expect(flights.get("item:4")?.at(-1)).toMatchObject({ transform: "translate(0px, 0px)" });
-    // Cards that keep their cell stay still.
-    expect(flights.has("item:0")).toBe(false);
+    await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    expect(scroller.scrollTop).toBe(0);
   });
 });

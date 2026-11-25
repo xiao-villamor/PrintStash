@@ -1,5 +1,7 @@
 "use client";
 
+import { SettingsSwitch } from "@/components/settings-card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { SETTINGS_FIELD } from "@/components/settings-controls";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
@@ -227,7 +229,7 @@ export function SpoolmanConnectCard({
 
   return (
     <Localized>
-      <div className="overflow-hidden border border-border bg-card">
+      <div className="overflow-hidden rounded-lg border border-border bg-card">
         {actionHost && actions ? createPortal(actions, actionHost) : null}
         <div className="space-y-1 p-4 sm:p-5">
           {!canEdit ? (
@@ -290,27 +292,24 @@ export function SpoolmanConnectCard({
                 </div>
               )}
               {/* Master switch */}
-              <label className="settings-preference-row">
+              <div className="settings-preference-row">
                 <span className="font-medium text-foreground">
                   {uiText("Enable Spoolman integration")}
                 </span>
                 <span>
-                  <select
-                    value={enabled ? "enabled" : "disabled"}
+                  <SettingsSwitch
+                    checked={enabled}
                     disabled={busy || review.phase !== "idle"}
-                    onChange={(e) => toggleEnabled(e.target.value === "enabled")}
-                    className={INPUT_CLASS}
-                  >
-                    <option value="enabled">{uiText("Enabled")}</option>
-                    <option value="disabled">{uiText("Disabled")}</option>
-                  </select>
+                    onChange={toggleEnabled}
+                    label={uiText("Enable Spoolman integration")}
+                  />
                   {enabled && (
                     <span className="mt-1 block text-xs text-muted-foreground">
                       {uiText(connected ? "Connected" : "Not connected")}
                     </span>
                   )}
                 </span>
-              </label>
+              </div>
 
               {/* Connection */}
               <form
@@ -365,25 +364,26 @@ export function SpoolmanConnectCard({
               {/* Write-back + double-count warning */}
               {enabled && (
                 <div className="space-y-2">
-                  <label className="settings-preference-row">
+                  <div className="settings-preference-row">
                     <span className="text-sm text-foreground">
                       {uiText("Write consumption back to Spoolman")}
-                      <span className="block text-2xs text-muted-foreground">
+                      <span
+                        id={formId + "-write-back-help"}
+                        className="block text-2xs text-muted-foreground"
+                      >
                         {uiText(
                           "Decrements the selected spool by measured filament when a print completes (Moonraker-measured prints only).",
                         )}
                       </span>
                     </span>
-                    <select
-                      value={status?.write_enabled ? "enabled" : "disabled"}
+                    <SettingsSwitch
+                      checked={!!status?.write_enabled}
                       disabled={busy || review.phase !== "idle"}
-                      onChange={(e) => toggleWrite(e.target.value === "enabled")}
-                      className={INPUT_CLASS}
-                    >
-                      <option value="enabled">{uiText("Enabled")}</option>
-                      <option value="disabled">{uiText("Disabled")}</option>
-                    </select>
-                  </label>
+                      onChange={toggleWrite}
+                      label={uiText("Write consumption back to Spoolman")}
+                      descriptionId={formId + "-write-back-help"}
+                    />
+                  </div>
                   {status?.native_hook_detected && (
                     <div className="space-y-2 border border-border p-3 text-xs text-foreground">
                       <div className="flex items-start gap-2">
@@ -395,12 +395,11 @@ export function SpoolmanConnectCard({
                         </span>
                       </div>
                       <label className="flex items-center gap-2 cursor-action pl-5">
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={!!status?.write_force}
                           disabled={busy || review.phase !== "idle"}
-                          onChange={(e) => toggleWriteForce(e.target.checked)}
-                          className="h-3.5 w-3.5 flex-shrink-0"
+                          onChange={toggleWriteForce}
+                          className="shrink-0"
                         />
                         <span>{uiText("Write back anyway (I disabled Moonraker's hook)")}</span>
                       </label>

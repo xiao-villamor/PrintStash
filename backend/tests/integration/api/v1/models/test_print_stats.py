@@ -32,10 +32,13 @@ from app.db.models import (
     PrintJobState,
 )
 from app.modules.printing import print_results
+from app.modules.printing.unattributed import ensure_unattributed_artifact
 from tests.factories import (
     build_collection,
     build_file,
     build_model,
+    build_print_job,
+    build_printer,
     print_job_config,
 )
 
@@ -491,3 +494,155 @@ class TestPrintStats:
 
     def test_rejects_an_unauthenticated_caller(self, client: TestClient) -> None:
         assert client.get("/api/v1/models/stats/prints").status_code == 401
+
+
+class TestFarmPanels:
+    def test_excludes_internal_model_from_rankings(
+        self, client: TestClient, auth_headers: dict, db_session: Session
+    ) -> None:
+        file_id, _ = ensure_unattributed_artifact(db_session)
+        file = db_session.get(File, file_id)
+        assert file is not None
+        build_print_job(
+            db_session,
+            file,
+            source="external",
+            state=PrintJobState.COMPLETED,
+            filament_g_effective=20,
+        )
+
+        result = client.get("/api/v1/models/stats/prints", headers=auth_headers).json()
+        assert result["top_models"] == []
+        assert result["total_prints"] == 1
+        assert result["total_filament_g"] == 20
+
+    def test_reports_terminal_outcomes_for_the_selected_period(
+        self, client: TestClient, auth_headers: dict, db_session: Session
+    ) -> None:
+        file = build_file(db_session, build_model(db_session), file_type=FileType.GCODE)
+        printer = build_printer(db_session, "North")
+        for state in (
+            PrintJobState.FAILED,
+            PrintJobState.COMPLETED,
+            PrintJobState.CANCELLED,
+            PrintJobState.PRINTING,
+        ):
+            build_print_job(db_session, file, printer=printer, state=state)
+        build_print_job(
+            db_session,
+            file,
+            printer=printer,
+            state=PrintJobState.FAILED,
+            finished_at=utcnow() - timedelta(days=31),
+        )
+        build_print_job(
+            db_session,
+            file,
+            printer=printer,
+            state=PrintJobState.FAILED,
+            deleted_at=utcnow(),
+        )
+        build_print_job(
+            db_session, file, printer_name="Workshop", state=PrintJobState.FAILED
+        )
+
+        result = client.get(
+            "/api/v1/models/stats/prints?period=30d", headers=auth_headers
+        ).json()
+        assert result["outcomes"] == {"failed": 2, "cancelled": 1}
+        assert result["printer_failures"] == [
+            {"printer_id": None, "name": "Workshop", "failed": 1, "completed": 0},
+            {"printer_id": printer.id, "name": "North", "failed": 1, "completed": 1},
+        ]
+
+    def test_distinguishes_measurement_sources(
+        self, client: TestClient, auth_headers: dict, db_session: Session
+    ) -> None:
+        model = build_model(db_session)
+        measured = build_file(
+            db_session,
+            model,
+            file_type=FileType.GCODE,
+            metadata={"estimated_time_s": 60},
+        )
+        estimated = build_file(
+            db_session,
+            model,
+            file_type=FileType.GCODE,
+            metadata={"estimated_time_s": 120},
+        )
+        unknown = build_file(db_session, model, file_type=FileType.GCODE)
+        build_print_job(
+            db_session,
+            measured,
+            state=PrintJobState.COMPLETED,
+            actual_duration_s=55,
+            filament_used_g=10,
+            filament_g_effective=10,
+            cost=0,
+        )
+        build_print_job(
+            db_session,
+            estimated,
+            state=PrintJobState.COMPLETED,
+            filament_g_effective=12,
+        )
+        build_print_job(db_session, unknown, state=PrintJobState.COMPLETED)
+
+        result = client.get("/api/v1/models/stats/prints", headers=auth_headers).json()
+        assert result["data_coverage"] == {
+            "recorded_time": 1,
+            "slicer_time": 1,
+            "recorded_filament": 1,
+            "slicer_filament": 1,
+            "known_cost": 1,
+        }
+
+    def test_groups_filament_weight_by_printer(
+        self, client: TestClient, auth_headers: dict, db_session: Session
+    ) -> None:
+        model = build_model(db_session)
+        pla = build_file(
+            db_session,
+            model,
+            file_type=FileType.GCODE,
+            metadata={"material_type": "PLA"},
+        )
+        petg = build_file(
+            db_session,
+            model,
+            file_type=FileType.GCODE,
+            metadata={"material_type": "PETG"},
+        )
+        north = build_printer(db_session, "North")
+        south = build_printer(db_session, "South")
+        for file, printer, grams in (
+            (pla, north, 20),
+            (pla, south, 12),
+            (petg, north, 8),
+        ):
+            build_print_job(
+                db_session,
+                file,
+                printer=printer,
+                state=PrintJobState.COMPLETED,
+                filament_g_effective=grams,
+            )
+        build_print_job(
+            db_session,
+            pla,
+            printer_name="Workshop",
+            state=PrintJobState.COMPLETED,
+            filament_g_effective=5,
+        )
+
+        result = client.get("/api/v1/models/stats/prints", headers=auth_headers).json()
+        assert [
+            (row["printer_name"], row["material_type"], row["total_g"])
+            for row in result["printer_filaments"]
+        ] == [
+            ("North", "PLA", 20),
+            ("South", "PLA", 12),
+            ("North", "PETG", 8),
+            ("Workshop", "PLA", 5),
+        ]

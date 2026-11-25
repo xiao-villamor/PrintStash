@@ -34,12 +34,17 @@ describe("Card", () => {
     expect(screen.getByText("Updated today")).toBeInTheDocument();
   });
 
+  it("keeps card corners square by default", () => {
+    render(<Card>Body</Card>);
+    expect(screen.getByText("Body")).toHaveClass("rounded-none");
+  });
+
   it("lets a caller's class override the shell's own", () => {
-    render(<Card className="rounded-none">Body</Card>);
+    render(<Card className="rounded-lg">Body</Card>);
 
     const card = screen.getByText("Body");
-    expect(card).toHaveClass("rounded-none");
-    expect(card).not.toHaveClass("rounded-lg");
+    expect(card).toHaveClass("rounded-lg");
+    expect(card).not.toHaveClass("rounded-none");
   });
 
   it("forwards a ref from every part", () => {

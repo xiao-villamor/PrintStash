@@ -67,7 +67,8 @@ test.describe("Source editing", () => {
       ).json();
       const writePath = `${readPath}/${initial.sources[0].id}`;
       await page.goto(`/models/${modelId}`);
-      await selectModelDetailTab(page, "Source info");
+      await selectModelDetailTab(page, "Source and license");
+      await page.getByRole("button", { name: "Edit source" }).click();
       await page.getByRole("button", { name: "Edit Title" }).click();
       const draft = page.getByRole("textbox", { name: "Title override" });
       await draft.fill("My reviewed source draft");

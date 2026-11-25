@@ -1,8 +1,7 @@
 import { lazy, Suspense, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Download, Printer, Star } from "lucide-react";
-import { LibraryItemLink } from "@/features/library/navigation";
-import type { LibraryEntry } from "@/features/library/navigation-state";
+import { Download } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 import { modelPrinterFilesOptions, useModelPrintJobs } from "@/features/library/model-detail";
 import { useAuth } from "@/lib/auth-context";
 import { downloadAuthenticatedFile } from "@/lib/api";
@@ -10,8 +9,15 @@ import { uiText } from "@/lib/locale";
 import { formatCalendarDate } from "@/lib/format";
 import { useUiLocale } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
-import type { FileRead, ModelListItem, ModelPrintJobRead, ModelRead } from "@/types";
+import type {
+  FileRead,
+  FileRevisionStatus,
+  ModelListItem,
+  ModelPrintJobRead,
+  ModelRead,
+} from "@/types";
 import { Button } from "@/components/ui/button";
+import { RevisionStatusBadge } from "@/components/revision-status-badge";
 const SendToButtons = lazy(() =>
   import("@/components/model-detail/send-to-buttons").then((module) => ({
     default: module.SendToButtons,
@@ -39,7 +45,8 @@ export function ModelCardRevision({
   model,
   detail,
   admitted,
-  origin,
+  status,
+  statusLabel,
   dimensions,
   collectionLabel,
   children,
@@ -47,7 +54,9 @@ export function ModelCardRevision({
   model: ModelListItem;
   detail?: ModelRead;
   admitted: boolean;
-  origin?: LibraryEntry;
+  /** The recommended revision's status; absent when no status is known. */
+  status: FileRevisionStatus | null | undefined;
+  statusLabel: string | null | undefined;
   /** Bounding box, e.g. `166 × 166 × 1 mm`; unknown until the card detail loads. */
   dimensions: string | null;
   /** Shown when the view spans folders; otherwise the card shows its file count. */
@@ -133,48 +142,11 @@ export function ModelCardRevision({
           </>
         ) : (
           <>
-            <div className="library-card-revision-line">
+            <div className="library-card-revision-line" title={resultText}>
+              {status && <RevisionStatusBadge status={status} label={statusLabel} />}
               <strong title={file?.revision_label ?? model.recommended_revision_label ?? undefined}>
                 {revision}
               </strong>
-              {file?.is_recommended && (
-                <span className="library-card-recommended">
-                  <Star className="h-3 w-3 fill-current shrink-0" aria-hidden />
-                  <span className="sr-only">{uiText("Recommended")}</span>
-                </span>
-              )}
-              <span className="library-card-revision-separator" aria-hidden="true" />
-              {administrator ? (
-                <LibraryItemLink
-                  origin={origin}
-                  href={`/models/${model.id}?tab=history`}
-                  trackPosition={false}
-                  className="library-card-result focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                  aria-label={uiText("Print history")}
-                  title={resultText}
-                >
-                  {outcomeLabels?.length
-                    ? outcomeLabels.map(({ state, printer, label }) => (
-                        <span
-                          key={JSON.stringify([state, printer])}
-                          className={
-                            state === "completed"
-                              ? "library-card-outcome"
-                              : state === "failed"
-                                ? "library-card-outcome library-card-outcome-failed"
-                                : undefined
-                          }
-                        >
-                          {label}
-                        </span>
-                      ))
-                    : resultText}
-                </LibraryItemLink>
-              ) : (
-                <p className="library-card-result" title={resultText}>
-                  {resultText}
-                </p>
-              )}
               <div className="library-card-revision-actions">
                 {file?.is_recommended && (
                   <Button
@@ -184,8 +156,9 @@ export function ModelCardRevision({
                     onClick={() => setSendOpen(true)}
                     aria-label={`${uiText("Print")} ${revision}`}
                     title={canPrint ? uiText("Print") : uiText("Access restricted")}
+                    className="library-card-send"
                   >
-                    <Printer aria-hidden />
+                    <Printer3D aria-hidden />
                   </Button>
                 )}
                 {file && (
@@ -202,10 +175,13 @@ export function ModelCardRevision({
                 )}
               </div>
             </div>
-            {children}
+            <div className="library-card-data-row">
+              {children}
+              <time dateTime={model.updated_at}>{formatCalendarDate(model.updated_at)}</time>
+            </div>
           </>
         )}
-        {meta}
+        {(detail ? !file : !expectsRevision) && meta}
       </div>
       {sendOpen && canPrint && file && (
         <div className="hidden">

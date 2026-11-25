@@ -11,7 +11,6 @@ import {
   FileBox,
   Layers3,
   ListOrdered,
-  Printer,
   Plus,
   GitFork,
   Network,
@@ -24,6 +23,7 @@ import {
   Trash2,
   Wrench,
 } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 
 import {
   deleteFleetJob,
@@ -459,20 +459,29 @@ export function FleetQueuePanel({
         />
         <Modal
           open={resolveTarget !== null}
-          onClose={() => {
-            if (busy !== resolveTarget?.id) setResolveTarget(null);
-          }}
+          variant="confirmation"
+          dismissible={resolveTarget === null || busy !== resolveTarget.id}
+          onClose={() => setResolveTarget(null)}
           title={uiText("Resolve stale job")}
-        >
-          {resolveTarget && (
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                {uiText(
-                  "Use this only when the printer is no longer running {value1}. This updates PrintStash history; it does not send a command to the printer.",
-                  { value1: String(resolveTarget.remote_filename) },
-                )}
-              </p>
-              <div className="flex flex-wrap justify-end gap-2">
+          description={
+            resolveTarget &&
+            uiText(
+              "Use this only when the printer is no longer running {value1}. This updates PrintStash history; it does not send a command to the printer.",
+              { value1: String(resolveTarget.remote_filename) },
+            )
+          }
+          footer={
+            resolveTarget && (
+              <>
+                <Button
+                  variant="outline"
+                  className="border-input"
+                  disabled={busy === resolveTarget.id}
+                  data-autofocus={busy === resolveTarget.id ? undefined : ""}
+                  onClick={() => setResolveTarget(null)}
+                >
+                  {uiText("Cancel")}
+                </Button>
                 <Button
                   variant="outline"
                   disabled={busy === resolveTarget.id}
@@ -481,16 +490,15 @@ export function FleetQueuePanel({
                   {uiText("Mark cancelled")}
                 </Button>
                 <Button
-                  variant="destructive"
                   disabled={busy === resolveTarget.id}
                   onClick={() => void resolveAs("failed")}
                 >
                   {uiText("Mark failed")}
                 </Button>
-              </div>
-            </div>
-          )}
-        </Modal>
+              </>
+            )
+          }
+        />
         <Modal
           open={editTarget !== null && draft !== null}
           onClose={() => {
@@ -860,7 +868,7 @@ export function FleetQueuePanel({
                 job.printer_id != null && controllablePrinterIds.has(job.printer_id) ? (
                   <Button
                     variant="outline"
-                    size="xs"
+                    size="sm"
                     disabled={busy === job.id}
                     onClick={() => setResolveTarget(job)}
                   >
@@ -884,7 +892,7 @@ export function FleetQueuePanel({
                     <>
                       <Button
                         variant="outline"
-                        size="xs"
+                        size="sm"
                         disabled={busy === job.id}
                         onClick={() =>
                           void mutate(job.id, () => decideOperatorGate(job.id, "release"))
@@ -894,7 +902,7 @@ export function FleetQueuePanel({
                       </Button>
                       <Button
                         variant="outline"
-                        size="xs"
+                        size="sm"
                         disabled={busy === job.id}
                         onClick={() =>
                           void mutate(job.id, () => decideOperatorGate(job.id, "hold"))
@@ -907,7 +915,7 @@ export function FleetQueuePanel({
                   {job.retryable && (
                     <Button
                       variant="outline"
-                      size="xs"
+                      size="sm"
                       disabled={busy === job.id}
                       onClick={() => void mutate(job.id, () => retryJob(job.id))}
                     >
@@ -986,7 +994,7 @@ function QueueSection({
         </div>
       </div>
       <div className="queue-register-destination">
-        <Printer size={15} />
+        <Printer3D size={15} />
         <div>
           <strong>
             {job.printer_id
@@ -1222,7 +1230,7 @@ export function FleetMaintenancePanel({
                   setMode("log");
                 }}
               >
-                {uiText("Add log entry")}
+                {uiText("Log service")}
               </Button>
             </div>,
             actionsHost,

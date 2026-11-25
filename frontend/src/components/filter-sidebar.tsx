@@ -57,11 +57,11 @@ import {
   FolderTree,
   ListTree,
   ChevronsUp,
-  Printer,
   Search,
   Trash2,
   X,
 } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 import {
   DndContext,
   DragEndEvent,
@@ -1778,7 +1778,7 @@ export function FilterSidebar(props: FilterSidebarProps) {
                     className: "w-full justify-start",
                   })}
                 >
-                  <Printer className="h-4 w-4 shrink-0" />
+                  <Printer3D className="h-4 w-4 shrink-0" />
                   {uiText("nav.printers")}
                 </Link>
               )}

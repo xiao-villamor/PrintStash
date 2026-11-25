@@ -19,6 +19,22 @@ import { queryKeys } from "@/lib/query-client";
 import { requireSessionVersion } from "@/lib/session-transport";
 import type { FilamentProfileRead, PrinterProfileRead } from "@/types";
 
+const printerProfileChannel = "printstash:printer-profiles";
+
+export function subscribeToPrinterProfileChanges(onChange: () => void) {
+  if (!globalThis.BroadcastChannel) return;
+  const channel = new BroadcastChannel(printerProfileChannel);
+  channel.addEventListener("message", onChange);
+  return () => channel.close();
+}
+
+function notifyPrinterProfilesChanged() {
+  if (!globalThis.BroadcastChannel) return;
+  const channel = new BroadcastChannel(printerProfileChannel);
+  channel.postMessage(null);
+  channel.close();
+}
+
 export const profileKeys = {
   filaments: queryKeys.filamentProfiles,
   printers: queryKeys.printerProfiles,
@@ -125,6 +141,7 @@ export function useProfileCommands() {
     });
     assertSession(context);
     void client.invalidateQueries({ queryKey: profileKeys.printers });
+    notifyPrinterProfilesChanged();
   };
   return {
     reviewFilament: async (id: number, session: number) => {
@@ -260,6 +277,7 @@ export function useProfileCommands() {
         });
         assertSession(context);
         void client.invalidateQueries({ queryKey: profileKeys.printers });
+        notifyPrinterProfilesChanged();
       },
       onSettled: (_, _error, _variables, context) => settled(context),
     }),

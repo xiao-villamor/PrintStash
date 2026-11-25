@@ -1,35 +1,24 @@
 import { Button } from "@/components/ui/button";
-import { Link } from "@/lib/link";
 import { uiText } from "@/lib/locale";
 
+/** The print entry shared by Overview and Print. */
 export function RevisionDeliveryActions({
-  printerless,
-  size,
+  secondary = false,
+  className,
   onSend,
 }: {
-  printerless: boolean;
-  size?: "sm";
-  onSend: (mode: "queue" | "send") => void;
+  secondary?: boolean;
+  className?: string;
+  onSend: () => void;
 }) {
   return (
-    <>
-      {!printerless && (
-        <Button size={size} onClick={() => onSend("send")}>
-          {uiText("Send to printer")}
-        </Button>
-      )}
-      <Button
-        size={size}
-        variant={printerless ? "default" : "outline"}
-        onClick={() => onSend("queue")}
-      >
-        {uiText("Add to queue")}
-      </Button>
-      {printerless && (
-        <Button asChild size={size} variant="outline">
-          <Link href="/printers">{uiText("Manage printers")}</Link>
-        </Button>
-      )}
-    </>
+    <Button
+      size="sm"
+      variant={secondary ? "outline" : "default"}
+      className={className}
+      onClick={onSend}
+    >
+      {uiText("modelDetail.preparePrint")}
+    </Button>
   );
 }

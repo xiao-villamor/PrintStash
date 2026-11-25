@@ -311,7 +311,7 @@ describe("ModelCard", () => {
     // `thumbnail_url: null` keeps the thumbnail hook from touching the network.
     renderModelCard(<ModelCard model={model} />);
 
-    expect(screen.getByLabelText("Revision status: Needs Test; label: a")).toHaveTextContent(
+    expect(screen.getByLabelText("Revision status: Needs test; label: a")).toHaveTextContent(
       "Needs test",
     );
     expect(screen.getByTitle("a")).toBeVisible();

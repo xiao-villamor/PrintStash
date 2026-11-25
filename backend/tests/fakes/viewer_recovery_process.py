@@ -80,7 +80,7 @@ def viewer() -> None:
     )
     from app.db.session import get_session_factory
     from app.main import app
-    from app.modules.derivatives.source import subject_key
+    from app.modules.derivatives.kinds import subject_key
     from tests.factories.geometry import three_mf
     from tests.fakes.job_engine_process import (
         _diagnostics,

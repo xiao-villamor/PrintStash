@@ -41,7 +41,7 @@ MESH_THUMBNAIL_RECIPE = 24
 THREE_MF_GEOMETRY_RECIPE = 15
 # 21 selects embedded covers by default and records picture availability.
 THREE_MF_THUMBNAIL_RECIPE = 29
-THREE_MF_VIEWER_STL_RECIPE = 5
+THREE_MF_VIEWER_STL_RECIPE = 6
 # STEP is tessellated with OCCT 8 at 0.05 mm linear deflection.
 STEP_GEOMETRY_RECIPE = 14
 # Keep this above the shared thumbnail recipe so a shared row cannot satisfy
@@ -287,3 +287,14 @@ def definitions_for_kind(kind: DerivativeKind) -> list[JobKind]:
 
 def all_definitions() -> tuple[JobKind, ...]:
     return tuple(_BY_DEFINITION)
+
+
+def subject_key(file_id: int) -> str:
+    return f"file/{file_id}"
+
+
+def file_id_of(subject: str) -> int:
+    prefix, _, value = subject.partition("/")
+    if prefix != "file" or not value.isdigit():
+        raise ValueError(f"not_a_derivative_subject:{subject}")
+    return int(value)

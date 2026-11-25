@@ -1,7 +1,7 @@
 import { currentLocale } from "@/lib/locale";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { History } from "lucide-react";
+import {} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SettingsCard } from "@/components/settings-card";
 import { backupRunsOptions, useBackupDestinationRetry } from "@/lib/queries/settings-backup-runs";
@@ -74,7 +74,6 @@ export function BackupRunHistory({ onPublished }: { onPublished: () => void }) {
   if (retired) return null;
   return (
     <SettingsCard
-      icon={History}
       title={t("settings.backupRunsTitle")}
       description={t("settings.backupRunsDescription")}
       action={
@@ -88,7 +87,7 @@ export function BackupRunHistory({ onPublished }: { onPublished: () => void }) {
         </Button>
       }
     >
-      <div className="space-y-4 p-4 sm:p-5" aria-busy={loading}>
+      <div className="space-y-4 py-4" aria-busy={loading}>
         {failed && (
           <p role="alert" className="text-sm text-destructive">
             {t("settings.backupRunsLoadFailed")}

@@ -78,6 +78,23 @@ def request(session: Session, file: File, kinds: list[DerivativeKind]) -> bool:
     return bool(groups)
 
 
+def request_model_previews(session: Session, model_id: int) -> int:
+    """Requeue the multi-angle views of each live mesh Artifact of a Model.
+
+    The views are published bytes; when they are gone or unreadable the Model's
+    card can only show the failure. Forgetting the recipe makes them pending, so
+    the producers recreate them. The count is how many Artifacts were queued.
+    """
+    files = session.exec(
+        select(File).where(
+            File.model_id == model_id,
+            live(File),
+            col(File.file_type).in_(MESH_TYPES),
+        )
+    ).all()
+    return sum(request(session, file, [DerivativeKind.PREVIEWS]) for file in files)
+
+
 def request_collection_thumbnails(session: Session, collection_id: int) -> int:
     """Requeue one representative thumbnail for each direct, live Model."""
     from app.modules.work import nudge

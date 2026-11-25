@@ -249,17 +249,24 @@ def create_document(
     _: None = Depends(require_auth),
     session: Session = Depends(get_session),
 ) -> DocumentRead:
-    collection_id, _aggregate = _guide_collection(
-        session,
-        current_user,
-        payload.multipart_model_id,
-        payload.collection_id,
-    )
+    collection_id = None
+    if payload.model_id is not None:
+        if payload.collection_id is not None or payload.multipart_model_id is not None:
+            raise HTTPException(status_code=400, detail="document_scope_conflict")
+        model = _live_model(session, payload.model_id)
+        rbac.require_model_collection_role(
+            session, current_user, model.collection_id, CollectionRole.EDIT
+        )
+    else:
+        collection_id, _aggregate = _guide_collection(
+            session, current_user, payload.multipart_model_id, payload.collection_id
+        )
     doc = Document(
         name=payload.name.strip(),
         kind=DocumentKind.MARKDOWN,
         collection_id=collection_id,
         multipart_model_id=payload.multipart_model_id,
+        model_id=payload.model_id,
         body=payload.body or "",
         created_by=current_user.id,
         updated_by=current_user.id,

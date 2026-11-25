@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { CalendarClock, History } from "lucide-react";
-import { SettingsCard } from "@/components/settings-card";
+import {} from "lucide-react";
+import { SettingsCard, SettingsSwitch } from "@/components/settings-card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -101,24 +101,23 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
     <form
       id={`audit-policy-${policy.mode}`}
       aria-label={`${title} ${t("auditSchedule.schedule")}`}
-      className="min-w-0 rounded-md border border-border p-4 sm:p-5"
+      className="min-w-0 border-b border-border py-4 last:border-b-0"
       onSubmit={(event) => {
         event.preventDefault();
         void save();
       }}
     >
       <fieldset disabled={busy || review.phase !== "idle"}>
-        <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
+        <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
-            <h4 className="text-base font-semibold">{title}</h4>
+            <h4 className="text-sm font-semibold">{title}</h4>
+            <p className="text-sm text-muted-foreground">{t("auditSchedule.runAutomatically")}</p>
           </div>
-          <label className="flex items-center gap-2 text-sm font-medium">
-            <Checkbox
-              checked={policy.enabled}
-              onChange={(enabled) => setPolicy({ ...policy, enabled })}
-            />
-            {t("auditSchedule.runAutomatically")}
-          </label>
+          <SettingsSwitch
+            checked={policy.enabled}
+            onChange={(enabled) => setPolicy({ ...policy, enabled })}
+            label={`${title} ${t("auditSchedule.runAutomatically")}`}
+          />
         </div>
         {policy.enabled ? (
           <div className="mt-5 space-y-4">
@@ -461,12 +460,8 @@ export function AuditSchedulePanel() {
   if (commands.retired) return null;
   return (
     <>
-      <SettingsCard
-        icon={CalendarClock}
-        title={t("auditSchedule.title")}
-        description={t("auditSchedule.description")}
-      >
-        <div className="settings-section-body grid gap-4 lg:grid-cols-2">
+      <SettingsCard title={t("auditSchedule.title")} description={t("auditSchedule.description")}>
+        <div className="divide-y-0">
           {error && policies && !denied && (
             <div role="alert">
               <p>{t("auditSchedule.loadFailed")}</p>
@@ -492,7 +487,7 @@ export function AuditSchedulePanel() {
         </div>
       </SettingsCard>
       {(historyError || history.length > 0) && (
-        <SettingsCard icon={History} title={t("auditSchedule.recent")}>
+        <SettingsCard title={t("auditSchedule.recent")}>
           <div className="settings-section-body">
             {historyError ? (
               <p role="alert" className="text-sm">

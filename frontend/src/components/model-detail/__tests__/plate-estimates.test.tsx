@@ -23,8 +23,8 @@ const plates: GcodePlates = {
 describe("PlateEstimates", () => {
   it("shows precise estimates under their own plates", () => {
     render(<PlateEstimates data={plates} selected={2} />);
-    const first = screen.getByRole("region", { name: "Plate 01" });
-    const second = screen.getByRole("region", { name: "Plate 02" });
+    const first = screen.getByRole("row", { name: "Plate 01" });
+    const second = screen.getByRole("row", { name: "Plate 02" });
     expect(within(first).getByText("7h 44m 22s")).toBeVisible();
     expect(within(first).getByText("419.18 g")).toBeVisible();
     expect(within(second).getByText("Wall mount")).toBeVisible();
@@ -38,11 +38,20 @@ describe("PlateEstimates", () => {
   it("identifies missing estimates for each plate without inventing totals", () => {
     render(<PlateEstimates data={{ ...plates, plate_metadata: [] }} selected={null} />);
     expect(
-      within(screen.getByRole("region", { name: "Plate 01" })).getAllByText("Not recorded"),
+      within(screen.getByRole("row", { name: "Plate 01" })).getAllByText("Not recorded"),
     ).toHaveLength(3);
     expect(
-      within(screen.getByRole("region", { name: "Plate 02" })).getAllByText("Not recorded"),
+      within(screen.getByRole("row", { name: "Plate 02" })).getAllByText("Not recorded"),
     ).toHaveLength(3);
     expect(screen.queryByText("Selected plate")).not.toBeInTheDocument();
+    expect(screen.queryByRole("rowheader", { name: "All plates" })).not.toBeInTheDocument();
+  });
+
+  it("totals every plate only when each plate carries its estimates", () => {
+    render(<PlateEstimates data={plates} selected={null} />);
+    const total = screen.getByRole("rowheader", { name: "All plates" }).closest("tr");
+    if (!total) throw new Error("The total must be a table row");
+    expect(within(total).getByText("8h 25m 27s")).toBeVisible();
+    expect(within(total).getByText("432.21 g")).toBeVisible();
   });
 });

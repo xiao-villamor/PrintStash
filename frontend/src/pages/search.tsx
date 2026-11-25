@@ -155,8 +155,8 @@ function SearchContent() {
     router.push(`/search?${updated}`);
   }
   return (
-    <div className="h-full overflow-y-auto bg-background pb-24 md:pb-0">
-      <div className="px-4 pb-3 pt-3.5 sm:px-6 [&>div]:flex-row [&>div]:justify-between [&_h1]:text-xl [&_p]:truncate">
+    <div className="relative flex h-full flex-col overflow-y-auto bg-background pb-24 md:overflow-hidden md:pb-0">
+      <div className="shrink-0 px-4 pb-3 pt-3.5 sm:px-6 [&>div]:flex-row [&>div]:justify-between [&_h1]:text-xl [&_p]:truncate">
         <PageHeader
           actions={
             <Button
@@ -181,7 +181,7 @@ function SearchContent() {
         />
       </div>
       {!imageMode && !modelId && (
-        <section aria-label={t("aiSearch.searchOptions")} className="px-4 sm:px-6">
+        <section aria-label={t("aiSearch.searchOptions")} className="shrink-0 px-4 sm:px-6">
           {!desktop && (
             <div className="mb-4">
               <LibrarySearch />
@@ -269,7 +269,7 @@ function SearchContent() {
           </div>
         </section>
       )}
-      <div className="px-4 py-4 sm:px-6">
+      <div className="relative px-4 py-4 sm:px-6 md:min-h-0 md:flex-1 md:overflow-y-auto md:overscroll-y-contain">
         {imageMode && (
           <SearchImageInput
             image={image}

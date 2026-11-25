@@ -1,4 +1,5 @@
 import { useId, type ReactNode } from "react";
+import { RadioOption } from "@/components/ui/radio-option";
 
 /** Visible choices keep the available printer and revision decisions together. */
 export function ChoiceField<T extends string | number>({
@@ -22,20 +23,17 @@ export function ChoiceField<T extends string | number>({
       <legend>{label}</legend>
       <div className={inline ? "detail-visible-choices is-inline" : "detail-visible-choices"}>
         {options.map((option) => (
-          <label key={option.value} data-selected={value === option.value}>
-            <input
-              type="radio"
-              name={name}
-              value={option.value}
-              checked={value === option.value}
-              disabled={option.disabled}
-              onChange={() => onChange(option.value)}
-            />
-            <span>
-              <span>{option.label}</span>
-              {option.description && <small>{option.description}</small>}
-            </span>
-          </label>
+          <RadioOption
+            key={option.value}
+            name={name}
+            value={option.value}
+            checked={value === option.value}
+            disabled={option.disabled}
+            onChange={() => onChange(option.value)}
+          >
+            <span>{option.label}</span>
+            {option.description && <small>{option.description}</small>}
+          </RadioOption>
         ))}
       </div>
     </fieldset>

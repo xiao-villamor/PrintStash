@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { useLibraryStar } from "@/features/library/mutations";
 import { toast } from "@/lib/toast";
 import { ModelPreviewControls, ModelPreviewFrame } from "@/components/model-preview";
+import { useRegenerateModelPreviews } from "@/features/library/model-previews";
 import { keepOffCard } from "@/lib/card-overlay";
 import { useModelPreviewCard } from "@/lib/use-model-preview-card";
 import { Localized } from "@/components/ui/localized";
@@ -106,46 +107,6 @@ const METRIC_CONFIG = {
   },
 } satisfies Record<CardMetricId, { abbr: string; getValue: (model: ModelListItem) => string }>;
 
-function RevisionBadge({
-  status,
-  label,
-}: {
-  status: FileRevisionStatus | null | undefined;
-  label?: string | null;
-}) {
-  useUiLocale();
-  if (!status)
-    return (
-      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-        {uiText("library.noRevisionStatus")}
-      </span>
-    );
-  const cfg = REVISION_CONFIG[status];
-  const accessibleLabel = label
-    ? uiText("Revision status: {status}; label: {label}", { status: cfg.label, label })
-    : uiText("Revision status: {status}", { status: cfg.label });
-  return (
-    <span
-      data-revision-status={status}
-      aria-label={accessibleLabel}
-      title={accessibleLabel}
-      className="inline-flex max-w-full items-center gap-1 text-xs text-foreground"
-    >
-      <span
-        className={`h-1.5 w-1.5 shrink-0 rounded-full ${status === "needs_test" ? "bg-warning" : status === "failed" ? "bg-destructive" : "bg-muted-foreground/60"}`}
-        aria-hidden
-      />
-      <span>
-        {status === "known_good"
-          ? uiText("Ready")
-          : status === "needs_test"
-            ? uiText("Needs test")
-            : cfg.label}
-      </span>
-    </span>
-  );
-}
-
 function MetricCell({ id, model }: { id: CardMetricId; model: ModelListItem }) {
   useUiLocale();
   const cfg = METRIC_CONFIG[id];
@@ -199,6 +160,7 @@ function ModelCardInner({
       : model.starred;
   const starBusy = starMutation.isPending;
   const [previewAdmission, preview] = useModelPreviewCard(model.thumbnail_url, model.previews);
+  const regeneratePreviews = useRegenerateModelPreviews();
   const menuOpener = useRef<HTMLAnchorElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(null);
@@ -224,6 +186,14 @@ function ModelCardInner({
   const canEditTags = model.effective_role === "edit" || model.effective_role === "admin";
   // A plain click already opens the page when no inspector takes it.
   const opensPage = Boolean(onInspect) && !selectable;
+
+  async function recreatePreviews() {
+    try {
+      await regeneratePreviews(model.id);
+    } catch (error) {
+      toast.error(error);
+    }
+  }
 
   async function toggleStar() {
     if (starBusy) return;
@@ -282,7 +252,7 @@ function ModelCardInner({
                 : undefined
             }
             onDragEnd={() => setDragging(false)}
-            className={`${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} library-model-card group group/selection-card relative flex h-full flex-col min-w-0 bg-card border rounded transition-[color,background-color,border-color,opacity,scale] duration-press ease-out active:scale-[0.99] motion-reduce:active:scale-100 overflow-hidden ${
+            className={`${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} library-model-card group group/selection-card relative flex h-full flex-col min-w-0 bg-card border rounded-lg transition-[color,background-color,border-color,opacity,scale] duration-press ease-out active:scale-[0.99] motion-reduce:active:scale-100 overflow-hidden ${
               draggable ? "cursor-grab active:cursor-grabbing" : ""
             } ${dragging ? "opacity-40" : ""} ${
               selected
@@ -304,7 +274,7 @@ function ModelCardInner({
               aria-label={model.name}
               draggable={false}
               data-menu-trigger
-              className="flex min-w-0 flex-col overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              className="flex min-w-0 flex-col overflow-hidden focus-visible:outline-none"
               onPointerEnter={() => !selectable && onIntent?.(model.id)}
               onFocus={() => !selectable && onIntent?.(model.id)}
               onPointerLeave={() => onIntent?.(null)}
@@ -331,17 +301,7 @@ function ModelCardInner({
                 state={preview}
                 admission={previewAdmission}
                 favorites={favorites}
-              >
-                {/* The footer already says "No G-code yet"; the corner only speaks for a known status. */}
-                {!favorites && cornerStatus && (
-                  <div className="library-card-status">
-                    <RevisionBadge
-                      status={cornerStatus}
-                      label={revision?.revision_label ?? model.recommended_revision_label}
-                    />
-                  </div>
-                )}
-              </ModelPreviewFrame>
+              />
 
               {favorites ? (
                 <div className="library-card-content flex flex-1 flex-col">
@@ -402,7 +362,7 @@ function ModelCardInner({
               )}
             </LibraryItemLink>
             {!selectable && (
-              <ModelPreviewControls name={model.name} state={preview}>
+              <ModelPreviewControls name={model.name} state={preview} onRecreate={recreatePreviews}>
                 {opensPage && (
                   <Button
                     variant="outline"
@@ -431,7 +391,8 @@ function ModelCardInner({
                 model={model}
                 detail={detail}
                 admitted={admitted}
-                origin={origin}
+                status={cornerStatus}
+                statusLabel={revision?.revision_label ?? model.recommended_revision_label}
                 dimensions={dimensions}
                 collectionLabel={collectionLabel ?? null}
               >
@@ -440,7 +401,7 @@ function ModelCardInner({
                     <MetricCell key={id} id={id} model={model} />
                   ))}
                   {ps?.material_type && !metrics.includes("material") && (
-                    <span>{ps.material_type}</span>
+                    <span className="library-card-material">{ps.material_type}</span>
                   )}
                   {!ps && <span className="text-muted-foreground">{uiText("Not recorded")}</span>}
                 </div>

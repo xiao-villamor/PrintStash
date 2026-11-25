@@ -15,7 +15,9 @@ test.describe("tags", () => {
 
     await uploadModel(page, model);
     await openModelPage(page, model);
-    await page.getByRole("button", { name: `Add tags to ${model}` }).click();
+    const addTag = page.getByRole("button", { name: `Add tags to ${model}` });
+    await expect(addTag).toHaveCSS("border-top-style", "dotted");
+    await addTag.press("Enter");
     const dialog = page.getByRole("dialog", { name: "Edit Model tags" });
     const search = dialog.getByRole("combobox", { name: "Find or create tag" });
     await expect(search).toBeFocused();
@@ -26,8 +28,9 @@ test.describe("tags", () => {
 
     await page.reload();
     await expect(
-      page.getByRole("region", { name: "About this model" }).getByText(tag, { exact: true }),
+      page.getByRole("region", { name: "Model details" }).getByText(tag, { exact: true }),
     ).toBeVisible();
+    await expect(page.getByRole("button", { name: `Edit tags for ${model}` })).toBeVisible();
   });
 
   test("reviews a conflicting quick-tag draft before replacing current tags", async ({ page }) => {

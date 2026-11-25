@@ -1,4 +1,4 @@
-import { SettingsGroupHead } from "@/components/settings-card";
+import { SettingsCard } from "@/components/settings-card";
 import { useAuth } from "@/lib/auth-context";
 import { Link } from "@/lib/link";
 import { uiText } from "@/lib/locale";
@@ -18,61 +18,101 @@ export function ImportReadiness({
   useUiLocale();
   const { user } = useAuth();
   const active = devices.filter((device) => device.revoked_at === null);
+  const connected = connections
+    .filter((connection) => connection.connected)
+    .map((connection) => connection.provider)
+    .join(", ");
+  const rows: { label: string; hint?: string; value: string; tone: "ok" | "idle" }[] = [
+    {
+      label: uiText("Vault connection"),
+      hint: uiText("Responded at the last check"),
+      value: uiText("Connected"),
+      tone: "ok",
+    },
+    {
+      label: uiText("Paired browsers"),
+      value: String(active.length),
+      tone: active.length > 0 ? "ok" : "idle",
+    },
+    {
+      label: uiText("Configured providers"),
+      value: connected || uiText("None"),
+      tone: connected ? "ok" : "idle",
+    },
+    {
+      label: uiText("Marketplace session and download"),
+      value: uiText("Not checked"),
+      tone: "idle",
+    },
+    {
+      label: uiText("Staging capacity"),
+      hint: uiText("Checked when reserving an upload"),
+      value: uiText("Not checked"),
+      tone: "idle",
+    },
+  ];
   return (
-    <section
-      className="overflow-hidden border border-border bg-card"
-      aria-label={uiText("Import readiness")}
-    >
-      <SettingsGroupHead
-        title={uiText("Import readiness")}
-        description={uiText(
-          "Pairing, provider configuration and a tested download are different checks.",
-        )}
-      />
-      <dl className="grid grid-cols-2 gap-2 px-5 py-3 text-sm">
-        <dt>{uiText("Vault connection")}</dt>
-        <dd>{uiText("Responded at the last check")}</dd>
-        <dt>{uiText("Paired browsers")}</dt>
-        <dd>{active.length}</dd>
-        <dt>{uiText("Configured providers")}</dt>
-        <dd>
-          {connections
-            .filter((connection) => connection.connected)
-            .map((connection) => connection.provider)
-            .join(", ") || uiText("None")}
-        </dd>
-        <dt>{uiText("Marketplace session and download")}</dt>
-        <dd>{uiText("Not checked")}</dd>
-        <dt>{uiText("Staging capacity")}</dt>
-        <dd>{uiText("Checked when reserving an upload")}</dd>
-      </dl>
-      <p className="px-5 pb-3 text-xs text-muted-foreground">
-        {uiText("Status read at")}{" "}
-        <time dateTime={new Date(checkedAt).toISOString()}>
-          {new Date(checkedAt).toLocaleString()}
-        </time>
-      </p>
-      {user?.is_superuser && (
-        <div className="flex flex-wrap gap-3 border-t border-border px-5 py-3 text-xs">
-          <Link className="underline" href="/settings?section=storage">
-            {uiText("Storage")}
-          </Link>
-          <Link className="underline" href="/settings?section=work">
-            {uiText("Background work")}
-          </Link>
-          <Link className="underline" href="/settings?section=backup">
-            {uiText("Backups")}
-          </Link>
-          <Link className="underline" href="/settings?section=maintenance">
-            {uiText("Audits")}
-          </Link>
-          <p>
-            {uiText(
-              "Check verification dates. An existing backup file is not proof of a verified backup.",
-            )}
-          </p>
-        </div>
+    <SettingsCard
+      title={uiText("Import readiness")}
+      description={uiText(
+        "Pairing, provider configuration and a tested download are different checks.",
       )}
-    </section>
+    >
+      <dl>
+        {rows.map((row) => (
+          <div
+            key={row.label}
+            className="flex items-center justify-between gap-6 border-b border-border py-3 text-sm last:border-b-0"
+          >
+            <dt className="min-w-0">
+              <span className="block font-medium text-foreground">{row.label}</span>
+              {row.hint && <span className="block text-sm text-muted-foreground">{row.hint}</span>}
+            </dt>
+            <dd className="flex shrink-0 items-center gap-2">
+              <span
+                aria-hidden
+                className={
+                  row.tone === "ok"
+                    ? "size-1.5 rounded-full bg-success"
+                    : "size-1.5 rounded-full bg-muted-foreground/50"
+                }
+              />
+              {row.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border py-3 text-sm text-muted-foreground">
+        <span>
+          {uiText("Status read at")}{" "}
+          <time dateTime={new Date(checkedAt).toISOString()}>
+            {new Date(checkedAt).toLocaleString()}
+          </time>
+        </span>
+        {user?.is_superuser && (
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <Link className="text-primary hover:underline" href="/settings?section=storage">
+              {uiText("Storage")}
+            </Link>
+            <Link className="text-primary hover:underline" href="/settings?section=work">
+              {uiText("Background work")}
+            </Link>
+            <Link className="text-primary hover:underline" href="/settings?section=backup">
+              {uiText("Backups")}
+            </Link>
+            <Link className="text-primary hover:underline" href="/settings?section=maintenance">
+              {uiText("Audits")}
+            </Link>
+          </span>
+        )}
+      </div>
+      {user?.is_superuser && (
+        <p className="border-t border-border py-3 text-sm text-muted-foreground">
+          {uiText(
+            "Check verification dates. An existing backup file is not proof of a verified backup.",
+          )}
+        </p>
+      )}
+    </SettingsCard>
   );
 }

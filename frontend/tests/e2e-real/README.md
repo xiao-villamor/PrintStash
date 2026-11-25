@@ -142,6 +142,13 @@ and consistency judgments. This command does not install or execute Impeccable.
 
 ## Coverage
 
+`production-costing.spec.ts` saves a connected printer's cost profile, launches
+a managed print against Moonraker, and checks the stopped run's cost in history.
+It also assigns an unpriced profile and opens that preset to configure operating costs.
+
+`statistics.spec.ts` switches the reporting period across tabs and verifies a saved
+panel choice after recording a failed print on a manually named printer.
+
 `library-inspector.spec.ts` uploads a real G-code Model, selects a loopback printer
 emulator, records a failed outcome through the inline inspector's revision shortcut
 and Mod+Enter note action, verifies the exact persisted record, then reloads the
@@ -288,6 +295,7 @@ sends no further setup probe.
 - `printers.spec.ts`: two settings editors detect a stale save, retain the losing
   draft and explicitly save revised changes without replacing untouched settings.
 
+- `production-costing.spec.ts`: normalizes filament spool pricing, configures printer expenses, uses Moonraker print measurements, and verifies saved per-piece estimates and reusable pricing rates.
 - `profiles.spec.ts`: two editors per preset kind recover a conditional conflict
   while preserving the other editor’s notes, verified after reload.
 

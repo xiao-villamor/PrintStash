@@ -8,10 +8,12 @@ API process (#259). Running it elsewhere must not change what the viewer receive
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import stat
 import struct
 import tracemalloc
+import zipfile
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -25,6 +27,7 @@ from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.mesh_isolation import MeshWorkerError
 from tests.factories.geometry import three_mf
 from tests.factories.three_mf_pilot import load_case
+from tests.fixtures.three_mf_projects import build_profile_project
 
 
 @pytest.fixture
@@ -45,6 +48,55 @@ class TestPrepareStl:
             assert prepared.path.read_bytes() == expected
             assert prepared.size == len(expected)
             assert prepared.sha256 == hashlib.sha256(expected).hexdigest()
+
+    @pytest.mark.parametrize(
+        ("palette", "expected"),
+        [
+            (["#E53042"], b"PrintStash RGB:\xe5\x30\x42"),
+            (["#E53042", "#123456"], None),
+            (["bad color"], None),
+            ([], None),
+        ],
+    )
+    def test_preserves_only_a_uniform_3mf_project_color(
+        self, tmp_path, palette, expected
+    ):
+        source = tmp_path / "project.3mf"
+        payload = build_profile_project({"filament_colour": palette})
+        source.write_bytes(payload)
+        with stl_isolation.prepare_stl(
+            source,
+            file_type="3mf",
+            expected_sha256=hashlib.sha256(payload).hexdigest(),
+            workspace=tmp_path,
+        ) as prepared:
+            header = prepared.stream.read(80)
+            if expected is not None:
+                assert header.startswith(expected)
+            else:
+                assert not header.startswith(b"PrintStash RGB:")
+
+    def test_preserves_standard_3mf_base_material_color(self, tmp_path):
+        source = tmp_path / "standard.3mf"
+        with zipfile.ZipFile(io.BytesIO(build_profile_project({}))) as original:
+            with zipfile.ZipFile(source, "w") as colored:
+                for member in original.infolist():
+                    data = original.read(member)
+                    if member.filename.endswith(".model"):
+                        data = data.replace(
+                            b"<resources>",
+                            b'<resources><basematerials id="10"><base name="Purple" displaycolor="#8935B2"/></basematerials>',
+                        ).replace(
+                            b'<object id="1"', b'<object id="1" pid="10" pindex="0"'
+                        )
+                    colored.writestr(member.filename, data)
+        with stl_isolation.prepare_stl(
+            source,
+            file_type="3mf",
+            expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+            workspace=tmp_path,
+        ) as prepared:
+            assert prepared.stream.read(80).startswith(b"PrintStash RGB:\x89\x35\xb2")
 
     def test_keeps_parent_allocation_bounded(self, tmp_path):
         source = tmp_path / "large.stl"

@@ -7,7 +7,7 @@
  * unrecognised code must never read as a network problem: the page that shows
  * it was served by the same server that recorded it.
  */
-import { uiText } from "@/lib/locale";
+import { uiMessage, uiText, type MessageDescriptor } from "@/lib/locale";
 
 export type DerivativeFailureCause =
   | "file"
@@ -56,28 +56,33 @@ export function derivativeFailureCause(reason: string | null): DerivativeFailure
 }
 
 export function derivativeFailureMessage(cause: DerivativeFailureCause): string {
+  const { key, values } = derivativeFailureDetail(cause);
+  return uiText(key, values);
+}
+
+export function derivativeFailureDetail(cause: DerivativeFailureCause): MessageDescriptor {
   switch (cause) {
     case "storage_credentials_expired":
     case "storage_authentication_failed":
     case "storage_access_denied":
     case "storage_signature_invalid":
-      return uiText(cause);
+      return uiMessage(cause);
     case "file":
-      return uiText(
+      return uiMessage(
         "PrintStash couldn't read this file. It may be damaged, incomplete or use a feature that isn't supported yet. You can still download it.",
       );
     case "too_large":
-      return uiText("This file is too large or complex to process. You can still download it.");
+      return uiMessage("This file is too large or complex to process. You can still download it.");
     case "processing":
-      return uiText(
+      return uiMessage(
         "Processing stopped unexpectedly on the server. Try again; if it keeps failing, check the PrintStash logs.",
       );
     case "storage":
-      return uiText(
+      return uiMessage(
         "PrintStash couldn't read or save this file in storage. Check that the storage is reachable, then try again.",
       );
     case "unknown":
-      return uiText(
+      return uiMessage(
         "This couldn't be produced. Try again; if it keeps failing, check the PrintStash logs.",
       );
   }

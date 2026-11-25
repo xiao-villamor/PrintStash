@@ -35,7 +35,7 @@ from app.db.models import (
     LaneName,
     WorkPriority,
 )
-from app.modules.derivatives.source import subject_key
+from app.modules.derivatives.kinds import subject_key
 from app.modules.work.contracts import PassSubmission
 from app.modules.work.jobs import status_of
 from app.modules.work.submission import execution_id

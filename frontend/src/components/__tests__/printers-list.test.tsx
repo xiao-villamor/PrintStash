@@ -21,7 +21,7 @@
  * nameable, or the fleet view shows an unlabelled machine forever.
  */
 
-import { anEditingBase, aPrintJob } from "@/test-support/factories";
+import { anEditingBase } from "@/test-support/factories";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -81,12 +81,21 @@ const ADMIN_AUTH: AuthState = {
   logout: vi.fn<AuthState["logout"]>(),
   refresh: vi.fn<AuthState["refresh"]>(),
 };
+const MEMBER_AUTH: AuthState = {
+  ...ADMIN_AUTH,
+  user: { id: 2, username: "member", email: null, is_superuser: false },
+};
 
 /** FleetQueuePanel's history window is part of its query key. */
 const FLEET_QUEUE_HISTORY_LIMIT = 20;
 
 function renderPrintersPage(
-  seed: { printers?: PrinterRead[]; summary?: FleetSummary; jobs?: PrintJobRead[] } = {},
+  seed: {
+    printers?: PrinterRead[];
+    summary?: FleetSummary;
+    jobs?: PrintJobRead[];
+    auth?: AuthState;
+  } = {},
 ) {
   const client = new QueryClient({
     defaultOptions: {
@@ -101,12 +110,24 @@ function renderPrintersPage(
   return render(
     <TestRouter>
       <QueryClientProvider client={client}>
-        <AuthContext.Provider value={ADMIN_AUTH}>
+        <AuthContext.Provider value={seed.auth ?? ADMIN_AUTH}>
           <PrintersPage />
         </AuthContext.Provider>
       </QueryClientProvider>
     </TestRouter>,
   );
+}
+
+/** Opens a printer card's context menu, as a right click does. */
+function openCardMenu(name: string) {
+  const card = screen.getByRole("link", { name }).closest("article");
+  expect(card).not.toBeNull();
+  fireEvent.contextMenu(card!);
+}
+
+async function chooseCardAction(name: string, action: string) {
+  openCardMenu(name);
+  await userEvent.click(await screen.findByRole("menuitem", { name: action }));
 }
 
 function makePrinter(overrides: Partial<PrinterRead> = {}): PrinterRead {
@@ -430,49 +451,6 @@ describe("PrinterCard", () => {
     expect(screen.queryByRole("link", { name: "Available Voron" })).not.toBeInTheDocument();
   });
 
-  it("bounds the activity panel while keeping recent printer history reachable", () => {
-    renderPrintersPage({
-      printers: [makePrinter()],
-      jobs: [
-        ...Array.from({ length: 5 }, (_, index) =>
-          aPrintJob({
-            id: index + 1,
-            printer_id: 1,
-            remote_filename: `active-${index}.gcode`,
-            state: "printing",
-          }),
-        ),
-        ...Array.from({ length: 8 }, (_, index) =>
-          aPrintJob({
-            id: index + 6,
-            printer_id: 1,
-            remote_filename: `finished-${index}.gcode`,
-            state: "completed",
-          }),
-        ),
-      ],
-    });
-    const activity = within(screen.getByRole("region", { name: "Fleet activity" }));
-    expect(activity.getAllByRole("listitem")).toHaveLength(7);
-    expect(activity.getByRole("link", { name: /finished-0/ })).toHaveAttribute(
-      "href",
-      "/printers/1?tab=jobs",
-    );
-  });
-
-  it("renders SQLite Fleet timestamps as UTC instants", () => {
-    renderPrintersPage({
-      printers: [makePrinter({ last_seen_at: "2026-01-01T03:23:06" })],
-      jobs: [aPrintJob({ state: "completed", finished_at: "2026-01-01T03:23:06" })],
-    });
-    const instant = new Date("2026-01-01T03:23:06Z");
-    const activity = within(screen.getByRole("region", { name: "Fleet activity" }));
-    expect(activity.getByRole("time")).toHaveAttribute("datetime", instant.toISOString());
-    expect(
-      screen.getByText(`Seen ${instant.toLocaleString("en")}`, { exact: false }),
-    ).toBeVisible();
-  });
-
   it("omits artwork when the preference explicitly disables it", () => {
     window.localStorage.setItem("printstash.printer-card.show-image", "false");
     const plain = renderPrintersPage({
@@ -514,20 +492,14 @@ describe("PrinterCard", () => {
     );
   });
 
-  it("shows the detected model", () => {
-    renderPrintersPage({ printers: [makePrinter({ detected_model: "Bambu Lab X1 Carbon" })] });
-
-    expect(screen.getByText("Bambu Lab X1 Carbon")).toBeInTheDocument();
-  });
-
   it("lets the user pick a model from the list when nothing was detected", async () => {
     const user = userEvent.setup();
     renderPrintersPage({ printers: [makePrinter()] });
 
-    await user.click(screen.getByText("Set model"));
+    await chooseCardAction("Voron 2.4", "Set model");
     const picker = screen.getByRole("dialog", { name: "Choose printer model" });
     await user.type(within(picker).getByRole("searchbox"), "Voron 2.4");
-    await user.click(within(picker).getByRole("button", { name: "Select" }));
+    await user.click(within(picker).getByRole("button", { name: "Voron 2.4" }));
 
     await waitFor(() => expect(requestsWithMethod("PATCH")).toHaveLength(1));
     const patched = requestsWithMethod("PATCH")[0]!;
@@ -542,10 +514,12 @@ describe("PrinterCard", () => {
     let latest = makePrinter({ model_name: "Other model", edit_version: 2 });
     let patches = 0;
     const headers: Headers[] = [];
+    const changes: PrinterUpdate[] = [];
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
       if (init?.method === "PATCH") {
         headers.push(new Headers(init.headers));
+        changes.push(JSON.parse(String(init.body)));
         patches += 1;
         if (patches === 1)
           return Promise.resolve(
@@ -564,7 +538,7 @@ describe("PrinterCard", () => {
       );
     });
     renderPrintersPage({ printers: [original] });
-    await user.click(screen.getByText("Set model"));
+    await chooseCardAction("Voron 2.4", "Set model");
     await user.click(screen.getByRole("button", { name: "Use custom model" }));
     const dialog = screen.getByRole("dialog", { name: "Custom printer model" });
     await user.type(within(dialog).getByRole("textbox", { name: "Manufacturer" }), "Homebrew");
@@ -584,7 +558,8 @@ describe("PrinterCard", () => {
         screen.queryByRole("dialog", { name: "Custom printer model" }),
       ).not.toBeInTheDocument(),
     );
-    expect(await screen.findByText("Homebrew CoreXY")).toBeVisible();
+    expect(changes[1]).toEqual({ model_name: "Homebrew CoreXY" });
+    expect(patches).toBe(2);
     expect(headers[0]?.get("If-Match")).toBe(`"printer-1-e${original.edit_epoch}-v1"`);
     expect(headers[1]?.get("If-Match")).toBe(`"printer-1-e${original.edit_epoch}-v2"`);
   });
@@ -592,7 +567,7 @@ describe("PrinterCard", () => {
   it("falls back to a custom text field for a model not in the list", async () => {
     renderPrintersPage({ printers: [makePrinter()] });
 
-    await userEvent.click(screen.getByText("Set model"));
+    await chooseCardAction("Voron 2.4", "Set model");
     await userEvent.click(screen.getByRole("button", { name: "Use custom model" }));
     await userEvent.type(screen.getByRole("textbox", { name: "Model" }), "Homebrew CoreXY");
     await userEvent.click(screen.getByRole("button", { name: "Use this model" }));
@@ -607,47 +582,66 @@ describe("PrinterCard", () => {
 
 describe("PrintersPage", () => {
   describe("removing a printer", () => {
+    async function selectAction(name: string, action: "Edit connection" | "Remove printer") {
+      await chooseCardAction(name, action);
+    }
+
     beforeAll(async () => {
       // Resolve the editor's lazy module before querying its controls.
       await import("@/components/printer-detail");
     });
 
     it("asks before removing", async () => {
-      // Removing a printer takes its access grants and its job history with it.
       renderPrintersPage({ printers: [makePrinter()] });
 
-      await userEvent.click(screen.getByRole("button", { name: "Settings" }));
-      await userEvent.click(await screen.findByRole("button", { name: /Remove/ }));
+      await selectAction("Voron 2.4", "Remove printer");
 
+      expect(screen.getByRole("dialog", { name: "Remove printer?" })).toBeInTheDocument();
       expect(requestsWithMethod("DELETE")).toHaveLength(0);
     });
 
-    it("names the printer it is about to remove", async () => {
+    it("keeps removal available from connection settings", async () => {
       renderPrintersPage({ printers: [makePrinter()] });
 
-      await userEvent.click(screen.getByRole("button", { name: "Settings" }));
-      await userEvent.click(await screen.findByRole("button", { name: /Remove/ }));
+      await selectAction("Voron 2.4", "Edit connection");
+      const settings = screen.getByRole("dialog", { name: "Edit printer connection" });
+      await userEvent.click(
+        await within(settings).findByRole("button", { name: "Remove printer" }),
+      );
 
       expect(
         await screen.findByText('"Voron 2.4" will be removed from PrintStash.'),
       ).toBeInTheDocument();
     });
 
-    it("removes it once confirmed", async () => {
+    it("keeps the printer when removal is canceled", async () => {
       renderPrintersPage({ printers: [makePrinter()] });
-      await userEvent.click(screen.getByRole("button", { name: "Settings" }));
-      await userEvent.click(await screen.findByRole("button", { name: /Remove/ }));
-      const dialog = await screen.findByRole("dialog");
 
+      await selectAction("Voron 2.4", "Remove printer");
+      const dialog = screen.getByRole("dialog", { name: "Remove printer?" });
+      await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+      expect(screen.getByRole("link", { name: "Voron 2.4" })).toBeVisible();
+      expect(requestsWithMethod("DELETE")).toHaveLength(0);
+    });
+
+    it("removes the selected printer once confirmed", async () => {
+      renderPrintersPage({
+        printers: [makePrinter(), makePrinter({ id: 2, name: "Lab Klipper" })],
+      });
+      await selectAction("Lab Klipper", "Remove printer");
+      const dialog = await screen.findByRole("dialog", { name: "Remove printer?" });
+      expect(dialog).toHaveAccessibleDescription('"Lab Klipper" will be removed from PrintStash.');
       await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
 
       await waitFor(() => expect(requestsWithMethod("DELETE")).toHaveLength(1));
-      expect(requestsWithMethod("DELETE")[0]!.url).toBe("/api/v1/printers/1");
+      expect(requestsWithMethod("DELETE")[0]!.url).toBe("/api/v1/printers/2");
     });
 
     it("offers no removal to somebody who may not administer it", async () => {
       // The connection is visible, while administrative actions remain unavailable.
       renderPrintersPage({
+        auth: MEMBER_AUTH,
         printers: [
           makePrinter({
             access: {
@@ -661,9 +655,44 @@ describe("PrintersPage", () => {
         ],
       });
 
-      expect(screen.queryByRole("button", { name: "Settings" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /Remove/ })).not.toBeInTheDocument();
+      openCardMenu("Voron 2.4");
+
+      expect(screen.getByRole("menuitem", { name: "Open page" })).toBeVisible();
+      expect(screen.queryByRole("menuitem", { name: "Remove printer" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "Edit connection" })).not.toBeInTheDocument();
       expect(requestsWithMethod("DELETE")).toEqual([]);
+    });
+
+    it("offers administration only on printers the member can administer", async () => {
+      const managed = makePrinter();
+      const viewOnly = makePrinter({
+        id: 2,
+        name: "View-only printer",
+        access: {
+          role: "view",
+          can_view: true,
+          can_print: false,
+          can_control: false,
+          can_admin: false,
+        },
+      });
+      renderPrintersPage({ auth: MEMBER_AUTH, printers: [managed, viewOnly] });
+
+      openCardMenu(viewOnly.name);
+      const menu = await screen.findByRole("menu");
+      expect(within(menu).getByRole("menuitem", { name: "Open page" })).toHaveAttribute(
+        "href",
+        "/printers/2",
+      );
+      expect(
+        within(menu).queryByRole("menuitem", { name: "Remove printer" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows the empty state before the first printer is added", async () => {
+      renderPrintersPage();
+
+      expect(screen.getByText("No printers configured yet.")).toBeVisible();
     });
   });
 
@@ -678,6 +707,14 @@ describe("PrintersPage", () => {
       renderPrintersPage({ printers: [makePrinter()] });
 
       expect(screen.getByRole("tab", { name: "Maintenance" })).toBeInTheDocument();
+    });
+
+    it("has no separate management tab; actions live in the card menu", async () => {
+      renderPrintersPage({ printers: [makePrinter()] });
+
+      expect(screen.queryByRole("tab", { name: "Manage printers" })).not.toBeInTheDocument();
+      openCardMenu("Voron 2.4");
+      expect(screen.getByRole("menuitem", { name: "Remove printer" })).toBeVisible();
     });
 
     it("opens the queue when it is chosen", async () => {

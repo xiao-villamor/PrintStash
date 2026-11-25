@@ -1,8 +1,24 @@
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Folder, Play, RefreshCcw, Trash2 } from "lucide-react";
+import {
+  Ban,
+  ChevronDown,
+  ChevronRight,
+  CircleAlert,
+  CircleCheck,
+  CirclePause,
+  CirclePlay,
+  Clock,
+  Folder,
+  Play,
+  RefreshCcw,
+  Trash2,
+  type LucideIcon,
+} from "lucide-react";
 import { lazy, Suspense, useId, useMemo, useState, type ReactNode } from "react";
 
+import { StatePill } from "@/components/state-pill";
 import { PrintJobReproducibility } from "@/components/print-job-reproducibility";
+import { PrintJobCost } from "@/components/print-job-cost";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
@@ -44,19 +60,27 @@ function isPrintJobState(value: string): value is PrintJobState {
   return Object.hasOwn(outcomeLabels, value);
 }
 
+const outcomeIcons = {
+  completed: CircleCheck,
+  failed: CircleAlert,
+  cancelled: Ban,
+  printing: CirclePlay,
+  paused: CirclePause,
+  started: CirclePlay,
+  uploading: Clock,
+  queued: Clock,
+} as const satisfies Record<PrintJobState, LucideIcon>;
+
 function JobOutcome({ job }: { job: PrintJobRead }) {
   return (
-    <>
-      {uiText(outcomeLabels[job.state])}
+    <span className="inline-flex flex-col items-start gap-1">
+      <StatePill icon={outcomeIcons[job.state]} destructive={job.state === "failed"}>
+        {uiText(outcomeLabels[job.state])}
+      </StatePill>
       {job.state === "completed" && job.started_at == null && (
-        <>
-          {" "}
-          <span className="block text-xs text-muted-foreground">
-            {uiText("No print start recorded")}
-          </span>
-        </>
+        <span className="text-xs text-muted-foreground">{uiText("No print start recorded")}</span>
       )}
-    </>
+    </span>
   );
 }
 
@@ -83,6 +107,7 @@ function dateValue(value: string | null, presentation: "short" | "full" = "full"
 }
 
 function duration(job: PrintJobRead) {
+  if (job.actual_duration_s != null) return job.actual_duration_s;
   const start = parseApiInstant(job.started_at);
   const end = parseApiInstant(job.finished_at);
   if (!start || !end) return null;
@@ -444,7 +469,11 @@ export function PrinterFiles({
                           )}
                         </td>
                         <td>{file.size_bytes === null ? "—" : formatBytes(file.size_bytes)}</td>
-                        <td>{uiText(file.model_id ? "Matched" : "External")}</td>
+                        <td>
+                          <StatePill icon={file.model_id ? CircleCheck : undefined}>
+                            {uiText(file.model_id ? "Matched" : "External")}
+                          </StatePill>
+                        </td>
                         <td>{dateValue(file.last_seen_at, "short")}</td>
                       </tr>
                     );
@@ -615,6 +644,7 @@ export function PrinterRecentRuns({
                     {dateValue(job.finished_at, "short")}
                     {elapsed !== null && ` · ${formatDuration(elapsed)}`}
                   </div>
+                  {job.production_cost && <PrintJobCost cost={job.production_cost} />}
                 </div>
                 <div
                   className={
@@ -746,6 +776,7 @@ export function PrinterJobHistory({
                       {uiText("Run #{value1}", { value1: String(job.id) })}
                       {(original ?? artifact) !== title ? ` · ${original ?? artifact}` : ""}
                     </p>
+                    {job.production_cost && <PrintJobCost cost={job.production_cost} />}
                   </td>
                   <td
                     id={`${id}-outcome-${job.id}`}

@@ -146,12 +146,14 @@ export function PrintJobReproducibility({
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 space-y-1">
-          <p className="font-mono text-2xs font-semibold text-foreground">{artifactName}</p>
-          <p className="font-mono text-3xs text-muted-foreground">{copy.description}</p>
+          <p className="wrap-anywhere font-mono text-xs font-medium text-foreground">
+            {artifactName}
+          </p>
+          <p className="text-xs text-muted-foreground">{copy.description}</p>
         </div>
         <span
           className={cn(
-            "shrink-0 rounded border px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider",
+            "shrink-0 rounded border px-1.5 py-0.5 text-xs font-medium",
             copy.className,
           )}
           data-testid="reproducibility-level"

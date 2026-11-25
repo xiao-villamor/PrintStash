@@ -345,6 +345,31 @@ class TestPreviewPublication:
         assert len(summary.published.views) == 4
         assert get_backend().read_bytes(previous)
 
+    def test_regenerates_views_after_the_published_storage_root_moves(
+        self, client, auth_headers, db_session, artifact, ready, tmp_path
+    ):
+        ready.storage_key = str(tmp_path / "old-vault" / "files" / "views.bin")
+        db_session.add(ready)
+        db_session.commit()
+        stale_view = _summary(db_session, artifact).published.views[0].url
+        unavailable = client.get(stale_view, headers=auth_headers)
+        assert unavailable.status_code == 410
+        assert unavailable.json()["detail"] == "preview_bytes_unavailable"
+
+        queued = client.post(
+            f"/api/v1/models/{artifact.model_id}/previews/regenerate",
+            headers=auth_headers,
+        )
+        assert queued.status_code == 202, queued.text
+        assert previews.derive(artifact.id).kinds == {
+            DerivativeKind.PREVIEWS: DerivativeState.READY
+        }
+        db_session.expire_all()
+        rebuilt_view = _summary(db_session, artifact).published.views[0].url
+        response = client.get(rebuilt_view, headers=auth_headers)
+        assert response.status_code == 200, response.text
+        assert response.headers["content-type"] == "image/webp"
+
     def test_preserves_valid_generation_after_failed_retry(
         self, db_session, artifact, ready
     ):

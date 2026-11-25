@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { Package, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { useMachineSetup } from "@/features/printers/materials";
 import { formatNumber } from "@/lib/format";
@@ -77,6 +78,7 @@ export function MachineIdentity({
         </div>
         {summary?.openSettings && (
           <Button size="xs" variant="ghost" onClick={summary.openSettings}>
+            <Settings className="size-3.5" aria-hidden="true" />
             {uiText("Printer settings")}
           </Button>
         )}
@@ -160,6 +162,7 @@ export function MachineMaterials({
         <h2>{heading ?? uiText("Materials & tools")}</h2>
         {openMaterials && (
           <Button size="xs" variant="outline" onClick={openMaterials}>
+            <Package className="size-3.5" aria-hidden="true" />
             {uiText("Open materials")}
           </Button>
         )}
@@ -183,7 +186,7 @@ export function MachineMaterials({
                   .map(({ tray, slot }) => (
                     <li
                       key={slot.slot_key}
-                      className="min-w-0 border border-border bg-muted/30 p-2"
+                      className="min-w-0 rounded-md border border-border bg-muted/30 p-2"
                     >
                       <MaterialSlot slot={slot} label={uiText("Tray {value1}", { value1: tray })} />
                     </li>

@@ -276,6 +276,31 @@ test.describe("Model preview browsing", () => {
     }
   });
 
+  for (const theme of ["light", "dark"] as const) {
+    test(`outlines card controls against the image area in ${theme} mode`, async ({ page }) => {
+      await page.addInitScript((value) => localStorage.setItem("printstash.theme", value), theme);
+      const { card, next } = await library(page);
+      const plate = await card
+        .locator('[data-model-preview="Bracket 1"]')
+        .evaluate((element) => getComputedStyle(element).backgroundColor);
+      for (const control of [
+        next,
+        card.getByRole("button", { name: "Model views", exact: true }),
+        card.getByRole("checkbox", { name: /^Select / }),
+      ]) {
+        // A photo or render can sit on any colour; the chip is bounded by its own edge and fill.
+        const style = await control.evaluate((element) => {
+          const { backgroundColor, borderTopColor, borderTopWidth } = getComputedStyle(element);
+          return { backgroundColor, borderTopColor, borderTopWidth };
+        });
+        expect(style.borderTopWidth).toBe("1px");
+        expect(style.borderTopColor).not.toBe("rgba(0, 0, 0, 0)");
+        expect(style.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+        expect(style.backgroundColor).not.toBe(plate);
+      }
+    });
+  }
+
   test("keeps card arrows compact over the image", async ({ page }) => {
     const { card, next } = await library(page);
 
@@ -509,6 +534,27 @@ test.describe("Model preview browsing", () => {
     await page.unroute("**/previews/generation/orbit-1");
     await card.getByRole("button", { name: "Retry preview" }).click();
     await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-1");
+  });
+
+  test("asks for new views when the published ones are gone", async ({ page }) => {
+    const { next, card } = await library(page);
+    const regenerated: string[] = [];
+    await page.route("**/api/v1/models/1/previews/regenerate", (route) => {
+      regenerated.push(route.request().method());
+      return route.fulfill({ status: 202, json: { queued: 1 } });
+    });
+    await page.route("**/previews/generation/orbit-1", (route) =>
+      route.fulfill({ status: 410, json: { detail: "preview_bytes_unavailable" } }),
+    );
+    await next.dispatchEvent("click");
+    const retry = card.getByRole("button", { name: "Retry preview" });
+    await expect(retry).toBeVisible();
+    // A compact icon over the image, not a text button.
+    expect(await retry.boundingBox()).toMatchObject({ width: 32, height: 32 });
+
+    await retry.click();
+
+    await expect.poll(() => regenerated).toEqual(["POST"]);
   });
 
   test("respects data saving", async ({ page }) => {

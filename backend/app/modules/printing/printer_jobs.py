@@ -33,7 +33,7 @@ from app.db.session import get_session_factory
 from app.modules.identity import printer_rbac, rbac
 from app.modules.media.sliced_gcode import is_container, plate_toolpath
 from app.modules.media.three_mf_preview import EmbeddedGcodeError
-from app.modules.printing import fleet
+from app.modules.printing import fleet, production_costing
 from app.modules.printing.printer_files import (
     build_traceable_remote_filename,
     upsert_printer_file,
@@ -377,6 +377,7 @@ def _claim_next_sync() -> int | None:
         )
 
         candidate: PrintJob | None = None
+        rates, estimate = None, None
         pending_updates: list[dict[str, object]] = []
         for row, printer, blocked_reason in resolved:
             requester = users.get(int(row.requested_by)) if row.requested_by else None
@@ -427,6 +428,9 @@ def _claim_next_sync() -> int | None:
                 )
             if blocked_reason is None and printer is not None:
                 candidate = row
+                rates, estimate = production_costing.job_cost_snapshot(
+                    session, printer, row, artifact
+                )
                 break
         if pending_updates:
             # ORM dirty flushing can degrade to one UPDATE per row depending on
@@ -446,6 +450,8 @@ def _claim_next_sync() -> int | None:
             )
             .values(
                 state=PrintJobState.UPLOADING,
+                production_rates=rates,
+                production_cost=estimate,
                 dispatch_claimed_at=claimed_at,
                 dispatch_attempts=PrintJob.dispatch_attempts + 1,
                 updated_at=claimed_at,
@@ -526,6 +532,7 @@ def _mark_dispatch_failed(job_id: int, code: str) -> None:
             job.error = code
             job.retryable = code != "dispatch_outcome_unknown"
             job.finished_at = utcnow()
+            job.production_cost = None
             job.updated_at = utcnow()
             session.add(job)
             session.commit()

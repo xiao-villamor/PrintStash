@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import {
   CollectionsPaneContext,
   CollectionsPaneOpenContext,
+  CollectionsPanePresenceContext,
   useCollectionsPane,
   type CollectionsPaneState,
 } from "@/lib/collections-pane-context";
@@ -146,9 +147,11 @@ export function CollectionsPaneProvider({ children }: { children: ReactNode }) {
   return (
     <CollectionsPaneContext.Provider value={value}>
       <CollectionsPaneOpenContext.Provider value={open}>
-        <div className="contents" style={{ "--workbench-sidebar-width": `${width}px` }}>
-          {children}
-        </div>
+        <CollectionsPanePresenceContext.Provider value={true}>
+          <div className="contents" style={{ "--workbench-sidebar-width": `${width}px` }}>
+            {children}
+          </div>
+        </CollectionsPanePresenceContext.Provider>
       </CollectionsPaneOpenContext.Provider>
     </CollectionsPaneContext.Provider>
   );

@@ -290,7 +290,7 @@ function HistoryProbe() {
  * for real by `tests/e2e/vault.spec.ts`, where CSS is applied.
  */
 function sortButton() {
-  return screen.getAllByRole("button", { name: "Sort models" }).at(-1)!;
+  return screen.getAllByRole("combobox", { name: "Sort models" }).at(-1)!;
 }
 
 function uploadButton() {
@@ -332,7 +332,11 @@ async function openFilters() {
 }
 
 async function waitForLibraryActions() {
-  expect(await screen.findByRole("group", { name: "Library tools" })).toBeVisible();
+  expect(
+    within(await screen.findByRole("main"))
+      .getAllByRole("button", { name: "More" })
+      .at(-1),
+  ).toBeVisible();
 }
 
 beforeEach(() => {
@@ -340,6 +344,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -349,7 +354,6 @@ describe("ModelBrowser", () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
       await within(screen.getByRole("main")).findByText("Benchy");
       const main = screen.getByRole("main");
-      const actions = within(main).getByRole("group", { name: "Library tools" });
       expect(within(main).getAllByRole("button", { name: "Filters" })).not.toHaveLength(0);
       expect(
         within(screen.getByRole("complementary")).queryByRole("navigation", {
@@ -358,7 +362,7 @@ describe("ModelBrowser", () => {
       ).not.toBeInTheDocument();
 
       expect(within(main).getByRole("button", { name: "New collection" })).toBeVisible();
-      expect(within(actions).getByRole("button", { name: "Select" })).toBeVisible();
+      expect(within(main).getAllByRole("button", { name: "More" }).at(-1)).toBeVisible();
       expect(screen.getByRole("checkbox", { name: "Select Benchy" })).toBeVisible();
       expect(screen.queryByRole("button", { name: "Library tools" })).not.toBeInTheDocument();
       expect(screen.queryByRole("menu")).not.toBeInTheDocument();
@@ -446,6 +450,10 @@ describe("ModelBrowser", () => {
       expect(await screen.findByText("This collection is empty")).toBeVisible();
       expect(screen.queryByText("Try clearing some filters.")).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Clear all filters" })).not.toBeInTheDocument();
+      // Importing from a URL or connecting a NAS add to the library, not to this collection.
+      expect(screen.queryByRole("link", { name: "Import from URL" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Connect folder or NAS" })).not.toBeInTheDocument();
+      expect(screen.getByText("Or drop files anywhere on this page.")).toBeVisible();
       await user.click(screen.getByRole("button", { name: "Upload files" }));
       const dialog = await screen.findByRole("dialog", { name: "Upload model" });
       await waitFor(() =>
@@ -905,6 +913,7 @@ describe("ModelBrowser", () => {
     });
 
     it("keeps existing root collections visible beside an imported root", async () => {
+      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1440);
       renderVault({
         collections: [
           aCollection({ id: 1, name: "Christine", path: "christine", model_count: 17 }),
@@ -1567,8 +1576,7 @@ describe("ModelBrowser", () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })], historyProbe: true });
       await within(screen.getByRole("main")).findByText("Benchy");
 
-      await user.click(sortButton());
-      await user.click(screen.getAllByRole("menuitemradio", { name: "Name A–Z" }).at(-1)!);
+      await user.selectOptions(sortButton(), "name-asc");
 
       expect(screen.getByTestId("vault-location")).toHaveTextContent("sort=name-asc");
     });
@@ -1589,7 +1597,7 @@ describe("ModelBrowser", () => {
         "aria-pressed",
         "true",
       );
-      expect(sortButton()).toHaveTextContent("Newest");
+      expect(sortButton()).toHaveValue("date-desc");
     });
 
     it("remembers a sort choice", async () => {
@@ -1598,9 +1606,7 @@ describe("ModelBrowser", () => {
       await within(screen.getByRole("main")).findByText("Benchy");
 
       const sort = sortButton();
-      await user.click(sort);
-      // Each bar owns its own menu, so scope the choice to the one just opened.
-      await user.click(screen.getAllByRole("menuitemradio", { name: "Name A–Z" }).at(-1)!);
+      await user.selectOptions(sort, "name-asc");
 
       expect(window.localStorage.getItem("ps-vault-sort")).toBe("name-asc");
     });
@@ -1609,8 +1615,7 @@ describe("ModelBrowser", () => {
       const user = userEvent.setup();
       const app = renderVault({ at: "/?q=benchy", models: [aModelListItem({ name: "Benchy" })] });
       await within(screen.getByRole("main")).findByText("Benchy");
-      await user.click(sortButton());
-      await user.click(screen.getAllByRole("menuitemradio", { name: "Relevance" }).at(-1)!);
+      await user.selectOptions(sortButton(), "relevance");
       expect(window.localStorage.getItem("ps-vault-sort")).toBe("relevance");
       await waitFor(() =>
         expect(
@@ -1630,7 +1635,7 @@ describe("ModelBrowser", () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
 
       await within(screen.getByRole("main")).findByText("Benchy");
-      expect(sortButton()).toHaveTextContent("Newest");
+      expect(sortButton()).toHaveValue("date-desc");
     });
   });
 
@@ -1778,7 +1783,6 @@ describe("ModelBrowser", () => {
       renderVault({ at: "/?v=multipart", multipartModels: [aMultipartSet()] });
 
       expect(await screen.findByRole("heading", { name: "All Models" })).toBeInTheDocument();
-      expect(screen.getByRole("group", { name: "Library tools" })).toBeVisible();
       expect(screen.getAllByRole("button", { name: "Multipart sets only" })[0]).toHaveAttribute(
         "aria-pressed",
         "true",
@@ -3585,6 +3589,7 @@ describe("ModelBrowser", () => {
     });
 
     it("keeps a wide folder level to one page until more is requested", async () => {
+      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1440);
       const nextPage = observePagination();
       const first = aCollectionNode();
       const second = aCollectionNode({
@@ -4056,6 +4061,7 @@ describe("ModelBrowser", () => {
     });
 
     it("restarts refreshed folder pagination automatically", async () => {
+      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1440);
       const nextPage = observePagination();
       const app = renderVault({
         models: [aModelListItem({ name: "Original model" })],
@@ -4172,6 +4178,7 @@ describe("ModelBrowser", () => {
     });
 
     it("ignores a refresh across rapid destinations", async () => {
+      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1440);
       const user = userEvent.setup();
       const pending = Promise.withResolvers<Response>();
       const middle = Promise.withResolvers<Response>();

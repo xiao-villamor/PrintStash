@@ -1,12 +1,14 @@
 "use client";
 
 import { createPortal } from "react-dom";
+import { useQuery } from "@tanstack/react-query";
 
 import { usePrinterSettingsCommand } from "@/features/printers/settings-edit";
 import { PrinterSettingsReview } from "@/features/printers/settings-review";
 
 import { knownUiText, uiMessage, uiText, type MessageDescriptor } from "@/lib/locale";
 import { formatNumber } from "@/lib/format";
+import { printerProfilesOptions, subscribeToPrinterProfileChanges } from "@/lib/queries/profiles";
 import { useUiLocale } from "@/lib/i18n";
 
 import {
@@ -50,6 +52,7 @@ import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { formatDuration } from "@/lib/format";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { PageFailure } from "@/components/page-failure";
 import { PrinterConfigWorkspace } from "@/features/printers/config-workspace";
 import { FormField } from "@/components/ui/form-field";
@@ -80,7 +83,9 @@ import {
   type CommandReceipts,
 } from "@/components/printer-controls";
 import { PrinterConsole } from "./printer-console";
-import { MachineIdentity, MachineMaterials } from "@/components/printer-machine";
+import { MachineIdentity, MachineMaterials, MachinePortrait } from "@/components/printer-machine";
+import { PrinterStatusBadge } from "@/components/printer-status-badge";
+import { Switch } from "@/components/ui/switch";
 import {
   PREHEAT_PRESETS,
   printerControlAvailability,
@@ -99,7 +104,17 @@ import "./printer-detail-content.css";
 import "./printer-detail.css";
 import "./printer-sections.css";
 import { PRINTER_MODEL_OPTIONS, providerAddress, providerLabel } from "@/lib/printer-providers";
-import { Pause, Play, Square, RefreshCcw } from "lucide-react";
+import {
+  FolderOpen,
+  History,
+  ListOrdered,
+  OctagonAlert,
+  Pause,
+  Play,
+  Plus,
+  RefreshCcw,
+  Square,
+} from "lucide-react";
 
 const FleetAddJobDialog = lazy(() =>
   import("./fleet-add-job").then((module) => ({ default: module.FleetAddJobDialog })),
@@ -705,11 +720,13 @@ function PrinterDetailView({
                 printer.capabilities.can_upload &&
                 printer.capabilities.can_start && (
                   <Button size="xs" onClick={() => setAddJobOpen(true)}>
+                    <Plus className="size-3.5" aria-hidden="true" />
                     {uiText("Add to queue")}
                   </Button>
                 )}
               {printer.capabilities.can_list_files && (
                 <Button variant="outline" size="xs" onClick={() => setActiveTab("files")}>
+                  <FolderOpen className="size-3.5" aria-hidden="true" />
                   {uiText("Browse files")}
                 </Button>
               )}
@@ -764,6 +781,7 @@ function PrinterDetailView({
         <div className="flex flex-wrap items-center gap-2">
           {activeState && printer.capabilities.can_list_files && (
             <Button variant="outline" size="xs" onClick={() => setActiveTab("files")}>
+              <FolderOpen className="size-3.5" aria-hidden="true" />
               {uiText("Browse files")}
             </Button>
           )}
@@ -772,11 +790,13 @@ function PrinterDetailView({
               href="/printers?tab=queue"
               className={buttonVariants({ variant: "outline", size: "xs" })}
             >
+              <ListOrdered className="size-3.5" aria-hidden="true" />
               {uiText("View queue")}
             </Link>
           )}
           {!bambu && (
             <Button size="xs" variant="outline" onClick={() => setActiveTab("jobs")}>
+              <History className="size-3.5" aria-hidden="true" />
               {uiText("Print history")}
             </Button>
           )}
@@ -872,55 +892,65 @@ function PrinterDetailView({
           }
         />
         <div className="w-full space-y-6">
-          <PageHeader
-            title={printer.name}
-            description={
-              <>
-                {providerLabel(printer)} · {connectionLabel}
-                {printer.capabilities.support_level === "beta" && (
-                  <span className="ml-2 inline-flex border border-border bg-muted px-1.5 py-0.5 text-2xs font-medium text-foreground">
-                    {uiText("Beta")}
-                  </span>
-                )}
-              </>
-            }
-            actions={
-              activeTab === "materials" ||
-              activeTab === "maintenance" ||
-              activeTab === "diagnostics" ||
-              (activeTab === "files" && printer.capabilities.can_list_files) ? null : (
-                <>
-                  {activeTab === "status" &&
-                    availability.moonraker &&
-                    printer.access.can_control && (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <CommandReceipt receipt={receipts.emergency} pending={emergencyStopBusy} />
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          disabled={!availability.connected || emergencyStopBusy}
-                          onClick={emergencyStop}
-                        >
-                          {uiText("Emergency stop")}
-                        </Button>
-                      </div>
+          <div className="flex items-start gap-4">
+            <MachinePortrait printer={printer} />
+            <div className="min-w-0 flex-1">
+              <PageHeader
+                title={printer.name}
+                description={
+                  <span className="inline-flex flex-wrap items-center gap-2">
+                    <PrinterStatusBadge status={printer.status} />
+                    {providerLabel(printer)} · {connectionLabel}
+                    {printer.capabilities.support_level === "beta" && (
+                      <span className="inline-flex rounded-full bg-foreground/10 px-2 py-0.5 text-2xs font-medium text-foreground/80">
+                        {uiText("Beta")}
+                      </span>
                     )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (activeTab === "config") void loadMoonrakerConfig();
-                      else void refreshAll();
-                    }}
-                    disabled={activeTab === "config" && loadingConfig}
-                  >
-                    <RefreshCcw className="h-3.5 w-3.5" />
-                    {uiText("Refresh")}
-                  </Button>
-                </>
-              )
-            }
-          />
+                  </span>
+                }
+                actions={
+                  activeTab === "materials" ||
+                  activeTab === "maintenance" ||
+                  activeTab === "diagnostics" ||
+                  (activeTab === "files" && printer.capabilities.can_list_files) ? null : (
+                    <>
+                      {activeTab === "status" &&
+                        availability.moonraker &&
+                        printer.access.can_control && (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <CommandReceipt
+                              receipt={receipts.emergency}
+                              pending={emergencyStopBusy}
+                            />
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              disabled={!availability.connected || emergencyStopBusy}
+                              onClick={emergencyStop}
+                            >
+                              <OctagonAlert className="size-3.5" aria-hidden="true" />
+                              {uiText("Emergency stop")}
+                            </Button>
+                          </div>
+                        )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (activeTab === "config") void loadMoonrakerConfig();
+                          else void refreshAll();
+                        }}
+                        disabled={activeTab === "config" && loadingConfig}
+                      >
+                        <RefreshCcw className="h-3.5 w-3.5" />
+                        {uiText("Refresh")}
+                      </Button>
+                    </>
+                  )
+                }
+              />
+            </div>
+          </div>
 
           {(error || resources.error) && (
             <div className="rounded border border-red-300/50 bg-red-50/30 p-3 font-mono text-sm text-red-600 dark:bg-red-950/20">
@@ -933,7 +963,7 @@ function PrinterDetailView({
             </div>
           )}
 
-          <div className="border-b border-border">
+          <div>
             <TabBar
               tabs={[
                 {
@@ -993,9 +1023,10 @@ function PrinterDetailView({
               ]}
               active={activeTab === "maintenance" ? "materials" : activeTab}
               onChange={setActiveTab}
-              className="gap-1 overflow-x-auto -mb-px"
-              tabClassName="px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              activeTabClassName="bg-transparent font-semibold text-foreground hover:bg-transparent"
+              showIndicator={false}
+              className="w-fit max-w-full gap-0.5 overflow-x-auto rounded-lg border border-border bg-card p-0.75"
+              tabClassName="h-7.5 shrink-0 rounded-md px-3 text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              activeTabClassName="bg-foreground/12 text-foreground"
             />
           </div>
 
@@ -1138,7 +1169,6 @@ function PrinterDetailView({
                 printer={printer}
                 canEdit={printer.access.can_admin}
                 key={printer.id}
-                connectionLabel={connectionLabel}
                 onDiagnostics={() => setActiveTab("diagnostics")}
                 onMaintenance={() => setActiveTab("maintenance")}
               />
@@ -1206,7 +1236,6 @@ export function PrinterSettings({
   onCancel,
   onSaved,
   onRemove,
-  connectionLabel,
   onDiagnostics,
   onMaintenance,
 }: {
@@ -1216,7 +1245,6 @@ export function PrinterSettings({
   onCancel?: () => void;
   onSaved?: () => void;
   onRemove?: () => void;
-  connectionLabel?: string;
   onDiagnostics?: () => void;
   onMaintenance?: () => void;
 }) {
@@ -1228,7 +1256,6 @@ export function PrinterSettings({
   const hintId = useId();
   const compact = modalActions !== undefined;
   const Field = compact ? FormField : SettingsField;
-  const setup = useMachineSetup(initialPrinter.id, !compact);
   useEffect(() => {
     active.current = true;
 
@@ -1240,6 +1267,24 @@ export function PrinterSettings({
   const [modelName, setModelName] = useState(printer.model_name ?? "");
   const [group, setGroup] = useState(printer.group ?? "");
   const [notes, setNotes] = useState(printer.notes ?? "");
+  const [costProfile, setCostProfile] = useState(printer.cost_profile_id ?? null);
+  const profiles = useQuery({
+    ...printerProfilesOptions(),
+    enabled: canEdit,
+    refetchOnWindowFocus: "always",
+  });
+  const refreshProfiles = profiles.refetch;
+  useEffect(() => {
+    if (!canEdit) return;
+    return subscribeToPrinterProfileChanges(() => void refreshProfiles());
+  }, [canEdit, refreshProfiles]);
+  const catalog = profiles.data ?? [];
+  const pricedProfiles = catalog.filter((profile) => profile.expenses != null);
+  const unpricedProfiles = catalog.filter((profile) => profile.expenses == null);
+  const assignedProfile = catalog.find((profile) => profile.id === costProfile);
+  const profilesHref = assignedProfile
+    ? `/profiles?tab=printers&profile=${assignedProfile.id}`
+    : "/profiles?tab=printers";
   const [address, setAddress] = useState(providerAddress(printer));
   const [serial, setSerial] = useState(printer.bambu_serial ?? "");
   const [username, setUsername] = useState(printer.prusalink_username ?? "");
@@ -1256,6 +1301,7 @@ export function PrinterSettings({
     modelName !== (printer.model_name ?? "") ||
     group !== (printer.group ?? "") ||
     notes !== (printer.notes ?? "") ||
+    costProfile !== (printer.cost_profile_id ?? null) ||
     address !== providerAddress(printer) ||
     serial !== (printer.bambu_serial ?? "") ||
     username !== (printer.prusalink_username ?? "") ||
@@ -1263,6 +1309,22 @@ export function PrinterSettings({
     secret !== "" ||
     providerMaterialSync !== printer.provider_material_sync_enabled ||
     operatorReleaseRequired !== printer.operator_release_required;
+  const sectionDirty = {
+    identity:
+      name.trim() !== printer.name ||
+      modelName !== (printer.model_name ?? "") ||
+      group !== (printer.group ?? ""),
+    costing: costProfile !== (printer.cost_profile_id ?? null),
+    connection:
+      address !== providerAddress(printer) ||
+      serial !== (printer.bambu_serial ?? "") ||
+      username !== (printer.prusalink_username ?? "") ||
+      mainboardId !== (printer.elegoo_centauri_mainboard_id ?? "") ||
+      secret !== "" ||
+      providerMaterialSync !== printer.provider_material_sync_enabled,
+    scheduling: operatorReleaseRequired !== printer.operator_release_required,
+    notes: notes !== (printer.notes ?? ""),
+  };
   const saving = command.busy;
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -1296,6 +1358,7 @@ export function PrinterSettings({
     setModelName(snapshot.model_name ?? "");
     setGroup(snapshot.group ?? "");
     setNotes(snapshot.notes ?? "");
+    setCostProfile(snapshot.cost_profile_id ?? null);
     setAddress(providerAddress(snapshot));
     setSerial(snapshot.bambu_serial ?? "");
     setUsername(snapshot.prusalink_username ?? "");
@@ -1318,6 +1381,7 @@ export function PrinterSettings({
     if (modelName !== (printer.model_name ?? "")) payload.model_name = modelName;
     if (group !== (printer.group ?? "")) payload.group = group;
     if (notes !== (printer.notes ?? "")) payload.notes = notes;
+    if (costProfile !== (printer.cost_profile_id ?? null)) payload.cost_profile_id = costProfile;
     if (providerMaterialSync !== printer.provider_material_sync_enabled)
       payload.provider_material_sync_enabled = providerMaterialSync;
     if (operatorReleaseRequired !== printer.operator_release_required)
@@ -1361,14 +1425,23 @@ export function PrinterSettings({
     }
   }
 
-  const materialSyncField = (
+  const materialSyncField = !compact ? (
+    <SettingsToggle
+      title={uiText("Provider material sync")}
+      description={uiText(
+        "Import supported AMS or active-Spoolman state. Turn off to use manual state exclusively.",
+      )}
+      checked={providerMaterialSync}
+      onChange={setProviderMaterialSync}
+      disabled={!canEdit || saving}
+    />
+  ) : (
     <label className="flex items-start gap-3">
-      <input
-        type="checkbox"
+      <Checkbox
         checked={providerMaterialSync}
-        onChange={(event) => setProviderMaterialSync(event.target.checked)}
+        onChange={setProviderMaterialSync}
         disabled={!canEdit || saving}
-        className="mt-0.5 h-4 w-4"
+        className="mt-0.5 shrink-0"
       />
       <span>
         <span
@@ -1441,47 +1514,54 @@ export function PrinterSettings({
 
   return (
     <Localized>
-      <div className={compact ? undefined : "printer-desk printer-settings-desk"}>
+      <div className={compact ? undefined : "printer-settings-layout"}>
         {!compact && (
-          <aside className="min-w-0">
-            <MachineIdentity
-              printer={initialPrinter}
-              status={connectionLabel ?? knownUiText(initialPrinter.status)}
-              nozzle={setup.nozzle}
-            />
-            <dl className="printer-machine-facts printer-settings-context">
-              <div>
-                <dt>{uiText("Scheduling")}</dt>
-                <dd>
-                  {uiText(
-                    initialPrinter.drain_mode ? "Soft drain active" : "Accepting scheduled work",
+          <nav aria-label={uiText("Settings sections")} className="printer-settings-nav">
+            {(
+              [
+                ["identity", uiText("Identity & routing"), true],
+                ["connection", uiText("Connection"), true],
+                ["costing", uiText("Print costing"), canEdit],
+                ["scheduling", uiText("Scheduling & release"), true],
+                ["notes", uiText("Operator notes"), true],
+              ] as const
+            )
+              .filter(([, , shown]) => shown)
+              .map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() =>
+                    document
+                      .getElementById(`printer-settings-${key}`)
+                      ?.scrollIntoView({ block: "start" })
+                  }
+                >
+                  {label}
+                  {sectionDirty[key] && (
+                    <span
+                      role="img"
+                      aria-label={uiText("Unsaved changes")}
+                      className="size-1.5 shrink-0 rounded-full bg-primary"
+                    />
                   )}
-                </dd>
-              </div>
-              <div>
-                <dt>{uiText("Operator release")}</dt>
-                <dd>
-                  {uiText(initialPrinter.operator_release_required ? "Required" : "Optional")}
-                </dd>
-              </div>
-            </dl>
-          </aside>
+                </button>
+              ))}
+          </nav>
         )}
         <form
           id={modalActions?.formId}
           ref={form}
           onSubmit={save}
-          className={compact ? "space-y-5" : "min-w-0 divide-y divide-border"}
+          className={compact ? "divide-y divide-border" : "min-w-0 space-y-4"}
         >
-          {!compact && (
-            <header className="printer-settings-actions">
-              <h2 className="mr-auto text-sm font-semibold">{uiText("Printer settings")}</h2>
-              <span role="status" className="text-xs text-muted-foreground">
-                {uiText(saveLabel)}
-              </span>
-            </header>
-          )}
-          <PrinterSettingsSection compact={compact} title={uiText("Identity & routing")}>
+          <PrinterSettingsSection
+            compact={compact}
+            columns
+            id="identity"
+            title={uiText("Identity & routing")}
+            description={uiText("How this printer is named and grouped in the fleet.")}
+          >
             <Field label={uiText("Name")}>
               <Input
                 value={name}
@@ -1490,11 +1570,6 @@ export function PrinterSettings({
                 disabled={!canEdit || saving}
               />
             </Field>
-            {compact && (
-              <Field label={uiText("Integration")}>
-                <Input value={providerLabel(printer)} readOnly />
-              </Field>
-            )}
             <Field
               label={uiText("Model")}
               hint={uiText("Pick a known model or type your own")}
@@ -1529,8 +1604,90 @@ export function PrinterSettings({
               />
             </Field>
           </PrinterSettingsSection>
+          {canEdit && (
+            <PrinterSettingsSection
+              compact={compact}
+              id="costing"
+              title={uiText("Print costing")}
+              description={uiText("Used to estimate production cost for prints on this machine.")}
+            >
+              <div className="col-span-full grid items-start gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <div className="min-w-0 space-y-2">
+                  <Field label={uiText("Cost profile")}>
+                    <select
+                      className={inputClasses}
+                      value={costProfile ?? ""}
+                      disabled={saving || profiles.isPending || profiles.isError}
+                      aria-describedby={`${hintId}-cost-profile`}
+                      onChange={(event) =>
+                        setCostProfile(event.target.value ? Number(event.target.value) : null)
+                      }
+                    >
+                      <option value="">{uiText("No cost profile")}</option>
+                      {costProfile != null && !assignedProfile && (
+                        <option value={costProfile}>
+                          {profiles.isSuccess
+                            ? uiText("Profile no longer available")
+                            : uiText("Checking…")}
+                        </option>
+                      )}
+                      {pricedProfiles.length > 0 && (
+                        <optgroup label={uiText("Operating costs configured")}>
+                          {pricedProfiles.map((profile) => (
+                            <option key={profile.id} value={profile.id}>
+                              {profile.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {unpricedProfiles.length > 0 && (
+                        <optgroup label={uiText("Operating costs missing")}>
+                          {unpricedProfiles.map((profile) => (
+                            <option key={profile.id} value={profile.id}>
+                              {profile.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                  </Field>
+                  <p
+                    id={`${hintId}-cost-profile`}
+                    role={profiles.isError ? "alert" : undefined}
+                    className="max-w-prose text-xs text-muted-foreground"
+                  >
+                    {profiles.isError
+                      ? uiText("Could not load printer profiles.")
+                      : profiles.isPending
+                        ? uiText("Checking…")
+                        : catalog.length === 0
+                          ? uiText("Create a printer profile to assign it here.")
+                          : assignedProfile?.expenses
+                            ? uiText("This profile supplies machine costs for new prints.")
+                            : assignedProfile
+                              ? uiText(
+                                  "Add operating costs to this profile to start tracking machine costs.",
+                                )
+                              : uiText("Choose a saved printer profile for machine cost tracking.")}
+                  </p>
+                </div>
+                <Button
+                  asChild
+                  size="sm"
+                  variant="outline"
+                  className="h-9 justify-self-start sm:mt-6"
+                >
+                  <Link href={profilesHref} target="_blank" rel="noreferrer">
+                    {uiText("Manage profiles")}
+                  </Link>
+                </Button>
+              </div>
+            </PrinterSettingsSection>
+          )}
           <PrinterSettingsSection
             compact={compact}
+            columns
+            id="connection"
             title={uiText("Connection")}
             description={providerLabel(printer)}
             action={
@@ -1616,10 +1773,11 @@ export function PrinterSettings({
                 printer.capabilities.can_report_material_state) &&
               materialSyncField}
           </PrinterSettingsSection>
-          {compact && notesField}
           <PrinterSettingsSection
             compact={compact}
+            id="scheduling"
             title={uiText("Scheduling & release")}
+            description={uiText("Control when the dispatcher may send new work here.")}
             action={
               !compact &&
               onMaintenance && (
@@ -1629,33 +1787,38 @@ export function PrinterSettings({
               )
             }
           >
+            {compact && notesField}
             {compact && materialSyncField}
-            <label className="flex items-start gap-3">
-              <input
-                type="checkbox"
+            {!compact ? (
+              <SettingsToggle
+                title={uiText("Require operator release")}
+                description={uiText(
+                  "After a managed print completes, block scheduling until an operator releases or holds the printer.",
+                )}
                 checked={operatorReleaseRequired}
-                onChange={(event) => setOperatorReleaseRequired(event.target.checked)}
+                onChange={setOperatorReleaseRequired}
                 disabled={!canEdit || saving}
-                className="mt-0.5 h-4 w-4"
               />
-              <span>
-                <span
-                  className={cn(
-                    "block font-medium text-foreground",
-                    compact ? "text-field" : "text-sm",
-                  )}
-                >
-                  {uiText("Require operator release")}
+            ) : (
+              <label className="flex items-start gap-3">
+                <Checkbox
+                  checked={operatorReleaseRequired}
+                  onChange={setOperatorReleaseRequired}
+                  disabled={!canEdit || saving}
+                  className="mt-0.5 shrink-0"
+                />
+                <span>
+                  <span className="block text-field font-medium text-foreground">
+                    {uiText("Require operator release")}
+                  </span>
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    {uiText(
+                      "After a managed print completes, block scheduling until an operator releases or holds the printer.",
+                    )}
+                  </span>
                 </span>
-                <span
-                  className={cn("block text-xs text-muted-foreground", compact ? "mt-1" : "mt-0.5")}
-                >
-                  {uiText(
-                    "After a managed print completes, block scheduling until an operator releases or holds the printer.",
-                  )}
-                </span>
-              </span>
-            </label>
+              </label>
+            )}
             {!canEdit && (
               <p className="text-xs text-warning">{uiText("Sign in to edit printer settings.")}</p>
             )}
@@ -1666,15 +1829,30 @@ export function PrinterSettings({
             )}
           </PrinterSettingsSection>
           {!compact && (
-            <PrinterSettingsSection compact={false} title={uiText("Operator notes")}>
+            <PrinterSettingsSection
+              compact={false}
+              id="notes"
+              title={uiText("Operator notes")}
+              description={uiText("Visible to everyone who can see this printer.")}
+            >
               {notesField}
             </PrinterSettingsSection>
           )}
           {modalActions ? (
             modalActions.target && createPortal(actions, modalActions.target)
           ) : (
-            <div className="printer-settings-actions">
-              <div className="ml-auto flex flex-wrap gap-2">{actions}</div>
+            <div className="printer-settings-bar">
+              <span role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "size-2 shrink-0 rounded-full",
+                    dirty ? "bg-primary" : "bg-muted-foreground/40",
+                  )}
+                />
+                {uiText(saveLabel)}
+              </span>
+              <div className="flex flex-wrap gap-2">{actions}</div>
             </div>
           )}
           <PrinterSettingsReview
@@ -1699,28 +1877,80 @@ export function PrinterSettings({
 
 function PrinterSettingsSection({
   compact,
+  columns,
+  id,
   title,
   description,
   action,
   children,
 }: {
   compact: boolean;
+  columns?: boolean;
+  id: string;
   title: string;
   description?: string;
   action?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  if (!compact) {
+    return (
+      <section id={`printer-settings-${id}`} className="printer-settings-card">
+        <header>
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold">{title}</h2>
+            {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
+          </div>
+          {action}
+        </header>
+        <div className="printer-settings-fields">{children}</div>
+      </section>
+    );
+  }
   return (
-    <section className={compact ? "space-y-4" : "printer-desk-section"}>
-      {(!compact || description) && (
-        <div className={compact ? "space-y-1" : "printer-desk-heading"}>
-          <h2 className="text-sm font-semibold">{title}</h2>
-          {action ||
-            (description && <span className="text-xs text-muted-foreground">{description}</span>)}
-        </div>
-      )}
-      <div className={compact ? "space-y-4" : "printer-settings-fields"}>{children}</div>
+    <section className="space-y-3 py-4 first:pt-0 last:pb-0">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold">{title}</h2>
+        {action ||
+          (description && <span className="text-xs text-muted-foreground">{description}</span>)}
+      </div>
+      <div className={cn("grid gap-x-4 gap-y-3", columns && "sm:grid-cols-2")}>{children}</div>
     </section>
+  );
+}
+
+/** A setting that is on or off: its meaning on the left, the switch on the right. */
+function SettingsToggle({
+  title,
+  description,
+  checked,
+  onChange,
+  disabled,
+}: {
+  title: string;
+  description: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+}) {
+  const descriptionId = useId();
+  return (
+    <div className="flex items-start gap-3 border-t border-border pt-4 first:border-t-0 first:pt-0">
+      <Switch
+        checked={checked}
+        onChange={onChange}
+        label={title}
+        descriptionId={descriptionId}
+        stateLabels={null}
+        disabled={disabled}
+        className="mt-0.5"
+      />
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-foreground">{title}</div>
+        <p id={descriptionId} className="mt-0.5 max-w-prose text-xs text-muted-foreground">
+          {description}
+        </p>
+      </div>
+    </div>
   );
 }
 

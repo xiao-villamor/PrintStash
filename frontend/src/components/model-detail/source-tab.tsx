@@ -1,10 +1,10 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import { useRef, useState, type ReactNode } from "react";
-import { ExternalLink, Image } from "lucide-react";
+import { useId, useRef, useState } from "react";
+import { ChevronLeft, ExternalLink, Image } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Input } from "@/components/ui/input";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { EmptyState } from "@/components/ui/empty-state";
 import { DetailTabLoading } from "./tab-loading";
@@ -18,13 +18,15 @@ import { useOptionalI18n, type MessageKey } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 import { safeHttpUrl } from "@/components/model-detail/source-url";
+import { sourceProviderName } from "./presentation";
 import type {
+  ModelProvenancePatch,
   ModelProvenanceRead,
   ModelSourceCoverRead,
+  ProvenanceFieldName,
   ProvenanceFieldRead,
   ProvenanceSourceRead,
 } from "@/types";
-import { provenanceOriginKey, type ProvenanceOrigin } from "@printstash/domain";
 
 type SubmitSource = ReturnType<typeof useSourceEditing>["submit"];
 
@@ -43,261 +45,208 @@ const LABELS = {
   updated_at: "source.updated",
 } satisfies Record<ProvenanceFieldRead["field_name"], MessageKey>;
 
-const ORIGIN_LABELS = {
-  confirmed: "source.origin.confirmed",
-  inferred: "source.origin.inferred",
-  user: "source.origin.user",
-} satisfies Record<ProvenanceOrigin, MessageKey>;
-
-function provenanceOriginLabel(
-  origin: ProvenanceOrigin,
-  i18n: ReturnType<typeof useOptionalI18n>,
-): string {
-  const key = ORIGIN_LABELS[provenanceOriginKey(origin)];
-  return i18n?.t(key) ?? uiText(key);
+function SourceTags({ tags }: { tags: string[] }) {
+  useUiLocale();
+  const i18n = useOptionalI18n();
+  if (tags.length === 0) return null;
+  const label = i18n?.t("source.tags") ?? uiText("Source tags");
+  return (
+    <div
+      className="grid grid-cols-[minmax(6rem,.4fr)_minmax(0,1fr)] gap-x-4 border-t border-border px-3 py-2.5 text-sm"
+      aria-label={label}
+    >
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="flex flex-wrap gap-1.5">
+        {tags.map((tag) => (
+          <span
+            key={tag}
+            className="min-w-0 max-w-full rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground [overflow-wrap:anywhere]"
+          >
+            {tag}
+          </span>
+        ))}
+      </dd>
+    </div>
+  );
 }
 
-function SourceField({
-  modelName,
-  source,
+/** The captured fields the Source view lists, in reading order. */
+const READ_FIELDS = [
+  "title",
+  "description",
+  "creator_name",
+  "creator_id",
+  "creator_url",
+  "published_at",
+  "updated_at",
+] as const satisfies readonly ProvenanceFieldName[];
+
+function SourceRow({
+  label,
   field,
-  canEdit,
-  blocked,
+  last,
+}: {
+  label: string;
+  field: ProvenanceFieldRead | undefined;
+  last: boolean;
+}) {
+  useUiLocale();
+  const i18n = useOptionalI18n();
+  const notSupplied = i18n?.t("source.notSuppliedGeneric") ?? uiText("source.notSuppliedGeneric");
+  const link = field?.field_name === "creator_url" ? safeHttpUrl(field.effective_value) : null;
+  return (
+    <div
+      className={`grid grid-cols-[minmax(6rem,.4fr)_minmax(0,1fr)] gap-x-4 px-3 py-2.5 text-sm ${last ? "" : "border-b border-border"}`}
+    >
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 break-words font-medium [overflow-wrap:anywhere]">
+        {link ? (
+          <a
+            href={link}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex max-w-full items-center gap-1 text-primary hover:underline"
+          >
+            <span className="min-w-0">{link}</span>
+            <ExternalLink className="size-3.5 shrink-0" aria-hidden />
+          </a>
+        ) : (
+          field?.effective_value || notSupplied
+        )}
+        {field?.user_override_set && (
+          <span className="block text-xs font-normal text-muted-foreground">
+            {uiText("Captured: {value1}", { value1: field.captured_value || notSupplied })}
+          </span>
+        )}
+      </dd>
+    </div>
+  );
+}
+
+const EDIT_FIELDS = [
+  "title",
+  "creator_name",
+  "published_at",
+  "license_code",
+] as const satisfies readonly ProvenanceFieldName[];
+
+/** One form, one save: every correction is kept next to the captured value. */
+function SourceEditForm({
+  source,
   snapshot,
   submit,
-  feedback,
-  last = false,
+  blocked,
+  onCancel,
 }: {
-  modelName?: string;
   source: ProvenanceSourceRead;
-  field: ProvenanceFieldRead;
-  canEdit: boolean;
-  blocked: boolean;
   snapshot: ModelProvenanceRead;
   submit: SubmitSource;
-  feedback: ReactNode;
-  last?: boolean;
+  blocked: boolean;
+  onCancel: () => void;
 }) {
   useUiLocale();
   const i18n = useOptionalI18n();
   const t = (key: MessageKey, values?: Record<string, string>) =>
     i18n?.t(key, values) ?? uiText(key, values);
-  const label = t(LABELS[field.field_name]);
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(field.effective_value);
-  const [restoreOpen, setRestoreOpen] = useState(false);
-  const [base, setBase] = useState(snapshot);
-  const finish = () => {
-    setRestoreOpen(false);
-    setEditing(false);
-  };
+  const id = useId();
+  const fieldOf = (name: ProvenanceFieldName) =>
+    source.fields.find((field) => field.field_name === name);
+  const [base] = useState(snapshot);
+  const [draft, setDraft] = useState<Record<string, string>>(() =>
+    Object.fromEntries(EDIT_FIELDS.map((name) => [name, fieldOf(name)?.effective_value ?? ""])),
+  );
+  const [restored, setRestored] = useState<ProvenanceFieldName[]>([]);
+  const overrides: ModelProvenancePatch["overrides"] = {};
+  for (const name of EDIT_FIELDS) {
+    if (restored.includes(name)) continue;
+    if (draft[name] !== (fieldOf(name)?.effective_value ?? "")) overrides[name] = draft[name];
+  }
+  const changed = Object.keys(overrides).length > 0 || restored.length > 0;
   const save = () =>
     submit(
       {
         kind: "override",
         sourceId: source.id,
-        payload: {
-          overrides: { [field.field_name]: value },
-          clear_overrides: [],
-        },
+        payload: { overrides, clear_overrides: restored },
       },
       base,
-      finish,
+      onCancel,
     );
-  const restore = () => {
-    setRestoreOpen(false);
-    submit(
-      {
-        kind: "override",
-        sourceId: source.id,
-        payload: {
-          overrides: {},
-          clear_overrides: [field.field_name],
-        },
-      },
-      base,
-      finish,
-    );
-  };
-  const isLink = field.field_name === "creator_url" || field.field_name === "license_url";
-  const safeLink = isLink ? safeHttpUrl(field.effective_value) : null;
-  const applyToModel = () => {
-    const payload =
-      field.field_name === "title"
-        ? { name: field.effective_value }
-        : { description: field.effective_value };
-    submit({ kind: "apply", payload }, snapshot, () => {});
-  };
+  const notSupplied = t("source.notSuppliedGeneric");
   return (
-    <div
-      className={`grid gap-x-4 gap-y-2 py-4 @md/source:grid-cols-[minmax(6.25rem,.65fr)_minmax(0,2fr)] @md/source:items-start ${last ? "" : "border-b border-border"}`}
+    <form
+      className="space-y-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (changed && !blocked) save();
+      }}
     >
-      {!editing && feedback}
-      <div className="flex flex-col items-start gap-1">
-        <h3 className="text-sm font-medium text-foreground">{label}</h3>
-        <span className="text-xs text-muted-foreground">
-          {provenanceOriginLabel(field.effective_origin, i18n)}
-        </span>
-      </div>
-      <div className="flex min-w-0 flex-col items-start gap-2">
-        <div className="w-full min-w-0 break-words whitespace-pre-wrap text-sm text-muted-foreground">
-          {safeLink ? (
-            <a
-              href={safeLink}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex max-w-full items-start gap-1 text-primary hover:underline"
-            >
-              <span className="min-w-0 [overflow-wrap:anywhere]">{safeLink}</span>
-              <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            </a>
-          ) : (
-            field.effective_value ||
-            (field.field_name.startsWith("license")
-              ? t("source.notSupplied")
-              : t("source.notSuppliedGeneric"))
-          )}
-        </div>
-        {canEdit && (
-          <div className="flex shrink-0 flex-wrap gap-1">
-            {(field.field_name === "title" || field.field_name === "description") && (
-              <Button size="xs" variant="outline" onClick={applyToModel}>
-                {field.field_name === "title"
-                  ? (i18n?.t("source.useTitle") ?? uiText("Use source title"))
-                  : (i18n?.t("source.useDescription") ?? uiText("Use source description"))}
-              </Button>
-            )}
-            {/* Every field renders one of these, so the visible word alone leaves a
-                  screen-reader user hearing "Edit" five times with no way to tell them
-                  apart — and it is what let a Playwright test drive the wrong one. */}
-            <Button
-              size="xs"
-              variant="ghost"
-              aria-label={t("source.editField", { field: label })}
-              onClick={() => {
-                setValue(field.effective_value);
-                setBase(snapshot);
-                setEditing(true);
-              }}
-            >
-              {t("source.edit")}
-            </Button>
-          </div>
-        )}
-      </div>
-      {field.field_name === "license_text" && (
-        <p className="col-span-full mt-1 text-xs text-muted-foreground @xl/source:col-start-2">
-          {i18n?.t("source.licenseDisclaimer") ??
-            uiText(
-              "PrintStash preserves published license text and does not grant, interpret, or expand rights.",
-            )}
+      <div className="space-y-1">
+        <h2 className="text-base font-semibold">{uiText("Edit source")}</h2>
+        <p className="text-sm text-muted-foreground">
+          {uiText("Your corrections are kept next to the captured value.")}
         </p>
-      )}
-      <Modal
-        open={editing && !restoreOpen}
-        onClose={() => {
-          setValue(field.effective_value);
-          setEditing(false);
-        }}
-        title={t("source.editField", { field: label })}
-        description={uiText("Save your override while retaining the captured source value.")}
-        footer={
-          <>
-            {field.user_override_set && (
-              <Button
-                variant="ghost"
-                className="mr-auto"
-                disabled={blocked || !canEdit}
-                onClick={() => setRestoreOpen(true)}
-              >
-                {t("source.restore")}
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              onClick={() => {
-                setValue(field.effective_value);
-                setEditing(false);
-              }}
-            >
-              {t("source.cancel")}
-            </Button>
-            <Button disabled={blocked || !canEdit} onClick={save}>
-              {uiText("Save override")}
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-5">
-          {feedback}
-          <dl className="grid grid-cols-[1fr_2fr] gap-x-4 gap-y-2 bg-plate p-4 text-[13px]">
-            {modelName && (
-              <>
-                <dt className="text-muted-foreground">{uiText("Model")}</dt>
-                <dd>{modelName}</dd>
-              </>
-            )}
-            <dt className="text-muted-foreground">{uiText("Captured source")}</dt>
-            <dd>
-              {source.provider} · {source.source_item_id ?? "—"}
-            </dd>
-          </dl>
-          <h3 className="text-sm font-semibold">{uiText("Your override")}</h3>
-          <label className="block space-y-2 text-[13px]">
-            {uiText("Your value")}
-            <textarea
-              disabled={blocked || !canEdit}
-              value={value}
-              onChange={(event) => setValue(event.target.value)}
-              aria-label={t("source.override", { label })}
-              rows={3}
-              className="w-full border border-input bg-card p-3 text-sm"
-            />
-          </label>
-          <div className="border-t border-border pt-4">
-            <h3 className="text-[13px] font-medium">{uiText("Captured value")}</h3>
-            <p className="mt-2 whitespace-pre-wrap break-words text-[13px] text-muted-foreground">
-              {field.captured_value || t("source.notSuppliedGeneric")}
-            </p>
-          </div>
-        </div>
-      </Modal>
-      <ConfirmModal
-        open={restoreOpen}
-        onClose={() => setRestoreOpen(false)}
-        title={t("source.restoreTitle")}
-        description={t("source.restoreDescription")}
-        confirmLabel={t("source.restoreConfirm")}
-        busy={blocked}
-        onConfirm={restore}
-      />
-    </div>
-  );
-}
-
-function SourceTags({ tags, last = false }: { tags: string[]; last?: boolean }) {
-  useUiLocale();
-  const i18n = useOptionalI18n();
-  if (tags.length === 0) return null;
-  return (
-    <div
-      className={`flex flex-wrap items-baseline gap-x-4 gap-y-2 py-4 ${last ? "" : "border-b border-border"}`}
-      aria-label={i18n?.t("source.tags") ?? uiText("Source tags")}
-    >
-      <span className="font-mono text-2xs uppercase tracking-wider text-on-surface-variant">
-        {i18n?.t("source.tags") ?? uiText("Source tags")}
-      </span>
-      <div className="flex flex-wrap gap-1.5">
-        {tags.map((tag) => (
-          <span
-            key={tag}
-            className="min-w-0 max-w-full text-sm text-muted-foreground [overflow-wrap:anywhere]"
-          >
-            {tag}
-          </span>
-        ))}
       </div>
-    </div>
+      <div className="space-y-1.5">
+        <label htmlFor={`${id}-link`} className="block text-sm font-medium">
+          {uiText("Source link")}
+        </label>
+        <Input id={`${id}-link`} readOnly value={source.canonical_url} />
+      </div>
+      {EDIT_FIELDS.map((name) => {
+        const field = fieldOf(name);
+        const label = name === "license_code" ? uiText("License") : t(LABELS[name]);
+        const canRestore = field?.user_override_set && !restored.includes(name);
+        return (
+          <div key={name} className="space-y-1.5">
+            <label htmlFor={`${id}-${name}`} className="block text-sm font-medium">
+              {label}
+            </label>
+            <Input
+              id={`${id}-${name}`}
+              value={draft[name]}
+              disabled={blocked}
+              placeholder={name === "published_at" ? notSupplied : undefined}
+              onChange={(event) => {
+                const value = event.target.value;
+                setDraft((current) => ({ ...current, [name]: value }));
+                setRestored((current) => current.filter((item) => item !== name));
+              }}
+            />
+            {name === "license_code" && (
+              <p className="text-xs text-muted-foreground">
+                {uiText("Search known licenses or type the published name.")}
+              </p>
+            )}
+            {canRestore && (
+              <p className="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
+                <span className="wrap-anywhere">
+                  {uiText("Captured: {value1}", { value1: field.captured_value || notSupplied })}
+                </span>
+                <button
+                  type="button"
+                  className="text-primary hover:underline"
+                  onClick={() => {
+                    setRestored((current) => [...current, name]);
+                    setDraft((current) => ({ ...current, [name]: field.captured_value }));
+                  }}
+                >
+                  {uiText("Restore captured value")}
+                </button>
+              </p>
+            )}
+          </div>
+        );
+      })}
+      <div className="flex justify-end gap-2 border-t border-border pt-4">
+        <Button type="button" variant="outline" onClick={onCancel}>
+          {uiText("Cancel")}
+        </Button>
+        <Button type="submit" disabled={!changed || blocked}>
+          {uiText("Save source")}
+        </Button>
+      </div>
+    </form>
   );
 }
 
@@ -399,7 +348,7 @@ function SourceCover({
         <h3 id={`cover-heading-${source.id}`} className="text-sm font-semibold">
           {t("source.cover")}
         </h3>
-        <p className="text-xs text-muted-foreground" aria-live="polite" role="status">
+        <p className="text-sm text-muted-foreground" aria-live="polite" role="status">
           {cover ? t("source.coverAvailable") : t("source.coverEmpty")}
         </p>
         {canEdit && (
@@ -408,7 +357,8 @@ function SourceCover({
               ref={inputRef}
               type="file"
               accept="image/jpeg,image/png,image/webp"
-              className="sr-only"
+              tabIndex={-1}
+              className="hidden"
               aria-label={cover ? t("source.coverReplace") : t("source.coverUpload")}
               onChange={(event) => {
                 selectFile(event.currentTarget.files?.[0]);
@@ -466,42 +416,26 @@ function SourceCover({
   );
 }
 
-function SourceIdentityRow({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-  last?: boolean;
-}) {
-  useUiLocale();
-  return (
-    <div className="min-w-0 space-y-1">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words text-sm text-foreground">{children}</dd>
-    </div>
-  );
-}
-
 export function SourceTab(props: {
   modelId: number;
-  modelName?: string;
   canEdit: boolean;
   api?: SourceApi;
+  /** Returns to the Overview; shown beside Edit source when given. */
+  onBack?: () => void;
 }) {
   return <SourceTabContent key={props.modelId} {...props} />;
 }
 
 function SourceTabContent({
   modelId,
-  modelName,
   canEdit,
   api = sourceApi,
+  onBack,
 }: {
   modelId: number;
-  modelName?: string;
   canEdit: boolean;
   api?: SourceApi;
+  onBack?: () => void;
 }) {
   useUiLocale();
   const i18n = useOptionalI18n();
@@ -509,6 +443,7 @@ function SourceTabContent({
     i18n?.t(key, values) ?? uiText(key, values);
   const editor = useSourceEditing(modelId, api);
   const { data, state } = editor;
+  const [editingSource, setEditingSource] = useState(false);
   if (!editor.active) return null;
   if (editor.denied || (!data && editor.query.isError))
     return (
@@ -524,11 +459,9 @@ function SourceTabContent({
       </div>
     );
   const blocked = state.phase !== "idle";
-  const editable = canEdit && !editor.editDenied && !blocked;
+  const canEditSource = canEdit && !editor.editDenied;
+  const editable = canEditSource && editingSource && !blocked;
   const reviewed = state.phase === "blocked" ? state.reviewed : null;
-  const pending = state.phase === "blocked" ? state.pending.command : null;
-  const fieldFeedback =
-    pending?.kind === "override" && Object.keys(pending.payload.overrides).length > 0;
   const feedback = state.phase === "blocked" && (
     <div role="alert" className="space-y-3 rounded border border-border bg-muted p-3 text-sm">
       <p>
@@ -576,112 +509,165 @@ function SourceTabContent({
               <Button onClick={editor.retryRead}>{uiText("Retry")}</Button>
             </div>
           )}
-          {!fieldFeedback && feedback}
+          {(onBack || (canEditSource && data.sources.length > 0)) && (
+            <div className="flex items-center justify-between gap-2">
+              {onBack ? (
+                <Button size="sm" variant="ghost" className="-ms-2" onClick={onBack}>
+                  <ChevronLeft className="size-4 shrink-0" aria-hidden />
+                  {uiText("Overview")}
+                </Button>
+              ) : (
+                <span />
+              )}
+              {canEditSource && data.sources.length > 0 && !editingSource && (
+                <Button size="sm" variant="outline" onClick={() => setEditingSource(true)}>
+                  {uiText("Edit source")}
+                </Button>
+              )}
+            </div>
+          )}
+          {feedback}
           {!data.sources.length && (
             <EmptyState title={t("source.emptyTitle")} description={t("source.emptyDescription")} />
           )}
           {data.sources.map((source) => {
             const canonicalUrl = safeHttpUrl(source.canonical_url);
-            const fieldCount = source.fields.length + (source.tags?.length ? 1 : 0);
+            const fieldByName = (name: ProvenanceFieldName) =>
+              source.fields.find((item) => item.field_name === name);
+            const titleField = fieldByName("title");
+            const creatorField = fieldByName("creator_name");
+            const licenseField = fieldByName("license_code");
+            const licenseUrl = safeHttpUrl(fieldByName("license_url")?.effective_value ?? "");
+            const site = sourceProviderName(source.provider);
+            if (editingSource && canEditSource)
+              return (
+                <article key={source.id} className="min-w-0 space-y-6">
+                  <SourceCover
+                    modelId={modelId}
+                    source={source}
+                    canEdit={editable}
+                    blocked={blocked}
+                    snapshot={data}
+                    submit={editor.submit}
+                    api={api}
+                  />
+                  <SourceEditForm
+                    source={source}
+                    snapshot={data}
+                    submit={editor.submit}
+                    blocked={blocked}
+                    onCancel={() => setEditingSource(false)}
+                  />
+                </article>
+              );
             return (
-              <article key={source.id} className="min-w-0">
+              <article key={source.id} className="min-w-0 space-y-5">
                 <section aria-labelledby={`source-heading-${source.id}`}>
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <h2 id={`source-heading-${source.id}`} className="text-base font-semibold">
-                      {uiText("Source information")}
-                    </h2>
-                    {canonicalUrl && (
-                      <a
-                        href={canonicalUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-foreground hover:underline"
-                      >
-                        {uiText("Open source page")}
-                        <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-                      </a>
-                    )}
-                  </div>
-                  <div className="space-y-3 border-b border-border py-4">
-                    <h3 className="text-lg font-semibold capitalize">
-                      {source.provider}
-                      <span className="ml-2 text-xs font-normal normal-case text-muted-foreground">
-                        {t("source.capturedStatus")}
-                      </span>
-                    </h3>
-                    <p className="break-words text-xs text-muted-foreground">
-                      {canonicalUrl ? (
-                        <a
-                          href={canonicalUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="hover:underline"
-                        >
-                          {canonicalUrl}
-                        </a>
-                      ) : (
-                        source.canonical_url
-                      )}
-                    </p>
-                    <dl
-                      className="grid grid-cols-2 gap-4 @xl/source:grid-cols-4"
-                      data-testid="source-identity-panel"
+                  <h2 id={`source-heading-${source.id}`} className="sr-only">
+                    {uiText("Source information")}
+                  </h2>
+                  <div className="flex min-w-0 items-center gap-4 rounded-lg border border-border p-3">
+                    <div
+                      aria-hidden={source.cover ? undefined : true}
+                      className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-muted-foreground"
                     >
-                      <SourceIdentityRow label={t("source.sourceId")}>
-                        {source.source_item_id || t("source.notSuppliedGeneric")}
-                      </SourceIdentityRow>
-                      <SourceIdentityRow label={t("source.revision")}>
-                        {source.source_revision || t("source.notSuppliedGeneric")}
-                      </SourceIdentityRow>
-                      <SourceIdentityRow label={t("source.captured")}>
-                        {new Date(source.first_captured_at).toLocaleDateString(i18n?.locale)}
-                      </SourceIdentityRow>
-                      <SourceIdentityRow label={t("source.checked")} last>
-                        {new Date(source.last_checked_at).toLocaleDateString(i18n?.locale)}
-                      </SourceIdentityRow>
-                    </dl>
+                      {source.cover ? (
+                        <SourceCoverImage
+                          compact
+                          cover={source.cover}
+                          path={api.getCoverContentPath(modelId, source.id)}
+                          alt={`${uiText("source.cover")} - ${source.provider}`}
+                        />
+                      ) : (
+                        <Image className="size-5" aria-hidden />
+                      )}
+                    </div>
+                    <div className="min-w-0 space-y-1">
+                      <p className="break-words text-base font-semibold [overflow-wrap:anywhere]">
+                        {titleField?.effective_value || site}
+                      </p>
+                      <p className="break-words text-sm">
+                        {canonicalUrl ? (
+                          <a
+                            href={canonicalUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={canonicalUrl}
+                            className="inline-flex max-w-full items-center gap-1 text-primary hover:underline"
+                          >
+                            <span className="min-w-0 [overflow-wrap:anywhere]">
+                              {site}
+                              {creatorField?.effective_value
+                                ? ` · ${creatorField.effective_value}`
+                                : ""}
+                            </span>
+                            <ExternalLink className="size-3.5 shrink-0" aria-hidden />
+                            <span className="sr-only">{uiText("Opens in a new tab")}</span>
+                          </a>
+                        ) : (
+                          source.canonical_url
+                        )}
+                      </p>
+                    </div>
                   </div>
                 </section>
-                <SourceCover
-                  modelId={modelId}
-                  source={source}
-                  canEdit={editable}
-                  blocked={blocked}
-                  snapshot={data}
-                  submit={editor.submit}
-                  api={api}
-                />
-                {fieldCount > 0 && (
-                  <section aria-labelledby={`metadata-heading-${source.id}`}>
-                    <h2 id={`metadata-heading-${source.id}`} className="sr-only">
-                      {t("source.metadata")}
+                {licenseField?.effective_value && (
+                  <section aria-labelledby={`license-heading-${source.id}`}>
+                    <h2
+                      id={`license-heading-${source.id}`}
+                      className="mb-2 text-sm font-medium text-muted-foreground"
+                    >
+                      {uiText("License")}
                     </h2>
-                    <div>
-                      {source.fields.map((field, index) => (
-                        <SourceField
-                          modelName={modelName}
-                          key={field.field_name}
-                          source={source}
-                          field={field}
-                          canEdit={editable}
-                          blocked={blocked}
-                          snapshot={data}
-                          submit={editor.submit}
-                          feedback={
-                            fieldFeedback &&
-                            pending?.kind === "override" &&
-                            pending.sourceId === source.id &&
-                            field.field_name in pending.payload.overrides
-                              ? feedback
-                              : null
-                          }
-                          last={index === source.fields.length - 1}
-                        />
-                      ))}
-                      <SourceTags tags={source.tags ?? []} last />
+                    <div className="space-y-1 rounded-lg border border-border p-3">
+                      <p className="text-sm font-semibold">{licenseField.effective_value}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {uiText("source.licenseNote", { site })}
+                      </p>
+                      {(licenseUrl ?? canonicalUrl) && (
+                        <a
+                          href={licenseUrl ?? canonicalUrl ?? undefined}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                        >
+                          {uiText("source.licenseTerms", { site })}
+                          <ExternalLink className="size-3.5 shrink-0" aria-hidden />
+                          <span className="sr-only">{uiText("Opens in a new tab")}</span>
+                        </a>
+                      )}
                     </div>
                   </section>
                 )}
+                <section aria-labelledby={`metadata-heading-${source.id}`}>
+                  <h2
+                    id={`metadata-heading-${source.id}`}
+                    className="mb-2 text-sm font-medium text-muted-foreground"
+                  >
+                    {uiText("Captured fields")}
+                  </h2>
+                  <dl className="overflow-hidden rounded-lg border border-border">
+                    {READ_FIELDS.map((name, index) => (
+                      <SourceRow
+                        key={name}
+                        label={t(LABELS[name])}
+                        field={fieldByName(name)}
+                        last={index === READ_FIELDS.length - 1 && !source.tags?.length}
+                      />
+                    ))}
+                    <SourceTags tags={source.tags ?? []} />
+                  </dl>
+                </section>
+                <p className="text-sm text-muted-foreground" data-testid="source-identity-panel">
+                  {t("source.captured")}{" "}
+                  {new Date(source.first_captured_at).toLocaleDateString(i18n?.locale)} ·{" "}
+                  {t("source.checked")}{" "}
+                  {new Date(source.last_checked_at).toLocaleDateString(i18n?.locale)} ·{" "}
+                  {t("source.sourceId")} {source.source_item_id || t("source.notSuppliedGeneric")}
+                  {source.source_revision
+                    ? ` · ${t("source.revision")} ${source.source_revision}`
+                    : ""}
+                </p>
               </article>
             );
           })}

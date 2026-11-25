@@ -157,6 +157,21 @@ async function openPasswordReset() {
 }
 
 beforeEach(() => {
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      readonly root = null;
+      readonly rootMargin = "0px";
+      readonly scrollMargin = "0px";
+      readonly thresholds = [0];
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+      takeRecords() {
+        return [];
+      }
+    },
+  );
   window.localStorage.clear();
 });
 
@@ -500,7 +515,8 @@ describe("SettingsPanel", () => {
         },
       });
 
-      await user.click(await screen.findByRole("button", { name: "Make admin" }));
+      await user.click(await screen.findByRole("button", { name: "More actions for maker" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Make admin" }));
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PATCH").at(-1)?.body ?? "{}")).toMatchObject({
@@ -521,7 +537,8 @@ describe("SettingsPanel", () => {
         },
       });
 
-      await user.click(await screen.findByRole("button", { name: "Disable" }));
+      await user.click(await screen.findByRole("button", { name: "More actions for maker" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Disable" }));
 
       await waitFor(() =>
         expect(
@@ -535,12 +552,13 @@ describe("SettingsPanel", () => {
       const { requestsWithMethod } = renderSettings({
         at: "/settings?section=access",
         routes: {
-          "GET /api/v1/admin/users": json([aUser({ id: 2, is_active: false })]),
+          "GET /api/v1/admin/users": json([aUser({ id: 2, username: "maker", is_active: false })]),
           "PATCH /api/v1/admin/users/2": json(aUser({ id: 2 })),
         },
       });
 
-      await user.click(await screen.findByRole("button", { name: "Enable" }));
+      await user.click(await screen.findByRole("button", { name: "More actions for maker" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Enable" }));
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PATCH").at(-1)?.body ?? "{}")).toMatchObject({
@@ -559,7 +577,7 @@ describe("SettingsPanel", () => {
         },
       });
       await openPasswordReset();
-      await user.type(await screen.findByPlaceholderText("New password"), "Password123");
+      await user.type(await screen.findByLabelText("New password"), "Password123");
 
       await user.click(
         within(screen.getByRole("dialog", { name: "Reset password" })).getByRole("button", {
@@ -582,7 +600,7 @@ describe("SettingsPanel", () => {
       });
 
       await openPasswordReset();
-      await user.type(await screen.findByPlaceholderText("New password"), "short");
+      await user.type(await screen.findByLabelText("New password"), "short");
 
       expect(
         within(screen.getByRole("dialog", { name: "Reset password" })).getByRole("button", {
@@ -2653,6 +2671,25 @@ describe("SettingsPanel", () => {
       expect(await screen.findByText("Trash is empty.")).toBeVisible();
     });
 
+    it("shows how long each trashed item has left", async () => {
+      const day = 86_400_000;
+      const inDays = (days: number) => new Date(Date.now() + days * day).toISOString();
+      renderSettings({
+        at: "/settings?section=trash",
+        routes: {
+          "GET /api/v1/models/trash": json([
+            { ...TRASHED_MODEL, id: 7, name: "Soon gone", expires_at: inDays(1.5) },
+            { ...TRASHED_MODEL, id: 8, name: "Later gone", expires_at: inDays(20.5) },
+            { ...TRASHED_MODEL, id: 9, name: "Overdue", expires_at: inDays(-2) },
+          ]),
+        },
+      });
+
+      expect(await screen.findByText("2 days left")).toBeVisible();
+      expect(screen.getByText("21 days left")).toBeVisible();
+      expect(screen.getByText("Expires today")).toBeVisible();
+    });
+
     it("offers no bulk action until a model is ticked", async () => {
       renderSettings({
         at: "/settings?section=trash",
@@ -2863,15 +2900,15 @@ describe("SettingsPanel", () => {
 
       await user.click(within(nav).getByRole("button", { name: "GPU & rendering" }));
 
-      expect(await screen.findByRole("combobox", { name: "Mesh renderer" })).toHaveValue("webgl");
+      expect(await screen.findByRole("radio", { name: /WebGL compatibility/ })).toBeChecked();
     });
 
     it("saves the renderer choice from the GPU section", async () => {
       const user = userEvent.setup();
       renderSettings({ at: "/settings?section=gpu" });
-      const choice = await screen.findByRole("combobox", { name: "Mesh renderer" });
+      const choice = await screen.findByRole("radio", { name: /WebGPU · experimental/ });
 
-      await user.selectOptions(choice, "webgpu");
+      await user.click(choice);
 
       expect(readPreviewPreferences().meshRenderer).toBe("webgpu");
     });
@@ -3214,42 +3251,43 @@ describe("SettingsPanel", () => {
       expect(toggle).not.toBeChecked();
     });
 
-    it.each(["single", "oblique", "oblique-poles"] as const)(
-      "saves preview mode %s",
-      async (mode) => {
-        const enabled = mode !== "single";
-        const poles = mode === "oblique-poles";
-        const user = userEvent.setup();
-        const app = renderSettings({
-          at: "/settings?section=previews",
-          routes: {
-            "GET /api/v1/config": json({ ...VAULT_CONFIG, derivatives_previews_enabled: !enabled }),
-            "PUT /api/v1/config": json({
-              ...VAULT_CONFIG,
-              edit_version: 2,
-              derivatives_previews_enabled: enabled,
-              derivatives_previews_include_poles: poles,
-            }),
-          },
-        });
-        const toggle = await screen.findByRole("combobox", { name: "Multi-angle previews" });
-        await waitFor(() => expect(toggle).toBeEnabled());
-
-        await user.selectOptions(toggle, mode);
-
-        await waitFor(() =>
-          expect(app.client.getQueryData(queryKeys.vaultConfig)).toMatchObject({
+    it.each([
+      { mode: "single", label: "One thumbnail" },
+      { mode: "oblique", label: "Angle views" },
+      { mode: "oblique-poles", label: "Angle views + top and bottom" },
+    ])("saves preview mode $mode", async ({ mode, label }) => {
+      const enabled = mode !== "single";
+      const poles = mode === "oblique-poles";
+      const user = userEvent.setup();
+      const app = renderSettings({
+        at: "/settings?section=previews",
+        routes: {
+          "GET /api/v1/config": json({ ...VAULT_CONFIG, derivatives_previews_enabled: !enabled }),
+          "PUT /api/v1/config": json({
+            ...VAULT_CONFIG,
+            edit_version: 2,
             derivatives_previews_enabled: enabled,
             derivatives_previews_include_poles: poles,
           }),
-        );
-        expect(JSON.parse(app.requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toEqual({
+        },
+      });
+      const toggle = await screen.findByRole("radio", { name: label });
+      await waitFor(() => expect(toggle).toBeEnabled());
+
+      await user.click(toggle);
+
+      await waitFor(() =>
+        expect(app.client.getQueryData(queryKeys.vaultConfig)).toMatchObject({
           derivatives_previews_enabled: enabled,
           derivatives_previews_include_poles: poles,
-        });
-        expect(toggle).toHaveValue(mode);
-      },
-    );
+        }),
+      );
+      expect(JSON.parse(app.requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toEqual({
+        derivatives_previews_enabled: enabled,
+        derivatives_previews_include_poles: poles,
+      });
+      expect(toggle).toBeChecked();
+    });
 
     it("restores the saved generation setting after a refused write", async () => {
       renderSettings({
@@ -3259,12 +3297,12 @@ describe("SettingsPanel", () => {
           "PUT /api/v1/config": json({ detail: "forbidden" }, 403),
         },
       });
-      const toggle = await screen.findByRole("combobox", { name: "Multi-angle previews" });
+      const toggle = await screen.findByRole("radio", { name: "One thumbnail" });
       await waitFor(() => expect(toggle).toBeEnabled());
 
-      await userEvent.selectOptions(toggle, "single");
+      await userEvent.click(toggle);
 
-      await waitFor(() => expect(toggle).toHaveValue("oblique"));
+      await waitFor(() => expect(screen.getByRole("radio", { name: "Angle views" })).toBeChecked());
     });
 
     it("requires review when the generation setting changed elsewhere", async () => {
@@ -3275,16 +3313,16 @@ describe("SettingsPanel", () => {
           "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
         },
       });
-      const toggle = await screen.findByRole("combobox", { name: "Multi-angle previews" });
+      const toggle = await screen.findByRole("radio", { name: "One thumbnail" });
       await waitFor(() => expect(toggle).toBeEnabled());
 
-      await userEvent.selectOptions(toggle, "single");
+      await userEvent.click(toggle);
       await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
 
       const latest = await screen.findByRole("region", { name: "Latest saved version" });
       expect(within(latest).getByText("Angle views")).toBeVisible();
       expect(toggle).toBeDisabled();
-      expect(toggle).toHaveValue("single");
+      expect(toggle).toBeChecked();
       expect(app.requestsWithMethod("PUT")).toHaveLength(1);
     });
 
@@ -3294,7 +3332,7 @@ describe("SettingsPanel", () => {
         routes: { "GET /api/v1/config": json({ detail: "forbidden" }, 403) },
       });
 
-      expect(await screen.findByRole("combobox", { name: "Multi-angle previews" })).toBeDisabled();
+      expect(await screen.findByRole("radio", { name: "One thumbnail" })).toBeDisabled();
     });
 
     it("saves the model image width", async () => {
@@ -3310,9 +3348,9 @@ describe("SettingsPanel", () => {
         },
       });
 
-      const choice = await screen.findByLabelText("Model image quality");
+      const choice = await screen.findByRole("radio", { name: /High · 1280/ });
       await waitFor(() => expect(choice).toBeEnabled());
-      await user.selectOptions(choice, "1280");
+      await user.click(choice);
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
@@ -3327,11 +3365,14 @@ describe("SettingsPanel", () => {
         at: "/settings?section=previews",
         routes: { "PUT /api/v1/config": json({ detail: "forbidden" }, 403) },
       });
-      const select = await screen.findByLabelText("Model image quality");
+      const high = await screen.findByRole("radio", { name: /High · 1280/ });
+      await waitFor(() => expect(high).toBeEnabled());
 
-      await user.selectOptions(select, "1280");
+      await user.click(high);
 
-      await waitFor(() => expect(select).toHaveValue("640"));
+      await waitFor(() =>
+        expect(screen.getByRole("radio", { name: /Standard · 640/ })).toBeChecked(),
+      );
     });
 
     it("queues a rebuild of the images already generated", async () => {
@@ -3403,7 +3444,9 @@ describe("SettingsPanel", () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({ at: "/settings?section=previews" });
 
-      await user.selectOptions(await screen.findByLabelText("Preview quality"), "detail");
+      await user.click(await screen.findByRole("radio", { name: /High detail · 2×/ }));
+
+      expect(readPreviewPreferences().previewQuality).toBe("detail");
 
       expect(requestsWithMethod("PUT")).toHaveLength(0);
     });
@@ -3491,7 +3534,7 @@ describe("SettingsPanel", () => {
       // lives in this browser and shows nowhere else.
       const user = userEvent.setup();
       renderSettings({ at: "/settings?section=design" });
-      await screen.findByText("Model card metrics");
+      await screen.findByRole("heading", { name: "Model card metrics" });
 
       await user.selectOptions(screen.getByRole("combobox", { name: "Metric 1" }), "material");
 
@@ -3504,7 +3547,7 @@ describe("SettingsPanel", () => {
       // metric already in use elsewhere is offered as taken rather than as free.
       renderSettings({ at: "/settings?section=design" });
 
-      await screen.findByText("Model card metrics");
+      await screen.findByRole("heading", { name: "Model card metrics" });
       const second = screen.getByRole("combobox", { name: "Metric 2" });
       const first = screen.getByRole("combobox", { name: "Metric 1" });
       const taken = within(second).getByRole("option", {
@@ -3520,7 +3563,7 @@ describe("SettingsPanel", () => {
       const events: string[] = [];
       window.addEventListener("storage", (event) => events.push(String(event.key)));
       renderSettings({ at: "/settings?section=design" });
-      await screen.findByText("Model card metrics");
+      await screen.findByRole("heading", { name: "Model card metrics" });
 
       await user.selectOptions(screen.getByRole("combobox", { name: "Metric 1" }), "material");
 
@@ -3530,7 +3573,7 @@ describe("SettingsPanel", () => {
     it("puts the metrics back to the defaults", async () => {
       const user = userEvent.setup();
       renderSettings({ at: "/settings?section=design" });
-      await screen.findByText("Model card metrics");
+      await screen.findByRole("heading", { name: "Model card metrics" });
       await user.selectOptions(screen.getByRole("combobox", { name: "Metric 1" }), "material");
 
       await user.click(screen.getByRole("button", { name: "Reset metrics" }));
@@ -3546,7 +3589,7 @@ describe("SettingsPanel", () => {
       // three anybody actually reads.
       const user = userEvent.setup();
       renderSettings({ at: "/settings?section=design" });
-      await screen.findByText("Model metadata");
+      await screen.findByRole("heading", { name: "Model metadata" });
 
       await user.click(screen.getByRole("checkbox", { name: "Infill", checked: true }));
 
@@ -3564,7 +3607,7 @@ describe("SettingsPanel", () => {
     it("turns every field on at once", async () => {
       const user = userEvent.setup();
       renderSettings({ at: "/settings?section=design" });
-      await screen.findByText("Model metadata");
+      await screen.findByRole("heading", { name: "Model metadata" });
 
       await user.click(screen.getByRole("button", { name: "Show all" }));
 
@@ -3574,7 +3617,7 @@ describe("SettingsPanel", () => {
     it("turns every field off at once", async () => {
       const user = userEvent.setup();
       renderSettings({ at: "/settings?section=design" });
-      await screen.findByText("Model metadata");
+      await screen.findByRole("heading", { name: "Model metadata" });
 
       await user.click(screen.getByRole("button", { name: "Hide all" }));
 
@@ -3584,7 +3627,7 @@ describe("SettingsPanel", () => {
     it("puts the fields back to the defaults", async () => {
       const user = userEvent.setup();
       renderSettings({ at: "/settings?section=design" });
-      await screen.findByText("Model metadata");
+      await screen.findByRole("heading", { name: "Model metadata" });
       await user.click(screen.getByRole("button", { name: "Hide all" }));
 
       await user.click(screen.getAllByRole("button", { name: "Reset" }).at(-1)!);
@@ -3759,7 +3802,7 @@ describe("Settings account draft lifetime", () => {
       },
     });
     await openPasswordReset();
-    const field = await screen.findByPlaceholderText("New password");
+    const field = await screen.findByLabelText("New password");
     fireEvent.change(field, { target: { value: "OldFakePassword123" } });
     await userEvent.click(
       within(screen.getByRole("dialog", { name: "Reset password" })).getByRole("button", {
@@ -3775,7 +3818,7 @@ describe("Settings account draft lifetime", () => {
       expect(screen.queryByRole("dialog", { name: "Reset password" })).not.toBeInTheDocument(),
     );
     await openPasswordReset();
-    expect(await screen.findByPlaceholderText("New password")).toHaveValue("NextFakePassword123");
+    expect(await screen.findByLabelText("New password")).toHaveValue("NextFakePassword123");
     expect(JSON.parse(app.requestsWithMethod("POST")[0].body).password).toBe("OldFakePassword123");
   });
   it("dismisses the one-time key receipt without revoking its key", async () => {
@@ -4095,12 +4138,15 @@ describe("Settings remote configuration recovery", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Configuration could not be loaded.",
     );
-    const name = section === "design" ? "Display currency" : "Model image quality";
-    expect(screen.getByLabelText(name)).toBeDisabled();
+    const control =
+      section === "design"
+        ? screen.getByLabelText("Display currency")
+        : screen.getByRole("radio", { name: /High · 1280/ });
+    expect(control).toBeDisabled();
     expect(app.requestsWithMethod("PUT")).toHaveLength(0);
     app.route({ "GET /api/v1/config": json(VAULT_CONFIG) });
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-    await waitFor(() => expect(screen.getByLabelText(name)).toBeEnabled());
+    await waitFor(() => expect(control).toBeEnabled());
   });
   it("shows the acknowledged normalized currency instead of the sent choice", async () => {
     const app = renderSettings({

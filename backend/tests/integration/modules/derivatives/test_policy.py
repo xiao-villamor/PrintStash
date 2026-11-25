@@ -17,8 +17,8 @@ from app.db.models import (
     JobState,
 )
 from app.modules.derivatives import policy, previews, producers, records, repair
-from app.modules.derivatives.kinds import GROUPS
-from app.modules.derivatives.source import DerivativeSource, subject_key
+from app.modules.derivatives.kinds import GROUPS, subject_key
+from app.modules.derivatives.source import DerivativeSource
 from app.modules.work import service
 from app.modules.work.jobs import jobs
 from app.modules.work.reconciler import run_pass

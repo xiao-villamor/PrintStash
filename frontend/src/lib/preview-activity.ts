@@ -13,7 +13,13 @@ export function previewProgress(activity: PreviewActivity) {
     progress: activity.total === 0 ? 100 : (processed / activity.total) * 100,
     detail: uiText(
       "{total} preview tasks · {completed} done · {remaining} remaining · {skipped} skipped · {failed} failed",
-      { ...activity },
+      {
+        total: activity.total,
+        completed: activity.completed,
+        remaining: activity.remaining,
+        skipped: activity.skipped,
+        failed: activity.failed,
+      },
     ),
   };
 }

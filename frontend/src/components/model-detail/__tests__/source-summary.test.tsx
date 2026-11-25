@@ -6,8 +6,8 @@ import { json, renderApp } from "@/test-support/render";
 import { CaptureSourceSummary, ModelSourceSummary } from "../source-summary";
 
 describe("SourceSummary", () => {
-  it("omits the source summary without captured sources", () => {
-    renderApp(<ModelSourceSummary modelId={1} />, {
+  it("keeps source attribution visible without a publication date", async () => {
+    renderApp(<ModelSourceSummary modelId={1} onAddSource={() => {}} />, {
       routes: {
         "GET /api/v1/models/1/provenance": json({
           edit_epoch: "a".repeat(32),
@@ -16,9 +16,24 @@ describe("SourceSummary", () => {
         }),
       },
     });
-    expect(screen.queryByRole("link", { name: "Source and license" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Add source link" })).toBeVisible();
+    expect(screen.getByText("Not recorded")).toBeVisible();
   });
 
+  it("normalizes safe source links", () => {
+    renderApp(<ModelSourceSummary modelId={1} sourceUrl="HTTPS://EXAMPLE.TEST/cube" />);
+    expect(screen.getByRole("link", { name: /Source model/ })).toHaveAttribute(
+      "href",
+      "https://example.test/cube",
+    );
+  });
+  it.each(["javascript:alert(1)", "https://user:secret@example.test/cube", "data:text/html,hello"])(
+    "does not link unsafe source %s",
+    (source) => {
+      renderApp(<ModelSourceSummary modelId={1} sourceUrl={source} />);
+      expect(screen.queryByRole("link", { name: "Source model" })).not.toBeInTheDocument();
+    },
+  );
   it("identifies inferred terms without inventing rights", () => {
     render(
       <CaptureSourceSummary
@@ -69,9 +84,9 @@ describe("SourceSummary", () => {
         }),
       },
     });
-    expect(await screen.findByText("Captured license: Original terms")).toBeVisible();
-    expect(screen.getByText("Your correction: Local correction")).toBeVisible();
-    expect(screen.getByRole("link", { name: "Source and license" })).toHaveAttribute(
+    expect(await screen.findByText("Captured: Original terms")).toBeVisible();
+    expect(screen.getByText("Local correction")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Source details" })).toHaveAttribute(
       "href",
       "/models/1?tab=source",
     );

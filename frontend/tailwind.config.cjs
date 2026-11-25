@@ -36,6 +36,11 @@ const config = {
         destructive: {
           DEFAULT: "var(--destructive)",
           foreground: "var(--destructive-foreground)",
+          action: {
+            DEFAULT: "var(--destructive-action)",
+            foreground: "var(--destructive-action-foreground)",
+            hover: "var(--destructive-action-hover)",
+          },
         },
         muted: {
           DEFAULT: "var(--muted)",
@@ -107,7 +112,7 @@ const config = {
       borderRadius: {
         DEFAULT: "var(--radius)",
         brand: "0.4375rem",
-        lg: "var(--radius)",
+        lg: "var(--radius-popover)",
         md: "var(--radius)",
         sm: "var(--radius)",
       },

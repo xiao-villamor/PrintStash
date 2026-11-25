@@ -34,6 +34,9 @@
     --accent-foreground: #101828;
     --destructive: #b42318;
     --destructive-foreground: #ffffff;
+    --destructive-action: #a11c27;
+    --destructive-action-foreground: #ffffff;
+    --destructive-action-hover: #861726;
     --border: #e4e7ec;
     --border-strong: #cdd3db;
     --overlay-scrim: rgb(16 24 40 / 0.28);
@@ -43,7 +46,8 @@
     --dialog-shadow: rgb(16 24 40 / 0.12);
     --input: #8190a3;
     --ring: #4d6f9b;
-    --radius: 0px;
+    --radius: 6px;
+    --radius-popover: 8px;
     color-scheme: light;
 
     /* Interaction shades of primary (hover = one step darker; soft = 40% for
@@ -62,10 +66,13 @@
     --chart-1: #4d6f9b;
     --chart-2: #0891b2;
     --chart-3: #7c3aed;
+    --chart-4: #b67515;
+    --chart-5: #be5278;
     --chart-grid: #cdd3db;
 
     /* Shared feedback timing and a critically damped content-settle profile. */
     --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-dock: cubic-bezier(0.333333, 0, 0.666667, 1);
     --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
     --duration-press: 150ms;
     --duration-fast: 200ms;
@@ -140,8 +147,10 @@
     --accent-foreground: #edf1f7;
 
     /* Status */
-    --destructive: #f87171;
-    --destructive-foreground: #450a0a;
+    --destructive: #e08585;
+    --destructive-foreground: #2b1214;
+    --destructive-action: #8a3a40;
+    --destructive-action-hover: #9c474d;
 
     /* Borders & inputs */
     --border: #232a35;
@@ -162,6 +171,8 @@
     --chart-1: #7896bc;
     --chart-2: #22d3ee;
     --chart-3: #a78bfa;
+    --chart-4: #e6ad58;
+    --chart-5: #ee8eaa;
     --chart-grid: #36404e;
 
     /* Surface scale — clear luminosity steps */
@@ -187,9 +198,9 @@
     --tertiary: #fb923c;
     --tertiary-container: #332316;
     --on-tertiary-container: #fed7aa;
-    --error: #f87171;
-    --error-container: #450a0a;
-    --on-error-container: #fef2f2;
+    --error: #e08585;
+    --error-container: #2b1618;
+    --on-error-container: #f6dcdc;
 
     /* Inverse */
     --inverse-surface: #edf1f7;
@@ -216,6 +227,12 @@
   .bg-chart-violet {
     background-color: var(--chart-3);
   }
+  .bg-chart-amber {
+    background-color: var(--chart-4);
+  }
+  .bg-chart-rose {
+    background-color: var(--chart-5);
+  }
   .bg-chart-cyan-soft {
     background-color: color-mix(in srgb, var(--chart-2) 14%, transparent);
   }
@@ -241,8 +258,12 @@
     @apply bg-background text-foreground antialiased;
   }
 
+  select {
+    border-radius: var(--radius);
+  }
+
   /* Every single-choice <select> opens the same menu as the app's dropdown
-     menus (Sort, Display): square popover, 12px rows, neutral hover, the
+     menus (Sort, Display): rounded popover, 12px rows, neutral hover, the
      chosen row tinted with a trailing check. Browsers without customizable
      select keep their native list; the trigger styling below still applies. */
   @supports (appearance: base-select) {
@@ -277,7 +298,7 @@
       margin: 4px 0;
       padding: 4px;
       border: 1px solid var(--border);
-      border-radius: 0;
+      border-radius: var(--radius-popover);
       background: var(--popover);
       color: var(--popover-foreground);
       box-shadow:
@@ -291,7 +312,7 @@
       gap: 8px;
       min-height: 32px;
       padding: 8px 10px;
-      border-radius: 0;
+      border-radius: var(--radius);
       font-size: 12px;
       line-height: 16px;
       color: var(--popover-foreground);

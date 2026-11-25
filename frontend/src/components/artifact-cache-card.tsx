@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SettingsCard } from "@/components/settings-card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Localized } from "@/components/ui/localized";
@@ -181,16 +181,13 @@ export function ArtifactCacheCard({ api = artifactCacheApi }: { api?: typeof art
 
   return (
     <Localized>
-      <Card>
-        <CardHeader className="border-b border-border">
-          <CardTitle>{uiText("Remote file cache")}</CardTitle>
-          <CardDescription>
-            {uiText(
-              "Reuse verified remote files for previews, printing, and downloads. Original files remain in Vault storage.",
-            )}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-5 pt-5">
+      <SettingsCard
+        title={uiText("Remote file cache")}
+        description={uiText(
+          "Reuse verified remote files for previews, printing, and downloads. Original files remain in Vault storage.",
+        )}
+      >
+        <div className="space-y-4 py-4">
           {(failed || denied) && (
             <div role="alert" className="space-y-2">
               <p>{uiText("Cache settings could not be loaded.")}</p>
@@ -515,7 +512,7 @@ export function ArtifactCacheCard({ api = artifactCacheApi }: { api?: typeof art
                 <Button
                   size="sm"
                   type="button"
-                  variant="outline"
+                  variant="danger"
                   disabled={busy}
                   onClick={() => void perform("clear")}
                 >
@@ -529,8 +526,8 @@ export function ArtifactCacheCard({ api = artifactCacheApi }: { api?: typeof art
               </p>
             </form>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </SettingsCard>
     </Localized>
   );
 }

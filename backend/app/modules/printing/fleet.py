@@ -44,6 +44,7 @@ from app.modules.media.sliced_gcode import selected_plate
 from app.modules.printing.feed_fit import Feed, FeedFit, Need, fit_requirements
 from app.modules.printing.printer_files import build_traceable_remote_filename
 from app.modules.printing.printer_provider import capabilities_for_provider
+from app.modules.printing.production_costing import finish_job_cost
 from app.schemas.fleet import (
     BatchCreate,
     FleetPrinterTelemetry,
@@ -959,6 +960,7 @@ def resolve_active_job(
     )
     job.error = "operator_marked_failed" if resolution == "failed" else None
     job.finished_at = now
+    finish_job_cost(job)
     job.blocked_reason = None
     job.updated_by = current_user.id
     job.updated_at = now
@@ -1002,6 +1004,8 @@ def retry_queue_job(session: Session, job_id: int, current_user: User) -> PrintJ
     job.error = None
     job.retryable = False
     job.finished_at = None
+    job.production_rates = None
+    job.production_cost = None
     job.dispatch_claimed_at = None
     job.updated_by = current_user.id
     job.updated_at = utcnow()

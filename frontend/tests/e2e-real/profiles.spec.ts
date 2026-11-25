@@ -7,6 +7,7 @@
  */
 import { type Locator } from "@playwright/test";
 import { test, expect, authBundleFor, ADMIN } from "./helpers";
+import { collapseNavigationSidebar } from "./util";
 
 // Resolve the unique name to the server-ID label in one DOM read. Retaining
 // an ordinal locator would follow a different row if the refreshed list sorts.
@@ -15,9 +16,9 @@ async function inputByValue(scope: Locator, labelRe: RegExp, value: string): Pro
   const existing = page.getByRole("dialog");
   if (await existing.count())
     await existing.getByRole("button", { name: "Close", exact: true }).click();
-  const row = scope.getByRole("region", { name: `Profile: ${value}`, exact: true });
+  const row = scope.getByRole("region", { name: `Preset: ${value}`, exact: true });
   await row.getByRole("button").click();
-  await page.getByRole("button", { name: `Edit profile ${value}`, exact: true }).click();
+  await page.getByRole("button", { name: `Edit preset ${value}`, exact: true }).click();
   const inputs = page.getByLabel(labelRe);
   let label: string | null = null;
   await expect
@@ -53,27 +54,33 @@ test.describe("profiles", () => {
           writes.push(request.url());
         }
       });
-      const opener = page.getByRole("button", { name: `New ${kind} profile`, exact: true });
+      const opener = page.getByRole("button", { name: `New ${kind} preset`, exact: true });
       await opener.click();
-      const form = page.getByRole("form", { name: `Create ${kind} preset` });
+      const dialog = page.getByRole("dialog", { name: `New ${kind} preset` });
+      const form = dialog.getByRole("form", { name: `Create ${kind} preset` });
+      const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
+      const submit = dialog.getByRole("button", { name: "Add preset", exact: true });
+      await expect(form).toBeVisible();
       for (const field of await form.getByRole("textbox").all()) await field.fill("12");
 
-      await form.getByRole("button", { name: "Cancel", exact: true }).click();
+      await cancel.click();
 
       await expect(form).toHaveCount(0);
       await expect(opener).toBeFocused();
       await opener.press("Enter");
+      await expect(form).toBeVisible();
       for (const field of await form.getByRole("textbox").all())
         await expect(field).toHaveValue("");
-      await expect(form.getByRole("button", { name: "Add profile", exact: true })).toBeDisabled();
+      await expect(submit).toBeDisabled();
       expect(writes).toEqual([]);
-      await form.getByRole("button", { name: "Cancel", exact: true }).click();
+      await cancel.click();
     });
   }
 
   test("create, edit, and delete a filament preset", async ({ page }) => {
     const name = `e2e-pla-${Date.now()}`;
     await page.goto("/profiles");
+    await collapseNavigationSidebar(page);
 
     const section = page.locator("section", { hasText: "Filament presets" });
     await page.getByRole("button", { name: /New filament/ }).click();
@@ -81,12 +88,23 @@ test.describe("profiles", () => {
     await createForm.getByLabel("Name").fill(name);
     await createForm.getByLabel("Material").fill("PLA");
     await createForm.getByLabel("Cost per kg").fill("25");
-    await createForm.getByRole("button", { name: "Add profile" }).click();
+    await page
+      .getByRole("dialog", { name: "New filament preset" })
+      .getByRole("button", { name: "Add preset" })
+      .click();
 
+    await section
+      .getByRole("region", { name: `Preset: ${name}`, exact: true })
+      .getByRole("button")
+      .click();
+    const profileHeading = page.getByRole("heading", { name, exact: true });
+    await expect(
+      profileHeading.locator("xpath=ancestor::header").locator("svg").first(),
+    ).toHaveClass(/\blucide-filament-spool\b/);
     const nameInput = await inputByValue(section, /^Filament preset name/, name);
     await expect(nameInput).toBeVisible();
 
-    // Edit cost; auto-saves on row blur (real PATCH).
+    // Closing the editor saves the new cost.
     await rowOf(nameInput)
       .getByLabel(/Filament cost per kg/)
       .fill("42");
@@ -95,7 +113,10 @@ test.describe("profiles", () => {
         (r) =>
           /\/api\/v1\/filament-profiles\/\d+/.test(r.url()) && r.request().method() === "PATCH",
       ),
-      page.getByRole("dialog", { name: "Edit filament preset" }).getByRole("heading").click(), // blur the row
+      page
+        .getByRole("dialog", { name: "Edit filament preset" })
+        .getByRole("button", { name: "Close", exact: true })
+        .click(),
     ]);
 
     // Cost persisted.
@@ -112,9 +133,9 @@ test.describe("profiles", () => {
       .getByRole("button", { name: "Delete preset" })
       .click();
     // Counting inputs before reading each one races with the row disappearing.
-    await expect(
-      section.getByRole("region", { name: `Profile: ${name}`, exact: true }),
-    ).toHaveCount(0);
+    await expect(section.getByRole("region", { name: `Preset: ${name}`, exact: true })).toHaveCount(
+      0,
+    );
   });
 
   test("keeps an invalid local draft while another preset refreshes the catalog", async ({
@@ -129,10 +150,11 @@ test.describe("profiles", () => {
       if (await editor.count())
         await editor.getByRole("button", { name: "Close", exact: true }).click();
       await page.getByRole("button", { name: /New filament/ }).click();
-      const form = page.getByRole("form", { name: "Create filament preset" });
+      const create = page.getByRole("dialog", { name: "New filament preset" });
+      const form = create.getByRole("form", { name: "Create filament preset" });
       await form.getByLabel("Name").fill(value);
       await form.getByLabel("Cost per kg").fill("25");
-      await form.getByRole("button", { name: "Add profile" }).click();
+      await create.getByRole("button", { name: "Add preset" }).click();
       return inputByValue(section, /^Filament preset name/, value);
     };
     const first = await add(name);
@@ -146,15 +168,16 @@ test.describe("profiles", () => {
     await expect(cost).toHaveAttribute("aria-invalid", "true");
     await expect(page.getByRole("dialog").getByText("Cost must be 0 or more.")).toBeVisible();
     await cost.fill("42");
+    const edit = page.getByRole("dialog", { name: "Edit filament preset" });
     await Promise.all([
       page.waitForResponse(
         (response) =>
           /\/api\/v1\/filament-profiles\/\d+/.test(response.url()) &&
           response.request().method() === "PATCH",
       ),
-      page.getByRole("dialog", { name: "Edit filament preset" }).getByRole("heading").click(),
+      edit.getByRole("button", { name: "Close", exact: true }).click(),
     ]);
-    await expect(cost).toBeEnabled();
+    await expect(edit).toHaveCount(0);
     await page.reload();
     const persisted = await inputByValue(section, /^Filament preset name/, name);
     await expect(rowOf(persisted).getByLabel(/Filament cost per kg/)).toHaveValue("42");
@@ -178,10 +201,11 @@ test.describe("profiles", () => {
     await page.getByRole("tab", { name: /Printers/ }).click();
     const section = page.locator("section", { hasText: "Printer presets" });
     await page.getByRole("button", { name: /New printer/ }).click();
-    const createForm = page.getByRole("form", { name: "Create printer preset" });
+    const create = page.getByRole("dialog", { name: "New printer preset" });
+    const createForm = create.getByRole("form", { name: "Create printer preset" });
     await createForm.getByLabel("Name").fill(name);
     await createForm.getByLabel("Printer model").fill("Voron 2.4");
-    await createForm.getByRole("button", { name: "Add profile" }).click();
+    await create.getByRole("button", { name: "Add preset" }).click();
 
     const nameInput = await inputByValue(section, /^Printer preset name/, name);
     await expect(nameInput).toBeVisible();
@@ -197,9 +221,9 @@ test.describe("profiles", () => {
       .getByRole("button", { name: "Delete preset" })
       .click();
     // Counting inputs before reading each one races with the row disappearing.
-    await expect(
-      section.getByRole("region", { name: `Profile: ${name}`, exact: true }),
-    ).toHaveCount(0);
+    await expect(section.getByRole("region", { name: `Preset: ${name}`, exact: true })).toHaveCount(
+      0,
+    );
   });
   for (const kind of ["filament", "printer"] as const) {
     test(`two ${kind} preset editors recover a competing save`, async ({ page }) => {
@@ -231,15 +255,15 @@ test.describe("profiles", () => {
           await second.getByRole("tab", { name: /Printers/ }).click();
         }
         await page
-          .getByRole("region", { name: `Profile: ${name}`, exact: true })
+          .getByRole("region", { name: `Preset: ${name}`, exact: true })
           .getByRole("button")
           .click();
-        await page.getByRole("button", { name: `Edit profile ${name}`, exact: true }).click();
+        await page.getByRole("button", { name: `Edit preset ${name}`, exact: true }).click();
         await second
-          .getByRole("region", { name: `Profile: ${name}`, exact: true })
+          .getByRole("region", { name: `Preset: ${name}`, exact: true })
           .getByRole("button")
           .click();
-        await second.getByRole("button", { name: `Edit profile ${name}`, exact: true }).click();
+        await second.getByRole("button", { name: `Edit preset ${name}`, exact: true }).click();
         // An invalid number captures the second editor's base without allowing
         // blur between browser tabs to save it before the competing edit.
         await second.getByRole("textbox", { name: numericLabel, exact: true }).fill("-1");
@@ -286,10 +310,10 @@ test.describe("profiles", () => {
         await second.reload();
         if (kind === "printer") await second.getByRole("tab", { name: /Printers/ }).click();
         await second
-          .getByRole("region", { name: `Profile: ${name}`, exact: true })
+          .getByRole("region", { name: `Preset: ${name}`, exact: true })
           .getByRole("button")
           .click();
-        await second.getByRole("button", { name: `Edit profile ${name}`, exact: true }).click();
+        await second.getByRole("button", { name: `Edit preset ${name}`, exact: true }).click();
         await expect(second.getByRole("textbox", { name: numericLabel, exact: true })).toHaveValue(
           nextValue,
         );

@@ -25,6 +25,7 @@ from app.api.v1 import (
     multipart_models,
     notifications,
     outliner,
+    pricing_templates,
     printer_config_files,
     printer_inspection,
     printer_profiles,
@@ -75,6 +76,7 @@ install_search_routes(api_router)
 api_router.include_router(files.router)
 api_router.include_router(filaments.router)
 api_router.include_router(printer_profiles.router)
+api_router.include_router(pricing_templates.router)
 api_router.include_router(slicer_profiles.router)
 api_router.include_router(taxonomy.router)
 api_router.include_router(documents.router)

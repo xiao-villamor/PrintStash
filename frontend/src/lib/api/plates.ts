@@ -12,10 +12,16 @@ export interface GcodePlateIdentity {
   object_count: number;
 }
 
+export type GcodePlateEstimateMetric = "estimated_time_s" | "filament_weight_g" | "filament_cost";
+
 export interface GcodePlateMetadata {
   estimated_time_s: number | null;
   filament_weight_g: number | null;
   filament_cost: number | null;
+  material_brand?: string | null;
+  material_type?: string | null;
+  printer_model?: string | null;
+  nozzle_diameter_mm?: number | null;
 }
 
 export interface GcodePlates {

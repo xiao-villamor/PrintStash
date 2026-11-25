@@ -35,10 +35,7 @@ describe("ProfileSettingsDetails", () => {
     renderDetails();
     const user = await openDetails();
     await user.click(screen.getByRole("button", { name: "View settings" }));
-    expect(screen.getByRole("link", { name: "bracket.gcode · Bracket" })).toHaveAttribute(
-      "href",
-      "/models/4",
-    );
+    expect(screen.getByRole("link", { name: "Bracket" })).toHaveAttribute("href", "/models/4");
   });
   it("preserves multiple filament values", async () => {
     renderDetails();
@@ -68,7 +65,7 @@ describe("ProfileSettingsDetails", () => {
     renderDetails([]);
     await openDetails();
     expect(
-      screen.getByText("No settings found for this profile's material and brand or printer model."),
+      screen.getByText("No settings found for this preset's material and brand or printer model."),
     ).toBeVisible();
   });
   it("keeps process settings with their file", async () => {
@@ -95,8 +92,8 @@ describe("ProfileSettingsDetails", () => {
     expect(await screen.findByText("Variants: 1 · Loaded files: 2")).toBeVisible();
     expect(screen.getAllByRole("article")).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "View settings" }));
-    expect(screen.getByRole("link", { name: "older.gcode · Bracket" })).toBeVisible();
-    expect(screen.getByRole("link", { name: "bracket.gcode · Bracket" })).toBeVisible();
+    expect(screen.getByText("older.gcode")).toBeVisible();
+    expect(screen.getByText("bracket.gcode")).toBeVisible();
   });
   it("offers retry after a failed read", async () => {
     renderApp(<ProfileSettingsDetails kind="filament" profile={profile} />, {
@@ -136,7 +133,7 @@ describe("ProfileSettingsDetails", () => {
     await screen.findByRole("alert");
     expect(
       screen.queryByText(
-        "No settings found for this profile's material and brand or printer model.",
+        "No settings found for this preset's material and brand or printer model.",
       ),
     ).not.toBeInTheDocument();
   });
@@ -158,9 +155,7 @@ describe("ProfileSettingsDetails", () => {
     await user.click(screen.getByRole("button", { name: "View settings" }));
     await user.click(screen.getByRole("button", { name: "Hide settings" }));
     await waitFor(() =>
-      expect(
-        screen.queryByRole("link", { name: "bracket.gcode · Bracket" }),
-      ).not.toBeInTheDocument(),
+      expect(screen.queryByRole("link", { name: "Bracket" })).not.toBeInTheDocument(),
     );
   });
 });

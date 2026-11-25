@@ -8,7 +8,14 @@
  * keep cancelled name drafts out of the saved Model.
  */
 import { test, expect } from "./helpers";
-import { clickModelAction, modelCard, openModelPage, uploadGcodeModel } from "./util";
+import {
+  clickModelAction,
+  collapseNavigationSidebar,
+  gcodeFor,
+  modelCard,
+  openModelPage,
+  uploadGcodeModel,
+} from "./util";
 
 test.describe("model detail", () => {
   test("persists a Markdown description", async ({ page }) => {
@@ -16,7 +23,7 @@ test.describe("model detail", () => {
     await uploadGcodeModel(page, name);
     await openModelPage(page, name);
     const modelId = new URL(page.url()).pathname.split("/").at(-1);
-    await page.getByRole("button", { name: "Edit details", exact: true }).click();
+    await clickModelAction(page, "Edit details");
     const description =
       "## Assembly instructions\n\n- Fit **both** clips.\n- Check [the source](https://www.printables.com/).\n\n| Part | Count |\n| --- | --- |\n| Clip | 2 |";
     const editor = page.getByRole("dialog", { name: "Edit Model details" });
@@ -151,27 +158,46 @@ test.describe("model detail", () => {
     await expect(page.getByText(renamed, { exact: true })).toHaveCount(0);
   });
 
-  test("log a manual print against an ad-hoc printer; it shows in history", async ({ page }) => {
+  test("reopens a saved result from the Activity receipt", async ({ page }) => {
     const name = `e2e-hist-${Date.now()}`;
     const printerName = `E2E Rig ${Date.now()}`;
-    await uploadGcodeModel(page, name);
-
-    await openModelPage(page, name);
+    const upload = await page.request.post("/api/v1/ingest/orca", {
+      multipart: {
+        file: {
+          name: `${name}.gcode`,
+          mimeType: "text/plain",
+          buffer: Buffer.from(gcodeFor(name)),
+        },
+        model_name: name,
+      },
+    });
+    expect(upload.status()).toBe(202);
+    const jobPath = `/api/v1/jobs/${(await upload.json()).job_id}`;
+    await expect
+      .poll(async () => (await (await page.request.get(jobPath)).json()).state)
+      .toBe("completed");
+    const { model_id: modelId } = await (await page.request.get(jobPath)).json();
+    expect(modelId).toBeTruthy();
+    await page.goto(`/models/${modelId}`);
+    await collapseNavigationSidebar(page);
     await expect(page.getByRole("heading", { name })).toBeVisible();
-    await page.getByRole("tab", { name: /History/ }).click();
-    await page.getByRole("button", { name: /Add Record/ }).click();
+    await page.getByRole("button", { name: "Record result", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Record result" });
 
-    // Free-text printer name path: pick "Other (not listed)…" and type a name.
-    await page
-      .locator("select")
-      .filter({ has: page.getByRole("option", { name: /Other \(not listed\)/ }) })
-      .selectOption("__adhoc__");
-    await page.getByPlaceholder("e.g. Garage Prusa MK4").fill(printerName);
+    await expect(dialog.getByText("Choose a printer to continue.")).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Save record" })).toBeDisabled();
+    await dialog.getByRole("button", { name: "Printer", exact: true }).click();
+    await page.getByRole("button", { name: "Other (not listed)…", exact: true }).click();
+    await dialog.getByRole("textbox", { name: "Printer name" }).fill(printerName);
+    await expect(dialog.getByRole("radio", { name: "Success", exact: true })).toBeChecked();
 
-    // The G-code revision defaults to the model's only revision; result defaults
-    // to Completed. Save and confirm the record renders.
-    await page.getByRole("button", { name: /^Save$/ }).click();
-    await expect(page.getByText(printerName)).toBeVisible();
+    await dialog.getByRole("button", { name: "Save record", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await page.getByRole("button", { name: "View activity ›" }).click();
+    await expect(page.getByRole("heading", { name: "Print history" })).toBeVisible();
+    await page.reload();
+    await expect(page.getByText(printerName, { exact: false })).toBeVisible();
+    expect((await page.request.delete(`/api/v1/models/${modelId}`)).status()).toBe(204);
   });
 
   test("edit a model's tags: Cancel discards, Save persists", async ({ page }) => {
@@ -187,16 +213,14 @@ test.describe("model detail", () => {
     const tagInput = page.getByPlaceholder("Search or create — press Enter");
 
     // Cancel discards: inline-create a tag in edit mode, then cancel.
-    await page.getByRole("heading", { level: 1 }).click({ button: "right" });
-    await page.getByRole("menuitem", { name: "Edit details" }).click();
+    await clickModelAction(page, "Edit details");
     await tagInput.fill(dropTag);
     await tagInput.press("Enter");
     await page.getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByText(dropTag, { exact: true })).toHaveCount(0);
 
     // Save persists: inline-create a different tag and save — it shows as a chip.
-    await page.getByRole("heading", { level: 1 }).click({ button: "right" });
-    await page.getByRole("menuitem", { name: "Edit details" }).click();
+    await clickModelAction(page, "Edit details");
     await tagInput.fill(keepTag);
     await tagInput.press("Enter");
     await page.getByRole("button", { name: /^Save$/ }).click();
@@ -209,7 +233,7 @@ test.describe("model detail", () => {
 
     await openModelPage(page, name);
     await expect(page.getByRole("heading", { name })).toBeVisible();
-    await page.getByRole("tab", { name: "Revisions" }).click();
+    await page.getByRole("tab", { name: "Print" }).click();
 
     const [download] = await Promise.all([
       page.waitForEvent("download"),

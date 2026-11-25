@@ -204,6 +204,7 @@ export function KeyboardShortcuts() {
       rows: [
         { labelKey: "Search", keys: ["/"] },
         { labelKey: "Search panel", keys: [mod, shift, "F"] },
+        { labelKey: "Find in collection", keys: [mod, "F"] },
         { labelKey: "Collections panel", keys: [mod, shift, "E"] },
         { labelKey: "Show or hide the sidebar", keys: [mod, "B"] },
         { labelKey: "Show or hide details", keys: [mod, alt, "B"] },
@@ -211,9 +212,19 @@ export function KeyboardShortcuts() {
       ],
     },
     {
+      titleKey: "In the find bar",
+      noteKey: "With the find bar open",
+      rows: [
+        { labelKey: "Next match", keys: ["Enter"] },
+        { labelKey: "Previous match", keys: [shift, "Enter"] },
+        { labelKey: "Close the find bar", keys: ["Esc"] },
+      ],
+    },
+    {
       titleKey: "Models",
       rows: [
         { labelKey: "Close details, then clear the selection", keys: ["Esc"] },
+        { labelKey: "Open the actions menu", keys: [shift, "F10"] },
         { labelKey: "Rename this collection", keys: ["F2"] },
         { labelKey: "Undo the last change", keys: [mod, "Z"] },
         { labelKey: "Show this list", keys: ["?"] },
@@ -235,7 +246,7 @@ export function KeyboardShortcuts() {
       open={open}
       onClose={() => setOpen(false)}
       labelledBy={titleId}
-      className="keyboard-help flex max-h-[calc(100dvh-48px)] w-160 max-w-[calc(100vw-48px)] flex-col overflow-hidden border border-border bg-card"
+      className="keyboard-help flex max-h-[calc(100dvh-48px)] w-160 max-w-[calc(100vw-48px)] flex-col overflow-hidden rounded-lg border border-border bg-card"
     >
       <div className="flex shrink-0 items-center gap-2 border-b border-border pb-5 pl-6 pr-4.5 pt-6">
         <h2 id={titleId} className="min-w-0 flex-1 text-lg font-semibold leading-snug">
@@ -245,7 +256,7 @@ export function KeyboardShortcuts() {
           type="button"
           aria-label={uiText("Close keyboard shortcuts")}
           onClick={() => setOpen(false)}
-          className="flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <X className="h-4 w-4" aria-hidden />
         </button>
@@ -253,7 +264,7 @@ export function KeyboardShortcuts() {
       <div className="keyboard-help-grid min-h-0 overflow-y-auto px-6 pb-6 pt-2">
         {groups.map(({ titleKey, noteKey, rows }) => (
           <section key={titleKey} className="min-w-0">
-            <h3 className="mb-1.5 mt-3.5 text-xs font-semibold text-secondary">
+            <h3 className="mb-1.5 pt-4 text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
               {uiText(titleKey)}
             </h3>
             {noteKey && <p className="mb-1.5 text-xs text-muted-foreground">{uiText(noteKey)}</p>}
@@ -268,7 +279,7 @@ export function KeyboardShortcuts() {
                     {keys.map((key, index) => (
                       <kbd
                         key={`${index}:${key}`}
-                        className="h-5.5 min-w-5.5 border border-border border-b-2 bg-muted px-1.5 text-center font-mono text-xs leading-[19px]"
+                        className="h-6 min-w-6 rounded-md border border-border border-b-2 bg-muted px-1.5 text-center font-mono text-xs leading-[21px] text-foreground"
                       >
                         {key}
                       </kbd>

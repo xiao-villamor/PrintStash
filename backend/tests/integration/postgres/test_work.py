@@ -42,8 +42,8 @@ from app.db.session import (
     override_session_factory,
 )
 from app.db.url import normalize_database_url
-from app.modules.derivatives.kinds import group
-from app.modules.derivatives.source import DerivativeSource, subject_key
+from app.modules.derivatives.kinds import group, subject_key
+from app.modules.derivatives.source import DerivativeSource
 from app.modules.work import fences
 from app.modules.work.contracts import (
     DiscoveryBudget,

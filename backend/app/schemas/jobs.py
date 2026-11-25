@@ -173,6 +173,11 @@ class ExecutorRead(BaseModel):
     stale: bool
 
 
+class PreviewActivityFailure(BaseModel):
+    reason: str
+    at: datetime
+
+
 class PreviewActivity(BaseModel):
     """Enabled cover and multi-angle tasks at their current recipes across the library."""
 
@@ -181,13 +186,24 @@ class PreviewActivity(BaseModel):
     remaining: int = Field(ge=0)
     skipped: int = Field(ge=0)
     failed: int = Field(ge=0)
+    latest_failure: PreviewActivityFailure | None
+
+
+class WorkFailureArtifact(BaseModel):
+    model_id: int
+    model_name: str
+    filename: str
+
+
+class WorkFailure(JobStatus):
+    artifact: WorkFailureArtifact | None = None
 
 
 class WorkOverview(BaseModel):
     lanes: list[LaneRead]
     definitions: list[DefinitionRead]
     executors: list[ExecutorRead]
-    failed_jobs: list[JobStatus]
+    failed_jobs: list[WorkFailure]
     failed_derivatives: int
 
 

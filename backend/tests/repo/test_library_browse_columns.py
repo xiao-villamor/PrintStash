@@ -11,13 +11,19 @@ from sqlmodel import SQLModel
 import app.db.models  # noqa: F401  (registers every table)
 from app.db import library_browse_v2
 
+# Columns added after the frozen v2 contract that are absent from browse data.
+# Production estimates have their own file endpoint and conditional edit contract.
+POST_V2_IGNORED_FIELDS = {"files": {"production_estimate"}}
+
 
 class TestBrowseColumns:
     @pytest.mark.parametrize("table", sorted(library_browse_v2.WATCHED_FIELDS))
     def test_every_column_is_watched_or_deliberately_ignored(self, table: str) -> None:
         columns = {column.name for column in SQLModel.metadata.tables[table].columns}
         watched = set(library_browse_v2.WATCHED_FIELDS[table])
-        ignored = set(library_browse_v2.IGNORED_FIELDS[table])
+        ignored = set(
+            library_browse_v2.IGNORED_FIELDS[table]
+        ) | POST_V2_IGNORED_FIELDS.get(table, set())
 
         assert not watched & ignored
         assert columns == watched | ignored, (

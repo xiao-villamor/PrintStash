@@ -23,9 +23,9 @@ from app.modules.work.contracts import (
 )
 
 from . import policy, previews, producers, records
-from .kinds import DerivativeGroup, group
+from .kinds import DerivativeGroup, file_id_of, group
 from .preview_source import PreviewSource
-from .source import DerivativeSource, file_id_of
+from .source import DerivativeSource
 
 
 class Producer(Protocol):

@@ -3,19 +3,19 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { ConfirmModal as SharedConfirmModal } from "@printstash/ui";
+import {
+  ConfirmModal as SharedConfirmModal,
+  type ConfirmModalProps as SharedConfirmModalProps,
+} from "@printstash/ui";
 
 import { useOptionalI18n } from "@/lib/i18n";
 import { translateUiText } from "@/lib/locale";
 
-export interface ConfirmModalProps {
-  open: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-  title: string;
-  description: string;
+export interface ConfirmModalProps extends Omit<
+  SharedConfirmModalProps,
+  "closeLabel" | "cancelLabel" | "confirmLabel"
+> {
   confirmLabel?: string;
-  busy?: boolean;
 }
 
 export function ConfirmModal({

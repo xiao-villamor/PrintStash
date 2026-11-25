@@ -17,6 +17,7 @@ from app.db.models import (
     RoutingStrategy,
 )
 from app.schemas.editing import EditingBase
+from app.schemas.production_costing import JobProductionCost
 
 
 def validate_remote_filename_value(value: Optional[str]) -> Optional[str]:
@@ -145,6 +146,7 @@ class PrinterCreate(BaseModel):
     group: Optional[str] = Field(default=None, max_length=128)
     provider_material_sync_enabled: bool = True
     operator_release_required: bool = False
+    cost_profile_id: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def validate_provider_fields(self) -> "PrinterCreate":
@@ -222,6 +224,7 @@ class PrinterUpdate(BaseModel):
     group: Optional[str] = Field(default=None, max_length=128)
     provider_material_sync_enabled: Optional[bool] = None
     operator_release_required: Optional[bool] = None
+    cost_profile_id: int | None = Field(default=None, gt=0)
 
 
 class PrinterRead(EditingBase):
@@ -256,6 +259,7 @@ class PrinterRead(EditingBase):
     drain_updated_at: Optional[datetime] = None
     provider_material_sync_enabled: bool = True
     operator_release_required: bool = False
+    cost_profile_id: int | None = None
     status: PrinterStatus
     last_seen_at: Optional[datetime] = None
     last_error: Optional[str] = None
@@ -402,6 +406,8 @@ class PrintJobRead(BaseModel):
     remote_filename: str
     state: PrintJobState
     progress: float
+    actual_duration_s: int | None = None
+    production_cost: JobProductionCost | None = None
     source: str = "vault"
     external_display_name: Optional[str] = None
     external_task_id: Optional[str] = None

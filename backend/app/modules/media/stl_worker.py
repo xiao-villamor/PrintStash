@@ -33,6 +33,7 @@ from app.modules.media.stl_isolation import (
     manifest_for,
 )
 from app.modules.media.three_mf_scene import Unsupported3MFCapability
+from app.modules.media.three_mf_viewer_color import STL_COLOR_PREFIX, viewer_color
 
 if TYPE_CHECKING:
     from trimesh import Trimesh
@@ -161,6 +162,9 @@ def convert(path: Path, file_type: str | None, destination: Path) -> STLManifest
             mesh.update_faces(keep)
         with destination.open("xb") as stream:
             mesh.export(file_obj=_CappedSTLOutput(stream), file_type="stl")
+            if file_type == "3mf" and (color := viewer_color(path)) is not None:
+                stream.seek(0)
+                stream.write(STL_COLOR_PREFIX + color)
             stream.flush()
             os.fsync(stream.fileno())
         with destination.open("rb") as stream:

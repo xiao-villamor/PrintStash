@@ -88,7 +88,14 @@ describe("PreviewActivityTracker", () => {
   it("reports failed generation instead of declaring previews ready", async () => {
     vi.spyOn(workApi, "getPreviewActivity")
       .mockResolvedValueOnce(aPreviewActivity({ total: 2, remaining: 2 }))
-      .mockResolvedValue(aPreviewActivity({ total: 2, completed: 1, failed: 1 }));
+      .mockResolvedValue(
+        aPreviewActivity({
+          total: 2,
+          completed: 1,
+          failed: 1,
+          latest_failure: { reason: "resource_limit", at: "2026-01-02T00:00:00Z" },
+        }),
+      );
     const { client } = mount(true);
     await waitFor(() => expect(taskCenter.listTasks()).toHaveLength(1));
 
@@ -99,9 +106,57 @@ describe("PreviewActivityTracker", () => {
         status: "failed",
         succeeded: 1,
         failed: 1,
-        detail: "2 preview tasks · 1 done · 0 remaining · 0 skipped · 1 failed",
       }),
     );
+    expect(taskCenter.taskDetail(taskCenter.listTasks()[0])).toBe(
+      "This file is too large or complex to process. You can still download it.",
+    );
+  });
+
+  it("completes a rebuild when only earlier preview failures remain", async () => {
+    const prior = {
+      total: 2,
+      failed: 1,
+      latest_failure: { reason: "resource_limit", at: "2026-01-01T00:00:00Z" },
+    };
+    vi.spyOn(workApi, "getPreviewActivity")
+      .mockResolvedValueOnce(aPreviewActivity({ ...prior, remaining: 1 }))
+      .mockResolvedValue(aPreviewActivity({ ...prior, completed: 1 }));
+    const { client } = mount(true);
+    await waitFor(() => expect(taskCenter.listTasks()[0]?.status).toBe("running"));
+
+    await client.invalidateQueries({ queryKey: ["work", "preview-activity"] });
+
+    await waitFor(() => expect(taskCenter.listTasks()[0].status).toBe("completed"));
+    expect(taskCenter.taskDetail(taskCenter.listTasks()[0])).toBe(
+      "1 ready · 0 skipped · Earlier library failures (1)",
+    );
+  });
+
+  it("reports a new failure when the library's failure count stays the same", async () => {
+    vi.spyOn(workApi, "getPreviewActivity")
+      .mockResolvedValueOnce(
+        aPreviewActivity({
+          total: 2,
+          remaining: 1,
+          failed: 1,
+          latest_failure: { reason: "resource_limit", at: "2026-01-01T00:00:00Z" },
+        }),
+      )
+      .mockResolvedValue(
+        aPreviewActivity({
+          total: 2,
+          completed: 1,
+          failed: 1,
+          latest_failure: { reason: "storage", at: "2026-01-02T00:00:00Z" },
+        }),
+      );
+    const { client } = mount(true);
+    await waitFor(() => expect(taskCenter.listTasks()[0]?.status).toBe("running"));
+
+    await client.invalidateQueries({ queryKey: ["work", "preview-activity"] });
+
+    await waitFor(() => expect(taskCenter.listTasks()[0].status).toBe("failed"));
   });
 
   it("keeps the last counts when polling fails", async () => {

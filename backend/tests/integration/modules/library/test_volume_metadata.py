@@ -200,8 +200,12 @@ class TestVolumeRecipeRefresh:
         self, db_session, stored, make_metadata, make_derivative
     ):
         from app.core.time import utcnow
-        from app.modules.derivatives.kinds import GCODE_METADATA_RECIPE, group
-        from app.modules.derivatives.source import DerivativeSource, subject_key
+        from app.modules.derivatives.kinds import (
+            GCODE_METADATA_RECIPE,
+            group,
+            subject_key,
+        )
+        from app.modules.derivatives.source import DerivativeSource
         from app.modules.library.volume_metadata import read_volume
 
         data = (
@@ -243,8 +247,12 @@ class TestVolumeRecipeRefresh:
         self, db_session, stored, make_metadata, make_derivative
     ):
         from app.core.time import utcnow
-        from app.modules.derivatives.kinds import MESH_GEOMETRY_RECIPE, group
-        from app.modules.derivatives.source import DerivativeSource, subject_key
+        from app.modules.derivatives.kinds import (
+            MESH_GEOMETRY_RECIPE,
+            group,
+            subject_key,
+        )
+        from app.modules.derivatives.source import DerivativeSource
 
         artifact = stored("old-metadata.stl", content.binary_stl())
         make_metadata(artifact, volume=VolumeLegacyUnassessed(500.0))

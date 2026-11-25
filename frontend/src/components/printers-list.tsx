@@ -5,7 +5,6 @@ import { queryKeys } from "@/lib/query-client";
 import { usePrinterSettingsCommand } from "@/features/printers/settings-edit";
 import { PrinterSettingsReview } from "@/features/printers/settings-review";
 
-import { currentLocale } from "@/lib/locale";
 import { knownUiText, uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
@@ -19,13 +18,12 @@ import {
   type PrinterStatus,
 } from "@/types";
 import { usePrinterCatalogCommands } from "@/features/printers/queries";
-import { useFleetQueue, useFleetSummary, usePrinters } from "@/lib/queries";
+import { useFleetSummary, usePrinters } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { useAuth } from "@/lib/auth-context";
 import {
   PRINTER_MODEL_OPTIONS,
   PRINTER_SETUP_OPTIONS,
-  providerAddress,
   providerLabel,
   setupProviderFields,
   type PrinterSetupKind,
@@ -53,19 +51,22 @@ import {
   type PrinterArtworkPreference,
 } from "@/lib/printer-card-display";
 import { printerArtwork } from "@/lib/orca-printer-images";
-import { formatNumber, parseApiInstant } from "@/lib/format";
+import { formatNumber } from "@/lib/format";
 import { PrinterProgress } from "@/components/printer-telemetry";
 import {
   ArrowUpRight,
+  Check,
   Fan,
-  ListOrdered,
+  Pencil,
   Plus,
   RefreshCw,
-  Pencil,
-  Printer as PrinterIcon,
+  Search,
+  Settings,
+  Trash2,
 } from "lucide-react";
-import { printJobArtifactLabel } from "@/lib/print-job-reproducibility";
-import type { PrintJobState } from "@/types";
+import { Printer3D } from "@/components/ui/printer-3d";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
+import { PrinterStatusBadge } from "@/components/printer-status-badge";
 
 const FleetAddJobDialog = lazy(() =>
   import("./fleet-add-job").then((module) => ({ default: module.FleetAddJobDialog })),
@@ -115,11 +116,12 @@ export function PrintersPage() {
   const [settingsFooter, setSettingsFooter] = useState<HTMLDivElement | null>(null);
   const [settingsTarget, setSettingsTarget] = useState<PrinterRead | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PrinterRead | null>(null);
+  const [modelTarget, setModelTarget] = useState<PrinterRead | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const artworkPreference = usePrinterArtworkPreference();
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const searchParams = useSearchParams();
-  const [activeView, setActiveView] = useState<"fleet" | "queue" | "maintenance">(() =>
+  const [requestedView, setActiveView] = useState<"fleet" | "queue" | "maintenance">(() =>
     searchParams.get("tab") === "queue" ? "queue" : "fleet",
   );
   const [queueView, setQueueView] = useState<FleetQueueView>("queued");
@@ -127,9 +129,9 @@ export function PrintersPage() {
   const canSeeQueue = Boolean(
     user?.is_superuser || printers.some((printer) => printer.access.can_print),
   );
-  const canSeeMaintenance = Boolean(
-    user?.is_superuser || printers.some((printer) => printer.access.can_admin),
-  );
+  const manageablePrinters = printers.filter((printer) => printer.access.can_admin);
+  const canManagePrinters = Boolean(user?.is_superuser || manageablePrinters.length);
+  const activeView = requestedView;
   const visiblePrinters = useMemo(
     () =>
       printers
@@ -222,7 +224,7 @@ export function PrintersPage() {
               <>
                 <Button
                   variant="outline"
-                  size="xs"
+                  size="sm"
                   onClick={() => {
                     void printersQuery.refetch();
                     void summaryQuery.refetch();
@@ -233,7 +235,7 @@ export function PrintersPage() {
                   {uiText("Refresh")}
                 </Button>
                 <Button
-                  size="xs"
+                  size="sm"
                   onClick={() => {
                     if (activeView === "queue") {
                       setAddJobOpen(true);
@@ -259,56 +261,66 @@ export function PrintersPage() {
             }
           />
 
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border">
+          <div className="flex flex-col items-stretch gap-5">
             <TabBar
               tabs={[
                 { key: "fleet", label: translateUiText(locale, "Fleet") },
                 ...(canSeeQueue
                   ? [{ key: "queue" as const, label: translateUiText(locale, "Queue") }]
                   : []),
-                ...(canSeeMaintenance
-                  ? [{ key: "maintenance" as const, label: translateUiText(locale, "Maintenance") }]
+                ...(canManagePrinters
+                  ? [
+                      {
+                        key: "maintenance" as const,
+                        label: translateUiText(locale, "Maintenance"),
+                      },
+                    ]
                   : []),
               ]}
               active={activeView}
               onChange={setActiveView}
-              className="shrink-0"
-              tabClassName="px-3 py-2 text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              activeTabClassName="font-semibold text-foreground"
+              showIndicator={false}
+              className="shrink-0 gap-0.5 self-start rounded-lg border border-border bg-card p-0.75"
+              tabClassName="h-7.5 rounded-md px-3 text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              activeTabClassName="bg-foreground/12 text-foreground"
             />
             {activeView === "fleet" && printers.length > 0 && (
               <section
                 aria-label={uiText("Fleet summary")}
-                className="flex flex-wrap items-center gap-x-1 gap-y-1 pb-1"
+                className="flex flex-wrap items-center justify-between gap-3"
               >
-                <FleetMetric
-                  label={uiText("Ready")}
-                  value={readyCount}
-                  selected={healthFilter === "ready"}
-                  onClick={() => setHealthFilter(healthFilter === "ready" ? null : "ready")}
-                />
-                <FleetMetric
-                  label={uiText("Active jobs")}
-                  value={summary?.active_jobs}
-                  onClick={canSeeQueue ? () => openQueue("active") : undefined}
-                />
-                <FleetMetric
-                  label={uiText("Queued jobs")}
-                  value={summary?.queued_jobs}
-                  onClick={canSeeQueue ? () => openQueue("queued") : undefined}
-                />
-                <FleetMetric
-                  label={uiText("Needs attention")}
-                  value={attentionCount}
-                  selected={healthFilter === "attention"}
-                  onClick={() => setHealthFilter(healthFilter === "attention" ? null : "attention")}
-                />
-                <label className="ml-1 flex min-w-0 max-w-full items-center gap-2 border-l border-border pl-3 text-xs text-muted-foreground">
+                <div className="flex divide-x divide-border overflow-hidden rounded-lg border border-border bg-card">
+                  <FleetMetric
+                    label={uiText("Ready")}
+                    value={readyCount}
+                    selected={healthFilter === "ready"}
+                    onClick={() => setHealthFilter(healthFilter === "ready" ? null : "ready")}
+                  />
+                  <FleetMetric
+                    label={uiText("Active jobs")}
+                    value={summary?.active_jobs}
+                    onClick={canSeeQueue ? () => openQueue("active") : undefined}
+                  />
+                  <FleetMetric
+                    label={uiText("Queued jobs")}
+                    value={summary?.queued_jobs}
+                    onClick={canSeeQueue ? () => openQueue("queued") : undefined}
+                  />
+                  <FleetMetric
+                    label={uiText("Needs attention")}
+                    value={attentionCount}
+                    selected={healthFilter === "attention"}
+                    onClick={() =>
+                      setHealthFilter(healthFilter === "attention" ? null : "attention")
+                    }
+                  />
+                </div>
+                <label className="flex min-w-0 max-w-full items-center gap-3 text-sm text-muted-foreground">
                   {uiText("Group")}
                   <select
                     value={selectedGroup ?? ""}
                     onChange={(event) => setSelectedGroup(event.target.value || null)}
-                    className="h-8 min-w-0 border border-input bg-card px-2 text-xs text-foreground"
+                    className="h-8 w-37.5 min-w-0 rounded-md border border-input bg-card px-2.5 text-sm text-foreground"
                   >
                     <option value="">{uiText("All groups")}</option>
                     {printerGroups.map((group) => (
@@ -322,14 +334,17 @@ export function PrintersPage() {
             )}
           </div>
 
+          {activeView === "fleet" && error && (
+            <div
+              role="alert"
+              className="animate-panel-in rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+            >
+              {error}
+            </div>
+          )}
+
           {activeView === "fleet" && (
             <>
-              {error && (
-                <div className="animate-panel-in rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-                  {error}
-                </div>
-              )}
-
               {summaryQuery.isError && (
                 <p role="status" className="text-xs text-muted-foreground">
                   {uiText("Fleet job data unavailable")}
@@ -339,7 +354,7 @@ export function PrintersPage() {
               {loading ? (
                 <div className="grid animate-panel-in grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {Array.from({ length: 3 }).map((_, i) => (
-                    <div key={i} className="bg-card border border-border rounded p-5 space-y-3">
+                    <div key={i} className="bg-card border border-border rounded-lg p-5 space-y-3">
                       <Skeleton className="h-5 w-32" />
                       <Skeleton className="h-4 w-48" />
                       <Skeleton className="h-4 w-24" />
@@ -348,7 +363,7 @@ export function PrintersPage() {
                 </div>
               ) : printers.length === 0 ? (
                 <EmptyState
-                  icon={PrinterIcon}
+                  icon={Printer3D}
                   title={uiText("No printers configured yet.")}
                   action={
                     user?.is_superuser ? (
@@ -361,30 +376,28 @@ export function PrintersPage() {
                   className="animate-panel-in rounded-lg border border-border bg-card shadow-sm"
                 />
               ) : (
-                <div className="grid min-w-0 grid-cols-1 items-start gap-4 @5xl/fleet:grid-cols-[minmax(0,1fr)_minmax(17rem,24%)]">
+                <div className="min-w-0">
                   {visiblePrinters.length === 0 ? (
                     <EmptyState
-                      icon={PrinterIcon}
+                      icon={Printer3D}
                       title={uiText("No matching printers")}
-                      className="border border-border bg-card"
+                      className="rounded-lg border border-border bg-card"
                     />
                   ) : (
-                    <div className="grid min-w-0 gap-3 grid-cols-[repeat(auto-fit,minmax(min(100%,21rem),1fr))]">
+                    <div className="grid min-w-0 gap-4 grid-cols-[repeat(auto-fit,minmax(min(100%,26rem),1fr))]">
                       {visiblePrinters.map((printer) => (
                         <FleetPrinterCard
                           key={printer.id}
                           printer={printer}
                           row={fleetRows.get(printer.id)}
                           artworkPreference={artworkPreference}
-                          onSettings={() => setSettingsTarget(printer)}
+                          onSettings={setSettingsTarget}
+                          onRemove={setDeleteTarget}
+                          onEditModel={setModelTarget}
                         />
                       ))}
                     </div>
                   )}
-                  <FleetActivity
-                    printers={printers}
-                    openQueue={canSeeQueue ? openQueue : undefined}
-                  />
                 </div>
               )}
             </>
@@ -399,7 +412,7 @@ export function PrintersPage() {
           )}
           {activeView === "maintenance" && (
             <FleetMaintenancePanel
-              printers={printers.filter((printer) => printer.access.can_admin)}
+              printers={manageablePrinters}
               onPrintersChanged={() => {
                 void printersQuery.refetch();
               }}
@@ -410,7 +423,7 @@ export function PrintersPage() {
             open={settingsTarget !== null}
             onClose={() => setSettingsTarget(null)}
             title={uiText("Edit printer connection")}
-            description={uiText("Connect your printer using its local integration.")}
+            description={settingsTarget?.name}
             footer={<div ref={setSettingsFooter} className="contents" />}
           >
             {settingsTarget && (
@@ -429,6 +442,13 @@ export function PrintersPage() {
               </Suspense>
             )}
           </Modal>
+          {modelTarget && (
+            <PrinterModelEditor
+              key={modelTarget.id}
+              printer={modelTarget}
+              onClose={() => setModelTarget(null)}
+            />
+          )}
           {addOpen && user?.is_superuser && (
             <AddPrinterModal
               onClose={() => setAddOpen(false)}
@@ -481,13 +501,13 @@ function FleetMetric({
 }) {
   const contents = (
     <>
-      <span className="text-xs font-medium text-muted-foreground">{label}</span>
-      <span className="font-mono text-xs font-semibold tabular-nums">
+      <span className="font-mono text-xl font-semibold leading-none tabular-nums">
         {value === undefined ? "—" : formatNumber(value)}
       </span>
+      <span className="text-xs text-muted-foreground">{label}</span>
     </>
   );
-  const classes = "flex min-w-0 items-center gap-1.5 px-2 py-1.5 text-left";
+  const classes = "flex min-w-26 flex-col items-start gap-0.5 px-4 py-2.5 text-left";
   return onClick ? (
     <button
       type="button"
@@ -502,147 +522,24 @@ function FleetMetric({
   );
 }
 
-const STATUS_DOT = {
-  ready: "bg-success",
-  printing: "bg-chart-cyan",
-  paused: "bg-warning",
-  error: "bg-destructive",
-  offline: "bg-muted-foreground",
-  unknown: "bg-muted-foreground",
-} satisfies Record<PrinterStatus, string>;
-
-const ACTIVITY_VIEW = {
-  queued: "queued",
-  uploading: "active",
-  started: "active",
-  printing: "active",
-  paused: "active",
-  completed: "recent",
-  cancelled: "recent",
-  failed: "recent",
-} satisfies Record<PrintJobState, FleetQueueView>;
-
-function FleetActivity({
-  printers,
-  openQueue,
-}: {
-  printers: PrinterRead[];
-  openQueue?: (view: FleetQueueView) => void;
-}) {
-  const activity = useFleetQueue({ refetchInterval: 8_000 });
-  const printersById = new Map(printers.map((printer) => [printer.id, printer]));
-  const jobs = activity.data ?? [];
-  const live = jobs.filter((job) => ACTIVITY_VIEW[job.state] !== "recent").slice(0, 3);
-  const recent = jobs.filter((job) => ACTIVITY_VIEW[job.state] === "recent").slice(0, 4);
-  const rows = [...live, ...recent];
-  return (
-    <section aria-label={uiText("Fleet activity")} className="border border-border bg-card">
-      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
-        <h2 className="text-sm font-semibold">{uiText("Fleet activity")}</h2>
-        {openQueue && (
-          <Button variant="ghost" size="xs" onClick={() => openQueue("recent")}>
-            {uiText("View history")}
-          </Button>
-        )}
-      </div>
-      {activity.isPending ? (
-        <div role="status" aria-label={uiText("Loading")} className="space-y-2 p-4">
-          <Skeleton className="h-5 w-full" />
-          <Skeleton className="h-5 w-2/3" />
-        </div>
-      ) : activity.isError && !activity.data ? (
-        <div className="space-y-2 p-4 text-xs text-muted-foreground">
-          <p role="alert">{uiText("Fleet job data unavailable")}</p>
-          <Button variant="outline" size="xs" onClick={() => void activity.refetch()}>
-            {uiText("Retry")}
-          </Button>
-        </div>
-      ) : rows.length === 0 ? (
-        <div className="flex items-center gap-3 p-4 text-sm text-muted-foreground">
-          <ListOrdered aria-hidden="true" className="size-4 shrink-0" />
-          {uiText("No fleet activity yet")}
-        </div>
-      ) : (
-        <ul className="divide-y divide-border">
-          {rows.map((job) => {
-            const printer = job.printer_id === null ? undefined : printersById.get(job.printer_id);
-            const view = ACTIVITY_VIEW[job.state];
-            const timestamp = parseApiInstant(job.finished_at ?? job.started_at ?? job.created_at);
-            const name =
-              job.identity?.display_name ??
-              job.external_display_name ??
-              job.remote_filename ??
-              printJobArtifactLabel(job);
-            const contents = (
-              <>
-                <span className="flex min-w-0 items-start justify-between gap-2">
-                  <span className="truncate text-sm font-medium" title={name}>
-                    {name}
-                  </span>
-                  <span
-                    className={`shrink-0 text-xs capitalize ${job.state === "failed" ? "text-destructive" : job.state === "completed" ? "text-success" : "text-muted-foreground"}`}
-                  >
-                    {knownUiText(job.state)}
-                  </span>
-                </span>
-                <span className="mt-1 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-2xs text-muted-foreground">
-                  <span className="truncate">
-                    {printer?.name ??
-                      (job.printer_id === null ? uiText("Unassigned") : uiText("Printer"))}
-                  </span>
-                  {timestamp ? (
-                    <time dateTime={timestamp.toISOString()}>
-                      {timestamp.toLocaleString(currentLocale(), {
-                        month: "short",
-                        day: "numeric",
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
-                    </time>
-                  ) : (
-                    <span>{uiText("Not recorded")}</span>
-                  )}
-                </span>
-              </>
-            );
-            const base = "block w-full min-w-0 px-4 py-3 text-left";
-            const interactive = `${base} hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring`;
-            return (
-              <li key={job.id}>
-                {view === "queued" && openQueue ? (
-                  <button type="button" className={interactive} onClick={() => openQueue("queued")}>
-                    {contents}
-                  </button>
-                ) : printer ? (
-                  <Link
-                    href={`/printers/${printer.id}${view === "recent" ? "?tab=jobs" : ""}`}
-                    className={interactive}
-                  >
-                    {contents}
-                  </Link>
-                ) : (
-                  <div className={base}>{contents}</div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </section>
-  );
-}
-
 function FleetPrinterCard({
   printer,
   row,
   artworkPreference,
   onSettings,
+  onRemove,
+  onEditModel,
 }: {
   printer: PrinterRead;
   row: FleetPrinterRow | undefined;
   artworkPreference: PrinterArtworkPreference;
-  onSettings: () => void;
+  onSettings: (printer: PrinterRead) => void;
+  onRemove: (printer: PrinterRead) => void;
+  onEditModel: (printer: PrinterRead) => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(null);
+  const menuOpener = useRef<HTMLAnchorElement | null>(null);
   const hold = routingHold(printer, row);
   const progress = row?.progress == null ? null : row.progress * 100;
   // Older servers publish only the display label for each loaded slot.
@@ -655,151 +552,203 @@ function FleetPrinterCard({
       color_hex: null,
     })) ??
     [];
-  const address = printer.access.can_admin ? providerAddress(printer) : null;
   const model = printer.model_name || printer.detected_model;
   const artworkUrl = printerArtwork(artworkPreference === "model" ? model : null).imageUrl;
-  const lastSeen = parseApiInstant(printer.last_seen_at);
+  const itemClass =
+    "flex min-h-9 w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none";
+  const openMenu = (point: { x: number; y: number } | null, target: HTMLElement) => {
+    menuOpener.current = target.querySelector<HTMLAnchorElement>("a[href]");
+    setMenuPoint(point);
+    setMenuOpen(true);
+  };
   return (
-    <article className="group @container/printer-card relative flex min-w-0 flex-col border border-border bg-card text-card-foreground hover:border-border-strong motion-safe:transition-transform duration-fast ease-out motion-safe:hover:-translate-y-0.5 motion-safe:active:scale-[0.99]">
-      <div className="flex flex-1 items-stretch">
-        {artworkPreference !== "off" && (
-          <PrinterCardArtwork key={artworkUrl} url={artworkUrl} model={model} />
-        )}
-        <div className="grid min-w-0 flex-1 grid-cols-1 content-start gap-3 px-4 py-4 text-xs">
-          <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-1.5">
-            <div className="min-w-0">
-              <h2 className="text-lg font-semibold leading-tight tracking-tight">
-                <Link
-                  href={`/printers/${printer.id}`}
-                  className="wrap-anywhere after:absolute after:inset-0 after:z-10 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring"
-                >
-                  {printer.name}
-                  <ArrowUpRight
-                    className="ml-1 inline size-4 align-text-top text-muted-foreground"
-                    aria-hidden="true"
-                  />
-                </Link>
-              </h2>
-              <p className="mt-1 wrap-anywhere text-xs text-muted-foreground">
-                {providerLabel(printer)}
-                {printer.capabilities.support_level === "beta" ? ` · ${uiText("Beta")}` : ""}
-                {printer.group ? ` · ${printer.group}` : ""}
-              </p>
-            </div>
-            <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 wrap-anywhere text-xs font-medium capitalize">
-              <span
-                aria-hidden="true"
-                className={`size-2 shrink-0 rounded-full ${STATUS_DOT[printer.status]}`}
-              />
-              {knownUiText(printer.status)}
-            </span>
-          </div>
-          <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
-            <div className="min-w-0 flex-1 basis-28 space-y-1.5">
-              <div className="flex min-w-0 items-center justify-between gap-2">
-                <span className="text-muted-foreground">{uiText("Current job")}</span>
-                {progress !== null && (
-                  <span className="shrink-0 font-mono text-sm font-semibold tabular-nums">
-                    {formatNumber(progress, { maximumFractionDigits: 0 })}%
-                  </span>
-                )}
+    <DropdownMenu
+      open={menuOpen}
+      onOpenChange={setMenuOpen}
+      portal
+      align="start"
+      anchorPoint={menuPoint}
+      returnFocusRef={menuOpener}
+      className="h-full min-w-0"
+      aria-label={uiText("Printer actions")}
+      contentClassName="w-60 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+      trigger={
+        <article
+          onContextMenu={(event) => {
+            event.preventDefault();
+            openMenu(
+              event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : null,
+              event.currentTarget,
+            );
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+              event.preventDefault();
+              openMenu(null, event.currentTarget);
+            }
+          }}
+          className="group @container/printer-card relative flex h-full min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card text-card-foreground hover:border-border-strong motion-safe:transition-transform duration-fast ease-out motion-safe:hover:-translate-y-0.5 motion-safe:active:scale-[0.99]"
+        >
+          <div className="flex flex-1 items-stretch">
+            {artworkPreference !== "off" && (
+              <PrinterCardArtwork key={artworkUrl} url={artworkUrl} model={model} />
+            )}
+            <div className="grid min-w-0 flex-1 grid-cols-1 content-start gap-3 px-4 py-4 text-xs">
+              <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-1.5">
+                <div className="min-w-0">
+                  <h2 className="text-lg font-semibold leading-tight tracking-tight">
+                    <Link
+                      href={`/printers/${printer.id}`}
+                      className="wrap-anywhere after:absolute after:inset-0 after:z-10 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring"
+                    >
+                      {printer.name}
+                      <ArrowUpRight
+                        className="ml-1 inline size-4 align-text-top text-muted-foreground"
+                        aria-hidden="true"
+                      />
+                    </Link>
+                  </h2>
+                  <p className="mt-1 wrap-anywhere text-xs text-muted-foreground">
+                    {providerLabel(printer)}
+                    {printer.capabilities.support_level === "beta" ? ` · ${uiText("Beta")}` : ""}
+                    {printer.group ? ` · ${printer.group}` : ""}
+                  </p>
+                </div>
+                <PrinterStatusBadge status={printer.status} />
               </div>
-              <p
-                className="truncate text-sm font-semibold"
-                title={row?.current_job_name ?? undefined}
-              >
-                {row?.current_job_name ??
-                  (row?.current_job_id != null
-                    ? knownUiText(printer.status)
-                    : row
-                      ? uiText("No active print")
-                      : "—")}
-              </p>
-              {progress !== null && <PrinterProgress value={progress} />}
-            </div>
-            {row?.telemetry && <FleetTelemetryReadings telemetry={row.telemetry} />}
-          </div>
-          {(row?.next_job_name || hold) && (
-            <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-t border-border pt-2.5">
-              {row?.next_job_name && (
-                <div className="flex min-w-0 items-baseline gap-2">
-                  <span className="shrink-0 text-muted-foreground">{uiText("Next job")}</span>
-                  <span className="truncate" title={row.next_job_name}>
-                    {row.next_job_name}
-                  </span>
+              <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
+                <div className="min-w-0 flex-1 basis-28 space-y-1.5">
+                  <div className="flex min-w-0 items-center justify-between gap-2">
+                    <span className="text-muted-foreground">{uiText("Current job")}</span>
+                    {progress !== null && (
+                      <span className="shrink-0 font-mono text-sm font-semibold tabular-nums">
+                        {formatNumber(progress, { maximumFractionDigits: 0 })}%
+                      </span>
+                    )}
+                  </div>
+                  <p
+                    className="truncate text-sm font-semibold"
+                    title={row?.current_job_name ?? undefined}
+                  >
+                    {row?.current_job_name ??
+                      (row?.current_job_id != null
+                        ? knownUiText(printer.status)
+                        : row
+                          ? uiText("No active print")
+                          : "—")}
+                  </p>
+                  {progress !== null && <PrinterProgress value={progress} />}
+                </div>
+                {row?.telemetry && <FleetTelemetryReadings telemetry={row.telemetry} />}
+              </div>
+              {(row?.next_job_name || hold) && (
+                <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-t border-border pt-2.5">
+                  {row?.next_job_name && (
+                    <div className="flex min-w-0 items-baseline gap-2">
+                      <span className="shrink-0 text-muted-foreground">{uiText("Next job")}</span>
+                      <span className="truncate" title={row.next_job_name}>
+                        {row.next_job_name}
+                      </span>
+                    </div>
+                  )}
+                  {hold && <p className="font-medium text-warning">{hold}</p>}
                 </div>
               )}
-              {hold && <p className="font-medium text-warning">{hold}</p>}
+              {printer.last_error && (
+                <p className="line-clamp-2 break-words text-destructive" title={printer.last_error}>
+                  {uiText("Connection issue: ")}
+                  {printer.last_error}
+                </p>
+              )}
+            </div>
+          </div>
+          {row && (row.nozzle_diameter_mm !== null || loadedSlots.length > 0) && (
+            <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-border px-4 py-2.5">
+              {row.nozzle_diameter_mm !== null && (
+                <span className="font-mono text-2xs text-muted-foreground">
+                  {uiText("{value1} mm nozzle", { value1: formatNumber(row.nozzle_diameter_mm) })}
+                </span>
+              )}
+              {loadedSlots.map((slot) => {
+                const color =
+                  slot.color_hex && /^#[0-9a-f]{6}$/i.test(slot.color_hex)
+                    ? slot.color_hex
+                    : undefined;
+                return (
+                  <span
+                    key={slot.slot_key}
+                    title={color}
+                    className="inline-flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-md border border-border px-1.5 py-0.5 text-2xs"
+                  >
+                    {color && (
+                      <span
+                        className="size-2.5 shrink-0 border border-input"
+                        style={{ backgroundColor: color }}
+                      />
+                    )}
+                    {slot.material_type && (
+                      <span className="font-medium">{slot.material_type}</span>
+                    )}
+                    <span className="min-w-0 break-words text-muted-foreground">{slot.label}</span>
+                  </span>
+                );
+              })}
             </div>
           )}
-          {printer.last_error && (
-            <p className="line-clamp-2 break-words text-destructive" title={printer.last_error}>
-              {uiText("Connection issue: ")}
-              {printer.last_error}
-            </p>
-          )}
-        </div>
-      </div>
-      {row && (row.nozzle_diameter_mm !== null || loadedSlots.length > 0) && (
-        <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-border px-4 py-2.5">
-          {row.nozzle_diameter_mm !== null && (
-            <span className="font-mono text-2xs text-muted-foreground">
-              {uiText("{value1} mm nozzle", { value1: formatNumber(row.nozzle_diameter_mm) })}
-            </span>
-          )}
-          {loadedSlots.map((slot) => {
-            const color =
-              slot.color_hex && /^#[0-9a-f]{6}$/i.test(slot.color_hex) ? slot.color_hex : undefined;
-            return (
-              <span
-                key={slot.slot_key}
-                title={color}
-                className="inline-flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 border border-border px-1.5 py-0.5 text-2xs"
-              >
-                {color && (
-                  <span
-                    className="size-2.5 shrink-0 border border-input"
-                    style={{ backgroundColor: color }}
-                  />
-                )}
-                {slot.material_type && <span className="font-medium">{slot.material_type}</span>}
-                <span className="min-w-0 break-words text-muted-foreground">{slot.label}</span>
-              </span>
-            );
-          })}
-        </div>
+        </article>
+      }
+    >
+      <Link
+        href={`/printers/${printer.id}`}
+        role="menuitem"
+        className={itemClass}
+        onClick={() => setMenuOpen(false)}
+      >
+        <ArrowUpRight className="size-4 text-muted-foreground" aria-hidden />
+        {uiText("Open page")}
+      </Link>
+      {printer.access.can_admin && (
+        <>
+          <button
+            type="button"
+            role="menuitem"
+            className={itemClass}
+            onClick={() => {
+              setMenuOpen(false);
+              onSettings(printer);
+            }}
+          >
+            <Settings className="size-4 text-muted-foreground" aria-hidden />
+            {uiText("Edit connection")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className={itemClass}
+            onClick={() => {
+              setMenuOpen(false);
+              onEditModel(printer);
+            }}
+          >
+            <Pencil className="size-4 text-muted-foreground" aria-hidden />
+            {uiText("Set model")}
+          </button>
+          <div role="separator" className="my-1 border-t border-border" />
+          <button
+            type="button"
+            role="menuitem"
+            className={`${itemClass} text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10`}
+            onClick={() => {
+              setMenuOpen(false);
+              onRemove(printer);
+            }}
+          >
+            <Trash2 className="size-4" aria-hidden />
+            {uiText("Remove printer")}
+          </button>
+        </>
       )}
-      <div className="flex min-h-12 items-center justify-between gap-2 border-t border-border bg-muted/30 px-4 py-2">
-        <div className="min-w-0 space-y-0.5">
-          <div
-            className={
-              printer.access.can_admin ? "relative z-20 w-fit max-w-full" : "w-fit max-w-full"
-            }
-          >
-            <PrinterModelBadge printer={printer} canEdit={printer.access.can_admin} />
-          </div>
-          <p
-            className="truncate text-2xs text-muted-foreground"
-            title={address ?? printer.notes ?? undefined}
-          >
-            {lastSeen
-              ? uiText("Seen {value1}", {
-                  value1: lastSeen.toLocaleString(currentLocale()),
-                })
-              : uiText(printer.last_seen_at ? "Not recorded" : "Never connected")}
-            {address && ` · ${address}`}
-          </p>
-          {printer.notes && (
-            <p className="truncate text-2xs text-muted-foreground">{printer.notes}</p>
-          )}
-        </div>
-        {printer.access.can_admin && (
-          <Button variant="outline" size="xs" className="relative z-20" onClick={onSettings}>
-            {uiText("Settings")}
-          </Button>
-        )}
-      </div>
-    </article>
+    </DropdownMenu>
   );
 }
 
@@ -844,43 +793,19 @@ function FleetTelemetryReadings({ telemetry }: { telemetry: FleetPrinterTelemetr
 function PrinterCardArtwork({ url, model }: { url: string; model: string | null | undefined }) {
   const [failed, setFailed] = useState(false);
   return (
-    <div className="grid min-h-36 w-20 shrink-0 place-items-center overflow-hidden border-e border-border bg-preview-image-matte px-1.5 py-2 dark:bg-muted @xs/printer-card:w-24 @lg/printer-card:w-32">
+    <div className="grid min-h-36 w-20 shrink-0 place-items-center overflow-hidden border-e border-border bg-preview-image-matte px-1.5 py-2 dark:bg-muted @xs/printer-card:w-28 @lg/printer-card:w-36">
       <img
         src={failed ? printerArtwork(null).imageUrl : url}
         alt={model ? uiText("{value1} printer", { value1: model }) : uiText("Printer")}
         referrerPolicy="no-referrer"
         onError={() => setFailed(true)}
-        className="h-32 w-full object-contain motion-safe:transition-transform duration-fast ease-out motion-safe:group-hover:-translate-y-1 motion-safe:group-active:scale-[0.98]"
+        className="h-36 w-full object-contain motion-safe:transition-transform duration-fast ease-out motion-safe:group-hover:-translate-y-1 motion-safe:group-active:scale-[0.98]"
       />
     </div>
   );
 }
 
 const OTHER_MODEL_OPTION = "__other__";
-
-function PrinterModelBadge({ printer, canEdit }: { printer: PrinterRead; canEdit: boolean }) {
-  useUiLocale();
-  const [editing, setEditing] = useState(false);
-  const displayModel = printer.model_name || printer.detected_model;
-  if (editing) return <PrinterModelEditor printer={printer} onClose={() => setEditing(false)} />;
-
-  return (
-    <button
-      type="button"
-      disabled={!canEdit}
-      className="flex max-w-full items-center gap-1 truncate rounded-md text-left text-xs font-medium text-foreground enabled:hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
-      onClick={(e) => {
-        if (!canEdit) return;
-        e.preventDefault();
-        e.stopPropagation();
-        setEditing(true);
-      }}
-    >
-      {displayModel || (canEdit ? uiText("Set model") : uiText("Model unknown"))}
-      {canEdit && <Pencil className="h-2.5 w-2.5 opacity-60" />}
-    </button>
-  );
-}
 
 function PrinterModelEditor({
   printer: initialPrinter,
@@ -964,6 +889,31 @@ function PrinterModelEditor({
   );
 }
 
+const MODEL_BRANDS = [
+  "Bambu Lab",
+  "Prusa",
+  "Elegoo",
+  "Creality",
+  "Voron",
+  "RatRig",
+  "Sovol",
+  "Anycubic",
+  "Flashforge",
+  "Qidi",
+];
+
+/** Group model names under their manufacturer, in the list's own order. */
+function groupModelsByBrand(models: string[]): [string, string[]][] {
+  const groups = new Map<string, string[]>();
+  for (const model of models) {
+    const brand =
+      MODEL_BRANDS.find((name) => model.startsWith(`${name} `) || model === name) ??
+      model.split(" ")[0]!;
+    groups.set(brand, [...(groups.get(brand) ?? []), model]);
+  }
+  return [...groups];
+}
+
 function PrinterModelPicker({
   selected,
   customValue,
@@ -992,6 +942,7 @@ function PrinterModelPicker({
   const models = PRINTER_MODEL_OPTIONS.filter((model) =>
     model.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
   );
+  const groups = groupModelsByBrand(models);
   const modelHintId = useId();
   return (
     <Localized>
@@ -1022,6 +973,7 @@ function PrinterModelPicker({
               </Button>
             ) : (
               <Button
+                variant="outline"
                 disabled={saving || blocked}
                 onClick={() => {
                   setCustom(true);
@@ -1061,38 +1013,51 @@ function PrinterModelPicker({
           </div>
         ) : (
           <>
-            <FormField label={uiText("Search manufacturer / model")}>
+            <div className="relative">
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              />
               <Input
                 autoFocus
                 type="search"
+                aria-label={uiText("Search manufacturer / model")}
+                placeholder={uiText("Search manufacturer / model")}
                 disabled={saving}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
+                className="ps-9"
               />
-            </FormField>
-            <div className="mt-4 max-h-96 divide-y divide-border overflow-y-auto">
-              {models.length ? (
-                models.map((model) => (
-                  <div key={model} className="flex items-start justify-between gap-4 py-3">
-                    <div>
-                      <strong className="block text-sm font-semibold">{model}</strong>
-                      <span className="mt-1 block text-sm text-muted-foreground">
-                        {uiText("Printer model")}
-                      </span>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={saving || blocked}
-                      aria-pressed={selected === model}
-                      onClick={() => {
-                        onSelectedChange(model);
-                        onSave(model);
-                      }}
-                    >
-                      {uiText("Select")}
-                    </Button>
-                  </div>
+            </div>
+            <div className="mt-3 max-h-96 space-y-4 overflow-y-auto pe-1">
+              {groups.length ? (
+                groups.map(([brand, brandModels]) => (
+                  <section key={brand} aria-label={brand}>
+                    <h3 className="px-2 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      {brand}
+                    </h3>
+                    <ul className="space-y-0.5">
+                      {brandModels.map((model) => (
+                        <li key={model}>
+                          <button
+                            type="button"
+                            disabled={saving || blocked}
+                            aria-pressed={selected === model}
+                            onClick={() => {
+                              onSelectedChange(model);
+                              onSave(model);
+                            }}
+                            className="flex min-h-10 w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none disabled:pointer-events-none disabled:opacity-60 aria-pressed:bg-foreground/10 aria-pressed:font-medium"
+                          >
+                            {model}
+                            {selected === model && (
+                              <Check aria-hidden="true" className="size-4 shrink-0 text-primary" />
+                            )}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
                 ))
               ) : (
                 <p className="py-4 text-sm text-muted-foreground">

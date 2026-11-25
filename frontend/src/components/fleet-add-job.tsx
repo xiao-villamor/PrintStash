@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { Button } from "@/components/ui/button";
+import { OptionPicker } from "@/components/ui/option-picker";
+import { RadioOption } from "@/components/ui/radio-option";
 import {
   useSavedRevision,
   revisionLabel,
@@ -10,10 +12,17 @@ import {
   type RevisionSelection,
 } from "@/features/printers/saved-revision";
 import { SavedRevisionPicker } from "@/components/saved-revision-picker";
-import { Check, FileBox, GitBranch, Layers3, Printer, ShieldCheck, Star } from "lucide-react";
+import {
+  QueueCompatibilityField,
+  QueueDialogActions,
+  QueueDispatchDetails,
+  QueuePriorityField,
+  QueueRevisionPanel,
+  QueueRoutingField,
+  QueueTargetGroupField,
+} from "@/components/queue-composer";
 import { providerLabel } from "@/lib/printer-providers";
 import { knownUiText } from "@/lib/locale";
-import "./fleet-queue-workspace.css";
 import { Modal } from "@/components/ui/modal";
 import { refreshFleet } from "@/features/printers/queries";
 import { checkFleetCompatibility, enqueueFleetJob } from "@/lib/api/fleet";
@@ -33,9 +42,6 @@ import type {
   QueueJobCreate,
   RoutingStrategy,
 } from "@/types";
-
-const selectClass =
-  "h-[38px] w-full border border-input bg-card px-3 text-[13px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50";
 
 interface RepeatRevision extends RevisionSelection {
   plateIndex: number | null;
@@ -212,7 +218,8 @@ function AddJobForm({
   function close() {
     if (!submitting.current) onClose();
   }
-  const canSubmit = file && plateReady && !pickerOpen && (effectiveStrategy !== "manual" || target);
+  const canSubmit =
+    file !== undefined && plateReady && !pickerOpen && (effectiveStrategy !== "manual" || !!target);
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (submitting.current || !canSubmit) return;
@@ -271,89 +278,79 @@ function AddJobForm({
       open
       onClose={close}
       title={uiText("Add to queue")}
-      className="queue-compose-dialog"
-      bodyClassName="queue-compose-body"
+      dismissible={!busy}
+      className="print-task-dialog max-w-240"
+      bodyClassName="queue-compose-body flex-1 p-0"
       footer={
-        <>
-          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={close}>
-            {uiText("Cancel")}
-          </Button>
-          <Button
-            form="fleet-add-job-form"
-            type="submit"
-            size="sm"
-            loading={busy}
-            disabled={!canSubmit}
-          >
-            {uiText("Save job")}
-          </Button>
-        </>
+        <QueueDialogActions
+          busy={busy}
+          canSubmit={canSubmit}
+          onClose={close}
+          submit={{ form: "fleet-add-job-form" }}
+        />
       }
     >
       <form
         id="fleet-add-job-form"
         onSubmit={(event) => void submit(event)}
-        className="queue-compose"
+        className="queue-compose min-h-full"
       >
         <fieldset disabled={busy} className="queue-compose-fields">
-          <div className="queue-revision-choice">
-            <FileBox size={23} />
-            <div>
-              {repeatRevision ? (
-                <div className="grid gap-2">
-                  <p className="text-xs text-muted-foreground">{uiText("Revision")}</p>
-                  {file && chosen.data ? (
-                    <p className="wrap-anywhere text-sm font-semibold">
-                      {chosen.data.name} · {revisionLabel(file)}
+          <QueueRevisionPanel>
+            {repeatRevision ? (
+              <div className="grid gap-2">
+                <p className="text-xs text-muted-foreground">{uiText("Revision")}</p>
+                {file && chosen.data ? (
+                  <p className="wrap-anywhere text-sm font-semibold">
+                    {chosen.data.name} · {revisionLabel(file)}
+                  </p>
+                ) : chosen.isFetching ? (
+                  <p role="status" className="text-sm">
+                    {uiText("Loading...")}
+                  </p>
+                ) : (
+                  <p role="alert" className="text-xs text-destructive">
+                    {chosen.isError
+                      ? userMessage(chosen.error)
+                      : uiText("This Revision cannot be queued on this printer.")}
+                  </p>
+                )}
+                {sliced && (
+                  <>
+                    <p className="text-sm">
+                      {uiText("Sliced plate")}: {repeatedPlate}
                     </p>
-                  ) : chosen.isFetching ? (
-                    <p role="status" className="text-sm">
-                      {uiText("Loading...")}
-                    </p>
-                  ) : (
-                    <p role="alert" className="text-xs text-destructive">
-                      {chosen.isError
-                        ? userMessage(chosen.error)
-                        : uiText("This Revision cannot be queued on this printer.")}
-                    </p>
-                  )}
-                  {sliced && (
-                    <>
-                      <p className="text-sm">
-                        {uiText("Sliced plate")}: {repeatedPlate}
+                    {plates.isPending ? (
+                      <p role="status" className="text-sm">
+                        {uiText("Loading sliced plates…")}
                       </p>
-                      {plates.isPending ? (
-                        <p role="status" className="text-sm">
-                          {uiText("Loading sliced plates…")}
+                    ) : (
+                      !plateReady && (
+                        <p role="alert" className="text-xs text-destructive">
+                          {plates.isError
+                            ? userMessage(plates.error)
+                            : uiText("This Revision cannot be queued on this printer.")}
                         </p>
-                      ) : (
-                        !plateReady && (
-                          <p role="alert" className="text-xs text-destructive">
-                            {plates.isError
-                              ? userMessage(plates.error)
-                              : uiText("This Revision cannot be queued on this printer.")}
-                          </p>
-                        )
-                      )}
-                    </>
-                  )}
-                </div>
-              ) : (
-                <SavedRevisionPicker
-                  emptyLabel={uiText("Browse saved Revisions")}
-                  pickerOpen={pickerOpen}
-                  onOpenChange={setPickerOpen}
-                  onChoose={(revision) => {
-                    setSelection(revision);
-                    setChosenPlate(null);
-                    setError(null);
-                  }}
-                  file={file}
-                  chosen={chosen}
-                />
-              )}
-            </div>
-          </div>
+                      )
+                    )}
+                  </>
+                )}
+              </div>
+            ) : (
+              <SavedRevisionPicker
+                emptyLabel={uiText("Browse saved Revisions")}
+                pickerOpen={pickerOpen}
+                onOpenChange={setPickerOpen}
+                onChoose={(revision) => {
+                  setSelection(revision);
+                  setChosenPlate(null);
+                  setError(null);
+                }}
+                file={file}
+                chosen={chosen}
+              />
+            )}
+          </QueueRevisionPanel>
           {!repeatRevision && sliced && (
             <fieldset className="queue-compose-group">
               <legend>{uiText("Sliced plate")}</legend>
@@ -374,15 +371,14 @@ function AddJobForm({
               ) : (
                 <div className="queue-options queue-plates">
                   {plates.data.plates.map((plate) => (
-                    <label key={plate}>
-                      <input
-                        type="radio"
-                        name="queue-plate"
-                        checked={chosenPlate === plate}
-                        onChange={() => setChosenPlate(plate)}
-                      />
-                      <span>{uiText("Plate {plate}", { plate })}</span>
-                    </label>
+                    <RadioOption
+                      key={plate}
+                      name="queue-plate"
+                      checked={chosenPlate === plate}
+                      onChange={() => setChosenPlate(plate)}
+                    >
+                      {uiText("Plate {plate}", { plate })}
+                    </RadioOption>
                   ))}
                 </div>
               )}
@@ -391,170 +387,70 @@ function AddJobForm({
           {fixedPrinterId === undefined && (
             <>
               {administrator && (
-                <fieldset className="queue-compose-group">
-                  <legend>{uiText("Routing")}</legend>
-                  <div className="queue-options">
-                    {(["manual", "default", "least_busy"] as const).map((value) => {
-                      const Icon =
-                        value === "manual" ? Printer : value === "default" ? Star : GitBranch;
-                      const label =
-                        value === "manual"
-                          ? uiText("Choose printer")
-                          : value === "default"
-                            ? uiText("Default printer")
-                            : uiText("Least busy");
-                      return (
-                        <label key={value}>
-                          <input
-                            type="radio"
-                            name="queue-routing"
-                            checked={strategy === value}
-                            onChange={() => {
-                              setStrategy(value);
-                              setError(null);
-                            }}
-                          />
-                          <span>
-                            <Icon size={15} />
-                            {label}
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </fieldset>
+                <QueueRoutingField
+                  value={strategy}
+                  onChange={(value) => {
+                    setStrategy(value);
+                    setError(null);
+                  }}
+                />
               )}
-              {!!groups.length && (
-                <label className="queue-group-filter">
-                  {uiText("Target group")}
-                  <select
-                    className={selectClass}
-                    value={group}
-                    onChange={(e) => {
-                      setGroup(e.target.value);
-                      setPrinterId(null);
-                      setError(null);
-                    }}
-                  >
-                    <option value="">{uiText("All groups")}</option>
-                    {groups.map((name) => (
-                      <option key={name}>{name}</option>
-                    ))}
-                  </select>
-                </label>
-              )}
+              <QueueTargetGroupField
+                groups={groups}
+                value={group}
+                onChange={(value) => {
+                  setGroup(value);
+                  setPrinterId(null);
+                  setError(null);
+                }}
+              />
               {effectiveStrategy === "manual" && (
-                <fieldset className="queue-compose-group">
-                  <legend>{uiText("Destination")}</legend>
-                  <div className="queue-printer-choices">
-                    {targets.map((printer) => (
-                      <label key={printer.id}>
-                        <input
-                          type="radio"
-                          name="queue-destination"
-                          checked={target?.id === printer.id}
-                          onChange={() => {
-                            setPrinterId(printer.id);
-                            setError(null);
-                          }}
-                        />
-                        <span>
-                          <Printer size={17} />
-                          <span>
-                            <b>{printer.name}</b>
-                            <small>{providerLabel(printer)}</small>
-                          </span>
-                          <Check size={15} />
-                        </span>
-                      </label>
-                    ))}
-                    {!targets.length && <p>{uiText("No compatible printers")}</p>}
-                  </div>
-                </fieldset>
+                <OptionPicker
+                  label={uiText("Destination")}
+                  searchPlaceholder={uiText("Search printers")}
+                  placeholder={uiText(targets.length ? "Choose printer" : "No compatible printers")}
+                  value={target?.id ?? null}
+                  options={targets.map((printer) => ({
+                    value: printer.id,
+                    label: printer.name,
+                    description: providerLabel(printer),
+                  }))}
+                  onChange={(value) => {
+                    setPrinterId(value);
+                    setError(null);
+                  }}
+                />
               )}
             </>
           )}
-          <fieldset className="queue-compose-group">
-            <legend>{uiText("Priority")}</legend>
-            <div className="queue-options queue-priority">
-              {(["low", "normal", "rush"] as const).map((value) => (
-                <label key={value}>
-                  <input
-                    type="radio"
-                    name="queue-priority"
-                    checked={priority === value}
-                    onChange={() => setPriority(value)}
-                  />
-                  <span>
-                    {value === "low"
-                      ? uiText("Low")
-                      : value === "normal"
-                        ? uiText("Normal")
-                        : uiText("Rush")}
-                  </span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-          <label className="queue-material-policy">
-            <input
-              type="checkbox"
-              checked={policy === "allow_mismatch"}
-              onChange={(e) => {
-                setPolicy(e.target.checked ? "allow_mismatch" : "safe");
-                setError(null);
-              }}
-            />
-            {uiText("Allow material or nozzle mismatch")}
-          </label>
+          <QueuePriorityField value={priority} onChange={setPriority} />
+          <QueueCompatibilityField
+            checked={policy === "allow_mismatch"}
+            onChange={(checked) => {
+              setPolicy(checked ? "allow_mismatch" : "safe");
+              setError(null);
+            }}
+          />
         </fieldset>
-        <aside className="queue-ticket" aria-label={uiText("Dispatch details")}>
-          <h3>
-            <Layers3 size={17} />
-            {uiText("Dispatch details")}
-          </h3>
-          <div className="queue-ticket-route">
-            <FileBox size={15} />
-            <div>
-              <small>{uiText("Revision")}</small>
-              <b>{chosen.data && file ? chosen.data.name : uiText("Select a saved Revision")}</b>
-              {file && <small>{revisionLabel(file)}</small>}
-            </div>
-            <Printer size={15} />
-            <div>
-              <small>{uiText("Destination")}</small>
-              <b>{fixedPrinter?.name ?? destination}</b>
-              {target && effectiveStrategy === "manual" && (
-                <small>{target.drain_mode ? uiText("Draining") : knownUiText(target.status)}</small>
-              )}
-            </div>
-          </div>
-          <dl>
-            <dt>{uiText("Queue position")}</dt>
-            <dd>{uiText("End of queue")}</dd>
-            <dt>{uiText("Priority")}</dt>
-            <dd>
-              {priority === "rush"
-                ? uiText("Rush")
-                : priority === "low"
-                  ? uiText("Low")
-                  : uiText("Normal")}
-            </dd>
-            {repeatedPlate !== null && (
-              <>
-                <dt>{uiText("Sliced plate")}</dt>
-                <dd>{repeatedPlate}</dd>
-              </>
-            )}
-          </dl>
-          <p>
-            <ShieldCheck size={16} />
-            {policy === "safe" ? uiText("Require compatible material") : uiText("Allow mismatch")}
-          </p>
+        <QueueDispatchDetails
+          model={file ? chosen.data?.name : undefined}
+          revision={file ? revisionLabel(file) : undefined}
+          destination={fixedPrinter?.name ?? destination}
+          destinationStatus={
+            target && effectiveStrategy === "manual"
+              ? target.drain_mode
+                ? uiText("Draining")
+                : knownUiText(target.status)
+              : undefined
+          }
+          priority={priority}
+          policy={policy}
+          plate={repeatedPlate}
+        >
           {fixedPrinterId !== undefined && file && !target && (
             <p role="alert">{uiText("This Revision cannot be queued on this printer.")}</p>
           )}
-        </aside>
+        </QueueDispatchDetails>
         {error && (
           <p role="alert" className="text-sm text-destructive">
             {error}

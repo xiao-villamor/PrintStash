@@ -24,6 +24,21 @@ async function openNewConnection() {
 }
 
 describe("RemoteStorageConnections", () => {
+  it("discards a new connection from Cancel", async () => {
+    const { requestsWithMethod } = renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage-connections": json([]),
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+      },
+    });
+    const dialog = await openNewConnection();
+    await userEvent.type(within(dialog).getByLabelText("Connection name"), "Draft connection");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+
+    expect(requestsWithMethod("POST")).toHaveLength(0);
+  });
+
   it("explains disabled transport selection", async () => {
     const view = renderApp(<RemoteStorageConnections />, {
       routes: {
@@ -457,7 +472,7 @@ describe("RemoteStorageConnections ownership recovery", () => {
         "GET /api/v1/storage-connections": json({ detail: "unavailable" }, 503),
       },
     });
-    const region = screen.getByRole("region", { name: "Remote storage" });
+    const region = screen.getByRole("group", { name: "Connections" });
     expect(await within(region).findByRole("alert")).toHaveTextContent(
       "Connections could not be loaded.",
     );
@@ -617,7 +632,7 @@ describe("RemoteStorageConnections authoritative lifetimes", () => {
       },
     });
     expect(await screen.findByText("Workshop storage")).toBeVisible();
-    const region = screen.getByRole("region", { name: "Remote storage" });
+    const region = screen.getByRole("group", { name: "Connections" });
     expect(within(region).getByRole("alert")).toHaveTextContent(
       "Storage providers could not be loaded.",
     );

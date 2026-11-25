@@ -1406,6 +1406,7 @@ def get_model_print_jobs(
             error=job.error,
             filament_used_g=job.filament_used_g,
             actual_duration_s=job.actual_duration_s,
+            production_cost=job.production_cost,  # type: ignore[arg-type]
             filament_cost=models_costing.filament_cost_for_job(
                 profiles, md, job.filament_used_g, job.spool_filament_id
             ),
@@ -1938,6 +1939,22 @@ def delete_model(
     m = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
     soft_delete_model(session, m)
     return Response(status_code=204)
+
+
+@router.post(
+    "/{model_id}/previews/regenerate",
+    status_code=202,
+    summary="Recreate a Model's multi-angle views",
+)
+def regenerate_model_previews(
+    model_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> dict[str, int]:
+    from app.modules.derivatives import repair
+
+    _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
+    return {"queued": repair.request_model_previews(session, model_id)}
 
 
 @router.get("/{model_id}/previews/{generation}")

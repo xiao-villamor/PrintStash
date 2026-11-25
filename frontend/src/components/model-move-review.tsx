@@ -12,7 +12,22 @@ export function ModelMoveReview({ moves }: { moves: ReturnType<typeof useModelMo
   const { source, destination, review } = issue;
   const busy = review.phase === "saving" || review.phase === "reviewing";
   return (
-    <Modal open title={uiText("library.moveReview")} onClose={() => moves.dismiss(source.id)}>
+    <Modal
+      open
+      variant="confirmation"
+      title={uiText("library.moveReview")}
+      onClose={() => moves.dismiss(source.id)}
+      footer={
+        <Button
+          variant="outline"
+          loading={review.phase === "reviewing"}
+          disabled={busy}
+          onClick={() => void moves.review(source.id)}
+        >
+          {uiText("library.reviewLatest")}
+        </Button>
+      }
+    >
       <div className="space-y-4">
         {review.phase === "denied" ? (
           <p role="alert">{uiText("library.moveUnavailable")}</p>
@@ -58,14 +73,6 @@ export function ModelMoveReview({ moves }: { moves: ReturnType<typeof useModelMo
             )}
           </>
         )}
-        <Button
-          variant="outline"
-          loading={review.phase === "reviewing"}
-          disabled={busy}
-          onClick={() => void moves.review(source.id)}
-        >
-          {uiText("library.reviewLatest")}
-        </Button>
       </div>
     </Modal>
   );

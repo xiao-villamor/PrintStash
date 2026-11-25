@@ -24,6 +24,8 @@ function renderRevision(detail: ModelRead | undefined = model, options: RenderAp
       model={aModelListItem()}
       detail={detail}
       admitted
+      status={null}
+      statusLabel={null}
       dimensions="166 × 166 × 1 mm"
     >
       <span>30m</span>
@@ -43,7 +45,7 @@ describe("ModelCardRevision", () => {
   it("displays the recommended revision number rather than its custom label", () => {
     renderRevision();
     expect(screen.getByText("Rev 2")).toHaveAttribute("title", "Fine");
-    expect(screen.getByText("Recommended")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Print Rev 2" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Download Rev 2" })).toBeEnabled();
   });
   it("summarizes outcomes for the displayed revision", async () => {
@@ -57,20 +59,14 @@ describe("ModelCardRevision", () => {
         ]),
       },
     });
-    expect(await screen.findByText("OK 2× on Workshop")).toBeVisible();
-    expect(screen.getByText("Failed 1× on Garage")).toBeVisible();
-    expect(screen.queryByText(/Other revision/)).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Print history" })).toHaveAttribute(
-      "href",
-      "/models/1?tab=history",
-    );
+    expect(await screen.findByTitle("OK 2× on Workshop · Failed 1× on Garage")).toBeVisible();
   });
   it("shows an empty print history only after it is confirmed", async () => {
     const pending = Promise.withResolvers<Response>();
     renderRevision(model, { routes: { "GET /api/v1/models/1/print-jobs": () => pending.promise } });
-    expect(screen.queryByText("Not printed yet")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Not printed yet")).not.toBeInTheDocument();
     pending.resolve(json([]));
-    expect(await screen.findByText("Not printed yet")).toBeVisible();
+    expect(await screen.findByTitle("Not printed yet")).toBeVisible();
   });
   it("keeps failed print history distinct from an unprinted revision", async () => {
     const app = renderRevision(model, {
@@ -79,8 +75,8 @@ describe("ModelCardRevision", () => {
     await waitFor(() =>
       expect(app.requests().some((request) => request.url.endsWith("/print-jobs"))).toBe(true),
     );
-    expect(screen.getByText("Print results not available")).toBeVisible();
-    expect(screen.queryByText("Not printed yet")).not.toBeInTheDocument();
+    expect(screen.getByTitle("Print results not available")).toBeVisible();
+    expect(screen.queryByTitle("Not printed yet")).not.toBeInTheDocument();
   });
   it("does not request privileged printer data for a member", () => {
     const app = renderRevision(model, { auth: memberSession() });
@@ -144,12 +140,18 @@ describe("ModelCardRevision", () => {
   });
   it("takes its final height at once when the list row has no G-code", () => {
     renderApp(
-      <ModelCardRevision model={aModelListItem()} admitted dimensions={null}>
+      <ModelCardRevision
+        model={aModelListItem()}
+        admitted
+        status={null}
+        statusLabel={null}
+        dimensions={null}
+      >
         <span>30m</span>
       </ModelCardRevision>,
     );
     expect(screen.queryByText("Revision")).not.toBeInTheDocument();
-    expect(screen.queryByText("Print results not available")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Print results not available")).not.toBeInTheDocument();
     expect(document.querySelector(".library-card-meta")).toBeInTheDocument();
   });
   it("reserves the revision lines before the detail loads when the list row has G-code", () => {
@@ -157,6 +159,8 @@ describe("ModelCardRevision", () => {
       <ModelCardRevision
         model={aModelListItem({ gcode_file_count: 1 })}
         admitted={false}
+        status={null}
+        statusLabel={null}
         dimensions={null}
       >
         <span>30m</span>

@@ -25,7 +25,7 @@ export function LibraryStatusFilters({
         key: "known_good",
         label: uiText("Ready"),
         count: counts && (counts.find((item) => item.value === "known_good")?.count ?? 0),
-        dot: "bg-muted-foreground",
+        dot: "library-status-ready",
       },
       {
         key: "needs_test",
@@ -37,7 +37,7 @@ export function LibraryStatusFilters({
         key: "failed",
         label: uiText("Failed"),
         count: counts && (counts.find((item) => item.value === "failed")?.count ?? 0),
-        dot: "bg-destructive",
+        dot: "library-status-failed",
       },
     ];
   const shown = options.filter(

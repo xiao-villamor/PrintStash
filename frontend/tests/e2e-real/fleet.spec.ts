@@ -47,16 +47,19 @@ test.describe("fleet queue", () => {
       await expect(card.getByText("ready", { exact: true })).toBeVisible({ timeout: 2_000 });
     }).toPass({ timeout: 30_000 });
 
-    // Queue a print from a model's send dialog against the (now sole, least-busy)
-    // fleet printer.
+    // Queue the recommended Revision for the fleet printer.
     await uploadGcodeModel(page, modelName);
     await openModelPage(page, modelName);
     await expect(page.getByRole("heading", { name: modelName })).toBeVisible();
-    await page.getByRole("button", { name: "Send to printer" }).last().click();
-    const dialog = page.getByRole("dialog", { name: "Send Rev 1 to printer" });
+    await page.getByRole("tab", { name: /^Print/ }).click();
+    await page
+      .getByRole("tabpanel", { name: /^Print/ })
+      .getByRole("button", { name: "Prepare print", exact: true })
+      .click();
+    await page.getByRole("radio", { name: "Add to queue", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Add to queue", exact: true });
     await expect(dialog).toBeVisible();
-    await dialog.getByRole("radio", { name: "Add to queue" }).click();
-    await dialog.getByRole("button", { name: "Add to queue" }).last().click();
+    await dialog.getByRole("button", { name: "Add to queue", exact: true }).click();
     await expect(dialog).toHaveCount(0);
 
     // The fleet scheduler dispatches within a couple of seconds and the mock
@@ -82,12 +85,12 @@ test.describe("fleet queue", () => {
 
     // Cleanup: remove the printer so it doesn't linger as "offline" in later runs
     // once this webServer instance's port is inevitably reused.
-    await page.getByRole("tab", { name: "Fleet" }).click();
-    await card.getByRole("button", { name: "Settings" }).click();
+    await page.getByRole("tab", { name: "Fleet", exact: true }).click();
     await page
-      .getByRole("dialog", { name: "Edit printer connection" })
-      .getByRole("button", { name: "Remove printer", exact: true })
-      .click();
+      .getByRole("article")
+      .filter({ has: page.getByRole("link", { name: printerName, exact: true }) })
+      .click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Remove printer", exact: true }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Remove" }).click();
     await expect(page.getByRole("link", { name: new RegExp(printerName) })).toHaveCount(0);
   });
@@ -131,11 +134,12 @@ test.describe("fleet queue", () => {
     const picker = page.getByRole("dialog", { name: "Revision", exact: true });
     await picker.getByRole("button", { name: modelName }).click();
     await picker.getByRole("button", { name: /Revision 1/ }).click();
+    await addJob.getByText("Allow material or nozzle mismatch", { exact: true }).click();
     const enqueue = page.waitForResponse(
       (response) =>
         response.url().endsWith("/api/v1/fleet/queue") && response.request().method() === "POST",
     );
-    await addJob.getByRole("button", { name: "Save job" }).click();
+    await addJob.getByRole("button", { name: "Add to queue" }).click();
     const receipt = await enqueue;
     expect(receipt.ok()).toBe(true);
     const job = await receipt.json();
@@ -160,6 +164,11 @@ test.describe("fleet queue", () => {
       });
     await expect(completed.getByRole("button", { name: modelName, exact: true })).toBeVisible();
     await expect(completed).toContainText("Completed");
+    const persisted = await page.request.get(`/api/v1/printers/${printerId}/jobs?limit=50`);
+    expect(persisted.ok()).toBe(true);
+    expect(await persisted.json()).toContainEqual(
+      expect.objectContaining({ id: job.id, compatibility_policy: "allow_mismatch" }),
+    );
 
     // ── Use the native Queue and Maintenance pickers with the keyboard ──
     await page.goto("/printers");
@@ -172,11 +181,11 @@ test.describe("fleet queue", () => {
     await recent.focus();
     await recent.press("Enter");
     await expect(recent).toHaveAttribute("aria-pressed", "true");
-    await expect(
-      page
-        .getByRole("region", { name: "Recent print jobs" })
-        .getByText(job.remote_filename, { exact: true }),
-    ).toBeVisible();
+    const recentJob = page
+      .getByRole("region", { name: "Recent print jobs" })
+      .getByText(`#${job.id} · normal`, { exact: true })
+      .locator("..");
+    await expect(recentJob.getByText(`${modelName}.gcode`, { exact: true })).toBeVisible();
 
     await page.getByRole("tab", { name: "Maintenance" }).click();
     const windows = page.getByRole("combobox", { name: "Windows" });
@@ -189,17 +198,14 @@ test.describe("fleet queue", () => {
     await expect(windows).toHaveValue("all");
 
     // ── Clean up the fixture records ──
-    await page.getByRole("tab", { name: "Fleet" }).click();
-    const card = page
+    await page.getByRole("tab", { name: "Fleet", exact: true }).click();
+    const printerCard = page
       .getByRole("article")
       .filter({ has: page.getByRole("link", { name: printerName, exact: true }) });
-    await card.getByRole("button", { name: "Settings" }).click();
-    await page
-      .getByRole("dialog", { name: "Edit printer connection" })
-      .getByRole("button", { name: "Remove printer", exact: true })
-      .click();
+    await printerCard.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Remove printer", exact: true }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Remove", exact: true }).click();
-    await expect(card).toHaveCount(0);
+    await expect(printerCard).toHaveCount(0);
     expect((await page.request.delete(`/api/v1${modelPath}`)).ok()).toBe(true);
     expect((await page.request.delete(`/api/v1${modelPath}/purge`)).ok()).toBe(true);
   });
