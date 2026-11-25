@@ -2,6 +2,7 @@
 import { expect, test } from "@playwright/test";
 import { useMockApi } from "./_setup";
 import { aCollectionNode, aModelListItem } from "../../src/test-support/factories";
+import { collapseNavigationSidebar } from "../e2e-real/util";
 
 useMockApi();
 
@@ -62,6 +63,54 @@ test.describe("Library motion", () => {
         return result;
       };
     });
+  });
+
+  test("matches the loading card to the revision card frame", async ({ page }) => {
+    await page.goto("/");
+    await collapseNavigationSidebar(page);
+    const browse = Promise.withResolvers<void>();
+    await page.route("**/api/v1/models/browse?**", async (route) => {
+      await browse.promise;
+      await route.fulfill({
+        json: {
+          items: [
+            {
+              kind: "model",
+              model: aModelListItem({
+                id: 1,
+                name: "Root model",
+                thumbnail_url: null,
+                gcode_file_count: 1,
+              }),
+            },
+          ],
+          total: 1,
+          next_cursor: null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      });
+    });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const loading = page.locator(".library-loading-placeholder:has(.library-model-card)");
+    const placeholder = loading.locator(".library-model-card").first();
+
+    await expect(loading).toHaveCSS("opacity", "1");
+    const loadingFrame = await placeholder.evaluate((card) => ({
+      height: card.getBoundingClientRect().height,
+      radius: getComputedStyle(card).borderRadius,
+    }));
+    browse.resolve();
+
+    const card = page
+      .getByRole("article")
+      .filter({ has: page.getByRole("heading", { name: "Root model" }) });
+    await expect(card).toBeVisible();
+    const loadedFrame = await card.evaluate((card) => ({
+      height: card.getBoundingClientRect().height,
+      radius: getComputedStyle(card).borderRadius,
+    }));
+    expect(loadingFrame).toEqual(loadedFrame);
   });
 
   test("cached history visits replay a stationary reveal", async ({ page }) => {

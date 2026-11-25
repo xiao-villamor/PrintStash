@@ -129,7 +129,7 @@ export function SidebarNav() {
   }
 
   const railClass = (active: boolean) =>
-    `relative flex h-10 w-10 shrink-0 items-center justify-center transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
+    `relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
       active
         ? "bg-accent text-accent-foreground before:absolute before:-left-1.5 before:bottom-[9px] before:top-[9px] before:w-[3px] before:bg-primary"
         : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -273,7 +273,7 @@ export function SidebarNav() {
                   aria-haspopup="menu"
                   aria-expanded={accountOpen}
                   onClick={() => setAccountOpen((open) => !open)}
-                  className="mt-1 flex h-10 w-10 items-center justify-center hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  className="mt-1 flex h-10 w-10 items-center justify-center rounded-md hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 >
                   <span className="flex h-7 w-7 items-center justify-center rounded-full border border-input bg-accent text-xs font-semibold text-accent-foreground">
                     {user.username.charAt(0).toUpperCase()}

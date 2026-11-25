@@ -254,12 +254,6 @@
   overflow: hidden;
   border: 1px solid var(--border);
 }
-.library-inspector-preview > div {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
 .library-inspector-section summary {
   list-style: none;
 }

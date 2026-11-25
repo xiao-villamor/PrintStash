@@ -2,15 +2,7 @@
 
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  ArrowUpRight,
-  Box,
-  ChevronRight,
-  Download,
-  Images,
-  Loader2,
-  MoreHorizontal,
-} from "lucide-react";
+import { ArrowUpRight, Box, ChevronRight, Download, Loader2, MoreHorizontal } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { modelPrinterFilesOptions, useModelDetail } from "@/features/library/model-detail";
 import { downloadAuthenticatedFile, getAssetUrl, getModel, updateModel } from "@/lib/api";
@@ -33,6 +25,8 @@ import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { MarkdownView } from "@/components/markdown-view";
 import { TabBar } from "@/components/ui/tabs";
+import { GcodePreview } from "@/components/model-detail/gcode-preview";
+import { getBedSize, useToolpathSources } from "@/lib/toolpath-preview";
 import { SendToButtons } from "@/components/model-detail/send-to-buttons";
 import { InspectorPreviewResize } from "./inspector-preview-resize";
 import {
@@ -48,6 +42,8 @@ import type { FileRead, MetadataRead, ModelRead } from "@/types";
 const STLViewer = lazy(() =>
   import("@/components/stl-viewer").then((m) => ({ default: m.STLViewer })),
 );
+type PreviewMode = "model" | "gcode" | "images";
+
 const meshTypes = new Set(["stl", "3mf", "obj", "step", "glb", "gltf", "ply", "3dm", "fbx"]);
 
 const sectionAction = "px-0 text-muted-foreground hover:bg-transparent hover:text-foreground";
@@ -154,7 +150,8 @@ export function InspectorContent({
     setDescriptionReviewed(null);
     setDescriptionReviewing(false);
   }
-  const [preview, setPreview] = useState<"model" | "images" | null>(null);
+  const [preview, setPreview] = useState<PreviewMode | null>(null);
+  const [gcodeSourceId, setGcodeSourceId] = useState<number | null>(null);
   const [sourceId, setSourceId] = useState<number | null>(null);
   const [fileMenu, setFileMenu] = useState<number | null>(null);
   const viewer = useRef<HTMLDivElement>(null);
@@ -166,10 +163,28 @@ export function InspectorContent({
   const hasImages = Boolean(
     previews.large_cover_url || model.thumbnail_url || publishedViews(previews).length,
   );
-  const imagesFirst = coverImageKind(previews, "full") === "photo";
-  const showImages =
-    !sourceFile || (hasImages && (preview === "images" || (!preview && imagesFirst)));
-  const canSwitchPreview = Boolean(sourceFile && hasImages);
+  const { sources: toolpathFiles, availability: toolpathAvailability } = useToolpathSources(
+    files,
+    active,
+  );
+  const tabs: { key: PreviewMode; label: string }[] = [];
+  if (sourceFile) tabs.push({ key: "model", label: uiText("3D model") });
+  if (toolpathFiles.length) tabs.push({ key: "gcode", label: uiText("G-code") });
+  if (hasImages) tabs.push({ key: "images", label: uiText("Images") });
+  const defaultPreview =
+    sourceFile && hasImages && coverImageKind(previews, "full") === "photo"
+      ? "images"
+      : (tabs[0]?.key ?? "images");
+  const mode = preview && tabs.some((tab) => tab.key === preview) ? preview : defaultPreview;
+  const selectedTab = tabs.find((tab) => tab.key === mode);
+  const showTabs = tabs.length > 1 || mode === "gcode";
+  const checkingToolpath = !sourceFile && preview === null && toolpathAvailability === "checking";
+  const viewerLoading = (
+    <span role="status" className="flex items-center justify-center">
+      <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden />
+      <span className="sr-only">{uiText("Loading...")}</span>
+    </span>
+  );
   function download(item: FileRead) {
     void downloadAuthenticatedFile(
       `/api/v1/files/${item.id}/download`,
@@ -366,56 +381,58 @@ export function InspectorContent({
     <div className="library-inspector-body fade-in">
       <div ref={viewer} role="region" aria-label={uiText("Preview")} className="relative">
         {widthHandle}
-        {canSwitchPreview && (
-          <TabBar
-            tabs={[
-              {
-                key: "model",
-                label: (
-                  <>
-                    <Box className="size-4" aria-hidden />
-                    {uiText("3D model")}
-                  </>
-                ),
-              },
-              {
-                key: "images",
-                label: (
-                  <>
-                    <Images className="size-4" aria-hidden />
-                    {uiText("Images")}
-                  </>
-                ),
-              },
-            ]}
-            active={showImages ? "images" : "model"}
-            onChange={setPreview}
-            showIndicator={false}
-            className="mb-2 w-fit max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-muted p-0.5"
-            tabClassName="inline-flex h-8 items-center gap-1.5 px-2.5 text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-            activeTabClassName="bg-primary/20 text-foreground"
-          />
-        )}
         <div
           className="library-inspector-preview library-preview"
-          role={canSwitchPreview ? "tabpanel" : undefined}
-          aria-label={canSwitchPreview ? uiText(showImages ? "Images" : "3D model") : undefined}
           style={{ height: previewSize.height }}
         >
-          <Suspense fallback={<Loader2 className="h-5 w-5 animate-spin" />}>
-            {!showImages && sourceFile ? (
-              <STLViewer
-                url={getAssetUrl(`/api/v1/files/${sourceFile.id}/stl`)}
-                modelId={model.id}
-              />
-            ) : (
-              <InspectorPreviewImages
-                name={model.name}
-                cover={model.thumbnail_url}
-                previews={previews}
-              />
-            )}
-          </Suspense>
+          {showTabs && (
+            <TabBar
+              tabs={tabs}
+              active={mode}
+              onChange={setPreview}
+              showIndicator={false}
+              className="absolute left-3 top-3 z-10 w-fit max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-popover p-0.5"
+              tabClassName="inline-flex h-7 items-center px-2.5 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              activeTabClassName="bg-accent text-accent-foreground"
+            />
+          )}
+          <div
+            className={
+              mode === "gcode"
+                ? "absolute inset-0 overflow-y-auto"
+                : "absolute inset-0 flex items-center justify-center"
+            }
+            role={showTabs ? "tabpanel" : undefined}
+            aria-label={showTabs ? selectedTab?.label : undefined}
+          >
+            <Suspense fallback={viewerLoading}>
+              {checkingToolpath ? (
+                viewerLoading
+              ) : mode === "gcode" ? (
+                <GcodePreview
+                  files={toolpathFiles}
+                  selectedFileId={gcodeSourceId ?? file?.id}
+                  onSelectFile={(id) => {
+                    setGcodeSourceId(id);
+                    if (revisions.some((revision) => revision.id === id)) setSelectedId(id);
+                  }}
+                  bedSizeFor={(source) => getBedSize(source.metadata?.printer_model)}
+                  viewerProps={{ screenshotName: model.name }}
+                />
+              ) : mode === "model" && sourceFile ? (
+                <STLViewer
+                  url={getAssetUrl(`/api/v1/files/${sourceFile.id}/stl`)}
+                  modelId={model.id}
+                />
+              ) : (
+                <InspectorPreviewImages
+                  name={model.name}
+                  cover={model.thumbnail_url}
+                  previews={previews}
+                />
+              )}
+            </Suspense>
+          </div>
         </div>
       </div>
       <InspectorPreviewResize {...previewSize} />
@@ -435,7 +452,10 @@ export function InspectorContent({
                 value={file.id}
                 aria-label={uiText("Choose G-code revision")}
                 title={revisionName(file)}
-                onChange={(event) => setSelectedId(Number(event.target.value))}
+                onChange={(event) => {
+                  setGcodeSourceId(null);
+                  setSelectedId(Number(event.target.value));
+                }}
               >
                 {revisions.map((item) => (
                   <option key={item.id} value={item.id}>

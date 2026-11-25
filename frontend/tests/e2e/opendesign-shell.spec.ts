@@ -7,6 +7,7 @@
 import { expect, test } from "@playwright/test";
 
 import { useMockApi } from "./_setup";
+import { collapseNavigationSidebar } from "../e2e-real/util";
 
 useMockApi();
 
@@ -58,6 +59,31 @@ test.describe("OpenDesign shell", () => {
       await expect(current).not.toHaveCSS("background-color", "rgb(77, 111, 155)");
     });
   }
+
+  test("rounds the hovered navigation rail highlight", async ({ page }) => {
+    await page.goto("/");
+    await collapseNavigationSidebar(page);
+    const link = page.getByRole("navigation", { name: "Navigation" }).getByRole("link", {
+      name: "Printers",
+    });
+
+    await link.hover();
+
+    await expect(link).toHaveCSS("border-radius", "6px");
+  });
+
+  test("rounds the focused workspace menu highlight", async ({ page }) => {
+    await page.goto("/");
+    await collapseNavigationSidebar(page);
+    const account = page.getByRole("button", { name: "My workspace" });
+
+    await account.focus();
+    await account.press("Enter");
+    const row = page.getByRole("menuitem", { name: "Statistics" });
+    await row.focus();
+
+    await expect(row).toHaveCSS("border-radius", "6px");
+  });
 
   test("uses the floating radius on the workspace menu", async ({ page }) => {
     await page.goto("/");

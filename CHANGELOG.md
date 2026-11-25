@@ -5,7 +5,8 @@
 ### Fixed
 
 - Open Trash from one workspace with an aligned selection header and a clearer review of expired items.
-- Keep the Model details title and actions clear while scrolling past the image preview. Show G-code in the full Model page and give its toolbar and layer controls dedicated space.
+- Keep the Model details header visible when scrolling. Open the preview without a cover flash and inspect G-code layers directly in the details panel.
+- Round sidebar and workspace menu highlights and match Library loading cards to the current card design.
 - Give the multi-plate tray its own row and keep the selected plate visible when switching views. Improve lighting on dark filament.
 - Align the model's Print actions and add space to attachment rows.
 

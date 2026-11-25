@@ -65,7 +65,7 @@ export function WorkspaceMenu({
     { href: "/settings", text: t("nav.settings"), icon: Settings },
   ];
   return (
-    <div className="workspace-menu w-max min-w-65 max-w-85 border border-border bg-popover p-1.5 text-popover-foreground shadow-xl">
+    <div className="workspace-menu w-max min-w-65 max-w-85 rounded-lg border border-border bg-popover p-1.5 text-popover-foreground shadow-xl">
       <div className="mb-1 flex items-center gap-2.5 border-b border-border px-2 pb-2.5 pt-2">
         <span
           aria-hidden
@@ -113,7 +113,7 @@ export function WorkspaceMenu({
               onNavigate();
               if (item.href !== "/settings" || !active) router.push(item.href);
             }}
-            className={`flex min-h-9 items-center gap-2.5 px-2.5 text-[13px] hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${active ? "bg-accent text-accent-foreground" : "text-foreground"}`}
+            className={`flex min-h-9 items-center gap-2.5 rounded-md px-2.5 text-[13px] hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${active ? "bg-accent text-accent-foreground" : "text-foreground"}`}
           >
             <item.icon
               className="h-4 w-4 shrink-0 text-muted-foreground"
@@ -131,7 +131,7 @@ export function WorkspaceMenu({
         className="flex min-h-10 items-center justify-between gap-3 pl-2.5 pr-1"
       >
         <span className="text-[13px]">{uiText("Theme")}</span>
-        <div className="flex gap-0.5 bg-muted p-0.5">
+        <div className="flex gap-0.5 rounded-md bg-muted p-0.5">
           {themeOptions.map(({ mode, text }) => (
             <button
               key={mode}
@@ -139,7 +139,7 @@ export function WorkspaceMenu({
               role="menuitemradio"
               aria-checked={theme === mode}
               onClick={() => setThemeMode(mode)}
-              className={`h-6.5 px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${theme === mode ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:bg-card"}`}
+              className={`h-6.5 rounded-sm px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${theme === mode ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:bg-card"}`}
             >
               {text}
             </button>
@@ -152,7 +152,7 @@ export function WorkspaceMenu({
         className="flex min-h-10 items-center justify-between gap-3 pl-2.5 pr-1"
       >
         <span className="text-[13px]">{t("locale.label")}</span>
-        <div className="flex gap-0.5 bg-muted p-0.5">
+        <div className="flex gap-0.5 rounded-md bg-muted p-0.5">
           {SUPPORTED_LOCALES.map((option) => (
             <button
               key={option}
@@ -161,7 +161,7 @@ export function WorkspaceMenu({
               lang={option}
               aria-checked={locale === option}
               onClick={() => setLocale(option)}
-              className={`h-6.5 px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${locale === option ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:bg-card"}`}
+              className={`h-6.5 rounded-sm px-2.5 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${locale === option ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:bg-card"}`}
             >
               {localeDefinitions[option].name}
             </button>
@@ -175,7 +175,7 @@ export function WorkspaceMenu({
         target="_blank"
         rel="noopener noreferrer"
         onClick={onNavigate}
-        className="flex min-h-9 items-center gap-2.5 px-2.5 text-[13px] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        className="flex min-h-9 items-center gap-2.5 rounded-md px-2.5 text-[13px] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <ExternalLink className="h-4 w-4 text-muted-foreground" strokeWidth={1.6} aria-hidden />
         <span className="flex-1">{uiText("Docs")}</span>
@@ -189,7 +189,7 @@ export function WorkspaceMenu({
             onNavigate();
             openKeyboardShortcuts();
           }}
-          className="flex min-h-9 w-full items-center gap-2.5 px-2.5 text-left text-[13px] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          className="flex min-h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[13px] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >
           <Keyboard className="h-4 w-4 text-muted-foreground" strokeWidth={1.6} aria-hidden />
           {uiText("Keyboard shortcuts")}
@@ -200,7 +200,7 @@ export function WorkspaceMenu({
         type="button"
         role="menuitem"
         onClick={onLogout}
-        className="flex min-h-9 w-full items-center gap-2.5 px-2.5 text-left text-[13px] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        className="flex min-h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[13px] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <LogOut className="h-4 w-4 text-muted-foreground" strokeWidth={1.6} aria-hidden />
         {t("nav.logOut")}

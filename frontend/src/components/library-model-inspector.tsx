@@ -22,7 +22,6 @@ import {
   useInspectorMotion,
 } from "./use-inspector-motion";
 import { Button } from "@/components/ui/button";
-import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import type { ModelListItem } from "@/types";
 import { RevisionStatusBadge } from "@/components/revision-status-badge";
 import "./library-model-inspector.css";
@@ -33,12 +32,14 @@ const InspectorContent = lazyImport(() =>
   })),
 );
 
-function InspectorLoading() {
+function InspectorLoading({ height }: { height: number }) {
   useUiLocale();
   return (
     <div className="library-inspector-body" role="status">
-      <Loader2 className="h-5 w-5 animate-spin" />
-      <span className="sr-only">{uiText("Loading...")}</span>
+      <div className="library-inspector-preview library-preview" style={{ height }}>
+        <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden />
+        <span className="sr-only">{uiText("Loading...")}</span>
+      </div>
     </div>
   );
 }
@@ -59,7 +60,7 @@ export function LibraryModelInspector({
   id: number;
   open: boolean;
   motionLocked?: boolean;
-  summary?: Pick<ModelListItem, "name" | "thumbnail_url">;
+  summary?: Pick<ModelListItem, "name">;
   origin?: LibraryEntry;
   canWrite: boolean;
   onClose: () => void;
@@ -81,31 +82,12 @@ export function LibraryModelInspector({
   const { panel, present } = useInspectorMotion(open, onMotionSettled);
   const scroll = useRef<HTMLDivElement>(null);
   const previewSize = useInspectorPreviewHeight(scroll);
-  // The shell and cached cover are cheap to paint. Mount the interactive
+  // Keep a stationary preview surface while the shell opens. Mount the interactive
   // body after opening settles, retaining an existing body through close.
   const [bodyId, setBodyId] = useState<number | null>(null);
   if (open && !motionLocked && bodyId !== id) setBodyId(id);
   const name = detail.data?.name ?? summary?.name;
-  const cover = summary?.thumbnail_url ?? detail.data?.thumbnail_url;
-  const loading =
-    cover && name ? (
-      <div className="library-inspector-body" aria-busy="true">
-        <div
-          className="library-inspector-preview library-preview"
-          style={{ height: previewSize.height }}
-        >
-          <ProtectedThumbnail
-            path={cover}
-            alt={displayModelName(name)}
-            className="h-full w-full"
-            imageClassName="h-full w-full object-contain"
-            placeholder={<Loader2 className="h-5 w-5 animate-spin" />}
-          />
-        </div>
-      </div>
-    ) : (
-      <InspectorLoading />
-    );
+  const loading = <InspectorLoading height={previewSize.height} />;
   const [downloading, setDownloading] = useState(false);
   const revisions = cardRevisions(detail.data);
   const recommended = revisions.find((file) => file.is_recommended) ?? revisions[0];

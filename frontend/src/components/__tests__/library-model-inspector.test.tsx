@@ -4,7 +4,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryModelInspector } from "@/components/library-model-inspector";
-import { aModel, aPrinter, aRevision } from "@/test-support/factories";
+import { aModel, aModelListItem, aPrinter, aRevision } from "@/test-support/factories";
 import { json, renderApp, type RouteTable } from "@/test-support/render";
 
 const file = aRevision({ id: 7, model_id: 1, gcode_revision_number: 1, is_recommended: true });
@@ -53,6 +53,27 @@ describe("Library model inspector", () => {
     app.rerender(<LibraryModelInspector id={1} open canWrite onClose={app.onClose} />);
 
     expect(await screen.findByRole("region", { name: "Print this revision" })).toBeVisible();
+  });
+
+  it("keeps a cover out of the opening placeholder", async () => {
+    const cover = "/api/v1/models/1/cover/content";
+    renderApp(
+      <LibraryModelInspector
+        id={1}
+        open
+        motionLocked
+        summary={aModelListItem({ name: model.name, thumbnail_url: cover })}
+        canWrite
+        onClose={vi.fn<() => void>()}
+      />,
+      { routes: { "GET /api/v1/models/1": json(aModel({ ...model, thumbnail_url: cover })) } },
+    );
+
+    await screen.findByRole("heading", { name: "Bracket" });
+
+    const loading = screen.getByRole("complementary", { name: "Model details" });
+    expect(loading.querySelector(".library-inspector-preview")).toBeVisible();
+    expect(loading.querySelector("img")).toBeNull();
   });
 
   it("renders a Markdown description in the inspector", async () => {

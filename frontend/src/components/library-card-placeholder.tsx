@@ -7,11 +7,10 @@ export function LibraryPreviewPlaceholder() {
   return <div aria-hidden className="library-preview-placeholder h-full w-full" />;
 }
 
-/** Built from the card's own title and footer boxes, so a placeholder has the
- * height of the Model card (without a revision) that replaces it. */
+/** Reserve the standard card's title, revision row, and bottom metadata line. */
 export function LibraryCardDetailsPlaceholder() {
   return (
-    <div aria-hidden className="flex flex-col bg-card">
+    <div aria-hidden className="flex flex-1 flex-col bg-card">
       <div className="library-card-content library-card-standard">
         <h3 className="h-[1lh]">
           <Skeleton className="h-4 w-3/4 animate-none" />
@@ -19,12 +18,13 @@ export function LibraryCardDetailsPlaceholder() {
       </div>
       <div className="library-card-summary-container">
         <div className="library-card-revision-summary">
-          <div className="library-card-context flex items-center">
-            <Skeleton className="h-3 w-1/4 animate-none" />
+          <div className="library-card-revision-line">
+            <Skeleton className="h-5 w-16 rounded-full animate-none" />
+            <Skeleton className="h-3 w-8 animate-none" />
           </div>
-          <div className="library-card-meta items-center">
-            <Skeleton className="h-3 w-1/3 animate-none" />
-            <Skeleton className="h-3 w-10 animate-none" />
+          <div className="library-card-data-row">
+            <Skeleton className="h-3 w-1/3 self-center animate-none" />
+            <Skeleton className="h-3 w-10 self-center animate-none" />
           </div>
         </div>
       </div>

@@ -75,14 +75,17 @@ test.describe("Library inline inspector", () => {
     const modes = preview.getByRole("tablist");
     const images = modes.getByRole("tab", { name: "Images" });
     await images.click();
-    await expect(preview.getByRole("tab", { name: "G-code", exact: true })).toHaveCount(0);
+    await expect(preview.getByRole("tab", { name: "G-code", exact: true })).toBeVisible();
     await expect(preview.getByText("Cover", { exact: true })).toHaveCount(0);
 
     const headerBounds = (await header.boundingBox())!;
     const modeBounds = (await modes.boundingBox())!;
     const mediaBounds = (await preview.locator(".library-inspector-preview").boundingBox())!;
-    expect(modeBounds.y + modeBounds.height).toBeLessThan(mediaBounds.y);
-    const offset = Math.round(mediaBounds.y - headerBounds.y - headerBounds.height + 8);
+    expect(modeBounds.y).toBeGreaterThan(mediaBounds.y);
+    expect(modeBounds.y + modeBounds.height).toBeLessThan(mediaBounds.y + mediaBounds.height);
+    const offset = Math.round(
+      modeBounds.y + modeBounds.height - headerBounds.y - headerBounds.height + 8,
+    );
     await page.mouse.move(modeBounds.x + 12, modeBounds.y + modeBounds.height + 30);
     await page.mouse.wheel(0, offset);
     await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBe(offset);
