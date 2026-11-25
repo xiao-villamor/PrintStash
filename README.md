@@ -1,11 +1,9 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="frontend/public/logo-dark.svg" />
-  <img src="frontend/public/logo.svg" alt="PrintStash logo" width="320" />
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/printstash-logo-dark.gif" />
+  <img src="screenshots/printstash-logo-light.gif" alt="PrintStash logo" width="320" height="107" />
 </picture>
-
-# PrintStash
 
 Self-hosted library for 3D models, G-code revisions, and print history.<br />
 Keep each model's files, slicer settings, and print results together.

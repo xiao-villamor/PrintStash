@@ -61,3 +61,47 @@ describe("Docker icon", () => {
     expect(icon).toEqual(extensionIcon);
   });
 });
+
+describe("README logo", () => {
+  const readme = readFileSync(resolve(root, "../README.md"), "utf8");
+
+  it("displays the project name once at the top", () => {
+    expect(readme).toContain('alt="PrintStash logo"');
+    expect(readme).not.toMatch(/^# PrintStash\s*$/m);
+  });
+
+  describe.each(["light", "dark"])("in %s mode", (theme) => {
+    const file = `screenshots/printstash-logo-${theme}.gif`;
+    const asset = readFileSync(resolve(root, "..", file));
+    // Each graphics-control extension carries the transparency and delay for a frame.
+    const graphicsControlMarker = Buffer.from([0x21, 0xf9, 0x04]);
+    const frameControls: number[] = [];
+    for (
+      let offset = asset.indexOf(graphicsControlMarker);
+      offset !== -1;
+      offset = asset.indexOf(graphicsControlMarker, offset + 8)
+    ) {
+      frameControls.push(offset + graphicsControlMarker.length);
+    }
+
+    it("references the GIF from the README", () => {
+      expect(readme).toContain(file);
+      expect(asset.subarray(0, 6).toString()).toBe("GIF89a");
+    });
+
+    it("allows a transparent background on every frame", () => {
+      expect(frameControls.length).toBeGreaterThan(0);
+      expect(frameControls.every((offset) => asset[offset] & 1)).toBe(true);
+    });
+
+    it("plays one brief sequence", () => {
+      expect(frameControls.length).toBeGreaterThan(1);
+      const durationMs = frameControls.reduce(
+        (sum, offset) => sum + asset.readUInt16LE(offset + 1) * 10,
+        0,
+      );
+      expect(durationMs).toBeLessThanOrEqual(300);
+      expect(asset.includes(Buffer.from("NETSCAPE2.0"))).toBe(false);
+    });
+  });
+});
