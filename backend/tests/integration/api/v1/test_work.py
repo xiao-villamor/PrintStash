@@ -73,6 +73,7 @@ class TestGetPreviewActivity:
             "remaining": 1,
             "skipped": 0,
             "failed": 0,
+            "latest_failure": None,
         }
 
     def test_rejects_non_administrators(self, client, member):

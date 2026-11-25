@@ -178,6 +178,7 @@
   "Multi-angle preview setting saved.": "Se ha guardado la configuración de vistas multiángulo.",
   "Generate extra views for each Model. Turn off to save preparation time; cover images and existing views stay available.": "Genera vistas adicionales de cada modelo. Desactívalo para ahorrar tiempo de preparación; las portadas y las vistas existentes seguirán disponibles.",
   "{total} preview tasks · {completed} done · {remaining} remaining · {skipped} skipped · {failed} failed": "{total} tareas de vista previa · {completed} completadas · {remaining} pendientes · {skipped} omitidas · {failed} fallidas",
+  "{completed} ready · {skipped} skipped · Earlier library failures ({failed})": "{completed} listas · {skipped} omitidas · Fallos anteriores en la biblioteca ({failed})",
   "library.collectionOverview.previewLoading": "Cargando vistas previas",
   "library.collectionOverview.previewError": "No se pudieron cargar las vistas previas",
   "library.collectionOverview.previewRetry": "Reintentar",

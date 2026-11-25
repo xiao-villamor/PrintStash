@@ -28,6 +28,7 @@ class TestPreviewActivity:
             "remaining": 2,
             "skipped": 0,
             "failed": 0,
+            "latest_failure": None,
         }
 
     def test_counts_completed_outputs(
@@ -43,6 +44,7 @@ class TestPreviewActivity:
             "remaining": 0,
             "skipped": 0,
             "failed": 0,
+            "latest_failure": None,
         }
 
     @pytest.mark.parametrize(
@@ -62,7 +64,12 @@ class TestPreviewActivity:
     ):
         file = make_file(make_model(), filename="part.stl")
         make_derivative(
-            file, DerivativeKind.PREVIEWS, state=DerivativeState.FAILED, exhausted=True
+            file,
+            DerivativeKind.PREVIEWS,
+            state=DerivativeState.FAILED,
+            exhausted=True,
+            failure_reason="resource_limit",
+            updated_at=AFTER,
         )
 
         assert preview_activity(db_session).model_dump() == {
@@ -71,7 +78,35 @@ class TestPreviewActivity:
             "remaining": 1,
             "skipped": 0,
             "failed": 1,
+            "latest_failure": {"reason": "resource_limit", "at": AFTER},
         }
+
+    def test_reports_the_latest_terminal_failure_across_producers(
+        self, db_session, make_model, make_file, make_derivative
+    ):
+        file = make_file(make_model(), filename="part.stl")
+        make_derivative(
+            file,
+            DerivativeKind.PREVIEWS,
+            state=DerivativeState.FAILED,
+            exhausted=True,
+            failure_reason="resource_limit",
+            updated_at=BEFORE,
+        )
+        make_derivative(
+            file,
+            DerivativeKind.THUMBNAIL,
+            state=DerivativeState.FAILED,
+            exhausted=True,
+            failure_reason="storage",
+            updated_at=AFTER,
+        )
+        other = make_file(make_model(), filename="other.stl")
+        make_derivative(other, DerivativeKind.PREVIEWS, state=DerivativeState.FAILED)
+
+        failure = preview_activity(db_session).latest_failure
+        assert failure is not None
+        assert failure.model_dump() == {"reason": "storage", "at": AFTER}
 
     @pytest.mark.parametrize(
         "state", [DerivativeState.SKIPPED, DerivativeState.CANCELLED]
@@ -146,4 +181,5 @@ class TestPreviewActivity:
             "remaining": 0,
             "skipped": 0,
             "failed": 0,
+            "latest_failure": None,
         }

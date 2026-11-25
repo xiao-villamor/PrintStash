@@ -730,6 +730,7 @@ export interface PreviewActivity {
   remaining: number;
   skipped: number;
   failed: number;
+  latest_failure: { reason: string; at: string } | null;
 }
 
 /** `GET /api/v1/admin/work`: the Background work settings page. */

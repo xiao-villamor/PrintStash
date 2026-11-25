@@ -1189,5 +1189,13 @@ export function aProjectProfile(
 
 /** A settled image preparation census, including enabled producers only. */
 export function aPreviewActivity(override?: Partial<PreviewActivity>): PreviewActivity {
-  return { total: 0, completed: 0, remaining: 0, skipped: 0, failed: 0, ...override };
+  return {
+    total: 0,
+    completed: 0,
+    remaining: 0,
+    skipped: 0,
+    failed: 0,
+    latest_failure: null,
+    ...override,
+  };
 }

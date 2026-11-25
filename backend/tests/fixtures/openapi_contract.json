@@ -16746,6 +16746,16 @@
             "title": "Failed",
             "type": "integer"
           },
+          "latest_failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewActivityFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "remaining": {
             "minimum": 0.0,
             "title": "Remaining",
@@ -16767,9 +16777,29 @@
           "completed",
           "remaining",
           "skipped",
-          "failed"
+          "failed",
+          "latest_failure"
         ],
         "title": "PreviewActivity",
+        "type": "object"
+      },
+      "PreviewActivityFailure": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "at"
+        ],
+        "title": "PreviewActivityFailure",
         "type": "object"
       },
       "PreviewImageKind": {

@@ -178,6 +178,7 @@
   "Multi-angle preview setting saved.": "Multi-angle preview setting saved.",
   "Generate extra views for each Model. Turn off to save preparation time; cover images and existing views stay available.": "Generate extra views for each Model. Turn off to save preparation time; cover images and existing views stay available.",
   "{total} preview tasks · {completed} done · {remaining} remaining · {skipped} skipped · {failed} failed": "{total} preview tasks · {completed} done · {remaining} remaining · {skipped} skipped · {failed} failed",
+  "{completed} ready · {skipped} skipped · Earlier library failures ({failed})": "{completed} ready · {skipped} skipped · Earlier library failures ({failed})",
   "All": "All",
   "library.collectionOverview.previewLoading": "Loading previews",
   "library.collectionOverview.previewError": "Could not load previews",
