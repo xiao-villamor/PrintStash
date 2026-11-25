@@ -127,7 +127,21 @@
 .queue-register-progress progress {
   height: 4px;
   width: 65px;
+  appearance: none;
+  border: 0;
+  border-radius: 9999px;
+  overflow: hidden;
+  background: var(--muted);
   accent-color: var(--primary);
+}
+.queue-register-progress progress::-webkit-progress-bar {
+  background: var(--muted);
+}
+.queue-register-progress progress::-webkit-progress-value {
+  background: var(--primary);
+}
+.queue-register-progress progress::-moz-progress-bar {
+  background: var(--primary);
 }
 .queue-register-progress span {
   font-size: 11px;
