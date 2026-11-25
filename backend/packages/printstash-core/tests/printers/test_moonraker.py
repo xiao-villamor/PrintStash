@@ -34,8 +34,8 @@ from printstash_core.printers.contracts import PrinterClient
 from printstash_core.printers.models import (
     MachineControlConflict,
     MachineControlError,
-    MotionAxis,
     MoonrakerConfig,
+    MotionAxis,
     OctoPrintConfig,
     PrinterSnapshot,
     TuningControl,
