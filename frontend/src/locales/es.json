@@ -4650,6 +4650,7 @@
   "{value1} unconfirmed": "{value1} sin confirmar",
   "{value1} not attempted": "{value1} sin intentar",
   "Move to: {value1}": "Mover a: {value1}",
+  "Moving {value1} to {value2}…": "Moviendo {value1} a {value2}…",
   "Add tags: {value1}": "Añadir etiquetas: {value1}",
   "Remove tags: {value1}": "Quitar etiquetas: {value1}",
   "librarySources.configFailed": "No se pudo cargar la configuración de las fuentes de biblioteca.",

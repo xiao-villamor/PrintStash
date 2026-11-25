@@ -3,6 +3,91 @@ import { test, expect } from "./helpers";
 import { modelCard, openLibraryTools, uploadModel } from "./util";
 
 test.describe("collection tree", () => {
+  test("reports a pending folder drop at the library root until the move is confirmed", async ({
+    page,
+  }, testInfo) => {
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
+    const stamp = Date.now();
+    const parent = `e2e-drop-parent-${stamp}`;
+    const child = `e2e-drop-child-${stamp}`;
+    const parentResponse = await page.request.post("/api/v1/collections", {
+      data: { name: parent },
+    });
+    expect(parentResponse.status()).toBe(201);
+    const parentId: number = (await parentResponse.json()).id;
+    let childId: number | null = null;
+    try {
+      const childResponse = await page.request.post("/api/v1/collections", {
+        data: { name: child, parent_id: parentId },
+      });
+      expect(childResponse.status()).toBe(201);
+      childId = (await childResponse.json()).id;
+      await page.goto(`/?c=${parent}`);
+
+      const sidebar = page.locator("#collections-pane");
+      const root = sidebar.getByRole("button", { name: "All Models", exact: true });
+      const source = sidebar.getByRole("treeitem", { name: child, exact: true });
+      const sourceRow = sidebar.locator(`[data-tree-node="${parent}/${child}"]`);
+      const movedRow = sidebar.locator(`[data-tree-node="${child}"]`);
+      const release = Promise.withResolvers<void>();
+      const browseReads: string[] = [];
+      await page.route(`**/api/v1/collections/${childId}`, async (route) => {
+        if (route.request().method() === "PATCH") await release.promise;
+        await route.continue();
+      });
+
+      await expect(source).toBeVisible();
+      const currentHeading = page
+        .getByRole("main")
+        .getByRole("heading", { name: parent, exact: true });
+      const heading = await currentHeading.evaluateHandle((element) => element);
+      page.on("request", (request) => {
+        const url = new URL(request.url());
+        if (
+          url.pathname === "/api/v1/models/browse" &&
+          url.searchParams.get("collection") === parent
+        ) {
+          browseReads.push(request.url());
+        }
+      });
+      const from = await source.boundingBox();
+      const to = await root.boundingBox();
+      if (!from || !to) throw new Error("Could not locate collection drag targets");
+      try {
+        await page.mouse.move(from.x + 30, from.y + from.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(from.x + 45, from.y + from.height / 2, { steps: 3 });
+        await page.mouse.move(to.x + 30, to.y + to.height / 2, { steps: 6 });
+        await expect(root.locator("..")).toHaveAttribute("data-drop-active", "true");
+        await sidebar.screenshot({ path: testInfo.outputPath("root-drop-hover.png") });
+        await page.mouse.up();
+        await expect(root).toHaveAttribute("aria-busy", "true");
+        await expect(
+          sidebar.getByText(`Moving ${child} to All Models…`, { exact: true }),
+        ).toBeVisible();
+        await expect(sourceRow).toBeVisible();
+        await expect(movedRow).toHaveCount(0);
+        await sidebar.screenshot({ path: testInfo.outputPath("root-drop-pending.png") });
+      } finally {
+        release.resolve();
+      }
+
+      await expect(movedRow).toBeVisible();
+      await expect(root).not.toHaveAttribute("aria-busy");
+      await expect(page.getByText("Moved", { exact: true })).toBeVisible();
+      expect(await heading.evaluate((element) => element.isConnected)).toBe(true);
+      expect(browseReads).toHaveLength(1);
+      await page.reload();
+      await expect(movedRow).toBeVisible();
+      await expect(sourceRow).toHaveCount(0);
+    } finally {
+      if (childId !== null) {
+        expect((await page.request.delete(`/api/v1/collections/${childId}`)).status()).toBe(204);
+      }
+      expect((await page.request.delete(`/api/v1/collections/${parentId}`)).status()).toBe(204);
+    }
+  });
+
   test("moves a Model into a newly expanded nested folder", async ({ page }) => {
     const stamp = Date.now();
     const parent = `e2e-tree-parent-${stamp}`;

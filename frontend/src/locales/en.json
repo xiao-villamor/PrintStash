@@ -4650,6 +4650,7 @@
   "{value1} unconfirmed": "{value1} unconfirmed",
   "{value1} not attempted": "{value1} not attempted",
   "Move to: {value1}": "Move to: {value1}",
+  "Moving {value1} to {value2}…": "Moving {value1} to {value2}…",
   "Add tags: {value1}": "Add tags: {value1}",
   "Remove tags: {value1}": "Remove tags: {value1}",
   "librarySources.configFailed": "Library source settings could not be loaded.",

@@ -1699,7 +1699,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       refreshForAuthority.current = null;
     };
   });
-  const modelMoves = useModelMoves(entry, refresh);
+  const modelMoves = useModelMoves(entry, async () => {
+    await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: queryKeys.outliner })]);
+  });
 
   // Multi-select for batch actions. The selected set is view-independent so it
   // survives load-more and search; backend per-model RBAC makes cross-collection
@@ -2726,12 +2728,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     }
   }
 
-  function handleMoveModel(source: ModelDrag, targetCollection: string | null) {
+  async function handleMoveModel(source: ModelDrag, targetCollection: string | null) {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
       return;
     }
-    void modelMoves.move(source, targetCollection);
+    await modelMoves.move(source, targetCollection);
   }
 
   async function handleMoveCollection(collectionId: number, newParentId: number | null) {
@@ -2742,7 +2744,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     try {
       await moveCollection(collectionId, newParentId);
       toast.success(uiText("Moved"));
-      refresh();
     } catch (e: any) {
       toast.error(e);
     }

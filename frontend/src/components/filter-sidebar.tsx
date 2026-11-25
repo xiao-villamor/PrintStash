@@ -12,6 +12,7 @@ import { TreeCount } from "@/components/tree-count";
 import { captureModelDrag, type ModelDrag } from "@/lib/model-dnd";
 import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
+import { toast } from "@/lib/toast";
 import { useUiLocale } from "@/lib/i18n";
 import type { StartupOutcome } from "@/lib/library-startup-context";
 import { useLibraryStartup } from "@/lib/library-startup-context";
@@ -26,6 +27,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "@/lib/navigation";
 import { Link } from "@/lib/link";
 import { useMediaQuery } from "@/lib/use-media-query";
@@ -56,6 +58,7 @@ import {
   FolderPlus,
   FolderTree,
   ListTree,
+  LoaderCircle,
   ChevronsUp,
   Search,
   Trash2,
@@ -65,6 +68,7 @@ import { Printer3D } from "@/components/ui/printer-3d";
 import {
   DndContext,
   DragEndEvent,
+  DragOverlay,
   DragStartEvent,
   MouseSensor,
   pointerWithin,
@@ -72,6 +76,7 @@ import {
   useDroppable,
   useSensor,
   useSensors,
+  type UniqueIdentifier,
 } from "@dnd-kit/core";
 
 import type { LibraryViewMode } from "@/features/library/url";
@@ -89,7 +94,21 @@ interface CollectionDropData {
   /** Destination collection, or null for the "All Models" root. */
   collectionPath: string | null;
   collectionId: number | null;
-  collectionParentId?: number | null;
+  name: string;
+}
+
+type PendingTreeMove = { name: string; target: CollectionDropData };
+
+const DROP_TARGET = "bg-primary-soft text-foreground ring-1 ring-inset ring-ring";
+
+function canDropOn(source: DragPayload, target: CollectionDropData): boolean {
+  if (source.type === "model") return source.model.collection !== target.collectionPath;
+  const { id, parent_id, path } = source.collection;
+  return (
+    target.collectionId !== id &&
+    target.collectionId !== parent_id &&
+    !target.collectionPath?.startsWith(`${path}/`)
+  );
 }
 
 /**
@@ -133,11 +152,13 @@ function readAllModelsExpanded(): boolean {
 function DraggableModelLeaf({
   model,
   isDraggingThisModel,
+  moving,
   enabled,
   onOpen,
 }: {
   model: OutlinerModelRead;
   isDraggingThisModel: boolean;
+  moving: boolean;
   enabled: boolean;
   onOpen?: FilterSidebarProps["onModelOpen"];
 }) {
@@ -146,11 +167,10 @@ function DraggableModelLeaf({
   const router = useRouter();
   const { attributes, listeners, setNodeRef } = useDraggable({
     id: `model-${model.id}`,
-    disabled: !enabled,
+    disabled: !enabled || moving,
     data: { type: "model", model } satisfies DragPayload,
   });
 
-  // No transform: Blender-style — source stays put (dimmed), only target highlights.
   return (
     <Localized>
       <div
@@ -162,6 +182,7 @@ function DraggableModelLeaf({
         }}
         onDoubleClick={() => router.push(`/models/${model.id}`)}
         role="treeitem"
+        aria-busy={moving || undefined}
         aria-level={(model.collection?.split("/").length ?? 0) + 1}
         tabIndex={0}
         onKeyDown={(event) => {
@@ -170,13 +191,13 @@ function DraggableModelLeaf({
             else router.push(`/models/${model.id}`);
           }
         }}
-        className={`flex items-center gap-2 rounded pl-7 pr-2 py-1 text-xs select-none hover:bg-muted transition-colors ${enabled ? "cursor-grab active:cursor-grabbing" : "cursor-action"} ${
+        className={`flex min-h-8 items-center gap-2 rounded pl-7 pr-2 py-1 text-xs select-none hover:bg-muted transition-colors ${moving ? "cursor-wait" : enabled ? "cursor-grab active:cursor-grabbing" : "cursor-action"} ${
           isDraggingThisModel ? "opacity-30 pointer-events-none" : "text-muted-foreground"
         }`}
         aria-label={model.name}
         data-outliner-entry={`/models/${model.id}`}
       >
-        <Box className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/40" />
+        <Box aria-hidden className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
         <span className="min-w-0 truncate" title={model.name}>
           {model.name}
         </span>
@@ -214,11 +235,13 @@ function MultipartLeaf({ multipart }: { multipart: OutlinerModelRead }) {
 function OutlinerLeaves({
   entries,
   dragging,
+  pendingMoves,
   dragEnabled,
   onModelOpen,
 }: {
   entries: OutlinerEntry[];
   dragging: DragPayload | null;
+  pendingMoves: ReadonlyMap<UniqueIdentifier, PendingTreeMove>;
   dragEnabled: boolean;
   onModelOpen?: FilterSidebarProps["onModelOpen"];
 }) {
@@ -228,6 +251,7 @@ function OutlinerLeaves({
       <DraggableModelLeaf
         key={`model-${entry.id}`}
         model={entry}
+        moving={pendingMoves.has(`model-${entry.id}`)}
         enabled={dragEnabled}
         onOpen={onModelOpen}
         isDraggingThisModel={dragging?.type === "model" && dragging.model.id === entry.id}
@@ -280,12 +304,15 @@ interface TreeContext {
   onIntent?: (path: string | null) => void;
   onModelOpen?: FilterSidebarProps["onModelOpen"];
   expanded: Set<string>;
+  expand: (path: string) => void;
   toggle: (path: string) => void;
   params: OutlinerParams;
   restoring: boolean;
   report: (key: string, status: StartupOutcome | null) => void;
   revealNodes: CollectionNodeRead[];
   dragging: DragPayload | null;
+  pendingMoves: ReadonlyMap<UniqueIdentifier, PendingTreeMove>;
+  pendingDestinations: ReadonlySet<number | null>;
   onDelete?: (id: number, recursive: boolean) => void;
 }
 
@@ -372,6 +399,7 @@ function EntryLevel({ collectionId, ctx }: { collectionId: number | null; ctx: T
       <OutlinerLeaves
         entries={entries}
         dragging={ctx.dragging}
+        pendingMoves={ctx.pendingMoves}
         dragEnabled={ctx.dragEnabled}
         onModelOpen={ctx.onModelOpen}
       />
@@ -522,7 +550,12 @@ function CollectionTreeRow({
   "use memo";
   const { t: uiText } = useI18n();
   const [confirming, setConfirming] = useState(false);
-  const { selected, onSelect, onIntent, expanded, toggle, dragging, onDelete } = ctx;
+  const { selected, onSelect, onIntent, expanded, expand, toggle, dragging, onDelete } = ctx;
+  const dragId = `collection-drag-${node.id}`;
+  const moving = ctx.pendingMoves.has(dragId);
+  const receiving = ctx.pendingDestinations.has(node.id);
+  const target = { collectionPath: node.path, collectionId: node.id, name: node.name };
+  const canDrop = dragging !== null && canDropOn(dragging, target);
 
   const {
     attributes,
@@ -530,47 +563,24 @@ function CollectionTreeRow({
     setNodeRef: setDragRef,
     isDragging,
   } = useDraggable({
-    id: `collection-drag-${node.id}`,
-    disabled: !ctx.dragEnabled,
+    id: dragId,
+    disabled: !ctx.dragEnabled || moving,
     data: { type: "collection", collection: node } satisfies DragPayload,
   });
 
   const { setNodeRef: setDropRef, isOver } = useDroppable({
     id: `collection-drop-${node.id}`,
-    disabled: !ctx.dragEnabled,
-    data: {
-      collectionPath: node.path,
-      collectionId: node.id,
-      collectionParentId: node.parent_id,
-    } satisfies CollectionDropData,
+    disabled: !ctx.dragEnabled || (dragging !== null && !canDrop),
+    data: target satisfies CollectionDropData,
   });
 
-  const rowRef = (el: HTMLDivElement | null) => {
-    setDragRef(el);
-    setDropRef(el);
-  };
-
-  const expandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (isOver && dragging !== null) {
-      expandTimerRef.current = setTimeout(() => {
-        if (!expanded.has(node.path)) toggle(node.path);
-      }, 500);
-    } else {
-      if (expandTimerRef.current) clearTimeout(expandTimerRef.current);
-    }
-    return () => {
-      if (expandTimerRef.current) clearTimeout(expandTimerRef.current);
-    };
-  }, [isOver, dragging]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const isDraggingCollection = dragging?.type === "collection";
-  const isSelf = isDraggingCollection && dragging.collection.id === node.id;
-  const isDescendantOfDragged =
-    isDraggingCollection && node.path.startsWith(dragging.collection.path + "/");
-  const canDrop = !isSelf && !isDescendantOfDragged;
-
   const isOpen = expanded.has(node.path);
+  const dropActive = isOver && canDrop;
+  useEffect(() => {
+    if (!dropActive || isOpen) return;
+    const timer = setTimeout(() => expand(node.path), 500);
+    return () => clearTimeout(timer);
+  }, [dropActive, expand, isOpen, node.path]);
   const isSelected = selected === node.path;
   const hasNestedItems = node.visible_child_count > 0 || node.direct_entry_count > 0;
   const descCount = node.descendant_count;
@@ -628,11 +638,12 @@ function CollectionTreeRow({
           </div>
         ) : (
           <div
-            ref={rowRef}
+            ref={setDropRef}
             data-current={isSelected || undefined}
+            data-drop-active={dropActive || undefined}
             className={`collection-tree-row group/row relative flex min-w-0 items-center gap-1 rounded px-2 py-1 transition-colors ${
-              isOver && dragging !== null && canDrop
-                ? "z-10 bg-accent"
+              dropActive || receiving
+                ? DROP_TARGET
                 : isSelected
                   ? "text-accent-foreground bg-accent"
                   : "text-foreground hover:bg-muted"
@@ -652,13 +663,16 @@ function CollectionTreeRow({
                 data-tree-toggle
               >
                 <ChevronRight
-                  className={`h-3 w-3 transition-transform ${isOpen ? "rotate-90" : ""}`}
+                  aria-hidden
+                  className={`h-4 w-4 transition-transform ${isOpen ? "rotate-90" : ""}`}
                 />
               </button>
             ) : (
               <span className="inline-block w-6 flex-shrink-0" />
             )}
             <button
+              ref={setDragRef}
+              {...listeners}
               type="button"
               onPointerDown={(e) => e.stopPropagation()}
               onPointerEnter={() => onIntent?.(node.path)}
@@ -666,62 +680,40 @@ function CollectionTreeRow({
               onPointerLeave={() => onIntent?.(null)}
               onBlur={() => onIntent?.(null)}
               onClick={() => onSelect(node.path, node.id)}
-              className="flex min-h-7 flex-1 min-w-0 items-center gap-1.5 text-left text-sm font-medium truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              className={`flex min-h-7 flex-1 min-w-0 items-center gap-1.5 text-left text-sm font-medium truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${moving ? "cursor-wait" : ctx.dragEnabled ? "cursor-grab active:cursor-grabbing" : ""}`}
               aria-description={`${node.display_path} · ${uiText("counts.items", { count: node.subtree_entry_count })}`}
               data-outliner-collection={node.path}
               {...attributes}
               role="treeitem"
+              aria-busy={moving || receiving || undefined}
               aria-selected={isSelected}
               aria-expanded={hasNestedItems ? isOpen : undefined}
               aria-level={node.path.split("/").length}
             >
               {isOpen || isSelected ? (
-                <FolderOpen className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
+                <FolderOpen aria-hidden className="h-4 w-4 flex-shrink-0 text-primary" />
               ) : (
-                <Folder className="h-3.5 w-3.5 flex-shrink-0" />
+                <Folder aria-hidden className="h-4 w-4 flex-shrink-0" />
               )}
               <span className="min-w-0 truncate" title={node.display_path}>
                 {node.name}
               </span>
             </button>
-            <span className="relative flex-shrink-0">
-              <span
-                className={`absolute right-full top-1/2 -translate-y-1/2 mr-1 flex items-center rounded invisible group-hover/row:visible group-focus-within/row:visible ${isSelected ? "bg-accent" : "bg-sidebar"}`}
+            {(moving || receiving) && (
+              <LoaderCircle aria-hidden className="size-4 shrink-0 animate-spin" />
+            )}
+            {onDelete && !moving && !receiving && (
+              <button
+                type="button"
+                onClick={() => setConfirming(true)}
+                className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-colors hover:bg-muted hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring group-hover/row:opacity-100 group-focus-within/row:opacity-100"
+                title={uiText("Delete collection")}
+                aria-label={uiText("Delete collection")}
               >
-                {ctx.dragEnabled && (
-                  <span
-                    {...listeners}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    className="p-0.5 text-muted-foreground/30 hover:text-muted-foreground cursor-grab active:cursor-grabbing flex-shrink-0"
-                    title={uiText("Drag to reorder")}
-                  >
-                    <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 16 16">
-                      <circle cx="5" cy="4" r="1.2" />
-                      <circle cx="11" cy="4" r="1.2" />
-                      <circle cx="5" cy="8" r="1.2" />
-                      <circle cx="11" cy="8" r="1.2" />
-                      <circle cx="5" cy="12" r="1.2" />
-                      <circle cx="11" cy="12" r="1.2" />
-                    </svg>
-                  </span>
-                )}
-                {onDelete && (
-                  <button
-                    type="button"
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setConfirming(true);
-                    }}
-                    className="p-0.5 text-muted-foreground/30 hover:text-red-500 flex-shrink-0 rounded transition-colors"
-                    title={uiText("Delete collection")}
-                  >
-                    <Trash2 className="h-2.5 w-2.5" />
-                  </button>
-                )}
-              </span>
-              <TreeCount value={node.subtree_entry_count} stale={stale} />
-            </span>
+                <Trash2 aria-hidden className="size-3.5" />
+              </button>
+            )}
+            <TreeCount value={node.subtree_entry_count} stale={stale} />
           </div>
         )}
         {isOpen && hasNestedItems && !confirming && (
@@ -755,38 +747,48 @@ function DroppableAllModels({
   ctx: TreeContext;
 }) {
   useUiLocale();
+  const target = { collectionPath: null, collectionId: null, name: uiText("All Models") };
+  const canDrop = ctx.dragging !== null && canDropOn(ctx.dragging, target);
+  const receiving = ctx.pendingDestinations.has(null);
   const { setNodeRef, isOver } = useDroppable({
     id: "collection-root",
-    disabled: !ctx.dragEnabled,
-    data: { collectionPath: null, collectionId: null } satisfies CollectionDropData,
+    disabled: !ctx.dragEnabled || (ctx.dragging !== null && !canDrop),
+    data: target satisfies CollectionDropData,
   });
+  const dropActive = isOver && canDrop;
   return (
     <>
       <div
         ref={setNodeRef}
-        className={`flex items-center rounded ${isOver || selected ? "bg-accent text-accent-foreground" : "text-foreground"}`}
+        className={`collection-tree-row flex min-h-8 items-center gap-1 rounded px-2 ${dropActive || receiving ? DROP_TARGET : selected ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-muted"}`}
+        data-drop-active={dropActive || undefined}
       >
         {(count > 0 || hasCollections) && (
           <Button
             variant="ghost"
-            size="sm"
+            size="icon-sm"
+            className="size-6 shrink-0"
             aria-label={isExpanded ? uiText("Collapse") : uiText("Expand")}
             aria-expanded={isExpanded}
             onClick={onToggleExpand}
           >
-            <ChevronRight className={`h-3 w-3 ${isExpanded ? "rotate-90" : ""}`} />
+            <ChevronRight aria-hidden className={`size-4 ${isExpanded ? "rotate-90" : ""}`} />
           </Button>
         )}
-        <Button variant="ghost" size="sm" aria-label={uiText("All Models")} onClick={onClick}>
-          <FolderOpen className="h-4 w-4" />
-          {uiText("All Models")}
+        <Button
+          variant="ghost"
+          size="xs"
+          className="min-w-0 flex-1 justify-start px-0 text-sm hover:bg-transparent"
+          aria-label={target.name}
+          aria-current={selected ? "page" : undefined}
+          aria-busy={receiving || undefined}
+          onClick={onClick}
+        >
+          <FolderOpen aria-hidden className="size-4 shrink-0" />
+          <span className="truncate">{target.name}</span>
         </Button>
+        {receiving && <LoaderCircle aria-hidden className="mr-1 size-4 shrink-0 animate-spin" />}
       </div>
-      {isExpanded && count > 0 && (
-        <div className="ml-5 border-l border-border pl-4 min-w-0">
-          {ctx.showModels && <EntryLevel collectionId={null} ctx={ctx} />}
-        </div>
-      )}
     </>
   );
 }
@@ -903,12 +905,12 @@ export function FilterSidebarContent({
     );
   });
   const [allModelsExpanded, setAllModelsExpanded] = useState(readAllModelsExpanded);
-  const levelsVisible = collectionsOnly || allModelsExpanded;
+  const levelsVisible = allModelsExpanded;
   const [collapsedAt, setCollapsedAt] = useState(collapseVersion);
   if (collapsedAt !== collapseVersion) {
     setCollapsedAt(collapseVersion);
     setExpanded(new Set());
-    setAllModelsExpanded(false);
+    if (!collectionsOnly) setAllModelsExpanded(false);
   }
   const {
     restore,
@@ -996,6 +998,12 @@ export function FilterSidebarContent({
   const [showAllTags, setShowAllTags] = useState(false);
   const [printerExpanded, setPrinterExpanded] = useState(false);
   const [dragging, setDragging] = useState<DragPayload | null>(null);
+  const [pendingMoves, setPendingMoves] = useState<ReadonlyMap<UniqueIdentifier, PendingTreeMove>>(
+    () => new Map(),
+  );
+  const pendingDestinations = new Set(
+    [...pendingMoves.values()].map(({ target }) => target.collectionId),
+  );
 
   const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 6 } }));
 
@@ -1068,6 +1076,9 @@ export function FilterSidebarContent({
       return next;
     });
   }
+  const expand = useCallback((path: string) => {
+    setExpanded((previous) => (previous.has(path) ? previous : new Set([...previous, path])));
+  }, []);
 
   const modelDrag = useRef<ModelDrag | null>(null);
   function handleDragStart(event: DragStartEvent) {
@@ -1076,30 +1087,33 @@ export function FilterSidebarContent({
     setDragging(payload);
   }
 
-  function handleDragEnd(event: DragEndEvent) {
+  async function handleDragEnd(event: DragEndEvent) {
     setDragging(null);
-    const payload = activeDragPayload(event);
+    const payload = dragging ?? activeDragPayload(event);
     const source = modelDrag.current;
     modelDrag.current = null;
     const target = collectionDropTarget(event);
-    if (!payload || !target) return;
+    const dragId = event.active.id;
+    if (!payload || !target || !canDropOn(payload, target) || pendingMoves.has(dragId)) return;
+    if (payload.type === "model" && (!source || source.collection === target.collectionPath))
+      return;
 
-    const targetCollectionPath = target.collectionPath;
-    const targetCollectionId = target.collectionId;
-
-    if (payload.type === "model") {
-      if (!source || targetCollectionPath === source.collection) return;
-      onMoveModel?.(source, targetCollectionPath);
-    } else if (payload.type === "collection") {
-      const col = payload.collection;
-      if (targetCollectionId === col.id) return;
-      if (targetCollectionPath !== null && targetCollectionPath.startsWith(col.path + "/")) return;
-      // Drop on "All Models" → move to root (parent_id = null)
-      // Drop on a collection → nest inside it (parent_id = that collection's id)
-      const newParentId = targetCollectionId ?? null;
-      if (newParentId === col.parent_id) return;
-      onMoveCollection?.(col.id, newParentId);
+    const name = payload.type === "model" ? payload.model.name : payload.collection.name;
+    setPendingMoves((previous) => new Map(previous).set(dragId, { name, target }));
+    if (target.collectionPath) expand(target.collectionPath);
+    else setAllModelsExpanded(true);
+    try {
+      if (payload.type === "model" && source) await onMoveModel?.(source, target.collectionPath);
+      else if (payload.type === "collection")
+        await onMoveCollection?.(payload.collection.id, target.collectionId);
+    } catch (error) {
+      toast.error(error);
     }
+    setPendingMoves((previous) => {
+      const next = new Map(previous);
+      next.delete(dragId);
+      return next;
+    });
   }
 
   const treeContext: TreeContext = {
@@ -1110,12 +1124,15 @@ export function FilterSidebarContent({
     onIntent: onCollectionIntent,
     onModelOpen,
     expanded,
+    expand,
     toggle: toggleExpanded,
     params,
     restoring,
     report,
     revealNodes,
     dragging,
+    pendingMoves,
+    pendingDestinations,
     onDelete: onDeleteCollection,
   };
 
@@ -1161,7 +1178,7 @@ export function FilterSidebarContent({
         sensors={navigationOnly ? [] : sensors}
         collisionDetection={pointerWithin}
         onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
+        onDragEnd={(event) => void handleDragEnd(event)}
         onDragCancel={() => {
           modelDrag.current = null;
           setDragging(null);
@@ -1282,6 +1299,18 @@ export function FilterSidebarContent({
                 role={outlinerQ === "" ? "tree" : undefined}
                 aria-label={uiText("Collections")}
               >
+                <DroppableAllModels
+                  selected={selectedCollection === null}
+                  onClick={() => {
+                    if (outlinerQ) onClearOutlinerFilter?.();
+                    onCollectionChange(null);
+                  }}
+                  isExpanded={allModelsExpanded}
+                  onToggleExpand={() => setAllModelsExpanded((value) => !value)}
+                  count={roots.data?.pages[0]?.parent_direct_entry_count ?? 0}
+                  hasCollections={roots.data?.pages.some((page) => page.items.length > 0) ?? false}
+                  ctx={treeContext}
+                />
                 {outlinerQ !== "" ? (
                   searchText !== outlinerQ ? (
                     <Skeleton className="h-5 w-full" />
@@ -1307,19 +1336,6 @@ export function FilterSidebarContent({
                         </Button>
                       </div>
                     )}
-                    {!collectionsOnly && (
-                      <DroppableAllModels
-                        selected={selectedCollection === null}
-                        onClick={() => onCollectionChange(null)}
-                        isExpanded={allModelsExpanded}
-                        onToggleExpand={() => setAllModelsExpanded((v) => !v)}
-                        count={roots.data?.pages[0]?.parent_direct_entry_count ?? 0}
-                        hasCollections={
-                          roots.data?.pages.some((page) => page.items.length > 0) ?? false
-                        }
-                        ctx={treeContext}
-                      />
-                    )}
                     {!levelsVisible && roots.isError && (
                       <PageControls
                         query={roots}
@@ -1330,8 +1346,7 @@ export function FilterSidebarContent({
                     {levelsVisible && (
                       <div className="collection-tree-root ml-1 border-l border-border pl-1 min-w-0">
                         <CollectionLevel parentId={null} ctx={treeContext} />
-                        {collectionsOnly &&
-                          treeModelsVisible &&
+                        {treeModelsVisible &&
                           (roots.data?.pages[0]?.parent_direct_entry_count ?? 0) > 0 && (
                             <EntryLevel collectionId={null} ctx={treeContext} />
                           )}
@@ -1547,6 +1562,40 @@ export function FilterSidebarContent({
             </div>
           )}
         </div>
+        <div
+          role="status"
+          className={
+            pendingMoves.size > 0
+              ? "shrink-0 space-y-1 border-t border-border px-3 py-2 text-xs text-muted-foreground"
+              : "sr-only"
+          }
+        >
+          {[...pendingMoves.entries()].map(([id, { name, target }]) => (
+            <p key={id} className="break-words">
+              {t("Moving {value1} to {value2}…", { value1: name, value2: target.name })}
+            </p>
+          ))}
+        </div>
+        {createPortal(
+          <DragOverlay dropAnimation={null} className="pointer-events-none">
+            {dragging && (
+              <div
+                aria-hidden
+                className="flex w-fit max-w-64 translate-x-3 translate-y-8 items-center gap-2 rounded-md border border-ring bg-popover px-2.5 py-1.5 text-sm text-popover-foreground shadow-lg"
+              >
+                {dragging.type === "collection" ? (
+                  <Folder className="size-4 shrink-0" />
+                ) : (
+                  <Box className="size-4 shrink-0" />
+                )}
+                <span className="truncate">
+                  {dragging.type === "collection" ? dragging.collection.name : dragging.model.name}
+                </span>
+              </div>
+            )}
+          </DragOverlay>,
+          document.body,
+        )}
       </DndContext>
     </Localized>
   );
@@ -1575,8 +1624,8 @@ export interface FilterSidebarProps {
   onPrinterChange: (printerId: number | null) => void;
   onPrinterPresenceChange: (presence: "any" | "none" | null) => void;
   onCreateCollection: () => void;
-  onMoveModel?: (source: ModelDrag, targetCollection: string | null) => void;
-  onMoveCollection?: (collectionId: number, newParentId: number | null) => void;
+  onMoveModel?: (source: ModelDrag, targetCollection: string | null) => void | Promise<void>;
+  onMoveCollection?: (collectionId: number, newParentId: number | null) => void | Promise<void>;
   onDeleteCollection?: (id: number, recursive: boolean) => void;
   canViewPrinters?: boolean;
   canManageLibrary?: boolean;
