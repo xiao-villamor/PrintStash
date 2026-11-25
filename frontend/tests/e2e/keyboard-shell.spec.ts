@@ -21,6 +21,7 @@ test.describe("Shared keyboard commands", () => {
       "Show or hide the sidebar",
       "Show or hide details",
       "Move in the collection tree",
+      "Move in the collection tree without arrow keys",
       "Focus Library results",
       "Move between Library results",
       "Close details, then clear the selection",
@@ -140,6 +141,46 @@ test.describe("Shared keyboard commands", () => {
     await expect(collection).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/c=maraio/);
+    await expect(filter).toBeFocused();
+  });
+
+  test("navigates the collection tree with compact keyboard keys", async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto("/");
+    const sidebar = page.getByRole("complementary", { name: "Collections" });
+    const root = sidebar.getByRole("button", { name: "All Models", exact: true });
+    const folder = sidebar.getByRole("treeitem", { name: "maraio", exact: true });
+    const model = sidebar.getByRole("treeitem", { name: "skadis_kitchen-roll_screw", exact: true });
+    await expect(folder).toBeVisible();
+    await page.keyboard.press("Control+Shift+E");
+    await expect(root).toBeFocused();
+
+    await page.keyboard.press("s");
+    await expect(folder).toBeFocused();
+    await expect(page.getByText("0 selected", { exact: true })).toHaveCount(0);
+    await page.keyboard.press("d");
+    await expect(model).toBeVisible();
+    await page.keyboard.press("d");
+    await expect(model).toBeFocused();
+    await page.keyboard.press("w");
+    await expect(folder).toBeFocused();
+    await page.keyboard.press("d");
+    await expect(model).toBeFocused();
+    await model.dispatchEvent("keydown", { key: "ArrowUp", code: "KeyW" });
+    await expect(folder).toBeFocused();
+    await page.screenshot({ path: testInfo.outputPath("compact-keyboard-collections.png") });
+    await page.keyboard.press("a");
+    await expect(folder).toHaveAttribute("aria-expanded", "false");
+    await page.keyboard.press("a");
+    await expect(root).toBeFocused();
+  });
+
+  test("keeps compact keyboard letters available in the collection filter", async ({ page }) => {
+    await page.goto("/");
+    const filter = page.getByPlaceholder("Filter collections");
+    await filter.pressSequentially("wasd");
+
+    await expect(filter).toHaveValue("wasd");
     await expect(filter).toBeFocused();
   });
 

@@ -213,6 +213,7 @@ export function KeyboardShortcuts() {
         { labelKey: "Show or hide the sidebar", keys: [mod, "B"] },
         { labelKey: "Show or hide details", keys: [mod, alt, "B"] },
         { labelKey: "Move in the collection tree", keys: ["↑", "↓", "←", "→"] },
+        { labelKey: "Move in the collection tree without arrow keys", keys: ["W", "A", "S", "D"] },
         { labelKey: "Focus Library results", keys: ["G"] },
         { labelKey: "Move between Library results", keys: ["↑", "↓", "←", "→"] },
       ],

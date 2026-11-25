@@ -141,6 +141,13 @@ function collectionDropTarget(event: DragEndEvent): CollectionDropData | null {
 
 const ALL_EXPANDED_KEY = "ps-filter-all-expanded";
 
+const compactTreeDirections = new Map([
+  ["w", "ArrowUp"],
+  ["a", "ArrowLeft"],
+  ["s", "ArrowDown"],
+  ["d", "ArrowRight"],
+]);
+
 /** Is the "All Models" group expanded? Open unless this session closed it. */
 function readAllModelsExpanded(): boolean {
   try {
@@ -1204,6 +1211,7 @@ export function FilterSidebarContent({
             const target = event.target instanceof HTMLElement ? event.target : null;
             const row = target?.closest<HTMLElement>(OUTLINER_KEYBOARD_ROW);
             if (!row || !contentRef.current) return;
+            const key = compactTreeDirections.get(event.key.toLowerCase()) ?? event.key;
             const matches = row.hasAttribute("data-outliner-match");
             const rows = Array.from(
               contentRef.current.querySelectorAll<HTMLElement>(
@@ -1217,22 +1225,22 @@ export function FilterSidebarContent({
               ":scope > [data-tree-toggle]",
             );
             let next: HTMLElement | undefined | null;
-            if (event.key === "ArrowDown") next = rows[Math.min(index + 1, rows.length - 1)];
-            else if (event.key === "ArrowUp") {
+            if (key === "ArrowDown") next = rows[Math.min(index + 1, rows.length - 1)];
+            else if (key === "ArrowUp") {
               next =
                 index === 0 && matches
                   ? row.closest("aside")?.querySelector<HTMLElement>("[data-tree-filter]")
                   : rows[Math.max(index - 1, 0)];
-            } else if (event.key === "Home") next = rows[0];
-            else if (event.key === "End") next = rows.at(-1);
-            else if (event.key === "ArrowRight") {
+            } else if (key === "Home") next = rows[0];
+            else if (key === "End") next = rows.at(-1);
+            else if (key === "ArrowRight") {
               if (toggle?.getAttribute("aria-expanded") === "false") toggle.click();
               else if (
                 row === root ||
                 (row.dataset.outlinerCollection && node?.contains(rows[index + 1] ?? null))
               )
                 next = rows[index + 1];
-            } else if (event.key === "ArrowLeft") {
+            } else if (key === "ArrowLeft") {
               if (toggle?.getAttribute("aria-expanded") === "true") toggle.click();
               else if (row !== root) {
                 const parent = row.dataset.outlinerCollection
@@ -1241,7 +1249,7 @@ export function FilterSidebarContent({
                 next = parent?.querySelector<HTMLElement>("[data-outliner-collection]") ?? root;
               }
             } else if (
-              event.key === "F2" &&
+              key === "F2" &&
               !navigationOnly &&
               row.dataset.outlinerCollection === selectedCollection
             ) {

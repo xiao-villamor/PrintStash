@@ -10,7 +10,7 @@
 - Round sidebar highlights, workspace menu highlights, and image preview indicators. Soften preview arrows with a filled background. Match Library loading cards to the current card design.
 - Keep the Settings header in place. Scroll the sidebar options and the current panel independently. Use a shorter, inset scrollbar and align the paired Overview cards.
 - Group identical confirmation notices, dismiss them sooner, and provide a visible close button.
-- Focus the collection tree when opening it by shortcut. Use arrow keys to move between folders and Models, with a rounded focus outline on the whole row.
+- Focus the collection tree when opening it by shortcut. Use arrows or W/A/S/D to move between folders and Models, with a rounded focus outline on the whole row.
 - Use the keyboard in filtered collections. Press G to focus Library results, then use the arrow keys to move between them.
 - Let each browser show or hide the view name and position on Model cards.
 - Label the AI Search toggle and give the Library search field a neutral focus border.
