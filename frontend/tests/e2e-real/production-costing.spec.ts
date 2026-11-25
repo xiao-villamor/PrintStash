@@ -278,12 +278,9 @@ test.describe("production costing", () => {
       await page.goto("/printers");
       await collapseNavigationSidebar(page);
       const card = page.getByRole("link", { name: new RegExp(name) });
-      await page.getByRole("tab", { name: "Manage printers", exact: true }).click();
-      const settings = page
-        .getByRole("row")
-        .filter({ has: card })
-        .getByRole("button", { name: "Settings", exact: true });
-      await settings.click();
+      await page.getByRole("tab", { name: "Fleet", exact: true }).click();
+      await page.getByRole("article").filter({ has: card }).click({ button: "right" });
+      await page.getByRole("menuitem", { name: "Edit connection", exact: true }).click();
       const dialog = page.getByRole("dialog", { name: "Edit printer connection" });
       const picker = dialog.getByRole("combobox", { name: "Cost profile" });
       await picker.selectOption(String(profile.id));

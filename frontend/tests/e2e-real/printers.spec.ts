@@ -82,12 +82,8 @@ test.describe("printers", () => {
     await page.reload();
     await expect(page.getByRole("link", { name: new RegExp(name) })).toBeVisible();
 
-    await page.getByRole("tab", { name: "Manage printers", exact: true }).press("Enter");
-    await page
-      .getByRole("row")
-      .filter({ has: card })
-      .getByRole("button", { name: "Remove printer", exact: true })
-      .click();
+    await page.getByRole("article").filter({ has: card }).click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Remove printer", exact: true }).click();
     const confirmation = page.getByRole("dialog", { name: "Remove printer?" });
     await expect(confirmation).toHaveAccessibleDescription(
       `"${name}" will be removed from PrintStash.`,

@@ -1382,6 +1382,7 @@
   "Keep the recommended local paths, or connect S3-compatible object storage.": "Mantén las rutas locales recomendadas o conecta almacenamiento de objetos compatible con S3.",
   "Klipper config": "Configuración de Klipper",
   "Layer": "Capa",
+  "Printer actions": "Acciones de la impresora",
   "Weight": "Peso",
   "More actions for {value1}": "Más acciones de {value1}",
   "Queue is empty": "La cola está vacía",

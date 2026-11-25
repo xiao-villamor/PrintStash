@@ -8,6 +8,8 @@
 
 ### Changed
 
+- Printers: each printer card now has a right-click menu (or Shift+F10) with Open page, Edit connection, Set model and Remove printer, replacing the card footer and the Manage printers tab. The fleet summary sits under the tabs, jobs that are printing animate on the routing graph, and the Profiles page, slicer configurations and their dialogs follow the new surface style.
+
 - Library cards are 280 px wide and show the revision status as one badge beside the revision, with time, weight and layer height on one line. The model panel shows the same badge in its header, labelled key figures for the recommended revision, and the collection, creation date and source link under the description.
 
 ### Added

@@ -118,6 +118,18 @@ function renderPrintersPage(
   );
 }
 
+/** Opens a printer card's context menu, as a right click does. */
+function openCardMenu(name: string) {
+  const card = screen.getByRole("link", { name }).closest("article");
+  expect(card).not.toBeNull();
+  fireEvent.contextMenu(card!);
+}
+
+async function chooseCardAction(name: string, action: string) {
+  openCardMenu(name);
+  await userEvent.click(await screen.findByRole("menuitem", { name: action }));
+}
+
 function makePrinter(overrides: Partial<PrinterRead> = {}): PrinterRead {
   return {
     ...anEditingBase(),
@@ -477,9 +489,6 @@ describe("PrinterCard", () => {
     const instant = new Date("2026-01-01T03:23:06Z");
     const activity = within(screen.getByRole("region", { name: "Fleet activity" }));
     expect(activity.getByRole("time")).toHaveAttribute("datetime", instant.toISOString());
-    expect(
-      screen.getByText(`Seen ${instant.toLocaleString("en")}`, { exact: false }),
-    ).toBeVisible();
   });
 
   it("omits artwork when the preference explicitly disables it", () => {
@@ -523,17 +532,11 @@ describe("PrinterCard", () => {
     );
   });
 
-  it("shows the detected model", () => {
-    renderPrintersPage({ printers: [makePrinter({ detected_model: "Bambu Lab X1 Carbon" })] });
-
-    expect(screen.getByText("Bambu Lab X1 Carbon")).toBeInTheDocument();
-  });
-
   it("lets the user pick a model from the list when nothing was detected", async () => {
     const user = userEvent.setup();
     renderPrintersPage({ printers: [makePrinter()] });
 
-    await user.click(screen.getByText("Set model"));
+    await chooseCardAction("Voron 2.4", "Set model");
     const picker = screen.getByRole("dialog", { name: "Choose printer model" });
     await user.type(within(picker).getByRole("searchbox"), "Voron 2.4");
     await user.click(within(picker).getByRole("button", { name: "Select" }));
@@ -573,7 +576,7 @@ describe("PrinterCard", () => {
       );
     });
     renderPrintersPage({ printers: [original] });
-    await user.click(screen.getByText("Set model"));
+    await chooseCardAction("Voron 2.4", "Set model");
     await user.click(screen.getByRole("button", { name: "Use custom model" }));
     const dialog = screen.getByRole("dialog", { name: "Custom printer model" });
     await user.type(within(dialog).getByRole("textbox", { name: "Manufacturer" }), "Homebrew");
@@ -601,7 +604,7 @@ describe("PrinterCard", () => {
   it("falls back to a custom text field for a model not in the list", async () => {
     renderPrintersPage({ printers: [makePrinter()] });
 
-    await userEvent.click(screen.getByText("Set model"));
+    await chooseCardAction("Voron 2.4", "Set model");
     await userEvent.click(screen.getByRole("button", { name: "Use custom model" }));
     await userEvent.type(screen.getByRole("textbox", { name: "Model" }), "Homebrew CoreXY");
     await userEvent.click(screen.getByRole("button", { name: "Use this model" }));
@@ -616,11 +619,8 @@ describe("PrinterCard", () => {
 
 describe("PrintersPage", () => {
   describe("removing a printer", () => {
-    async function selectAction(name: string, action: "Settings" | "Remove printer") {
-      await userEvent.click(screen.getByRole("tab", { name: "Manage printers" }));
-      const list = screen.getByRole("region", { name: "Manage printers" });
-      const row = within(list).getByRole("link", { name }).closest("tr");
-      await userEvent.click(within(row!).getByRole("button", { name: action }));
+    async function selectAction(name: string, action: "Edit connection" | "Remove printer") {
+      await chooseCardAction(name, action);
     }
 
     beforeAll(async () => {
@@ -640,7 +640,7 @@ describe("PrintersPage", () => {
     it("keeps removal available from connection settings", async () => {
       renderPrintersPage({ printers: [makePrinter()] });
 
-      await selectAction("Voron 2.4", "Settings");
+      await selectAction("Voron 2.4", "Edit connection");
       const settings = screen.getByRole("dialog", { name: "Edit printer connection" });
       await userEvent.click(
         await within(settings).findByRole("button", { name: "Remove printer" }),
@@ -659,7 +659,6 @@ describe("PrintersPage", () => {
       await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
       expect(screen.getByRole("link", { name: "Voron 2.4" })).toBeVisible();
-      expect(screen.getByRole("button", { name: "Remove printer" })).toHaveFocus();
       expect(requestsWithMethod("DELETE")).toHaveLength(0);
     });
 
@@ -693,11 +692,15 @@ describe("PrintersPage", () => {
         ],
       });
 
-      expect(screen.queryByRole("tab", { name: "Manage printers" })).not.toBeInTheDocument();
+      openCardMenu("Voron 2.4");
+
+      expect(screen.getByRole("menuitem", { name: "Open page" })).toBeVisible();
+      expect(screen.queryByRole("menuitem", { name: "Remove printer" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "Edit connection" })).not.toBeInTheDocument();
       expect(requestsWithMethod("DELETE")).toEqual([]);
     });
 
-    it("lists only printers the member can administer", async () => {
+    it("offers administration only on printers the member can administer", async () => {
       const managed = makePrinter();
       const viewOnly = makePrinter({
         id: 2,
@@ -712,17 +715,16 @@ describe("PrintersPage", () => {
       });
       renderPrintersPage({ auth: MEMBER_AUTH, printers: [managed, viewOnly] });
 
-      await userEvent.click(screen.getByRole("tab", { name: "Manage printers" }));
+      openCardMenu(managed.name);
+      expect(screen.getByRole("menuitem", { name: "Remove printer" })).toBeVisible();
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
 
-      const list = within(screen.getByRole("region", { name: "Manage printers" }));
-      expect(list.getByRole("link", { name: managed.name })).toBeVisible();
-      expect(list.queryByRole("link", { name: viewOnly.name })).not.toBeInTheDocument();
+      openCardMenu(viewOnly.name);
+      expect(screen.queryByRole("menuitem", { name: "Remove printer" })).not.toBeInTheDocument();
     });
 
-    it("shows an empty management view before the first printer is added", async () => {
+    it("shows the empty state before the first printer is added", async () => {
       renderPrintersPage();
-
-      await userEvent.click(screen.getByRole("tab", { name: "Manage printers" }));
 
       expect(screen.getByText("No printers configured yet.")).toBeVisible();
     });
@@ -739,6 +741,14 @@ describe("PrintersPage", () => {
       renderPrintersPage({ printers: [makePrinter()] });
 
       expect(screen.getByRole("tab", { name: "Maintenance" })).toBeInTheDocument();
+    });
+
+    it("has no separate management tab; actions live in the card menu", async () => {
+      renderPrintersPage({ printers: [makePrinter()] });
+
+      expect(screen.queryByRole("tab", { name: "Manage printers" })).not.toBeInTheDocument();
+      openCardMenu("Voron 2.4");
+      expect(screen.getByRole("menuitem", { name: "Remove printer" })).toBeVisible();
     });
 
     it("opens the queue when it is chosen", async () => {

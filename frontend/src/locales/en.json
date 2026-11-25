@@ -1382,6 +1382,7 @@
   "Keep the recommended local paths, or connect S3-compatible object storage.": "Keep the recommended local paths, or connect S3-compatible object storage.",
   "Klipper config": "Klipper config",
   "Layer": "Layer",
+  "Printer actions": "Printer actions",
   "Weight": "Weight",
   "More actions for {value1}": "More actions for {value1}",
   "Queue is empty": "Queue is empty",

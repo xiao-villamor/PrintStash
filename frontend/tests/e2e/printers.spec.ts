@@ -518,20 +518,19 @@ test.describe("printer routes", () => {
     await expect(page).toHaveURL(/\/printers\/3$/);
 
     await page.goBack();
-    await page.getByRole("tab", { name: "Manage printers", exact: true }).click();
     await page
-      .getByRole("row")
+      .getByRole("article")
       .filter({ has: page.getByRole("link", { name: "ender", exact: true }) })
-      .getByRole("button", { name: "Settings", exact: true })
-      .click();
+      .click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Edit connection", exact: true }).click();
     const settings = page.getByRole("dialog", { name: "Edit printer connection" });
     await expect(settings).toBeVisible();
     await expect(page).toHaveURL(/\/printers$/);
     await page.keyboard.press("Escape");
     await expect(settings).toBeHidden();
 
-    await page.getByRole("tab", { name: "Fleet", exact: true }).click();
-    await card.getByRole("button", { name: /set model|creality/i }).click();
+    await card.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Set model", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "Choose printer model" })).toBeVisible();
     await expect(page).toHaveURL(/\/printers$/);
     await page.keyboard.press("Escape");
