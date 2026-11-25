@@ -1,87 +1,41 @@
-.settings-grouped {
+/* ── Settings language ─────────────────────────────────────────────────────
+   Every section is a stack of groups. A group is a heading with its actions
+   above a light bordered box that holds only rows (Linear and Cursor settings),
+   so the box carries no header rule and no icon tile. */
+
+.settings-grouped,
+.settings-inline-groups,
+.settings-imports,
+.settings-maintenance,
+.settings-notifications,
+.settings-storage-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settings-card-box {
   border: 1px solid var(--border);
+  border-radius: var(--radius-popover);
   background: var(--card);
+  padding: 4px 20px;
 }
 
-.settings-imports {
-  border: 1px solid var(--border);
-  background: var(--card);
-}
-
-.settings-maintenance {
-  border: 1px solid var(--border);
-  background: var(--card);
-}
-
-.settings-notifications {
-  border: 1px solid var(--border);
-  background: var(--card);
-}
-
-.settings-maintenance > .bg-card {
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-}
-
-.settings-maintenance > .bg-card + .bg-card {
-  border-top: 1px solid var(--border);
-}
-
-.settings-imports > .bg-card,
-.settings-imports fieldset > section {
-  border-right: 0;
-  border-left: 0;
-  border-radius: 0;
-}
-
-.settings-imports > .bg-card {
-  border-top: 0;
-}
-
-.settings-imports fieldset {
-  margin-top: 0;
-}
-
-.settings-grouped > .settings-card,
-.settings-inline-groups > .settings-card {
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-}
-
-.settings-grouped > .settings-card + .settings-card,
-.settings-inline-groups > .settings-card + .settings-card {
-  border-top: 1px solid var(--border);
-}
-
-.settings-grouped > .settings-card > .settings-card-head,
-.settings-inline-groups > .settings-card > .settings-card-head {
-  border: 0;
-  padding-bottom: 12px;
-}
-
-.settings-grouped > .settings-card > :not(.settings-card-head),
-.settings-inline-groups > .settings-card > :not(.settings-card-head) {
-  margin-left: 64px;
-  padding-top: 0;
-  padding-left: 0;
-}
-
-.settings-grouped > [role="alert"],
-.settings-grouped > [role="status"] {
-  padding: 16px 20px;
+.settings-card-box[data-tone="danger"] {
+  border-color: color-mix(in oklab, var(--destructive) 45%, var(--border));
 }
 
 .settings-card-foot {
   display: flex;
   justify-content: flex-end;
-  padding: 4px 20px 16px;
+  gap: 8px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
 }
 
-.settings-grouped > .settings-card > .settings-card-foot,
-.settings-inline-groups > .settings-card > .settings-card-foot {
-  padding-left: 0;
+.settings-grouped > [role="alert"],
+.settings-grouped > [role="status"] {
+  padding: 16px 20px;
 }
 
 .settings-preference-fields {
@@ -90,9 +44,7 @@
 }
 
 .settings-safety-rows {
-  padding-right: 20px;
-  padding-bottom: 4px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .settings-safety-rows > div {
@@ -113,7 +65,6 @@
 
 .settings-safety-rows dd {
   text-align: right;
-  font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
 
@@ -136,17 +87,6 @@
   display: flex;
   width: fit-content;
   margin: 12px 0 0 auto;
-}
-
-.settings-storage-pane > .bg-card,
-.settings-storage-pane > [data-slot="card"] {
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-}
-
-.settings-storage-pane > * + * {
-  border-top: 1px solid var(--border);
 }
 
 .settings-storage-summary > div {
@@ -175,17 +115,7 @@
   font-size: 12px;
 }
 
-.settings-storage-migration > .settings-card-head {
-  border-bottom: 0;
-}
-
 @media (max-width: 767px) {
-  .settings-grouped > .settings-card > :not(.settings-card-head),
-  .settings-inline-groups > .settings-card > :not(.settings-card-head) {
-    margin-left: 16px;
-    padding-right: 16px;
-  }
-
   .settings-preference-row {
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
@@ -200,13 +130,13 @@
 .settings-main select,
 .settings-main
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]) {
-  height: 34px;
-  min-height: 34px;
-  padding: 7px 10px;
-  border-radius: 0;
-  font-size: 13px;
+  height: 36px;
+  min-height: 36px;
+  padding: 7px 12px;
+  border-radius: var(--radius);
+  font-size: 14px;
   font-weight: 400;
-  line-height: 18px;
+  line-height: 20px;
 }
 
 .settings-main select {
@@ -214,26 +144,9 @@
 }
 
 .settings-main textarea {
-  border-radius: 0;
-  font-size: 13px;
-  font-weight: 400;
-}
-
-/* Text buttons carry no leading icon; spinners and icon-only buttons stay. */
-.settings-main
-  :is(button, a, label)[class*="inline-flex"]:not([aria-label]):not([title]):not(
-    :has(.sr-only)
-  ):not([class*="w-8"]):not([class*="w-9"]):not([class*="w-10"]):not([data-trash-page] *)
-  > svg:not(.animate-spin) {
-  display: none;
-}
-
-/* The Trash page keeps the rounded control language of the rest of the app. */
-.settings-main [data-trash-page] select,
-.settings-main
-  [data-trash-page]
-  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]) {
   border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 400;
 }
 
 .settings-main [role="switch"] {
@@ -249,15 +162,15 @@
   background: var(--card);
 }
 
-/* Statuses are aligned mono text, never pills. */
+/* Badges are neutral pills; only a failure is red. */
 .settings-main [data-slot="badge"] {
-  height: auto;
-  padding: 0;
+  height: 20px;
+  padding: 0 8px;
   border: 0;
-  border-radius: 0;
-  background: none;
-  color: var(--muted-foreground);
-  font: 500 12px/1.4 var(--font-mono);
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
+  color: color-mix(in oklab, var(--foreground) 82%, transparent);
+  font: 500 12px/1 var(--font-sans);
   gap: 6px;
 }
 
@@ -274,13 +187,26 @@
   background: var(--warning);
 }
 
+/* Where a setting applies: this browser or the whole Vault. */
+.settings-scope {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
 .settings-status {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   white-space: nowrap;
-  color: var(--muted-foreground);
-  font: 500 12px/1.4 var(--font-mono);
+  color: var(--foreground);
+  font: 400 14px/1.4 var(--font-sans);
 }
 
 .settings-status[data-tone="danger"] {
@@ -295,14 +221,10 @@
   background: var(--warning);
 }
 
-/* Group heads: 32px icon tile, title, description wrapped at reading width. */
+/* Group heads: title and description at reading width above the box. */
 .settings-main .settings-card-head p {
   max-width: 72ch;
   line-height: 1.5;
-}
-
-.settings-main .settings-preview-look .settings-card-head p {
-  max-width: none;
 }
 
 /* Rows: label and hint on the left, control on the right. */
@@ -458,12 +380,6 @@
   font-size: 13px;
   font-weight: 400;
   line-height: 18px;
-}
-
-/* Settings body copy is 13px throughout, like the rows around it. */
-.settings-main .text-sm {
-  font-size: 13px;
-  line-height: 1.45;
 }
 
 /* Body of a group inside panels that do not use the grouped indent rule. */

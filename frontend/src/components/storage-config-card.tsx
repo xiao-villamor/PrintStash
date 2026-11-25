@@ -7,7 +7,7 @@ import { useUiLocale } from "@/lib/i18n";
 
 import { providerFormError } from "@/lib/storage-provider-form";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AlertTriangle, Folder } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { vaultConfigOptions, useVaultConfigCommand } from "@/lib/queries/settings-config";
 import { storageProvidersOptions, storageReadDenied } from "@/lib/queries/settings-storage";
@@ -325,7 +325,6 @@ export function StorageConfigCard({
     <Localized>
       <div className="overflow-hidden rounded-none border border-border bg-card shadow-sm">
         <SettingsGroupHead
-          icon={Folder}
           level={3}
           title={t("settings.currentStorage")}
           description={t("Where PrintStash keeps your Vault files.")}

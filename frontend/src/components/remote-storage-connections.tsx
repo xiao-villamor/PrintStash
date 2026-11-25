@@ -452,7 +452,6 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
         className="overflow-hidden rounded-none border border-border bg-card text-card-foreground shadow-sm"
       >
         <SettingsGroupHead
-          icon={Cloud}
           level={2}
           title={uiText("Connections")}
           description={uiText(

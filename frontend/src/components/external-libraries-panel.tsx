@@ -622,7 +622,6 @@ function AdminLibrarySourcesPanel({
     <Localized>
       <div className="overflow-hidden border border-border bg-card">
         <SettingsGroupHead
-          icon={FolderSync}
           level={3}
           title={uiText("Scanning")}
           description={uiText("Applies to every Library source.")}
@@ -785,7 +784,6 @@ function AdminLibrarySourcesPanel({
           </section>
         )}
         <SettingsGroupHead
-          icon={FolderSync}
           level={3}
           title={uiText("Sources")}
           description={uiText(

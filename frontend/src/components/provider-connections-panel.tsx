@@ -6,7 +6,7 @@ import { SettingsGroupHead } from "@/components/settings-card";
 import { currentLocale } from "@/lib/locale";
 
 import { useEffect, useRef, useState } from "react";
-import { CloudUpload, ExternalLink } from "lucide-react";
+import {} from "lucide-react";
 
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Modal } from "@/components/ui/modal";
@@ -247,7 +247,6 @@ export function ProviderConnectionsPanel({
           className="overflow-hidden rounded-none border border-border bg-card"
         >
           <SettingsGroupHead
-            icon={CloudUpload}
             level={2}
             id="provider-connections-title"
             title={t("settings.providerConnections.title")}
@@ -369,7 +368,6 @@ export function ProviderConnectionsPanel({
           className="overflow-hidden rounded-none border border-border bg-card"
         >
           <SettingsGroupHead
-            icon={ExternalLink}
             level={2}
             id="paired-browsers-title"
             title={t("settings.pairedBrowsers.title")}

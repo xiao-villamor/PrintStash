@@ -5,6 +5,7 @@ import {
   settingsSection,
   type SettingsSection,
 } from "@/lib/settings-sections";
+import { SettingsNav, type SettingsNavGroup } from "@/components/settings-nav";
 import { useCollectionsPane } from "@/lib/collections-pane-context";
 
 import { useContentReveal } from "@/lib/use-content-reveal";
@@ -84,26 +85,21 @@ import { BackupRunHistory } from "@/components/backup-run-history";
 import { CollectionPicker } from "@/components/collection-picker";
 import {
   Bell,
-  ArrowRightLeft,
   Boxes,
   Check,
   CircleArrowUp,
-  Clock,
   Cloud,
   Database,
   Download,
   Eraser,
-  Eye,
   Gpu,
   Hourglass,
   Files,
   FolderSync,
-  Coins,
   FolderTree,
   HardDrive,
   HeartPulse,
   Activity,
-  FileText,
   Info,
   Images,
   KeyRound,
@@ -112,14 +108,12 @@ import {
   Palette,
   Puzzle,
   ShieldCheck,
-  RefreshCw,
   RotateCcw,
   Save,
   Settings as SettingsIcon,
   Trash2,
   Search,
   Server,
-  Sun,
   Tag,
   UserPlus,
   Users,
@@ -253,14 +247,14 @@ const SETTINGS_SECTIONS: {
 ];
 
 const SETTINGS_GROUPS: { labelKey: MessageKey; ids: SettingsSection[] }[] = [
-  { labelKey: "Global settings", ids: ["overview"] },
   {
-    labelKey: "Library",
-    ids: ["storage", "backup", "remote-storage", "imports", "ai-search", "libraries", "trash"],
+    labelKey: "Vault",
+    ids: ["overview", "access", "storage", "backup", "remote-storage", "maintenance"],
   },
-  { labelKey: "Hardware & integrations", ids: ["spoolman", "notifications"] },
-  { labelKey: "Account", ids: ["access", "sso"] },
-  { labelKey: "System", ids: ["maintenance", "work", "design", "previews", "gpu", "about"] },
+  { labelKey: "Library", ids: ["imports", "libraries", "previews", "ai-search", "trash"] },
+  { labelKey: "Integrations", ids: ["spoolman", "notifications", "sso"] },
+  { labelKey: "This browser", ids: ["design", "gpu"] },
+  { labelKey: "System", ids: ["work", "about"] },
 ];
 
 const SETTINGS_SUBTITLES = {
@@ -851,6 +845,17 @@ export function SettingsPanel() {
     (section) =>
       !["sso", "maintenance", "work", "ai-search"].includes(section.id) || user?.is_superuser,
   );
+
+  const settingsNavGroups: SettingsNavGroup[] = SETTINGS_GROUPS.flatMap((group) => {
+    const sections = group.ids.flatMap((id) => {
+      const section = visibleSettingsSections.find((item) => item.id === id);
+      return section ? [{ id: section.id, label: t(section.labelKey), icon: section.icon }] : [];
+    });
+    return sections.length ? [{ label: uiText(group.labelKey), sections }] : [];
+  });
+  // The Settings sidebar and the in-page rail are the same navigation; the rail
+  // shows whenever the sidebar is not already showing it.
+  const pageRail = !(sidebar && sidebar.open && sidebar.mode === "settings");
 
   function changeSection(section: SettingsSection) {
     const params = new URLSearchParams(searchParams.toString());
@@ -2257,7 +2262,6 @@ export function SettingsPanel() {
     activeSection === "trash" ? (
       <SettingsCard
         className="border-0"
-        icon={Trash2}
         title={uiText("Trash retention")}
         description={uiText(
           "Soft-deleted models stay restorable until the retention window expires.",
@@ -2315,7 +2319,6 @@ export function SettingsPanel() {
       <SettingsCard
         hideHeader={trashPage}
         className="border-0"
-        icon={Boxes}
         title={uiText("trash.itemsTitle")}
         description={uiText("multipart.trashHelp")}
       >
@@ -2716,10 +2719,7 @@ export function SettingsPanel() {
         {!trashPage && (
           <div
             ref={mobileTabsRef}
-            className={cn(
-              "border-b border-border pb-3",
-              sidebar ? sidebar.open && sidebar.mode === "settings" && "md:hidden" : "lg:hidden",
-            )}
+            className={cn("border-b border-border pb-3", pageRail ? "lg:hidden" : "md:hidden")}
           >
             <TabBar
               tabs={visibleSettingsSections.map((section) => {
@@ -2746,74 +2746,42 @@ export function SettingsPanel() {
 
         <div
           className={
-            trashPage || sidebar
+            trashPage || !pageRail
               ? ""
-              : "lg:grid lg:grid-cols-[14.375rem_minmax(0,1fr)] lg:items-start lg:gap-5"
+              : "lg:grid lg:grid-cols-[14.5rem_minmax(0,1fr)] lg:items-start lg:gap-8"
           }
         >
           {!trashPage && (
-            <WorkbenchSidebarContent>
-              <nav
-                aria-label={uiText("Settings sections")}
-                hidden={sidebar !== null && sidebar.mode !== "settings"}
-                className={cn(
-                  "settings-nav",
-                  sidebar
-                    ? "h-full w-full overflow-y-auto px-3 pb-4"
-                    : "sticky top-0 hidden border border-border bg-card p-3.5 lg:block",
-                )}
-              >
+            <>
+              <WorkbenchSidebarContent>
                 {sidebar && (
-                  <h2 className="flex h-12 items-center px-1 font-mono text-2xs font-medium uppercase tracking-[.06em] text-muted-foreground">
-                    {t("settings.title")}
-                  </h2>
+                  <SettingsNav
+                    variant="sidebar"
+                    groups={settingsNavGroups}
+                    active={activeSection}
+                    onChange={(id) => changeSection(settingsSection(id))}
+                    hidden={sidebar.mode !== "settings"}
+                  />
                 )}
-                {SETTINGS_GROUPS.map((group) => {
-                  const sections = group.ids.flatMap((id) => {
-                    const section = visibleSettingsSections.find((item) => item.id === id);
-                    return section ? [section] : [];
-                  });
-                  if (!sections.length) return null;
-                  return (
-                    <div
-                      key={group.labelKey}
-                      className="border-b border-border px-1 py-2 last:border-b-0"
-                    >
-                      <p
-                        className={cn(
-                          "px-2 pb-1 font-mono text-2xs font-medium uppercase tracking-wider text-muted-foreground",
-                          group.labelKey === "Global settings" &&
-                            "pb-3 font-sans text-[13px] font-semibold normal-case tracking-normal text-foreground",
-                        )}
-                      >
-                        {uiText(group.labelKey)}
-                      </p>
-                      {sections.map((section) => {
-                        const Icon = section.icon;
-                        const isActive = section.id === activeSection;
-                        return (
-                          <button
-                            key={section.id}
-                            type="button"
-                            aria-current={isActive ? "page" : undefined}
-                            onClick={() => changeSection(section.id)}
-                            className={cn(
-                              "flex h-8 w-full items-center gap-2.5 px-2.5 text-left text-[13px] font-normal transition-[color,background-color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-                              isActive
-                                ? "bg-accent text-accent-foreground"
-                                : "text-muted-foreground hover:bg-popover-hover hover:text-foreground",
-                            )}
-                          >
-                            <Icon className="h-4 w-4 shrink-0" />
-                            <span>{t(section.labelKey)}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-              </nav>
-            </WorkbenchSidebarContent>
+              </WorkbenchSidebarContent>
+              {pageRail && (
+                <SettingsNav
+                  variant="page"
+                  groups={settingsNavGroups}
+                  active={activeSection}
+                  onChange={(id) => changeSection(settingsSection(id))}
+                  account={
+                    user
+                      ? {
+                          name: user.username,
+                          role: user.is_superuser ? uiText("Vault admin") : uiText("Member"),
+                        }
+                      : undefined
+                  }
+                  onBack={() => router.push("/")}
+                />
+              )}
+            </>
           )}
 
           <main ref={sectionMotion} className="settings-main min-w-0">
@@ -2945,8 +2913,8 @@ export function SettingsPanel() {
                   </SettingsNotice>
                 )}
                 <ImportCopyWarning storageHealth={storageHealth} />
-                <div className="overflow-hidden border border-border bg-card">
-                  <div className="grid grid-cols-2 gap-y-4 border-b border-border p-4 sm:p-5 lg:grid-cols-4">
+                <div className="space-y-6">
+                  <div className="grid grid-cols-2 gap-y-4 rounded-lg border border-border bg-card p-4 sm:p-5 lg:grid-cols-4">
                     {kpiItems.map((item) => (
                       <div
                         key={item.label}
@@ -2964,10 +2932,9 @@ export function SettingsPanel() {
                     ))}
                   </div>
 
-                  <div className="settings-inline-groups divide-y divide-border">
+                  <div className="grid items-start gap-6 xl:grid-cols-2">
                     {user?.is_superuser && (
                       <SettingsCard
-                        icon={ShieldCheck}
                         title={t("Data safety")}
                         description={t("Review backups and file checks for this Vault.")}
                         action={
@@ -3051,41 +3018,8 @@ export function SettingsPanel() {
                         </dl>
                       </SettingsCard>
                     )}
-                    {user?.is_superuser && (
-                      <SettingsCard
-                        icon={Boxes}
-                        title={uiText("Sample collection")}
-                        action={
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            loading={addingSamples}
-                            onClick={async () => {
-                              setAddingSamples(true);
-                              try {
-                                const { job_id } = await addSampleCollection();
-                                toast.success(
-                                  uiText(
-                                    job_id
-                                      ? "Sample collection queued"
-                                      : "Sample collection already exists",
-                                  ),
-                                );
-                              } catch (error) {
-                                toast.error(userMessage(error));
-                              } finally {
-                                setAddingSamples(false);
-                              }
-                            }}
-                          >
-                            {uiText("Add sample collection")}
-                          </Button>
-                        }
-                      />
-                    )}
                     {/* System information */}
                     <SettingsCard
-                      icon={Server}
                       title={uiText("System")}
                       description={uiText("Server status and vault configuration")}
                       action={
@@ -3102,7 +3036,7 @@ export function SettingsPanel() {
                         ) : undefined
                       }
                     >
-                      <div className="pb-1 pr-5">
+                      <div>
                         {systemItems.map((item) => (
                           <div key={item.label} className="settings-readonly-row">
                             <div className="min-w-0">
@@ -3123,15 +3057,15 @@ export function SettingsPanel() {
                         ))}
                       </div>
                     </SettingsCard>
-
+                  </div>
+                  <div className="grid items-start gap-6 xl:grid-cols-2">
                     <SettingsCard
-                      icon={Download}
                       title={uiText("Library migration")}
                       description={uiText(
                         "Portable archive with models, metadata, print history, and original artifacts",
                       )}
                     >
-                      <div className="p-4 sm:p-5 space-y-4">
+                      <div className="space-y-4 py-4">
                         <p className="text-sm text-muted-foreground leading-relaxed">
                           {uiText(
                             "Export a versioned archive for migration to another PrintStash installation. Accounts, credentials, settings, and trash are excluded.",
@@ -3176,11 +3110,10 @@ export function SettingsPanel() {
 
                     {/* Data export */}
                     <SettingsCard
-                      icon={Download}
                       title={uiText("Data export")}
                       description={uiText("Metadata only — no raw STL/3MF/G-code files")}
                     >
-                      <div className="p-4 sm:p-5 space-y-4">
+                      <div className="space-y-4 py-4">
                         <p className="text-sm text-muted-foreground leading-relaxed">
                           {uiText(
                             "Download your searchable library context for spreadsheets, audits, migrations, or local AI prompts.",
@@ -3209,6 +3142,38 @@ export function SettingsPanel() {
                       </div>
                     </SettingsCard>
                   </div>
+                  {user?.is_superuser && (
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed border-border px-4 py-3">
+                      <p className="text-sm font-medium text-foreground">
+                        {uiText("Sample collection")}
+                      </p>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        loading={addingSamples}
+                        onClick={async () => {
+                          setAddingSamples(true);
+                          try {
+                            const { job_id } = await addSampleCollection();
+                            toast.success(
+                              uiText(
+                                job_id
+                                  ? "Sample collection queued"
+                                  : "Sample collection already exists",
+                              ),
+                            );
+                          } catch (error) {
+                            toast.error(userMessage(error));
+                          } finally {
+                            setAddingSamples(false);
+                          }
+                        }}
+                      >
+                        {uiText("Add sample collection")}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -3217,7 +3182,6 @@ export function SettingsPanel() {
               <div className="settings-grouped">
                 {user?.is_superuser && (
                   <SettingsCard
-                    icon={Users}
                     title={uiText("Users")}
                     description={uiText(
                       "Create users, assign vault admins, disable accounts, and reset passwords.",
@@ -3232,7 +3196,7 @@ export function SettingsPanel() {
                       </Button>
                     }
                   >
-                    <div className="p-4 sm:p-5 space-y-4">
+                    <div className="space-y-4 py-4">
                       <Modal
                         open={createUserOpen}
                         onClose={() => {
@@ -3464,13 +3428,12 @@ export function SettingsPanel() {
 
                 {user?.is_superuser && (
                   <SettingsCard
-                    icon={FolderTree}
                     title={uiText("Collection access")}
                     description={uiText(
                       "Assign view, edit, or admin access per user. Child collections inherit parent grants.",
                     )}
                   >
-                    <div className="p-4 sm:p-5 space-y-4">
+                    <div className="space-y-4 py-4">
                       <div className="settings-access-fields">
                         <label className="settings-preference-row">
                           <span className="text-[13px] font-medium text-foreground">
@@ -3661,7 +3624,6 @@ export function SettingsPanel() {
 
                 {user?.is_superuser && (
                   <SettingsCard
-                    icon={Printer3D}
                     title={uiText("Printer access")}
                     description={uiText(
                       "Grant access per printer. Roles build from view to print, machine control, and administration.",
@@ -3892,13 +3854,12 @@ export function SettingsPanel() {
                 )}
 
                 <SettingsCard
-                  icon={KeyRound}
                   title={uiText("API keys")}
                   description={uiText(
                     "Create credentials for scripts and integrations, then exchange them for a JWT at login.",
                   )}
                 >
-                  <div className="p-4 sm:p-5 space-y-4">
+                  <div className="space-y-4 py-4">
                     {!user ? (
                       <p className="text-sm text-muted-foreground">
                         {uiText("Sign in to create API keys.")}
@@ -4100,7 +4061,6 @@ export function SettingsPanel() {
                   {user?.is_superuser && (
                     <SettingsCard
                       className="settings-storage-migration"
-                      icon={ArrowRightLeft}
                       title={t("migration.title")}
                       description={t("migration.description")}
                       action={
@@ -4260,7 +4220,6 @@ export function SettingsPanel() {
                   </p>
                 )}
                 <SettingsCard
-                  icon={Clock}
                   title={t("settings.backupPolicyTitle")}
                   description={t("settings.backupPolicyDescription")}
                   stackActionOnMobile
@@ -4465,7 +4424,6 @@ export function SettingsPanel() {
                   </div>
                 </SettingsCard>
                 <SettingsCard
-                  icon={RefreshCw}
                   title={t("settings.backupRetentionTitle")}
                   description={t("settings.backupRetentionDescription")}
                   stackActionOnMobile
@@ -4540,7 +4498,6 @@ export function SettingsPanel() {
                   </div>
                 </SettingsCard>
                 <SettingsCard
-                  icon={HardDrive}
                   title={uiText("Manual backup")}
                   description={t("settings.backupManualDescription")}
                   stackActionOnMobile
@@ -4595,7 +4552,6 @@ export function SettingsPanel() {
                   <BackupRunHistory onPublished={() => void ownedBackupRead.refetch()} />
                 )}
                 <SettingsCard
-                  icon={RotateCcw}
                   title={uiText("Restore backup")}
                   description={uiText(
                     "Recover the vault database and stored files from a previous backup.",
@@ -5028,7 +4984,6 @@ export function SettingsPanel() {
                 )}
 
                 <SettingsCard
-                  icon={Sun}
                   title={t("Theme and language")}
                   description={t("Theme and language apply to this browser.")}
                 >
@@ -5072,7 +5027,6 @@ export function SettingsPanel() {
                 </SettingsCard>
 
                 <SettingsCard
-                  icon={Printer3D}
                   title={uiText("Printer cards")}
                   description={uiText(
                     "Choose whether printer cards include a visual. Plain cards remain more compact and information-dense.",
@@ -5120,7 +5074,6 @@ export function SettingsPanel() {
 
                 {/* Print tracking behaviour */}
                 <SettingsCard
-                  icon={Printer3D}
                   title={uiText("Print tracking")}
                   description={uiText(
                     "Automatically promote a revision to known-good after its first successful print. A manual failed/archived verdict is never overridden.",
@@ -5167,7 +5120,6 @@ export function SettingsPanel() {
 
                 {/* Currency for cost tracking */}
                 <SettingsCard
-                  icon={Coins}
                   title={uiText("Currency")}
                   description={uiText(
                     "Currency used to display cost figures in statistics and filament pricing.",
@@ -5203,7 +5155,6 @@ export function SettingsPanel() {
 
                 {/* Card metrics picker */}
                 <SettingsCard
-                  icon={Palette}
                   title={uiText("Model card metrics")}
                   description={uiText(
                     "Choose which 3 stats appear on each model card in the grid.",
@@ -5244,7 +5195,6 @@ export function SettingsPanel() {
                 </SettingsCard>
 
                 <SettingsCard
-                  icon={Info}
                   title={uiText("Model metadata")}
                   description={uiText("Choose which metadata fields appear on model detail pages.")}
                   action={
@@ -5304,7 +5254,6 @@ export function SettingsPanel() {
               <div className="settings-grouped">
                 {user?.is_superuser && (
                   <SettingsCard
-                    icon={Gpu}
                     title={t("gpu.server.title")}
                     description={t("gpu.server.description")}
                     action={
@@ -5322,7 +5271,6 @@ export function SettingsPanel() {
                   </SettingsCard>
                 )}
                 <SettingsCard
-                  icon={Gpu}
                   title={uiText("3D rendering")}
                   description={uiText("Choose how 3D models are rendered in this browser.")}
                 >
@@ -5371,7 +5319,6 @@ export function SettingsPanel() {
                 )}
 
                 <SettingsCard
-                  icon={Eye}
                   title={uiText("Interactive previews")}
                   description={uiText(
                     "Balance sharpness against GPU use in the 3D Model and G-code viewers. This preference is saved in this browser.",
@@ -5430,7 +5377,6 @@ export function SettingsPanel() {
                 </SettingsCard>
 
                 <SettingsCard
-                  icon={Images}
                   title={uiText("Model preview images")}
                   description={uiText(
                     "Choose the resolution of generated Model card images. Higher settings take longer to render and use more memory and storage.",
@@ -5611,7 +5557,6 @@ export function SettingsPanel() {
             {activeSection === "about" && (
               <div className="settings-grouped">
                 <SettingsCard
-                  icon={Info}
                   title={uiText("Version")}
                   description={uiText("Self-hosted asset management for 3D printing workflows.")}
                   action={
@@ -5703,7 +5648,6 @@ export function SettingsPanel() {
                 </SettingsCard>
 
                 <SettingsCard
-                  icon={FileText}
                   title={uiText("Latest changes")}
                   description={uiText("What changed in the current release")}
                 >

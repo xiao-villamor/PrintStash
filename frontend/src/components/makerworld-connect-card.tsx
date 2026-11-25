@@ -4,7 +4,7 @@ import { SettingsGroupHead } from "@/components/settings-card";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { Download, ExternalLink } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Localized } from "@/components/ui/localized";
 
@@ -18,7 +18,6 @@ export function MakerWorldConnectCard() {
     <Localized>
       <div className="overflow-hidden rounded-none border border-border bg-card">
         <SettingsGroupHead
-          icon={Download}
           level={3}
           title={uiText("MakerWorld browser import")}
           description={uiText("Import authenticated models with the PrintStash browser extension")}

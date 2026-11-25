@@ -1,4 +1,11 @@
 {
+  "Integrations": "Integraciones",
+  "Back to library": "Volver a la biblioteca",
+  "Search settings": "Buscar ajustes",
+  "No settings match": "Ningún ajuste coincide",
+  "Vault admin": "Administrador del Vault",
+  "This browser": "Este navegador",
+  "Whole Vault": "Todo el Vault",
   "Console": "Consola",
   "Macros": "Macros",
   "Send": "Enviar",

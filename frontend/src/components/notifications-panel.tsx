@@ -633,7 +633,6 @@ export function NotificationsPanel({
         <fieldset className="min-w-0" disabled={busy !== null || Boolean(settingsQuery.error)}>
           {/* Master switch */}
           <SettingsGroupHead
-            icon={Bell}
             level={3}
             title={uiText("Channels")}
             description={uiText(

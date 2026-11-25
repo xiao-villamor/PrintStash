@@ -2,7 +2,7 @@ import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, Database, HardDrive, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CheckCircle2, HardDrive } from "lucide-react";
 
 import { AuditSchedulePanel } from "@/components/audit-schedule-panel";
 
@@ -167,7 +167,6 @@ export function MaintenancePanel() {
     <div className="settings-grouped settings-maintenance">
       <Card role="region" aria-labelledby="maintenance-heading" className="overflow-hidden">
         <SettingsGroupHead
-          icon={ShieldCheck}
           level={2}
           id="maintenance-heading"
           title={t("maintenance.checkNow")}
@@ -431,7 +430,6 @@ export function MaintenancePanel() {
       <AuditSchedulePanel />
 
       <SettingsCard
-        icon={Database}
         title={t("maintenance.backupTitle")}
         description={t("maintenance.backupDescription")}
       >

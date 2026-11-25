@@ -2,7 +2,7 @@ import { SearchSettingsSnapshot } from "@/components/search-settings-snapshot";
 import { SettingsGroupHead } from "@/components/settings-card";
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Settings2 } from "lucide-react";
+import {} from "lucide-react";
 
 import { AiSearchSetup } from "@/components/ai-search-setup";
 import { InferenceEndpointForm } from "@/components/inference-endpoint-form";
@@ -508,7 +508,6 @@ export function AiSearchSettings() {
           </Modal>
           <section className="border-t border-border">
             <SettingsGroupHead
-              icon={Settings2}
               level={2}
               title={t("Setup and options")}
               description={t("Search types, AI servers and technical limits.")}

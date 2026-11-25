@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { CalendarClock, History } from "lucide-react";
+import {} from "lucide-react";
 import { SettingsCard } from "@/components/settings-card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -461,11 +461,7 @@ export function AuditSchedulePanel() {
   if (commands.retired) return null;
   return (
     <>
-      <SettingsCard
-        icon={CalendarClock}
-        title={t("auditSchedule.title")}
-        description={t("auditSchedule.description")}
-      >
+      <SettingsCard title={t("auditSchedule.title")} description={t("auditSchedule.description")}>
         <div className="settings-section-body grid gap-4 lg:grid-cols-2">
           {error && policies && !denied && (
             <div role="alert">
@@ -492,7 +488,7 @@ export function AuditSchedulePanel() {
         </div>
       </SettingsCard>
       {(historyError || history.length > 0) && (
-        <SettingsCard icon={History} title={t("auditSchedule.recent")}>
+        <SettingsCard title={t("auditSchedule.recent")}>
           <div className="settings-section-body">
             {historyError ? (
               <p role="alert" className="text-sm">
