@@ -30,7 +30,11 @@ export function LibraryCardSelection({
         checked={checked}
         onChange={onChange}
         ariaLabel={label}
-        className="relative before:absolute before:-inset-1.5"
+        className={cn(
+          "relative before:absolute before:-inset-1.5",
+          // Unchecked, it sits over any image: a chip, not a hole in the card.
+          !checked && "border-border-strong bg-card/90 shadow-sm backdrop-blur-sm",
+        )}
       />
     </div>
   );

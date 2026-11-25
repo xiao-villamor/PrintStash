@@ -187,19 +187,14 @@ function PreviewArrows({ state, size }: { state: PreviewCard; size: "card" | "ga
             <Button
               key={index}
               {...keepOffCard}
-              variant={size === "card" && state.imageKind === "render" ? "ghost" : "outline"}
+              variant="outline"
               size="icon"
               data-side={index === 0 ? "previous" : "next"}
               className={cn(
                 "library-preview-arrow pointer-events-auto absolute top-1/2 -translate-y-1/2",
-                size === "card"
-                  ? cn(
-                      "h-8 w-6",
-                      state.imageKind === "render" &&
-                        "text-foreground hover:bg-card hover:text-card-foreground focus-visible:bg-card focus-visible:text-card-foreground",
-                    )
-                  : "h-11 w-8",
-                "dark:bg-card/75 dark:text-card-foreground dark:hover:bg-card/90 dark:focus-visible:bg-card/90",
+                // A chip, whatever the image: a photo or render may be dark, light or busy.
+                "border-border-strong bg-card/90 shadow-sm backdrop-blur-sm hover:bg-card focus-visible:bg-card",
+                size === "card" ? "h-8 w-6" : "h-11 w-8",
                 index === 0
                   ? size === "card"
                     ? "left-1"
@@ -271,7 +266,7 @@ export function ModelPreviewControls({
               {...keepOffCard}
               variant="outline"
               size="xs"
-              className="library-preview-views pointer-events-auto h-6 px-1.5 py-0 text-2xs dark:bg-card/75 dark:hover:bg-card/90 dark:focus-visible:bg-card/90"
+              className="library-preview-views pointer-events-auto h-6 border-border-strong bg-card/90 px-1.5 py-0 text-2xs shadow-sm backdrop-blur-sm hover:bg-card focus-visible:bg-card"
               aria-label={uiText("modelPreview.gallery")}
               title={
                 views.length >= 2
