@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from printstash_core.mesh.preview_profile import PreviewLook
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 UnavailableReason = Literal[
     # Registration is off (VAULT_SETUP_MODE=disabled).
@@ -19,6 +21,19 @@ UnavailableReason = Literal[
     "admin_credentials_invalid",
     "admin_credentials_without_environment_mode",
 ]
+
+
+class SetupPreviewAppearance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    preview_look: PreviewLook
+    preview_floor_grid: StrictBool
+
+
+class SetupPreviewMode(StrEnum):
+    SINGLE = "single"
+    OBLIQUE = "oblique"
+    OBLIQUE_POLES = "oblique-poles"
 
 
 class SetupStatus(BaseModel):
@@ -56,6 +71,8 @@ class SetupStatus(BaseModel):
     current_backup_s3_bucket: Optional[str] = None
     current_backup_s3_endpoint_url: Optional[str] = None
     current_backup_s3_region: Optional[str] = None
+    preview_appearance: SetupPreviewAppearance | None = None
+    preview_mode: SetupPreviewMode | None = None
     configured_at: Optional[datetime] = None
 
 
@@ -86,6 +103,8 @@ class SetupRequest(SetupStorageRequest):
     username: str = Field(min_length=3, max_length=128)
     password: str = Field(min_length=8, max_length=256)
     email: Optional[str] = Field(default=None, max_length=255)
+    preview_appearance: SetupPreviewAppearance | None = None
+    preview_mode: SetupPreviewMode | None = None
 
 
 class SetupSessionResponse(BaseModel):

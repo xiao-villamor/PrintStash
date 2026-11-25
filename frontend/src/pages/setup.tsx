@@ -35,12 +35,15 @@ import {
 import { storeLogin } from "@/lib/auth";
 import { resetTasksForNewSetup } from "@/lib/task-center";
 import { useI18n } from "@/lib/i18n";
-import { SetupFrame } from "@/components/setup-frame";
+import { SetupFrame, type SetupStep } from "@/components/setup-frame";
+import { PreviewAppearance } from "@/components/preview-appearance";
+import { SetupReview } from "@/components/setup-review";
 import { SetupUnavailable } from "@/components/setup-unavailable";
 import { setupErrorFields, setupErrorMessage, setupStorageBody } from "@/lib/setup-storage";
 import { providerFormError } from "@/lib/storage-provider-form";
 import { formatBytes } from "@/lib/format";
 import type { SetupStorageCheck } from "@/types";
+import type { PreviewAppearance as Appearance, PreviewMode } from "@/types/config";
 
 export interface SetupPageDeps extends SetupEntryApi {
   storeLogin: typeof storeLogin;
@@ -56,6 +59,7 @@ const LIVE_DEPS: SetupPageDeps = {
 type AccountField = "username" | "password" | "confirm" | "email";
 const ACCOUNT_FIELDS = ["username", "email", "password", "confirm"] as const;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const DEFAULT_APPEARANCE: Appearance = { preview_look: "sky", preview_floor_grid: true };
 
 /** Every account rule that fails, in form order, so all of them are reported at once. */
 function invalidAccountFields(account: Record<AccountField, string>): AccountField[] {
@@ -85,8 +89,12 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
   const status = bootstrap.data?.status ?? null;
   const existing = bootstrap.data?.kind === "configured";
   const providers = bootstrap.data?.kind === "ready" ? bootstrap.data.providers : [];
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<SetupStep>(1);
   const [account, setAccount] = useState({ username: "", password: "", confirm: "", email: "" });
+  const [appearanceDraft, setAppearanceDraft] = useState<Appearance | null>(null);
+  const appearance = appearanceDraft ?? status?.preview_appearance ?? DEFAULT_APPEARANCE;
+  const [previewModeDraft, setPreviewModeDraft] = useState<PreviewMode | null>(null);
+  const previewMode = previewModeDraft ?? status?.preview_mode ?? "single";
   const [visiblePasswords, setVisiblePasswords] = useState({ password: false, confirm: false });
   const initialStorage = useMemo(() => {
     const state = bootstrap.data;
@@ -201,6 +209,8 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
       username: account.username.trim(),
       password: account.password,
       email: account.email.trim() || undefined,
+      preview_appearance: appearanceDraft ?? undefined,
+      preview_mode: previewModeDraft ?? undefined,
     };
     command.current = true;
     setOperation("create");
@@ -274,13 +284,13 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
             type="button"
             variant="outline"
             disabled={busy}
-            onClick={() => setStep(step === 3 ? 2 : 1)}
+            onClick={() => setStep(step === 4 ? 3 : step === 3 ? 2 : 1)}
           >
             {t("setup.back")}
           </Button>
         )}
         <Button type="submit" form={formId} className="ml-auto" loading={busy}>
-          {t(step === 3 ? "setup.create" : "setup.next")}
+          {t(step === 4 ? "setup.create" : "setup.next")}
         </Button>
       </>
     );
@@ -321,7 +331,8 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                 setAdvanceWhenChecked(true);
                 void checkStorage();
               }
-            } else if (step === 3) void submit();
+            } else if (step === 3) setStep(4);
+            else void submit();
           }}
         >
           <div>
@@ -331,14 +342,23 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
               className="text-xl font-semibold tracking-tight text-foreground focus-visible:outline-none"
             >
               {t(
-                step === 1 ? "setup.accountHeading" : step === 2 ? "setup.files" : "setup.summary",
+                (
+                  {
+                    1: "setup.accountHeading",
+                    2: "setup.files",
+                    3: "setup.customizePreviews",
+                    4: "setup.summary",
+                  } as const
+                )[step],
               )}
             </h1>
-            {step !== 3 && (
+            {step !== 4 && (
               <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
                 {step === 1
                   ? t("setup.accountHelp")
-                  : `${t("setup.defaultHelp")} ${t("setup.existingHelp")}`}
+                  : step === 2
+                    ? `${t("setup.defaultHelp")} ${t("setup.existingHelp")}`
+                    : t("setup.appearanceHelp")}
               </p>
             )}
           </div>
@@ -514,97 +534,34 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                 </div>
               </div>
             </>
+          ) : step === 3 ? (
+            <PreviewAppearance
+              firstRun
+              layout="setup"
+              value={appearance}
+              onChange={setAppearanceDraft}
+              views={{ value: previewMode, onChange: setPreviewModeDraft }}
+            />
           ) : (
-            <dl
-              aria-label={t("setup.summary")}
-              className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-x-2 divide-y divide-border text-sm sm:gap-x-3"
-            >
-              {(
-                [
-                  {
-                    key: "username",
-                    label: t("setup.username"),
-                    value: account.username.trim(),
-                    edit: { step: 1, label: t("setup.editAccount") },
-                  },
-                  {
-                    key: "email",
-                    label: t("setup.reviewEmail"),
-                    value: account.email.trim() || "—",
-                  },
-                  {
-                    key: "files",
-                    label: t("setup.files"),
-                    value: [
-                      selectedProvider ? storageChoiceLabel(selectedProvider) : providerId,
-                      values.data_dir ? String(values.data_dir) : null,
-                      filesFree != null
-                        ? // Kept as one unit so the size never splits from its unit.
-                          `${formatBytes(filesFree)} ${t("setup.availableSpace")}`.replace(
-                            / /g,
-                            "\u00a0",
-                          )
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · "),
-                    edit: { step: 2, label: t("setup.editStorage") },
-                  },
-                  ...(values.thumb_dir
-                    ? [
-                        {
-                          key: "previews",
-                          label: t("setup.previews"),
-                          value: String(values.thumb_dir),
-                        },
-                      ]
-                    : []),
-                ] as const satisfies readonly {
-                  key: string;
-                  label: string;
-                  value: string;
-                  edit?: { step: 1 | 2; label: string };
-                }[]
-              ).map((row) => (
-                <div
-                  key={row.key}
-                  className="col-span-3 grid min-h-12 grid-cols-subgrid items-center py-2"
-                >
-                  <dt className="text-muted-foreground">{row.label}</dt>
-                  <dd
-                    title={row.value}
-                    className={
-                      row.key === "files" || row.key === "previews"
-                        ? "break-all text-right font-mono text-xs"
-                        : "break-all text-right"
-                    }
-                  >
-                    {row.value}
-                  </dd>
-                  {"edit" in row && (
-                    <dd className="justify-self-end">
-                      <Button
-                        type="button"
-                        variant="link"
-                        size="xs"
-                        className="px-0 text-muted-foreground hover:text-foreground"
-                        disabled={busy}
-                        onClick={() => setStep(row.edit.step)}
-                      >
-                        {row.edit.label}
-                      </Button>
-                    </dd>
-                  )}
-                </div>
-              ))}
-            </dl>
+            <SetupReview
+              username={account.username.trim()}
+              email={account.email.trim()}
+              provider={selectedProvider ? storageChoiceLabel(selectedProvider) : providerId}
+              files={values.data_dir ? String(values.data_dir) : undefined}
+              previews={values.thumb_dir ? String(values.thumb_dir) : undefined}
+              freeBytes={filesFree}
+              appearance={appearance}
+              previewMode={previewMode}
+              busy={busy}
+              onEdit={setStep}
+            />
           )}
           {error && step !== 2 && (
             <p role="alert" className="text-sm text-destructive">
               {error}
             </p>
           )}
-          {step === 3 && busy && (
+          {step === 4 && busy && (
             <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
               {t("setup.creating")}
             </p>

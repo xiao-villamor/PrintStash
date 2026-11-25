@@ -22135,6 +22135,33 @@
         "title": "SetupCheckResponse",
         "type": "object"
       },
+      "SetupPreviewAppearance": {
+        "additionalProperties": false,
+        "properties": {
+          "preview_floor_grid": {
+            "title": "Preview Floor Grid",
+            "type": "boolean"
+          },
+          "preview_look": {
+            "$ref": "#/components/schemas/PreviewLook"
+          }
+        },
+        "required": [
+          "preview_look",
+          "preview_floor_grid"
+        ],
+        "title": "SetupPreviewAppearance",
+        "type": "object"
+      },
+      "SetupPreviewMode": {
+        "enum": [
+          "single",
+          "oblique",
+          "oblique-poles"
+        ],
+        "title": "SetupPreviewMode",
+        "type": "string"
+      },
       "SetupRequest": {
         "additionalProperties": false,
         "properties": {
@@ -22239,6 +22266,26 @@
             "minLength": 8,
             "title": "Password",
             "type": "string"
+          },
+          "preview_appearance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetupPreviewAppearance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preview_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetupPreviewMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "s3_access_key": {
             "anyOf": [
@@ -22636,6 +22683,26 @@
               }
             ],
             "title": "Observed Host"
+          },
+          "preview_appearance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetupPreviewAppearance"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preview_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetupPreviewMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "recovery_required": {
             "default": false,
@@ -50736,6 +50803,52 @@
           }
         ],
         "summary": "Prepare Storage",
+        "tags": [
+          "setup"
+        ]
+      }
+    },
+    "/api/v1/setup/preview-example": {
+      "get": {
+        "operationId": "preview_example_api_v1_setup_preview_example_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "look",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PreviewLook"
+            }
+          },
+          {
+            "in": "query",
+            "name": "floor_grid",
+            "required": true,
+            "schema": {
+              "title": "Floor Grid",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/webp": {}
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Example",
         "tags": [
           "setup"
         ]

@@ -134,24 +134,36 @@ def begin(request: Request, response: Response, session: Session) -> str:
     return csrf
 
 
-def verify(request: Request) -> None:
-    require_origin(request)
+def _ticket(request: Request) -> dict:
     try:
-        claims = jwt.decode(
+        return jwt.decode(
             request.cookies.get(COOKIE, ""),
             _signing_key(),
             algorithms=["HS256"],
             audience="printstash-setup",
             options={"require": ["exp", "iat", "csrf"]},
         )
-        csrf = claims["csrf"]
-        valid = isinstance(csrf, str) and hmac.compare_digest(
-            csrf.encode(), request.headers.get(CSRF_HEADER, "").encode()
-        )
-    except jwt.InvalidTokenError:
-        valid = False
+    except jwt.InvalidTokenError as exc:
+        raise HTTPException(403, "setup_session_expired") from exc
+
+
+def verify(request: Request) -> None:
+    require_origin(request)
+    csrf = _ticket(request)["csrf"]
+    valid = isinstance(csrf, str) and hmac.compare_digest(
+        csrf.encode(), request.headers.get(CSRF_HEADER, "").encode()
+    )
     if not valid:
         raise HTTPException(403, "setup_session_expired")
+
+
+def verify_preview(request: Request) -> None:
+    """A same-site setup ticket admits the read-only example image."""
+    if not isinstance(setup_policy.current(), setup_policy.TrustedNetwork):
+        raise HTTPException(403, "setup_disabled")
+    if not host_allowed(request.url.hostname or ""):
+        raise HTTPException(403, "setup_origin_not_allowed")
+    _ticket(request)
 
 
 def clear(response: Response, request: Request) -> None:

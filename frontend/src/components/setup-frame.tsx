@@ -4,14 +4,16 @@ import { AuthFrame } from "@/components/auth-frame";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-const STEPS = ["stepAccount", "stepStorage", "stepReview"] as const;
+const STEPS = ["stepAccount", "stepStorage", "stepAppearance", "stepReview"] as const;
+
+export type SetupStep = 1 | 2 | 3 | 4;
 
 export function SetupFrame({
   step,
   actions,
   children,
 }: {
-  step?: 1 | 2 | 3;
+  step?: SetupStep;
   actions?: ReactNode;
   children: ReactNode;
 }) {
@@ -26,7 +28,7 @@ export function SetupFrame({
       {step && (
         <ol
           aria-label={t("setup.progress")}
-          className="grid grid-cols-3 gap-1 border-b border-border p-3 sm:gap-2 sm:px-5"
+          className="grid grid-cols-2 gap-1 border-b border-border p-3 sm:grid-cols-4 sm:gap-2 sm:px-5"
         >
           {STEPS.map((key, index) => {
             const position = index + 1;

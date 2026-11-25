@@ -14,7 +14,8 @@ import { StorageConnectionReview } from "@/components/storage-connection-review"
 import { captureEditingBase } from "@/lib/api/editing";
 import type { EditingBase } from "@/types/editing";
 import type { PricingRates } from "@/types/production-costing";
-import type { PreferenceIntent, PreviewMode } from "@/lib/queries/settings-preferences";
+import type { PreferenceIntent } from "@/lib/queries/settings-preferences";
+import type { PreviewMode } from "@/types/config";
 
 import { PreviewAppearanceSettings } from "@/components/preview-appearance-settings";
 import { GettingStartedReminder } from "@/components/getting-started-reminder";

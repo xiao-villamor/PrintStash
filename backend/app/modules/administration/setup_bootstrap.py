@@ -21,7 +21,7 @@ from app.core.logging import get_logger
 from app.db.models import SystemConfig, User
 from app.modules.administration import runtime_config, setup_policy, setup_storage
 from app.modules.identity.auth import hash_password
-from app.schemas.setup import SetupRequest
+from app.schemas.setup import SetupPreviewMode, SetupRequest
 
 logger = get_logger(__name__)
 
@@ -81,6 +81,16 @@ def claim(session: Session, request: SetupRequest) -> Ownership:
     prepared = setup_storage.prepare(request, session, provision=True)
     setup_storage.persist_choice(session, request, prepared)
     user, config = _stage_owner(session, request)
+    if request.preview_appearance is not None:
+        config.preview_look = request.preview_appearance.preview_look
+        config.preview_floor_grid = request.preview_appearance.preview_floor_grid
+    if request.preview_mode is not None:
+        config.derivatives_previews_enabled = (
+            request.preview_mode is not SetupPreviewMode.SINGLE
+        )
+        config.derivatives_previews_include_poles = (
+            request.preview_mode is SetupPreviewMode.OBLIQUE_POLES
+        )
     session.commit()
     session.refresh(user)
     # Runtime activation is part of the recoverable preparation below.

@@ -3,22 +3,12 @@ import { Check } from "lucide-react";
 import { ModelCard } from "@/components/model-card";
 import { SettingsSwitch } from "@/components/settings-card";
 import { useI18n } from "@/lib/i18n";
+import { previewLookLabel, previewViewLabel } from "@/lib/preview-appearance";
 import { PREVIEW_LOOK_COLOURS } from "@/lib/thumbnail-profile.generated";
 import { cn } from "@/lib/utils";
-import type { PreviewAppearance as Appearance, PreviewLook } from "@/types/config";
+import type { PreviewAppearance as Appearance, PreviewLook, PreviewMode } from "@/types/config";
 import type { ModelListItem } from "@/types/models";
 import { NO_PREVIEWS } from "@/types/previews";
-
-const looks = {
-  sky: "Sky",
-  printstash_blue: "Blue",
-  slate: "Slate",
-  graphite: "Graphite",
-  sand: "Sand",
-  sage: "Sage",
-  clay: "Clay",
-  plum: "Plum",
-} as const satisfies Record<PreviewLook, string>;
 
 const lookOrder: readonly PreviewLook[] = [
   "sky",
@@ -30,6 +20,7 @@ const lookOrder: readonly PreviewLook[] = [
   "clay",
   "plum",
 ];
+const previewModes = ["single", "oblique", "oblique-poles"] as const;
 
 function swatchStyle(look: PreviewLook): CSSProperties & { "--preview-swatch": string } {
   return { "--preview-swatch": PREVIEW_LOOK_COLOURS[look] };
@@ -41,12 +32,16 @@ export function PreviewAppearance({
   layout,
   disabled,
   status,
+  firstRun = false,
+  views,
 }: {
   value: Appearance;
   onChange: (value: Appearance) => void;
   layout: "settings" | "setup";
   disabled?: boolean;
   status?: ReactNode;
+  firstRun?: boolean;
+  views?: { value: PreviewMode; onChange: (value: PreviewMode) => void };
 }) {
   const { t } = useI18n();
   const themes = [
@@ -56,12 +51,16 @@ export function PreviewAppearance({
   const colourLabel = useId();
   const colourHint = useId();
   const gridHint = useId();
+  const viewsId = useId();
   const row =
     layout === "settings"
       ? "settings-preference-row"
       : "flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-border py-3 text-sm font-medium";
   const PreviewHeading = layout === "settings" ? "h4" : "h3";
   const sampleName = t("Example bracket");
+  const exampleEndpoint = firstRun
+    ? "/api/v1/setup/preview-example"
+    : "/api/v1/config/preview-example";
   const sample: ModelListItem = {
     id: -1,
     edit_epoch: "sample",
@@ -74,7 +73,7 @@ export function PreviewAppearance({
     source_url: null,
     effective_role: null,
     tags: [],
-    thumbnail_url: `/api/v1/config/preview-example?look=${value.preview_look}&floor_grid=${value.preview_floor_grid}`,
+    thumbnail_url: `${exampleEndpoint}?look=${value.preview_look}&floor_grid=${value.preview_floor_grid}`,
     file_count: 1,
     gcode_file_count: 0,
     mesh_file_id: null,
@@ -99,7 +98,7 @@ export function PreviewAppearance({
         </div>
         <div className="preview-palette flex min-w-0 flex-wrap items-center gap-3 md:justify-end">
           <span aria-hidden className="whitespace-nowrap text-xs text-muted-foreground">
-            {t(looks[value.preview_look])}
+            {t(previewLookLabel[value.preview_look])}
           </span>
           <div
             role="radiogroup"
@@ -110,13 +109,13 @@ export function PreviewAppearance({
             {lookOrder.map((look) => (
               <label
                 key={look}
-                title={t(looks[look])}
+                title={t(previewLookLabel[look])}
                 className="relative block has-disabled:cursor-disabled"
               >
                 <input
                   type="radio"
                   name={colourLabel}
-                  aria-label={t(looks[look])}
+                  aria-label={t(previewLookLabel[look])}
                   className="peer sr-only"
                   checked={value.preview_look === look}
                   onChange={() => onChange({ ...value, preview_look: look })}
@@ -156,6 +155,27 @@ export function PreviewAppearance({
           disabled={disabled}
         />
       </div>
+      {views && (
+        <div className={row}>
+          <label htmlFor={viewsId}>{t("setup.previewViews")}</label>
+          <select
+            id={viewsId}
+            className="h-9 w-full px-3 font-normal sm:w-56"
+            value={views.value}
+            disabled={disabled}
+            onChange={(event) => {
+              const mode = previewModes.find((option) => option === event.target.value);
+              if (mode) views.onChange(mode);
+            }}
+          >
+            {previewModes.map((mode) => (
+              <option key={mode} value={mode}>
+                {t(previewViewLabel[mode])}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className={cn("space-y-3 pt-4", layout === "settings" && "pb-3")}>
         <PreviewHeading className="text-sm font-medium text-foreground">
           {t("Preview")}

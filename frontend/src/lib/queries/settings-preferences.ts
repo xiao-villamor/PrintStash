@@ -11,10 +11,10 @@ import { getSessionVersion, requireSessionVersion } from "@/lib/session-transpor
 import { useVaultConfigCommand, vaultConfigOptions } from "./settings-config";
 import { settingsTrashKeys } from "./settings-trash";
 import type { EditingBase } from "@/types/editing";
+import type { PreviewMode } from "@/types/config";
 import type { VaultConfigRead, VaultConfigUpdate } from "@/types";
 import type { PricingRates } from "@/types/production-costing";
 
-export type PreviewMode = "single" | "oblique" | "oblique-poles";
 export function previewMode(
   config:
     | Pick<VaultConfigRead, "derivatives_previews_enabled" | "derivatives_previews_include_poles">

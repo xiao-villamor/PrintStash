@@ -17,7 +17,7 @@
 - Show a compact status label when AI Search is on. Use a neutral Library search focus border and consistent filled dropdowns with rounded menus.
 - Anchor dropdowns below their controls when there is room, with upward placement near the viewport edge.
 - Use cards for the Library gallery and simplify its More menu.
-- Streamline first-run setup with three centered steps, a compact form, and optional preview customization in Getting started.
+- Center first-run setup and let the administrator choose the preview color, floor grid, and number of views before reviewing the account and storage choices.
 - Give sign-in and first-run setup a print illustration with a soft white background and a clearer grid in dark mode.
 - Use the Encaje logo in the app and its icons, with graphite in light mode and soft white in dark mode.
 - Keep reusable pricing templates in Profiles and show the rates applied to each Model revision. Use a separate editing view for one-off estimate inputs.
