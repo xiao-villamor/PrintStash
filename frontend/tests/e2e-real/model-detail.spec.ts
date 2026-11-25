@@ -23,7 +23,7 @@ test.describe("model detail", () => {
     await uploadGcodeModel(page, name);
     await openModelPage(page, name);
     const modelId = new URL(page.url()).pathname.split("/").at(-1);
-    await page.getByRole("button", { name: "Edit details", exact: true }).click();
+    await clickModelAction(page, "Edit details");
     const description =
       "## Assembly instructions\n\n- Fit **both** clips.\n- Check [the source](https://www.printables.com/).\n\n| Part | Count |\n| --- | --- |\n| Clip | 2 |";
     const editor = page.getByRole("dialog", { name: "Edit Model details" });
@@ -213,14 +213,14 @@ test.describe("model detail", () => {
     const tagInput = page.getByPlaceholder("Search or create — press Enter");
 
     // Cancel discards: inline-create a tag in edit mode, then cancel.
-    await page.getByRole("button", { name: "Edit details", exact: true }).click();
+    await clickModelAction(page, "Edit details");
     await tagInput.fill(dropTag);
     await tagInput.press("Enter");
     await page.getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByText(dropTag, { exact: true })).toHaveCount(0);
 
     // Save persists: inline-create a different tag and save — it shows as a chip.
-    await page.getByRole("button", { name: "Edit details", exact: true }).click();
+    await clickModelAction(page, "Edit details");
     await tagInput.fill(keepTag);
     await tagInput.press("Enter");
     await page.getByRole("button", { name: /^Save$/ }).click();

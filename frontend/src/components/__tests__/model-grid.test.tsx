@@ -344,6 +344,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -912,6 +913,7 @@ describe("ModelBrowser", () => {
     });
 
     it("keeps existing root collections visible beside an imported root", async () => {
+      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1440);
       renderVault({
         collections: [
           aCollection({ id: 1, name: "Christine", path: "christine", model_count: 17 }),
@@ -3587,6 +3589,7 @@ describe("ModelBrowser", () => {
     });
 
     it("keeps a wide folder level to one page until more is requested", async () => {
+      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1440);
       const nextPage = observePagination();
       const first = aCollectionNode();
       const second = aCollectionNode({
@@ -4058,6 +4061,7 @@ describe("ModelBrowser", () => {
     });
 
     it("restarts refreshed folder pagination automatically", async () => {
+      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1440);
       const nextPage = observePagination();
       const app = renderVault({
         models: [aModelListItem({ name: "Original model" })],
@@ -4174,6 +4178,7 @@ describe("ModelBrowser", () => {
     });
 
     it("ignores a refresh across rapid destinations", async () => {
+      vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1440);
       const user = userEvent.setup();
       const pending = Promise.withResolvers<Response>();
       const middle = Promise.withResolvers<Response>();

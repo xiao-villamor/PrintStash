@@ -151,7 +151,9 @@ async function openActions(user: ReturnType<typeof userEvent.setup>) {
 
 /** Open the metadata drawer while the Model page remains visible. */
 async function openEdit(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole("button", { name: "Edit details" }));
+  await user.click(
+    await within(screen.getByRole("banner")).findByRole("button", { name: "Edit details" }),
+  );
   await screen.findByRole("textbox", { name: "Name (required)" });
 }
 
@@ -366,7 +368,9 @@ describe("ModelDetail", () => {
       await user.dblClick(screen.getByRole("textbox", { name: "Model name" }));
       expect(screen.getByRole("textbox", { name: "Model name" })).toHaveValue("Saved title");
       expect(screen.getByRole("textbox", { name: "Model name" })).toHaveAttribute("readonly");
-      await user.click(screen.getByRole("button", { name: "Edit details" }));
+      await user.click(
+        within(screen.getByRole("banner")).getByRole("button", { name: "Edit details" }),
+      );
       expect(screen.getByRole("textbox", { name: "Model name" })).toHaveAttribute("readonly");
       expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
       await act(async () => {

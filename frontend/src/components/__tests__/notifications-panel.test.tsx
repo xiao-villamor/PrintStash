@@ -222,7 +222,7 @@ describe("NotificationsPanel", () => {
       .mockResolvedValue({ ...EDIT_BASE, enabled: true, channels: [aChannel()] });
     renderPanel({ getNotificationsSettings: read });
     expect(await screen.findByRole("alert")).toBeVisible();
-    expect(screen.queryByText("No notification channels yet")).not.toBeInTheDocument();
+    expect(screen.queryByText(/No notification channels yet/)).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Retry notification settings" }));
     expect(await screen.findByText("Workshop webhook")).toBeVisible();
@@ -974,7 +974,7 @@ describe("NotificationsPanel", () => {
           .mockResolvedValue({ ...EDIT_BASE, enabled: true, channels: [] }),
       });
 
-      expect(await screen.findByText("No notification channels yet")).toBeInTheDocument();
+      expect(await screen.findByText(/No notification channels yet/)).toBeInTheDocument();
     });
 
     it("distinguishes a channel that disabled itself from one the operator turned off", async () => {
@@ -1339,7 +1339,7 @@ describe("NotificationsPanel", () => {
         pending.resolve();
         await pending.promise;
       });
-      expect(await screen.findByText("No notification channels yet")).toBeVisible();
+      expect(await screen.findByText(/No notification channels yet/)).toBeVisible();
     });
   });
 

@@ -392,7 +392,7 @@ export async function clickModelAction(
   name: "Share" | "Edit details" | "Delete model",
 ): Promise<void> {
   if (name === "Edit details") {
-    await page.getByRole("button", { name, exact: true }).click();
+    await page.getByRole("button", { name, description: name, exact: true }).click();
     return;
   }
   await page.getByRole("button", { name: "More model actions", exact: true }).click();

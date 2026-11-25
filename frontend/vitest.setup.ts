@@ -31,23 +31,6 @@ if (!("ResizeObserver" in globalThis)) {
   };
 }
 
-// jsdom has no intersection geometry. Tests can provide entries when they
-// need to exercise scroll-driven behaviour.
-if (!("IntersectionObserver" in globalThis)) {
-  globalThis.IntersectionObserver = class {
-    readonly root = null;
-    readonly rootMargin = "0px";
-    readonly scrollMargin = "0px";
-    readonly thresholds = [0];
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-    takeRecords() {
-      return [];
-    }
-  };
-}
-
 // jsdom has no media queries or animation clock. Ask for reduced motion, so content
 // is shown at once, unless a test supplies its own matcher.
 window.matchMedia = (query) => ({

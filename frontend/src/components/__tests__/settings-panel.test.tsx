@@ -157,6 +157,21 @@ async function openPasswordReset() {
 }
 
 beforeEach(() => {
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      readonly root = null;
+      readonly rootMargin = "0px";
+      readonly scrollMargin = "0px";
+      readonly thresholds = [0];
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+      takeRecords() {
+        return [];
+      }
+    },
+  );
   window.localStorage.clear();
 });
 

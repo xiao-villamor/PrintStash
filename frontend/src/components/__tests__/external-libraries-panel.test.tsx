@@ -626,7 +626,7 @@ describe("ExternalLibrariesPanel", () => {
     it("explains how to add the first source", async () => {
       renderPanel({ list: vi.fn<() => Promise<ExternalLibrary[]>>().mockResolvedValue([]) });
 
-      expect(await screen.findByText("No library sources yet")).toBeInTheDocument();
+      expect(await screen.findByText(/No library sources yet/)).toBeInTheDocument();
       expect(screen.getByText(/mounted folder or connect remote storage/)).toBeInTheDocument();
     });
 
@@ -1261,7 +1261,7 @@ describe("ExternalLibrariesPanel", () => {
       });
 
       expect(await screen.findByRole("alert")).toHaveTextContent(/could not|unavailable/i);
-      expect(screen.queryByText("No library sources yet")).toBeNull();
+      expect(screen.queryByText(/No library sources yet/)).toBeNull();
       expect(screen.getByRole("button", { name: /Retry/i })).toBeEnabled();
     });
     it("recovers source reads without an empty-state claim", async () => {
@@ -1272,7 +1272,7 @@ describe("ExternalLibrariesPanel", () => {
           .mockResolvedValue([aVolume()]),
       });
       const retry = await screen.findByRole("button", { name: "Retry" });
-      expect(screen.queryByText("No library sources yet")).toBeNull();
+      expect(screen.queryByText(/No library sources yet/)).toBeNull();
 
       await userEvent.click(retry);
 

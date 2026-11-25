@@ -278,11 +278,11 @@ describe("Printer Jobs", () => {
         jobs={[aPrintJob({ ...external, state: "completed", started_at: null })]}
       />,
     );
-    const outcome = "Completed No print start recorded";
+    const outcome = /Completed\s*No print start recorded/;
     const history = within(screen.getByRole("table", { name: "Print history" }));
     expect(history.getByRole("cell", { name: outcome })).toBeVisible();
     expect(history.getByRole("button", { name: "Prime tower" })).toHaveAccessibleDescription(
-      expect.stringContaining(outcome),
+      outcome,
     );
     const inspector = within(screen.getByRole("complementary", { name: "Selected run" }));
     expect(inspector.getByText("No print start recorded")).toBeVisible();

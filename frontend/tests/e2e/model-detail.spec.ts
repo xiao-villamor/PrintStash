@@ -55,7 +55,9 @@ test.describe("model detail route", () => {
       route.fulfill({ json: [aTag({ name: "Short-editor tag" })] }),
     );
     await page.goto("/models/1");
-    await page.getByRole("button", { name: "Edit details", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Edit details", description: "Edit details", exact: true })
+      .click();
     const editor = page.getByRole("dialog", { name: "Edit Model details" });
     const search = editor.getByRole("combobox", { name: "Model tags" });
     await search.fill("short-editor");
@@ -74,7 +76,9 @@ test.describe("model detail route", () => {
       }),
     );
     await page.goto("/models/1");
-    await page.getByRole("button", { name: "Edit details", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Edit details", description: "Edit details", exact: true })
+      .click();
     const editor = page.getByRole("dialog", { name: "Edit Model details" });
     const collection = editor.getByRole("button", { name: collectionLabel, exact: true });
     const offset = await collection.evaluate((element) => {
@@ -89,7 +93,9 @@ test.describe("model detail route", () => {
   test("keeps the details save button clear of overlays", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/models/1");
-    await page.getByRole("button", { name: "Edit details", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Edit details", description: "Edit details", exact: true })
+      .click();
     const editor = page.getByRole("dialog", { name: "Edit Model details" });
     const save = editor.getByRole("button", { name: "Save changes", exact: true });
     await expect(save).toBeEnabled();
@@ -804,7 +810,9 @@ test.describe("model detail route", () => {
       });
     });
     await page.goto("/models/1");
-    await page.getByRole("button", { name: "Edit details", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Edit details", description: "Edit details", exact: true })
+      .click();
     await page.getByRole("textbox", { name: "Name (required)" }).fill("Saved draft");
     await page.getByRole("button", { name: "Save changes", exact: true }).click();
     await expect(
@@ -849,7 +857,9 @@ test.describe("model detail route", () => {
       });
     });
     await page.goto("/models/1");
-    await page.getByRole("button", { name: "Edit details", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Edit details", description: "Edit details", exact: true })
+      .click();
     await page.getByRole("textbox", { name: "Name (required)" }).fill("My browser draft");
     await page.getByRole("button", { name: "Save changes", exact: true }).click();
 

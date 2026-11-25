@@ -362,7 +362,13 @@ test.describe("Existing Model review", () => {
             await page.getByRole("button", { name: "More model actions", exact: true }).click();
             await review.capture("model-actions-menu");
             await page.keyboard.press("Escape");
-            await page.getByRole("button", { name: "Edit details", exact: true }).click();
+            await page
+              .getByRole("button", {
+                name: "Edit details",
+                description: "Edit details",
+                exact: true,
+              })
+              .click();
             await review.capture("model-details-editor");
             await dismiss();
             await expect(revisionTab).toHaveAttribute("aria-selected", "true");

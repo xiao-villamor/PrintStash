@@ -5,7 +5,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { Outlet, useLocation } from "@tanstack/react-router";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { multipartDetailOptions } from "@/features/library/multipart";
 import { clearLogin } from "@/lib/auth-store";
@@ -21,8 +21,6 @@ import {
   type RenderAppOptions,
 } from "@/test-support/render";
 import type { CollectionRead, MultipartModelRead } from "@/types";
-
-afterEach(() => vi.unstubAllGlobals());
 
 function renderApp(ui: ReactElement, options: RenderAppOptions = {}) {
   return renderApplication(ui, {
@@ -1013,7 +1011,6 @@ describe("MultipartModelDetailPage", () => {
   });
 
   it("saves an external image as the set cover", async () => {
-    vi.stubGlobal("IntersectionObserver", undefined);
     const user = userEvent.setup();
     const detail = aMultipart({
       part_count: 1,

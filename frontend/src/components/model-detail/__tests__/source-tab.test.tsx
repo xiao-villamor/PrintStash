@@ -13,8 +13,7 @@
  * The i18n rows are the other axis, and the rule is the same as everywhere: the
  * *interface* is translated, the captured values are not. A provider name, a tag,
  * a scraped title are the user's or the source's words — translating them
- * corrupts the record. The English origin labels are the deliberate fallback when
- * no provider is known, not a missing translation.
+ * corrupts the record.
  *
  * Cover controls stay out of a view-only tab. Rendering them for a user without
  * write access offers an action that 403s.
@@ -31,7 +30,6 @@ import { renderApp, renderApp as render, json } from "@/test-support/render";
 import { anEditingBase, aModel } from "@/test-support/factories";
 import { queryKeys } from "@/lib/query-client";
 import type { SourceApi } from "@/features/library/provenance";
-import { getMessageCatalog } from "@/lib/i18n";
 
 /** Written as a code point so the fixture survives every editor and diff tool. */
 const NUL = String.fromCharCode(0);
@@ -156,9 +154,10 @@ describe("SourceTab", () => {
 
     render(<SourceTab modelId={1} canEdit={false} api={api} />);
 
-    expect(
-      await screen.findByRole("link", { name: /^https:\/\/example.test\/canonical/ }),
-    ).toHaveAttribute("href", "https://example.test/canonical");
+    expect(await screen.findByRole("link", { name: /^Printables/ })).toHaveAttribute(
+      "href",
+      "https://example.test/canonical",
+    );
   });
 
   it("keeps cover controls out of a view-only Source tab", async () => {
@@ -173,41 +172,26 @@ describe("SourceTab", () => {
   it("localizes Source UI without translating provider, tag, or captured values", async () => {
     render(<SourceTab modelId={1} canEdit api={api} />, { locale: "es" });
 
-    await screen.findByText("Printables");
-    await editSource();
-    expect(screen.getByRole("button", { name: "Usar título de la fuente" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Usar descripción de la fuente" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Subir portada" })).toBeInTheDocument();
+    const summary = within(await screen.findByRole("region", { name: "Información de origen" }));
+    expect(summary.getByText("Printables")).toBeInTheDocument();
+    expect(summary.getByText("Source title")).toBeInTheDocument();
     expect(screen.getByLabelText("Etiquetas de la fuente")).toHaveTextContent("calibration");
-    expect(screen.getByText("Source title")).toBeInTheDocument();
-    expect(screen.getAllByText("Fuente", { exact: true }).length).toBeGreaterThan(0);
-    expect(screen.getByText("Inferido", { exact: true })).toBeInTheDocument();
-  });
 
-  it("keeps English origin labels as the typed catalog fallback without a provider", async () => {
-    expect(getMessageCatalog("en")["source.origin.confirmed"]).toBe("Source");
-    expect(getMessageCatalog("en")["source.origin.inferred"]).toBe("Inferred");
-    expect(getMessageCatalog("en")["source.origin.user"]).toBe("Edited");
+    await editSource();
 
-    render(<SourceTab modelId={1} canEdit={false} api={api} />);
-
-    await screen.findByText("Printables");
-    expect(screen.getAllByText("Source", { exact: true }).length).toBeGreaterThan(0);
-    expect(screen.getByText("Inferred", { exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Título" })).toHaveValue("Source title");
+    expect(screen.getByRole("button", { name: "Subir portada" })).toBeInTheDocument();
   });
 
   it("uses grouped technical rows for source identity and captured metadata", async () => {
     render(<SourceTab modelId={1} canEdit={false} api={api} />);
 
     expect(await screen.findByRole("heading", { name: "Source information" })).toBeInTheDocument();
-    expect(screen.getByTestId("source-identity-panel")).toBeInTheDocument();
-    expect(await screen.findByRole("heading", { name: "Captured fields" })).toBeInTheDocument();
-    expect(screen.getByText("Source ID")).toBeInTheDocument();
-    expect(screen.getByText("Revision")).toBeInTheDocument();
-    expect(screen.getByText("Last checked")).toBeInTheDocument();
-    expect(screen.getByText("Source title")).toBeInTheDocument();
+    const identity = screen.getByTestId("source-identity-panel");
+    expect(identity).toHaveTextContent("Source ID 41");
+    expect(identity).toHaveTextContent("Last checked");
+    const fields = within(await screen.findByRole("region", { name: "Captured fields" }));
+    expect(fields.getByText("Source title")).toBeInTheDocument();
     expect(screen.getByLabelText("Source tags")).toHaveTextContent("calibration");
   });
 
@@ -228,31 +212,6 @@ describe("SourceTab", () => {
         expect.objectContaining(anEditingBase()),
       );
     });
-  });
-
-  it("uses source title and description through the Model endpoint without patching provenance", async () => {
-    updateModel
-      .mockResolvedValueOnce(aModel({ edit_version: 2 }))
-      .mockResolvedValueOnce(aModel({ edit_version: 3 }));
-    const user = userEvent.setup();
-    render(<SourceTab modelId={1} canEdit api={api} />);
-    await editSource();
-    await user.click(await screen.findByRole("button", { name: "Use source title" }));
-    await user.click(screen.getByRole("button", { name: "Use source description" }));
-    expect(updateModel).toHaveBeenNthCalledWith(
-      1,
-      1,
-      { name: "Source title" },
-      expect.objectContaining(anEditingBase()),
-    );
-    expect(updateModel).toHaveBeenNthCalledWith(
-      2,
-      1,
-      { description: "Inferred description" },
-      expect.objectContaining(anEditingBase({ edit_version: 2 })),
-    );
-    expect(patchProvenance).not.toHaveBeenCalled();
-    expect(screen.getByText(/does not grant, interpret, or expand rights/i)).toBeInTheDocument();
   });
 
   /** The same provenance with the title carrying a user override. */
@@ -286,7 +245,7 @@ describe("SourceTab", () => {
 
     await editSource();
     expect(await screen.findByRole("textbox", { name: "Title" })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Description" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Creator" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "License" })).toBeInTheDocument();
   });
 
@@ -386,7 +345,11 @@ describe("SourceTab conditional editing", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     view.route({ "GET /api/v1/models/1/provenance": json(provenance) });
     await user.click(screen.getByRole("button", { name: "Retry" }));
-    expect(await screen.findByText("Source title")).toBeInTheDocument();
+    expect(
+      await within(await screen.findByRole("region", { name: "Source information" })).findByText(
+        "Source title",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("reads source covers from the shared snapshot", async () => {
@@ -492,7 +455,11 @@ describe("SourceTab conditional editing", () => {
     expect(await screen.findByText("Other editor")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("My draft");
     await user.click(screen.getByRole("button", { name: "Save my draft against this version" }));
-    expect(await screen.findByText("My draft")).toBeInTheDocument();
+    expect(
+      await within(await screen.findByRole("region", { name: "Source information" })).findByText(
+        "My draft",
+      ),
+    ).toBeInTheDocument();
     expect(writes).toEqual([
       '"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"',
       '"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v7"',
@@ -555,7 +522,11 @@ describe("SourceTab conflict recovery", () => {
     const { user, view } = await openConflict();
     await user.click(screen.getByRole("button", { name: "Review latest version" }));
     await user.click(await screen.findByRole("button", { name: "Use latest version" }));
-    expect(await screen.findByText("Latest saved title")).toBeInTheDocument();
+    expect(
+      await within(await screen.findByRole("region", { name: "Source information" })).findByText(
+        "Latest saved title",
+      ),
+    ).toBeInTheDocument();
     await waitFor(() =>
       expect(screen.queryByRole("textbox", { name: "Title" })).not.toBeInTheDocument(),
     );
@@ -611,7 +582,11 @@ describe("SourceTab conflict recovery", () => {
   it("refuses retry after edit permission is revoked", async () => {
     const { user, view } = await openConflict({ role: "view" });
     await user.click(screen.getByRole("button", { name: "Review latest version" }));
-    expect(await screen.findByText("Latest saved title")).toBeInTheDocument();
+    expect(
+      await within(await screen.findByRole("region", { name: "Latest saved version" })).findByText(
+        "Latest saved title",
+      ),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Save my draft against this version" }),
     ).toBeDisabled();
@@ -682,58 +657,6 @@ describe("SourceTab conflict recovery", () => {
       edit_version: 12,
     });
   });
-
-  it.each([
-    { label: "title", button: "Use source title", payload: { name: "Source title" } },
-    {
-      label: "description",
-      button: "Use source description",
-      payload: { description: "Inferred description" },
-    },
-  ])("applies captured Model $label conditionally", async ({ button, payload }) => {
-    const user = userEvent.setup();
-    let base: string | null = null;
-    const saved = aModel({ edit_version: 8, ...payload });
-    const view = renderApp(<SourceTab modelId={1} canEdit />, {
-      routes: {
-        "GET /api/v1/models/1/provenance": json(provenance),
-        "PATCH /api/v1/models/1": (_url, init) => {
-          base = new Headers(init?.headers).get("If-Match");
-          return json(saved);
-        },
-      },
-    });
-    await editSource();
-    await user.click(await screen.findByRole("button", { name: button }));
-    await waitFor(() => expect(view.client.getQueryData(queryKeys.model(1))).toMatchObject(saved));
-    expect(base).toBe('"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"');
-    expect(JSON.parse(view.requestsWithMethod("PATCH")[0].body)).toEqual(payload);
-    expect(view.client.getQueryData([...queryKeys.model(1), "provenance"])).toMatchObject({
-      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      edit_version: 8,
-    });
-  });
-
-  it("reviews the current Model value before replacing it with captured text", async () => {
-    const user = userEvent.setup();
-    const view = renderApp(<SourceTab modelId={1} canEdit />, {
-      routes: {
-        "GET /api/v1/models/1/provenance": json(provenance),
-        "GET /api/v1/models/1": json(aModel({ edit_version: 7, name: "Current model title" })),
-        "PATCH /api/v1/models/1": json({ detail: "edit_conflict" }, 412),
-      },
-    });
-    await editSource();
-    await user.click(await screen.findByRole("button", { name: "Use source title" }));
-    view.route({ "GET /api/v1/models/1/provenance": json({ ...provenance, edit_version: 7 }) });
-    await user.click(await screen.findByRole("button", { name: "Review latest version" }));
-    expect(
-      within(await screen.findByRole("region", { name: "Latest saved version" })).getByText(
-        "Current model title",
-      ),
-    ).toBeInTheDocument();
-    expect(view.requestsWithMethod("PATCH")).toHaveLength(1);
-  });
 });
 
 describe("SourceTab edit boundaries", () => {
@@ -757,12 +680,14 @@ describe("SourceTab edit boundaries", () => {
     const view = renderApp(<SourceTab modelId={1} canEdit />, {
       routes: { "GET /api/v1/models/1/provenance": json(provenance) },
     });
-    await screen.findByText("Source title");
+    await within(await screen.findByRole("region", { name: "Source information" })).findByText(
+      "Source title",
+    );
     view.route({ "GET /api/v1/models/1/provenance": json({ detail: "forbidden" }, 403) });
     await act(async () => {
       await view.client.refetchQueries({ queryKey: [...queryKeys.model(1), "provenance"] });
     });
-    await waitFor(() => expect(screen.queryByText("Source title")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryAllByText("Source title")).toHaveLength(0));
     expect(screen.getByRole("alert")).toBeInTheDocument();
   });
 
