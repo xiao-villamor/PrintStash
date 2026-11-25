@@ -539,12 +539,12 @@ export function SettingsPanel() {
   // during render; mirroring it into state needed an effect to re-sync on every
   // deep link, back button, and replace.
   const activeSection = settingsSection(searchParams.get("section"));
-  const sectionMotion = useContentReveal<HTMLElement>(activeSection);
+  const sectionMotion = useContentReveal<HTMLElement>(activeSection, { scroll: "self" });
   const trashPage = activeSection === "trash";
-  const mobileTabsRef = useRef<HTMLDivElement>(null);
+  const settingsTabsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const tabs = mobileTabsRef.current?.querySelector<HTMLElement>('[role="tablist"]');
+    const tabs = settingsTabsRef.current?.querySelector<HTMLElement>('[role="tablist"]');
     const selected = tabs?.querySelector<HTMLElement>('[data-active="true"]');
     if (tabs && selected) {
       tabs.scrollLeft = selected.offsetLeft - (tabs.clientWidth - selected.clientWidth) / 2;
@@ -2539,7 +2539,7 @@ export function SettingsPanel() {
 
   return (
     <Localized>
-      <div className={cn("w-full space-y-6", !trashPage && "mx-auto max-w-7xl")}>
+      <div className={cn("settings-frame", !trashPage && "mx-auto max-w-7xl")}>
         <ConfirmModal
           open={restartConfirmOpen}
           variant="default"
@@ -2754,7 +2754,10 @@ export function SettingsPanel() {
         />
 
         {!trashPage && (
-          <div ref={mobileTabsRef} className="border-b border-border pb-3 lg:hidden">
+          <div
+            ref={settingsTabsRef}
+            className="settings-tabs border-b border-border pb-3 lg:hidden"
+          >
             <TabBar
               tabs={visibleSettingsSections.map((section) => {
                 const Icon = section.icon;
@@ -2781,8 +2784,8 @@ export function SettingsPanel() {
         <div
           className={
             trashPage
-              ? ""
-              : "lg:grid lg:grid-cols-[14.5rem_minmax(0,1fr)] lg:items-start lg:gap-8 xl:grid-cols-[14.5rem_minmax(0,1fr)_10.5rem]"
+              ? "settings-layout flex flex-col"
+              : "settings-layout flex flex-col lg:grid lg:grid-cols-[14.5rem_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)] lg:gap-8 xl:grid-cols-[14.5rem_minmax(0,1fr)_10.5rem]"
           }
         >
           {!trashPage && (
@@ -2970,13 +2973,13 @@ export function SettingsPanel() {
                     ))}
                   </div>
 
-                  <div className="grid items-start gap-6 xl:grid-cols-2">
+                  <div className="settings-overview-pair">
                     {user?.is_superuser && (
                       <SettingsCard
                         title={t("Data safety")}
                         description={t("Review backups and file checks for this Vault.")}
-                        action={
-                          <div className="flex flex-wrap gap-2">
+                        footer={
+                          <>
                             <Button
                               variant="outline"
                               size="sm"
@@ -2991,7 +2994,7 @@ export function SettingsPanel() {
                             >
                               {t("settings.maintenance")}
                             </Button>
-                          </div>
+                          </>
                         }
                       >
                         <dl className="settings-safety-rows">
@@ -3062,7 +3065,7 @@ export function SettingsPanel() {
                     <SettingsCard
                       title={uiText("System")}
                       description={uiText("Server status and vault configuration")}
-                      action={
+                      footer={
                         user?.is_superuser && health?.capabilities?.restart ? (
                           <Button
                             type="button"
@@ -3098,20 +3101,14 @@ export function SettingsPanel() {
                       </div>
                     </SettingsCard>
                   </div>
-                  <div className="grid items-start gap-6 xl:grid-cols-2">
+                  <div className="settings-overview-pair">
                     <SettingsCard
                       title={uiText("Library migration")}
                       description={uiText(
                         "Portable archive with models, metadata, print history, and original artifacts",
                       )}
-                    >
-                      <div className="space-y-4 py-4">
-                        <p className="text-sm text-muted-foreground leading-relaxed">
-                          {uiText(
-                            "Export a versioned archive for migration to another PrintStash installation. Accounts, credentials, settings, and trash are excluded.",
-                          )}
-                        </p>
-                        <div className="flex flex-wrap items-end gap-2">
+                      footer={
+                        <>
                           <button
                             type="button"
                             onClick={() => void exportArchive()}
@@ -3144,22 +3141,22 @@ export function SettingsPanel() {
                               />
                             </label>
                           )}
-                        </div>
-                      </div>
+                        </>
+                      }
+                    >
+                      <p className="py-4 text-sm leading-relaxed text-muted-foreground">
+                        {uiText(
+                          "Export a versioned archive for migration to another PrintStash installation. Accounts, credentials, settings, and trash are excluded.",
+                        )}
+                      </p>
                     </SettingsCard>
 
                     {/* Data export */}
                     <SettingsCard
                       title={uiText("Data export")}
                       description={uiText("Metadata only — no raw STL/3MF/G-code files")}
-                    >
-                      <div className="space-y-4 py-4">
-                        <p className="text-sm text-muted-foreground leading-relaxed">
-                          {uiText(
-                            "Download your searchable library context for spreadsheets, audits, migrations, or local AI prompts.",
-                          )}
-                        </p>
-                        <div className="flex flex-wrap gap-2">
+                      footer={
+                        <>
                           <button
                             type="button"
                             onClick={() => exportData("json")}
@@ -3178,8 +3175,14 @@ export function SettingsPanel() {
                             <Download className="h-3.5 w-3.5" />
                             {exporting === "csv" ? uiText("Exporting") : uiText("CSV")}
                           </button>
-                        </div>
-                      </div>
+                        </>
+                      }
+                    >
+                      <p className="py-4 text-sm leading-relaxed text-muted-foreground">
+                        {uiText(
+                          "Download your searchable library context for spreadsheets, audits, migrations, or local AI prompts.",
+                        )}
+                      </p>
                     </SettingsCard>
                   </div>
                   {user?.is_superuser && (

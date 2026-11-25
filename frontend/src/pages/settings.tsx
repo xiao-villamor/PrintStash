@@ -3,7 +3,7 @@ import { PageContainer } from "@/components/ui/page-container";
 
 export default function SettingsPage() {
   return (
-    <PageContainer className="relative">
+    <PageContainer className="settings-page relative">
       <SettingsPanel />
     </PageContainer>
   );

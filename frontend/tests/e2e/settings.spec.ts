@@ -48,20 +48,82 @@ const accessibleGpu = {
 };
 
 test.describe("settings route", () => {
+  test("keeps Settings navigation fixed when Appearance scrolls", async ({ page }) => {
+    await page.goto("/settings?section=design");
+    await collapseNavigationSidebar(page);
+    const navigation = page.getByRole("navigation", { name: "Settings sections" });
+    const title = page.getByRole("heading", { name: "Appearance", level: 1 });
+    const content = page.locator(".settings-main");
+    await expect(page.getByRole("group", { name: "Model card metrics" })).toBeVisible();
+    const originalNav = await navigation.boundingBox();
+    const originalTitle = await title.boundingBox();
+
+    await content.hover({ position: { x: 160, y: 150 } });
+    await page.mouse.wheel(0, 480);
+
+    await expect.poll(() => content.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    expect(await navigation.boundingBox()).toEqual(originalNav);
+    expect(await title.boundingBox()).toEqual(originalTitle);
+  });
+
   test("keeps the active settings section visible at the bottom of the overview", async ({
     page,
-  }) => {
+  }, testInfo) => {
     await page.goto("/settings?section=overview");
     const toggle = page.getByRole("button", { name: "Toggle sidebar" });
     if ((await toggle.getAttribute("aria-expanded")) === "true") await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
 
-    await page.getByRole("heading", { name: "Data export" }).scrollIntoViewIfNeeded();
+    const index = page.getByRole("complementary", { name: "On this page" });
+    await index.getByRole("link", { name: "Data export" }).click();
+    await expect(page.getByRole("heading", { name: "Data export" })).toBeInViewport();
 
     const crumbs = page.getByRole("navigation", { name: "Breadcrumbs" });
     await expect(crumbs.locator("[aria-current=page]")).toHaveText("Overview");
     await expect(crumbs).toBeInViewport();
     expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(1080);
+
+    const scrollbar = await page.locator(".settings-main").evaluate((element) => {
+      const track = getComputedStyle(element, "::-webkit-scrollbar-track");
+      const thumb = getComputedStyle(element, "::-webkit-scrollbar-thumb");
+      const width = getComputedStyle(element, "::-webkit-scrollbar").width;
+      return {
+        gap: getComputedStyle(element).paddingInlineEnd,
+        arrows: getComputedStyle(element, "::-webkit-scrollbar-button").display,
+        thumbWidth: parseFloat(width) - 2 * parseFloat(thumb.borderInlineStartWidth),
+        trackHeight: Math.round(
+          element.getBoundingClientRect().height - 2 * parseFloat(track.marginBlockStart),
+        ),
+      };
+    });
+    expect(scrollbar).toEqual({ gap: "8px", arrows: "none", thumbWidth: 4, trackHeight: 144 });
+    await page.screenshot({ path: testInfo.outputPath("overview-scrollbar.png") });
+  });
+
+  test("aligns Overview cards and export actions side by side", async ({ page }, testInfo) => {
+    await page.goto("/settings?section=overview");
+    await collapseNavigationSidebar(page);
+    for (const [left, right] of [
+      ["Data safety", "System"],
+      ["Library migration", "Data export"],
+    ]) {
+      const leftCard = page.getByRole("group", { name: left, exact: true });
+      const rightCard = page.getByRole("group", { name: right, exact: true });
+      const leftBox = (await leftCard.locator(".settings-card-box").boundingBox())!;
+      const rightBox = (await rightCard.locator(".settings-card-box").boundingBox())!;
+      const leftTitle = await leftCard.getByRole("heading").boundingBox();
+      const rightTitle = await rightCard.getByRole("heading").boundingBox();
+      expect(leftBox.x).toBeLessThan(rightBox.x);
+      expect(leftBox.y).toBeCloseTo(rightBox.y);
+      expect(leftBox.height).toBeCloseTo(rightBox.height);
+      expect(leftTitle?.y).toBe(rightTitle?.y);
+    }
+
+    const archive = page.getByRole("button", { name: "Export full library" });
+    const metadata = page.getByRole("button", { name: "JSON", exact: true });
+    expect((await archive.boundingBox())?.y).toBe((await metadata.boundingBox())?.y);
+    await metadata.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath("overview-aligned.png") });
   });
 
   test("selects Settings values from the shared menu", async ({ page }) => {

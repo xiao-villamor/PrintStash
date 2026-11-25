@@ -430,7 +430,7 @@ test.describe("Model preview browsing", () => {
       };
     });
     expect(shadow).toMatchObject({ radius: "6px", neutral: true, overflow: "visible" });
-    expect(shadow.shadow).toContain("0px 14px 28px -12px");
+    expect(shadow.shadow).toContain("0px 8px 20px -10px");
   });
 
   test("persists a hidden card preview label across reload", async ({ page }) => {

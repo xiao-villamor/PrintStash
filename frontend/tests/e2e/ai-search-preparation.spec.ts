@@ -133,4 +133,26 @@ test.describe("AI Search preparation", () => {
       await expect(page.getByRole("link", { name: action, exact: true })).toBeVisible();
     });
   }
+  test("keeps the technical settings chrome in place during scrolling", async ({
+    page,
+  }, testInfo) => {
+    await serveSearch(page, aSearchGeneration({ state: "active" }));
+    await page.goto("/settings?section=ai-search&ai-view=technical");
+    await collapseNavigationSidebar(page);
+    const title = page.getByRole("heading", { name: "AI Search", level: 1 });
+    const back = page.getByRole("link", { name: "Back to AI Search" });
+    const section = page.getByRole("group", { name: "Technical settings" });
+    const body = section.locator(".settings-card-box");
+    await expect(body).toBeVisible();
+    const originalTitle = await title.boundingBox();
+    const originalBack = await back.boundingBox();
+
+    await body.hover({ position: { x: 160, y: 150 } });
+    await page.mouse.wheel(0, 480);
+
+    await page.screenshot({ path: testInfo.outputPath("technical-settings-scroll.png") });
+    await expect.poll(() => body.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    expect(await title.boundingBox()).toEqual(originalTitle);
+    expect(await back.boundingBox()).toEqual(originalBack);
+  });
 });

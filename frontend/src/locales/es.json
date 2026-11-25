@@ -4455,7 +4455,6 @@
   "aiSearch.navIndexes": "Tipos de búsqueda",
   "aiSearch.navServers": "Servidores de IA",
   "aiSearch.navTechnical": "Opciones técnicas",
-  "aiSearch.technicalTitle": "Opciones técnicas",
   "aiSearch.technicalIntro": "Permisos y ajustes especializados. La configuración guiada cubre las opciones habituales.",
   "aiSearch.serversIntro": "Conecta un servidor para buscar sin un modelo de IA local.",
   "aiSearch.editServer": "Editar {model}",

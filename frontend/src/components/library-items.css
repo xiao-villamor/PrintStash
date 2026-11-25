@@ -353,8 +353,12 @@
 :where(.dark) .library-model-card:not([data-inspected]):hover {
   border-color: var(--border-strong);
   box-shadow:
-    0 14px 28px -12px color-mix(in srgb, var(--foreground) 22%, transparent),
-    0 3px 7px var(--dialog-shadow);
+    0 8px 20px -10px var(--dialog-shadow),
+    0 2px 5px var(--dialog-shadow);
+}
+
+:where(.dark) .library-model-card:not([data-inspected], [data-selected]):hover {
+  background-color: color-mix(in srgb, var(--card) 96%, var(--foreground));
 }
 
 /* Keyboard focus rings the whole card, not the square link inside it. */

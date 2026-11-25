@@ -1,5 +1,6 @@
 import { SearchSettingsSnapshot } from "@/components/search-settings-snapshot";
 import { SettingsCard, SettingsNotice } from "@/components/settings-card";
+import { SETTINGS_FIELD } from "@/components/settings-controls";
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
@@ -101,12 +102,6 @@ function SettingsForm({
       }}
     >
       <fieldset disabled={readOnly || save.isPending} className="space-y-4">
-        <div>
-          <h3 className="text-base font-semibold">{t("aiSearch.technicalTitle")}</h3>
-          <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-            {t("aiSearch.technicalIntro")}
-          </p>
-        </div>
         <h4 className="text-sm font-semibold">{t("aiSearch.setupPermissions")}</h4>
         <div className="space-y-3">
           {toggles.map(([field, label, help]) => (
@@ -151,7 +146,7 @@ function SettingsForm({
             <label className="block space-y-1 text-sm">
               {t("aiSearch.sparseModel")}
               <select
-                className="block w-full rounded-md border border-input bg-field-surface p-2"
+                className={`${SETTINGS_FIELD} flex w-full items-center`}
                 value={draft.sparse_model_id ?? ""}
                 onChange={(event) =>
                   setDraft({
@@ -219,7 +214,7 @@ function SettingsForm({
             <label className="space-y-1 text-sm">
               {t("aiSearch.lexicalBackend")}
               <select
-                className="block w-full rounded-md border border-input bg-field-surface p-2"
+                className={`${SETTINGS_FIELD} flex w-full items-center`}
                 value={draft.lexical_backend}
                 onChange={(event) =>
                   setDraft({
@@ -319,7 +314,7 @@ function SettingsForm({
           <label className="mt-3 block space-y-1 text-sm">
             {t("aiSearch.chatEndpoint")}
             <select
-              className="block w-full rounded-md border border-input bg-field-surface p-2"
+              className={`${SETTINGS_FIELD} flex w-full items-center`}
               value={draft.chat_endpoint_id ?? ""}
               onChange={(event) => {
                 const endpoint = initial.endpoints.find(
@@ -482,7 +477,10 @@ export function AiSearchSettings() {
     void settings.refetch();
   };
   return (
-    <div className="settings-grouped">
+    <div
+      key={section}
+      className={section === "setup" ? "settings-grouped" : "settings-grouped settings-ai-subpage"}
+    >
       {settings.isError && (
         <SettingsNotice
           role="alert"
@@ -588,7 +586,10 @@ export function AiSearchSettings() {
                   </fieldset>
                 </SettingsCard>
               ) : section === "technical" ? (
-                <SettingsCard title={t("Technical settings")}>
+                <SettingsCard
+                  title={t("Technical settings")}
+                  description={t("aiSearch.technicalIntro")}
+                >
                   <SettingsForm
                     initial={settings.data}
                     catalog={catalog}

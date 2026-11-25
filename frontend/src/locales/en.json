@@ -4455,7 +4455,6 @@
   "aiSearch.navIndexes": "Search types",
   "aiSearch.navServers": "AI servers",
   "aiSearch.navTechnical": "Technical",
-  "aiSearch.technicalTitle": "Technical options",
   "aiSearch.technicalIntro": "Permissions and specialist settings. The guided setup covers the usual choices.",
   "aiSearch.serversIntro": "Connect a server to run search without a local AI model.",
   "aiSearch.editServer": "Edit {model}",

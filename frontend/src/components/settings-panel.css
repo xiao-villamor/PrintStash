@@ -72,6 +72,53 @@
   overflow-wrap: anywhere;
 }
 
+.settings-overview-pair {
+  display: grid;
+  gap: 24px;
+}
+
+.settings-overview-pair .settings-card-box {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-overview-pair .settings-card-head {
+  align-items: flex-start;
+}
+
+.settings-overview-pair .settings-card-foot {
+  justify-content: flex-start;
+  margin-top: auto;
+}
+
+@container (min-width: 42rem) {
+  .settings-overview-pair {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 0;
+  }
+
+  .settings-overview-pair > .settings-card {
+    display: grid;
+    grid-row: span 2;
+    grid-template-rows: subgrid;
+  }
+
+  .settings-overview-pair > .settings-card:only-child {
+    grid-column: 1 / -1;
+  }
+
+  .settings-overview-pair .settings-safety-rows {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  .settings-overview-pair .settings-safety-rows > div {
+    flex: 1;
+    align-items: center;
+  }
+}
+
 .settings-preference-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, min(50%, 22rem));
@@ -448,9 +495,121 @@
   gap: 2px;
 }
 
+/* The route frame and navigation stay still while the current panel scrolls. */
+div:has(> .settings-page) {
+  overflow: clip;
+  scrollbar-gutter: auto;
+}
+
+.settings-page,
+.settings-frame {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.settings-layout {
+  min-height: 0;
+}
+
+/* Use the fixed tab strip if the vertical navigation cannot fit. */
+@media (width >= 64rem) and (height < 54rem) {
+  .settings-tabs {
+    display: block;
+  }
+
+  .settings-layout {
+    display: flex;
+  }
+
+  .settings-layout > .settings-nav,
+  .settings-layout > aside {
+    display: none;
+  }
+}
+
+.settings-page {
+  height: 100%;
+}
+
+.settings-frame,
+.settings-layout,
 .settings-main {
-  container-type: inline-size;
+  flex: 1;
+}
+
+.settings-frame {
+  width: 100%;
+  gap: 24px;
+}
+
+.settings-frame > :not(.settings-layout) {
+  flex: none;
+}
+
+.settings-main {
+  min-height: 0;
+  overflow-y: auto;
+  padding-inline-end: 8px;
+  scrollbar-gutter: stable;
+  container-type: size;
   transform-origin: center top;
+}
+
+.settings-main:has(> .settings-ai-subpage) {
+  display: flex;
+  flex-direction: column;
+  overflow: clip;
+  padding-inline-end: 0;
+  scrollbar-gutter: auto;
+}
+
+.settings-ai-subpage,
+.settings-ai-subpage > .settings-card {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.settings-ai-subpage > :not(.settings-card),
+.settings-ai-subpage .settings-card-head {
+  flex: none;
+}
+
+.settings-ai-subpage > .settings-card > .settings-card-box {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  container-type: size;
+}
+
+@media (forced-colors: none) {
+  @supports selector(::-webkit-scrollbar) {
+    :is(.settings-main, .settings-ai-subpage > .settings-card > .settings-card-box) {
+      scrollbar-width: auto;
+      scrollbar-color: auto;
+
+      &::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      &::-webkit-scrollbar-button {
+        display: none;
+      }
+
+      &::-webkit-scrollbar-track {
+        margin-block: max(8px, calc((100cqh - 144px) / 2));
+      }
+
+      &::-webkit-scrollbar-thumb {
+        border-inline: 2px solid transparent;
+        background-clip: padding-box;
+      }
+    }
+  }
 }
 
 .settings-preference-row > .settings-segmented {
