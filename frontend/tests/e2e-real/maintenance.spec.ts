@@ -5,7 +5,7 @@ test.describe("Maintenance editing", () => {
   test("reviews a schedule conflict in the browser", async ({ page, context }) => {
     await page.goto("/settings?section=maintenance");
     const form = page.getByRole("form", { name: "Quick check schedule" });
-    await form.getByRole("checkbox", { name: "Run automatically" }).click();
+    await form.getByRole("switch", { name: "Quick check Run automatically" }).click();
     await form.getByRole("button", { name: "Save changes" }).click();
     await expect(form.getByRole("button", { name: "Save changes" })).toHaveCount(0);
     await form.getByLabel("Time zone", { exact: true }).fill("Europe/Madrid");
@@ -22,7 +22,7 @@ test.describe("Maintenance editing", () => {
       await form.getByRole("button", { name: "Use current values" }).click();
       await expect(form.getByLabel("Time zone", { exact: true })).toHaveValue("Europe/Paris");
       await form.getByLabel("Time zone", { exact: true }).fill("UTC");
-      await form.getByRole("checkbox", { name: "Run automatically" }).click();
+      await form.getByRole("switch", { name: "Quick check Run automatically" }).click();
       await form.getByRole("button", { name: "Save changes" }).click();
       await expect(form.getByRole("button", { name: "Save changes" })).toHaveCount(0);
     } finally {

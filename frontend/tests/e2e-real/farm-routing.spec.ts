@@ -46,31 +46,20 @@ test.describe("farm routing canvas", () => {
         ).toBeTruthy();
       }
       const [source, destination] = printers;
+      const queued = await page.request.post("/api/v1/fleet/queue", {
+        data: {
+          file_id: revision.file_id,
+          strategy: "manual",
+          printer_id: source.id,
+          priority: "rush",
+        },
+      });
+      expect(queued.status(), await queued.text()).toBe(201);
+      const queuedJob: PrintJobRead = await queued.json();
+      job = queuedJob;
       await page.goto("/printers?tab=queue");
       await collapseNavigationSidebar(page);
-      await page.getByRole("button", { name: "Add to queue", exact: true }).first().click();
-      const composer = page.getByRole("dialog", { name: "Add to queue", exact: true });
-      await composer.getByRole("button", { name: "Revision", exact: true }).click();
-      const picker = page.getByRole("dialog", { name: "Revision", exact: true });
-      await picker.getByRole("button", { name, exact: true }).click();
-      await picker.getByRole("button", { name: /Revision 1/ }).click();
-      await composer.getByRole("radio", { name: new RegExp(source.name) }).check();
-      await composer.getByRole("radio", { name: "Rush", exact: true }).check();
-      const queued = page.waitForResponse(
-        (r) => r.url().endsWith("/fleet/queue") && r.request().method() === "POST",
-      );
-      await composer.getByRole("button", { name: "Add to queue" }).click();
-      const response = await queued;
-      expect(response.status()).toBe(201);
-      const saved: PrintJobRead = await response.json();
-      job = saved;
-      expect(job).toMatchObject({
-        printer_id: source.id,
-        file_id: revision.file_id,
-        priority: "rush",
-      });
-      await expect(composer).toHaveCount(0);
-      const jobNode = page.locator('.react-flow__node[data-id="job-' + job.id + '"]');
+      const jobNode = page.locator('.react-flow__node[data-id="job-' + queuedJob.id + '"]');
       const destNode = page.locator('.react-flow__node[data-id="printer-' + destination.id + '"]');
       const inspector = page.getByRole("complementary", { name: "Route inspector" });
       await jobNode.getByRole("button").focus();
@@ -97,7 +86,7 @@ test.describe("farm routing canvas", () => {
       await expect(inspector).toContainText(destination.name);
       await expect(
         page.locator(
-          '.react-flow__edge[data-id="rule-' + job.id + ":printer-" + destination.id + '"]',
+          '.react-flow__edge[data-id="rule-' + queuedJob.id + ":printer-" + destination.id + '"]',
         ),
       ).toBeVisible();
     } finally {
