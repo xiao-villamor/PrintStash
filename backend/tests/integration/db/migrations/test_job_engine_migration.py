@@ -66,82 +66,87 @@ class Upgraded:
             return [tuple(row) for row in connection.execute(text(sql), params)]
 
 
-@pytest.mark.parametrize(
-    "starting_point",
-    [
-        "sqlite-release",
-        "sqlite-0.13",
-        "sqlite-before-check",
-        pytest.param("postgres-release", marks=pytest.mark.postgres),
-    ],
-)
-def test_upgrades_legacy_generic_jobs(tmp_path: Path, starting_point: str) -> None:
-    if starting_point == "postgres-release":
-        from tests.containers import fresh_postgres_database
+class TestRunMigrations:
+    @pytest.mark.parametrize(
+        "starting_point",
+        [
+            "sqlite-release",
+            "sqlite-0.13",
+            "sqlite-before-check",
+            pytest.param("postgres-release", marks=pytest.mark.postgres),
+        ],
+    )
+    def test_upgrades_legacy_generic_jobs(
+        self, tmp_path: Path, starting_point: str
+    ) -> None:
+        if starting_point == "postgres-release":
+            from tests.containers import fresh_postgres_database
 
-        url = fresh_postgres_database("generic_jobs")
-        create_released_schema = create_released_v0121_postgres_schema
-    else:
-        url = f"sqlite:///{tmp_path / 'legacy-generic-jobs.sqlite'}"
-        create_released_schema = create_released_v0121_sqlite_schema
+            url = fresh_postgres_database("generic_jobs")
+            create_released_schema = create_released_v0121_postgres_schema
+        else:
+            url = f"sqlite:///{tmp_path / 'legacy-generic-jobs.sqlite'}"
+            create_released_schema = create_released_v0121_sqlite_schema
 
-    engine = create_engine(normalize_database_url(url))
-    config = _alembic_config(url)
-    try:
-        with engine.begin() as connection:
-            create_released_schema(connection)
-            seed_released_v0121_rows(connection)
-            for job_id, kind, state in (
-                ("legacy-completed", "generic", "completed"),
-                ("legacy-running", "generic", "running"),
-                ("legacy-url", "url", "completed"),
-            ):
+        engine = create_engine(normalize_database_url(url))
+        config = _alembic_config(url)
+        try:
+            with engine.begin() as connection:
+                create_released_schema(connection)
+                seed_released_v0121_rows(connection)
+                for job_id, kind, state in (
+                    ("legacy-completed", "generic", "completed"),
+                    ("legacy-running", "generic", "running"),
+                    ("legacy-url", "url", "completed"),
+                ):
+                    seed_schema_row(
+                        connection,
+                        "background_jobs",
+                        id=job_id,
+                        owner_user_id=1,
+                        kind=kind,
+                        state=state,
+                        status_json='{"model_id":1,"file_id":1}',
+                    )
                 seed_schema_row(
                     connection,
-                    "background_jobs",
-                    id=job_id,
+                    "inbox_items",
+                    id=1,
                     owner_user_id=1,
-                    kind=kind,
-                    state=state,
-                    status_json='{"model_id":1,"file_id":1}',
+                    source_kind="BROWSER",
+                    state="COMPLETED",
+                    manifest_json="{}",
+                    requested_tags_json="[]",
+                    background_job_id="legacy-completed",
                 )
-            seed_schema_row(
-                connection,
-                "inbox_items",
-                id=1,
-                owner_user_id=1,
-                source_kind="BROWSER",
-                state="COMPLETED",
-                manifest_json="{}",
-                requested_tags_json="[]",
-                background_job_id="legacy-completed",
-            )
-        command.stamp(config, RELEASED_V0121_REVISION)
-        earlier_revision = {
-            "sqlite-0.13": "e916c791628c",
-            "sqlite-before-check": "ca576b5337d2",
-        }.get(starting_point)
-        if earlier_revision is not None:
-            command.upgrade(config, earlier_revision)
+            command.stamp(config, RELEASED_V0121_REVISION)
+            earlier_revision = {
+                "sqlite-0.13": "e916c791628c",
+                "sqlite-before-check": "ca576b5337d2",
+            }.get(starting_point)
+            if earlier_revision is not None:
+                command.upgrade(config, earlier_revision)
 
-        run_migrations(url)
-        run_migrations(url)
+            run_migrations(url)
+            run_migrations(url)
 
-        assert schema_is_current(url)
-        database = Upgraded(engine=engine, config=config)
-        assert database.rows(
-            "SELECT id, kind, state, owner_user_id FROM jobs ORDER BY id"
-        ) == [
-            ("legacy-completed", "ingestion.upload", "completed", 1),
-            ("legacy-running", "ingestion.upload", "failed", 1),
-            ("legacy-url", "ingestion.url", "completed", 1),
-        ]
-        assert database.rows("SELECT job_id FROM inbox_items WHERE id = 1") == [
-            ("legacy-completed",)
-        ]
-        assert database.rows("SELECT id, name FROM models") == [(1, "Released model")]
-    finally:
-        engine.dispose()
+            assert schema_is_current(url)
+            database = Upgraded(engine=engine, config=config)
+            assert database.rows(
+                "SELECT id, kind, state, owner_user_id FROM jobs ORDER BY id"
+            ) == [
+                ("legacy-completed", "ingestion.upload", "completed", 1),
+                ("legacy-running", "ingestion.upload", "failed", 1),
+                ("legacy-url", "ingestion.url", "completed", 1),
+            ]
+            assert database.rows("SELECT job_id FROM inbox_items WHERE id = 1") == [
+                ("legacy-completed",)
+            ]
+            assert database.rows("SELECT id, name FROM models") == [
+                (1, "Released model")
+            ]
+        finally:
+            engine.dispose()
 
 
 def _seed(engine: Engine) -> None:
