@@ -5123,9 +5123,7 @@ describe("OpenDesign Library strip", () => {
     const user = userEvent.setup();
     renderVault({ models: [aModelListItem({ name: "Gallery model" })] });
     await screen.findByText("Gallery model");
-    await user.click(
-      within(screen.getByRole("main")).getByRole("button", { name: "More", exact: true }),
-    );
+    await user.click(within(screen.getByRole("main")).getByRole("button", { name: /^More$/ }));
     const menu = within(screen.getByRole("menu"));
 
     expect(menu.getByRole("menuitem", { name: "Similar models" })).toBeVisible();
