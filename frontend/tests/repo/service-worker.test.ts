@@ -31,7 +31,7 @@ function worker({
     },
     caches: {
       open,
-      keys: async () => ["printstash-shell-v7", "printstash-shell-v8", "unrelated"],
+      keys: async () => ["printstash-shell-v8", "printstash-shell-v9", "unrelated"],
       delete: async (key: string) => {
         deletions.push(key);
       },
@@ -138,7 +138,7 @@ describe("bootstrap service worker", () => {
       },
     }).invoke("fetch");
     expect(await (await response!).text()).toBe("offline bootstrap");
-    expect(open).toHaveBeenCalledWith("printstash-shell-v8");
+    expect(open).toHaveBeenCalledWith("printstash-shell-v9");
     await done();
   });
   it("reuses HTTP-cached immutable assets during reload", async () => {
@@ -193,6 +193,15 @@ describe("bootstrap service worker", () => {
   it("updates the shell without deleting unrelated caches", async () => {
     const runtime = worker({ open: async () => cache(), network: async () => new Response() });
     await runtime.invoke("activate").done();
-    expect(runtime.deletions).toEqual(["printstash-shell-v7"]);
+    expect(runtime.deletions).toEqual(["printstash-shell-v8"]);
+  });
+  it("precaches the active brand icons on installation", async () => {
+    const stored = cache();
+    await worker({ open: async () => stored, network: async () => new Response() })
+      .invoke("install")
+      .done();
+    expect(stored.addAll).toHaveBeenCalledWith(
+      expect.arrayContaining(["/icon-light.svg?v=6", "/icon-dark.svg?v=6", "/icon-maskable.svg"]),
+    );
   });
 });

@@ -1,16 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="268 118 426 426" width="32" height="32" fill="none" role="img" aria-label="PrintStash">
-  <defs>
-    <linearGradient id="ps-icon-dark" x1="272" y1="118" x2="690" y2="544" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#2767FF"/>
-      <stop offset="1" stop-color="#0E48F0"/>
-    </linearGradient>
-  </defs>
-  <rect x="272" y="118" width="418" height="426" rx="69" fill="url(#ps-icon-dark)"/>
-  <g stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M397 350 V165 H485 A80 80 0 0 1 485 325 H397" stroke-width="56"/>
-    <path d="M397 450 C397 470 381 480 363 480 C345 480 335 490 335 502 C335 514 347 520 361 520 H492" stroke-width="30"/>
-  </g>
-  <rect x="335" y="330" width="124" height="48" rx="14" fill="#fff"/>
-  <rect x="375" y="382" width="44" height="22" rx="6" fill="#fff"/>
-  <path d="M367 404 H427 L409 432 L397 442 L385 432 Z" fill="#fff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32" role="img" aria-label="PrintStash">
+  <rect width="24" height="24" rx="5" fill="#13171e"/>
+  <path fill="#f1f4fa" d="M3 3.8h12.9a2 2 0 0 1 1.4.6l3.8 3.8a1.15 1.15 0 0 1 0 1.6l-3.8 3.8h-2.8l-4.2-4.2H5.4A2.4 2.4 0 0 1 3 7V3.8Zm0 9.2h5.8l3.95 3.95h8.15v1a2.35 2.35 0 0 1-2.35 2.35H5.4A2.4 2.4 0 0 1 3 17.9V13Z"/>
 </svg>

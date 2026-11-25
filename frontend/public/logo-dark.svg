@@ -1,38 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="683" viewBox="0 0 2048 683" fill="none" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="2048" height="683" viewBox="0 0 2048 683" role="img" aria-labelledby="title desc">
   <title id="title">PrintStash</title>
-  <desc id="desc">PrintStash logo: a "P" monogram drawn as a 3D-printer extruder laying a filament bead, beside the wordmark.</desc>
-  <defs>
-    <linearGradient id="ps-bg" x1="0" y1="0" x2="2048" y2="0" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#020A17"/>
-      <stop offset="0.5" stop-color="#04142D"/>
-      <stop offset="1" stop-color="#020A17"/>
-    </linearGradient>
-    <linearGradient id="ps-icon" x1="272" y1="118" x2="690" y2="544" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#2767FF"/>
-      <stop offset="1" stop-color="#0E48F0"/>
-    </linearGradient>
-    <filter id="ps-shadow" x="0" y="0" width="100%" height="100%">
-      <feDropShadow dx="0" dy="10" stdDeviation="20" flood-color="#000814" flood-opacity="0.25"/>
-    </filter>
-  </defs>
-
-  <rect width="2048" height="683" fill="url(#ps-bg)"/>
-
-  <!-- Icon tile -->
-  <rect x="272" y="118" width="418" height="426" rx="69" fill="url(#ps-icon)" filter="url(#ps-shadow)"/>
-
-  <!-- Stylized P + extruder mark -->
-  <g stroke="white" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M397 350 V165 H485 A80 80 0 0 1 485 325 H397" stroke-width="56"/>
-    <path d="M397 450 C397 470 381 480 363 480 C345 480 335 490 335 502 C335 514 347 520 361 520 H492" stroke-width="30"/>
+  <desc id="desc">Two pieces meet along a diagonal fold next to the PrintStash wordmark.</desc>
+  <rect width="2048" height="683" fill="#13171e"/>
+  <g transform="translate(223 66) scale(22)">
+    <path fill="#f1f4fa" d="M3 3.8h12.9a2 2 0 0 1 1.4.6l3.8 3.8a1.15 1.15 0 0 1 0 1.6l-3.8 3.8h-2.8l-4.2-4.2H5.4A2.4 2.4 0 0 1 3 7V3.8Zm0 9.2h5.8l3.95 3.95h8.15v1a2.35 2.35 0 0 1-2.35 2.35H5.4A2.4 2.4 0 0 1 3 17.9V13Z"/>
+    <path fill="#b7bbc1" d="M10.3 9.4h6.6l.4 4.2h-2.8l-4.2-4.2Z"/>
   </g>
-  <rect x="335" y="330" width="124" height="48" rx="14" fill="white"/>
-  <rect x="375" y="382" width="44" height="22" rx="6" fill="white"/>
-  <path d="M367 404 H427 L409 432 L397 442 L385 432 Z" fill="white"/>
-
-  <!-- Wordmark -->
-  <text x="770" y="378" fill="white" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="170" font-weight="800" letter-spacing="-4">PrintStash</text>
-
-  <!-- Tagline -->
-  <text x="775" y="456" fill="#A9BFE5" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="52" font-weight="700" letter-spacing="10">SELF-HOSTED 3D PRINT VAULT</text>
+  <text x="770" y="378" fill="#f1f4fa" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="170" font-weight="800" letter-spacing="-4">PrintStash</text>
+  <text x="775" y="456" fill="#aeb9c8" font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="52" font-weight="700" letter-spacing="10">SELF-HOSTED 3D PRINT VAULT</text>
 </svg>

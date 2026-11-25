@@ -38,6 +38,7 @@ theme swap so colors remain consistent throughout the application.
 | Token | Use |
 | --- | --- |
 | `background` / `foreground` | Page base |
+| `brand` / `brand-fold` | Encaje symbol and its folded face |
 | `card` / `card-foreground` | Raised content surfaces |
 | `popover` / `popover-foreground` | Floating panels: menus, pickers |
 | `popover-hover` | Perceptible hover/focus fill for items inside floating panels |

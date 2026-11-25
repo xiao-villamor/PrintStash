@@ -1,16 +1,4 @@
-export const brandMarkViewBox = { x: 268, y: 118, size: 426 };
-export const brandMarkStrokes = [
-  { d: "M397 350 V165 H485 A80 80 0 0 1 485 325 H397", width: 56 },
-  {
-    d: "M397 450 C397 470 381 480 363 480 C345 480 335 490 335 502 C335 514 347 520 361 520 H492",
-    width: 30,
-  },
-];
-export const brandMarkBlocks = [
-  { x: 335, y: 330, width: 124, height: 48, rx: 14 },
-  { x: 375, y: 382, width: 44, height: 22, rx: 6 },
-];
-export const brandMarkNozzle = "M367 404 H427 L409 432 L397 442 L385 432 Z";
+import { brandMarkOutline, brandMarkViewBox } from "@/components/brand-geometry";
 
 export type Point = readonly [x: number, y: number];
 
@@ -31,23 +19,11 @@ function* rasterizeMark(): Generator<void, Point[][] | null> {
   canvas.width = rasterSize;
   canvas.height = rasterSize;
   const context = canvas.getContext("2d");
-  if (!context?.roundRect) return null;
+  if (!context) return null;
 
-  const { x, y, size } = brandMarkViewBox;
-  const scale = rasterSize / size;
-  context.setTransform(scale, 0, 0, scale, -x * scale, -y * scale);
-  context.lineCap = "round";
-  context.lineJoin = "round";
-  for (const stroke of brandMarkStrokes) {
-    context.lineWidth = stroke.width;
-    context.stroke(new Path2D(stroke.d));
-  }
-  for (const block of brandMarkBlocks) {
-    context.beginPath();
-    context.roundRect(block.x, block.y, block.width, block.height, block.rx);
-    context.fill();
-  }
-  context.fill(new Path2D(brandMarkNozzle));
+  const scale = rasterSize / brandMarkViewBox;
+  context.scale(scale, scale);
+  context.fill(new Path2D(brandMarkOutline));
 
   const { data } = context.getImageData(0, 0, rasterSize, rasterSize);
   yield;

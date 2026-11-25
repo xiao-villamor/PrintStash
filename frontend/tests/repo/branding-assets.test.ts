@@ -1,47 +1,45 @@
 /*
- * The favicon follows the theme, and its URL is versioned.
- *
- * A favicon is the single most aggressively cached asset a browser holds. Without
- * a version in the URL, a rebranded icon never reaches anybody who has visited
- * before — which is most users. The dark-mode variant matters because a dark icon
- * on a dark tab strip is invisible, and the tab is how people find PrintStash
- * among twenty others.
+ * Published assets share the UI mark. Small theme-aware favicons use the
+ * silhouette alone so the diagonal gap remains distinct at tab size.
  */
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
-import { brandMarkStrokes } from "../../src/components/auth-print-geometry";
+import { brandMarkFold, brandMarkOutline } from "../../src/components/brand-geometry";
 
 const root = resolve(import.meta.dirname, "../..");
 
-describe("faviconFor", () => {
-  it("uses current blue brand in dark mode and versioned asset URLs", () => {
-    const darkIcon = readFileSync(resolve(root, "public/icon-dark.svg"), "utf8");
-    const html = readFileSync(resolve(root, "index.html"), "utf8");
-    const bootstrap = readFileSync(resolve(root, "public/theme-bootstrap.js"), "utf8");
-    const theme = readFileSync(resolve(root, "src/lib/theme.ts"), "utf8");
+describe("favicons", () => {
+  it.each([
+    ["light", "#141923"],
+    ["dark", "#f1f4fa"],
+  ])("renders a single-tone silhouette in %s mode", (theme, ink) => {
+    const asset = readFileSync(resolve(root, `public/icon-${theme}.svg`), "utf8");
+    expect(asset).toContain(`<path fill="${ink}" d="${brandMarkOutline}"/>`);
+    expect(asset.match(/<path\b/g)).toHaveLength(1);
+  });
 
-    expect(darkIcon).toContain("#2767FF");
-    expect(darkIcon).toContain("#0E48F0");
-    expect(darkIcon).not.toMatch(/#fb923c|#ea580c/i);
-    expect(html).toContain("/theme-bootstrap.js");
-    expect(bootstrap).toContain("/icon-dark.svg?v=4");
-    expect(theme).toContain("/icon-dark.svg?v=4");
+  it.each([
+    ["light", "#f6f7f9"],
+    ["dark", "#13171e"],
+  ])("provides an opaque neutral tile for the %s icon", (theme, background) => {
+    const asset = readFileSync(resolve(root, `public/icon-${theme}.svg`), "utf8");
+    expect(asset).toContain(`<rect width="24" height="24" rx="5" fill="${background}"/>`);
   });
 });
 
 describe("PrintStash monogram", () => {
   it.each([
-    "public/icon-light.svg",
-    "public/icon-dark.svg",
     "public/logo.svg",
     "public/logo-dark.svg",
+    "public/icon-maskable.svg",
     "../browser-extension/icon.svg",
   ])("uses the same shape in %s", (path) => {
     const asset = readFileSync(resolve(root, path), "utf8");
-    for (const stroke of brandMarkStrokes) expect(asset).toContain(`d="${stroke.d}"`);
+    expect(asset).toContain(`d="${brandMarkOutline}"`);
+    expect(asset).toContain(`d="${brandMarkFold}"`);
   });
 
   it.each([16, 32, 48, 128])("exports a square %i px extension icon", (size) => {

@@ -15,7 +15,7 @@
     favicon.id = "app-favicon";
     favicon.rel = "icon";
     favicon.type = "image/svg+xml";
-    favicon.href = dark ? "/icon-dark.svg?v=4" : "/icon-light.svg?v=4";
+    favicon.href = dark ? "/icon-dark.svg?v=6" : "/icon-light.svg?v=6";
     document.head.appendChild(favicon);
   } catch {
     // Storage can be unavailable in hardened browser contexts. Light mode and

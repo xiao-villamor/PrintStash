@@ -1,6 +1,7 @@
 /* A fresh installation reaches its first Models using only browser controls. */
 import { mkdir, writeFile } from "node:fs/promises";
 import { test, expect } from "@playwright/test";
+import { brandMarkOutline } from "../../../src/components/brand-geometry";
 import { gcodeFor } from "../util";
 
 const loseResponse = process.env.PLAYWRIGHT_ONBOARDING_LOST_RESPONSE === "1";
@@ -13,6 +14,8 @@ test.describe("Browser onboarding", () => {
     });
     await page.goto("/setup");
     await page.getByLabel("Usuario", { exact: true }).fill("first-owner");
+    const mark = page.getByRole("banner").locator(`path[d="${brandMarkOutline}"]`);
+    await expect(mark).toHaveCSS("fill", "rgb(241, 244, 250)");
 
     const frame = page.getByRole("region", { name: "Bienvenido a PrintStash" });
     const progress = page.getByRole("list", { name: "Progreso de configuración" });
@@ -40,6 +43,7 @@ test.describe("Browser onboarding", () => {
     expect((await frame.boundingBox())!.y).toBe(account.y);
     await page.getByRole("button", { name: "Cambiar tema" }).click();
     await expect(page.locator("html")).not.toHaveClass(/dark/);
+    await expect(mark).toHaveCSS("fill", "rgb(20, 25, 35)");
     await expect(next).toBeInViewport();
     await page.screenshot({ path: testInfo.outputPath("storage-es-light.png") });
   });

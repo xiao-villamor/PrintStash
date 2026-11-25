@@ -12,9 +12,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
-import { useId, useState, useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
+import { BrandMark } from "@/components/brand-mark";
 import { WorkspaceMenu } from "@/components/workspace-menu";
 import { useAuth } from "@/lib/auth-context";
 import { useI18n, useUiLocale, type MessageKey } from "@/lib/i18n";
@@ -58,28 +59,6 @@ const utilityItems: NavItem[] = [
 function subscribeLastVaultHref(onStoreChange: () => void): () => void {
   window.addEventListener("storage", onStoreChange);
   return () => window.removeEventListener("storage", onStoreChange);
-}
-
-function RailMark() {
-  const clipId = useId();
-  return (
-    <span className="flex h-7.5 w-7.5 items-center justify-center rounded-brand bg-primary text-primary-foreground">
-      <svg viewBox="0 0 30 30" className="h-7.5 w-7.5" fill="none" aria-hidden>
-        <clipPath id={clipId}>
-          <path
-            d="M10 6h6.6a5.2 5.2 0 0 1 0 10.4h-3V24H10zM13.6 9.4V13h2.9a1.8 1.8 0 0 0 0-3.6z"
-            fillRule="evenodd"
-            clipRule="evenodd"
-          />
-        </clipPath>
-        <g clipPath={`url(#${clipId})`} fill="currentColor">
-          {[6, 9, 12, 15, 18, 21].map((y) => (
-            <rect key={y} x="8" y={y} width="16" height={y === 21 ? 3 : 2.2} />
-          ))}
-        </g>
-      </svg>
-    </span>
-  );
 }
 
 /** Compact desktop navigation; the mobile navigation owns the same destinations on phones. */
@@ -215,7 +194,7 @@ export function SidebarNav() {
           aria-label="PrintStash"
           className="mb-2.5 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
-          <RailMark />
+          <BrandMark className="size-7.5" />
         </Link>
         <div className="flex min-h-0 flex-1 flex-col items-center gap-1">
           {mainItems.map(itemLink)}

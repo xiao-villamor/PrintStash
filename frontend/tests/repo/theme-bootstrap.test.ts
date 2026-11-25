@@ -54,14 +54,14 @@ describe("theme bootstrap", () => {
   it("restores a saved dark preference", () => {
     expect(runBootstrap("dark", false)).toEqual({
       dark: true,
-      faviconHref: "/icon-dark.svg?v=4",
+      faviconHref: "/icon-dark.svg?v=6",
     });
   });
 
   it("honours a saved light preference over a dark OS preference", () => {
     expect(runBootstrap("light", true)).toEqual({
       dark: false,
-      faviconHref: "/icon-light.svg?v=4",
+      faviconHref: "/icon-light.svg?v=6",
     });
   });
 

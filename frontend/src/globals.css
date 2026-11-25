@@ -17,6 +17,8 @@
     --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
     --background: #f6f7f9;
     --foreground: #101828;
+    --brand: #141923;
+    --brand-fold: #4f535b;
     --card: #ffffff;
     --card-foreground: #101828;
     --popover: #ffffff;
@@ -127,6 +129,8 @@
     --sidebar-bg: #0f1318;
     --rail-bg: #090c10;
     --foreground: #edf1f7;
+    --brand: #f1f4fa;
+    --brand-fold: #b7bbc1;
     --card: #13171e;
     --card-foreground: #edf1f7;
     --popover: #13171e;

@@ -8,6 +8,8 @@
  * `revoked` in a list somewhere is not the same as `refused` on the wire.
  */
 import { test, expect, ADMIN } from "./helpers";
+import { brandMarkFold, brandMarkOutline } from "../../src/components/brand-geometry";
+import { collapseNavigationSidebar } from "./util";
 
 test.describe("authentication", () => {
   test.describe("without a browser session", () => {
@@ -20,6 +22,15 @@ test.describe("authentication", () => {
         await page.addInitScript((value) => localStorage.setItem("printstash.theme", value), theme);
         await page.goto("/login");
         await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
+        const brand = page.getByRole("banner");
+        await expect(brand.locator(`path[d="${brandMarkOutline}"]`)).toHaveCSS(
+          "fill",
+          theme === "light" ? "rgb(20, 25, 35)" : "rgb(241, 244, 250)",
+        );
+        await expect(brand.locator(`path[d="${brandMarkFold}"]`)).toHaveCSS(
+          "fill",
+          theme === "light" ? "rgb(79, 83, 91)" : "rgb(183, 187, 193)",
+        );
         const form = page.getByRole("main").locator("form");
         const artwork = page.locator(".auth-split-art");
         await expect(artwork).toBeVisible();
@@ -32,6 +43,22 @@ test.describe("authentication", () => {
         await page.screenshot({ path: testInfo.outputPath(`login-${theme}-desktop.png`) });
       });
     }
+
+    test("the favicon follows the saved theme", async ({ page }) => {
+      await page.emulateMedia({ colorScheme: "light" });
+      await page.goto("/login");
+      const favicon = page.locator("#app-favicon");
+      const toggle = page.getByRole("button", { name: "Toggle theme" });
+      await expect(favicon).toHaveAttribute("href", "/icon-light.svg?v=6");
+      await toggle.click();
+      await expect(favicon).toHaveAttribute("href", "/icon-dark.svg?v=6");
+      await page.reload();
+      await expect(favicon).toHaveAttribute("href", "/icon-dark.svg?v=6");
+      await toggle.click();
+      await expect(favicon).toHaveAttribute("href", "/icon-light.svg?v=6");
+      await page.reload();
+      await expect(favicon).toHaveAttribute("href", "/icon-light.svg?v=6");
+    });
 
     test("keeps the login controls reachable on a short screen", async ({ page }) => {
       await page.setViewportSize({ width: 1280, height: 600 });
@@ -59,6 +86,9 @@ test.describe("authentication", () => {
 
       await expect(page).toHaveURL(/\/(\?.*)?$/);
       await expect(page.getByRole("button", { name: "Upload", exact: true })).toBeVisible();
+      await collapseNavigationSidebar(page);
+      const home = page.getByRole("link", { name: "PrintStash", exact: true });
+      await expect(home.locator(`path[d="${brandMarkOutline}"]`)).toBeVisible();
     });
 
     test("the login form rejects a wrong password", async ({ page }) => {
