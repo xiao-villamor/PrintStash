@@ -144,9 +144,10 @@
     --accent-foreground: #edf1f7;
 
     /* Status */
-    --destructive: #f87171;
-    --destructive-foreground: #450a0a;
-    --destructive-action-hover: #a62431;
+    --destructive: #e08585;
+    --destructive-foreground: #2b1214;
+    --destructive-action: #8a3a40;
+    --destructive-action-hover: #9c474d;
 
     /* Borders & inputs */
     --border: #232a35;
@@ -192,9 +193,9 @@
     --tertiary: #fb923c;
     --tertiary-container: #332316;
     --on-tertiary-container: #fed7aa;
-    --error: #f87171;
-    --error-container: #450a0a;
-    --on-error-container: #fef2f2;
+    --error: #e08585;
+    --error-container: #2b1618;
+    --on-error-container: #f6dcdc;
 
     /* Inverse */
     --inverse-surface: #edf1f7;

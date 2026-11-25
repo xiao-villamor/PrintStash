@@ -63,9 +63,10 @@
     --muted-foreground: #8c97a8;
     --accent: rgb(255 255 255 / 0.08);
     --accent-foreground: #edf1f7;
-    --destructive: #f87171;
-    --destructive-foreground: #450a0a;
-    --destructive-action-hover: #a62431;
+    --destructive: #e08585;
+    --destructive-foreground: #2b1214;
+    --destructive-action: #8a3a40;
+    --destructive-action-hover: #9c474d;
     --border: #232a35;
     --border-strong: #36404e;
     --overlay-scrim: rgb(0 0 0 / 0.45);
