@@ -19,6 +19,7 @@ import {
   type LibraryReadingRenderer,
 } from "@/features/library/reading-position";
 import { cn } from "@/lib/utils";
+import { durationToken } from "@/lib/css-time";
 import {
   clampInspectorWidth,
   LIBRARY_INSPECTOR_MAX_WIDTH,
@@ -46,6 +47,19 @@ function fittedTrack(width: number, preferredWidth: number, gap: number) {
   return columns === 1
     ? Math.min(width || preferredWidth, SINGLE_COLUMN_MAX)
     : Math.max(preferredWidth, Math.floor((width - gap * (columns - 1)) / columns));
+}
+
+interface PaneCardSnapshot {
+  columns: number;
+  track: number;
+  width: number;
+  scrollTop: number;
+  cards: Map<string, { bounds: DOMRect; row: number }>;
+  viewport: DOMRect;
+}
+
+function cardIsVisible(bounds: DOMRect, viewport: DOMRect) {
+  return bounds.top < viewport.bottom && bounds.bottom > viewport.top;
 }
 
 export interface LibraryInspectorDock {
@@ -130,6 +144,20 @@ export function LibraryItems<T>({
   const restore = useRef<{ key: string; offset: number } | null>(null);
   const readyGeometry = useRef<typeof geometry | null>(null);
   const sidebarTarget = useRef<number | null>(null);
+  const paneCards = useRef<PaneCardSnapshot | null>(null);
+  const cardAnimations = useRef<Animation[]>([]);
+  const snapshotExpiry = useRef<number | null>(null);
+  const paintedGrid = useRef<{
+    columns: number;
+    track: number;
+    width: number;
+    keys: readonly string[];
+  }>({
+    columns: 1,
+    track: 0,
+    width: 0,
+    keys: [],
+  });
   const gap = layout === "list" ? 0 : compact ? 8 : 16;
   const preferredWidth = minCardWidth ?? preferredCardWidth(compact);
   const track = geometry.track || preferredWidth;
@@ -363,8 +391,30 @@ export function LibraryItems<T>({
     };
     const moving = (event: Event) => {
       if (!(event instanceof PaneMovingEvent)) return;
-      sidebarTarget.current = event.targetSidebarWidth;
-      measure(true);
+      if (layout === "grid" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        const viewport = scroll.getBoundingClientRect();
+        const { columns, track, width, keys } = paintedGrid.current;
+        const rows = new Map(keys.map((key, index) => [key, Math.floor(index / columns)]));
+        const cards: PaneCardSnapshot["cards"] = new Map();
+        for (const card of node.querySelectorAll<HTMLElement>("[data-library-key]")) {
+          const key = card.dataset.libraryKey!;
+          const row = rows.get(key);
+          const bounds = card.getBoundingClientRect();
+          if (row !== undefined && cardIsVisible(bounds, viewport)) cards.set(key, { bounds, row });
+        }
+        paneCards.current = { columns, track, width, cards, viewport, scrollTop: scroll.scrollTop };
+        if (snapshotExpiry.current !== null) cancelAnimationFrame(snapshotExpiry.current);
+        // The projection is committed before paint. A dock that leaves the
+        // grid unchanged must not carry this snapshot into a later resize.
+        snapshotExpiry.current = requestAnimationFrame(() => {
+          snapshotExpiry.current = null;
+          paneCards.current = null;
+        });
+      }
+      if (event.targetSidebarWidth !== null) {
+        sidebarTarget.current = event.targetSidebarWidth;
+        measure(true);
+      }
     };
     window.addEventListener(PANE_SETTLED_EVENT, settled);
     window.addEventListener(PANE_MOVING_EVENT, moving);
@@ -428,6 +478,76 @@ export function LibraryItems<T>({
     for (const row of root.current?.querySelectorAll<HTMLElement>("[data-index]") ?? [])
       virtualizer.measureElement(row);
   }, [columns, track, compact, layout, virtual, virtualizer]);
+
+  useLayoutEffect(() => {
+    paintedGrid.current = { columns, track, width: geometry.width, keys };
+  }, [columns, track, geometry.width, keys]);
+
+  useLayoutEffect(() => {
+    const before = paneCards.current;
+    const node = root.current;
+    const scroll = scrollRef.current;
+    if (!before || !node || !scroll) return;
+    if (before.columns === columns && before.track === track && before.width === geometry.width)
+      return;
+    paneCards.current = null;
+    for (const animation of cardAnimations.current) animation.cancel();
+    cardAnimations.current = [];
+
+    const viewport = scroll.getBoundingClientRect();
+    const scrollTop = scroll.scrollTop;
+    const visible = [...node.querySelectorAll<HTMLElement>("[data-library-key]")]
+      .map((card) => ({ card, bounds: card.getBoundingClientRect() }))
+      .filter(
+        ({ bounds }) => bounds.width > 0 && bounds.height > 0 && cardIsVisible(bounds, viewport),
+      );
+    if (visible.length === 0) return;
+    const duration = durationToken(node, "--duration-fast") * 1000;
+    const easing = getComputedStyle(node).getPropertyValue("--ease-out").trim();
+    const rows = new Map(keys.map((key, index) => [key, Math.floor(index / columns)]));
+    for (const { card, bounds } of visible) {
+      const key = card.dataset.libraryKey!;
+      const origin = before.cards.get(key);
+      if (!origin || origin.row !== rows.get(key)) {
+        if (before.columns !== columns)
+          cardAnimations.current.push(
+            card.animate([{ opacity: 0.75 }, { opacity: 1 }], { duration, easing }),
+          );
+        continue;
+      }
+      const x = origin.bounds.left - before.viewport.left - (bounds.left - viewport.left);
+      const y = origin.bounds.top + before.scrollTop - (bounds.top + scrollTop);
+      const scaleX = origin.bounds.width / bounds.width;
+      const scaleY = origin.bounds.height / bounds.height;
+      if (
+        Math.abs(x) < 0.5 &&
+        Math.abs(y) < 0.5 &&
+        Math.abs(scaleX - 1) < 0.002 &&
+        Math.abs(scaleY - 1) < 0.002
+      )
+        continue;
+      cardAnimations.current.push(
+        card.animate(
+          [
+            {
+              transformOrigin: "top left",
+              transform: `translate(${x}px, ${y}px) scale(${scaleX}, ${scaleY})`,
+            },
+            { transformOrigin: "top left", transform: "none" },
+          ],
+          { duration, easing },
+        ),
+      );
+    }
+  }, [geometry.width, columns, track, keys, scrollRef]);
+
+  useEffect(
+    () => () => {
+      if (snapshotExpiry.current !== null) cancelAnimationFrame(snapshotExpiry.current);
+      for (const animation of cardAnimations.current) animation.cancel();
+    },
+    [],
+  );
 
   useLayoutEffect(() => {
     const saved = restore.current;

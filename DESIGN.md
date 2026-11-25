@@ -396,8 +396,11 @@ focus to the opener, the inspected Model card if it was remounted, or the Detail
 
 Both docks use the same smooth cubic ease over the fast timing (200 ms), with
 inherited velocity on interruption. Opening or closing either dock commits the
-Library grid's final tracks before the pane moves. Individual cards have no
-transition for dock reflow. The Collections shell edge and workspace move together.
+Library grid's final tracks before the pane moves. At the click, the library
+captures visible cards before the dock changes layout. Cards on the same row
+move from those positions using a compositor transform. Cards that wrap
+briefly fade into their destination cells. Both docks use the same card timing.
+The Collections shell edge and workspace move together.
 The inner outliner keeps its intrinsic width, clipped and anchored to the moving edge.
 Retain the outliner DOM, filter, expansion and scroll state while closed; make it
 inert immediately and hide its contents only at rest. Drag resizing remains 1:1,

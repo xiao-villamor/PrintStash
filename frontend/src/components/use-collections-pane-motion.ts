@@ -31,11 +31,11 @@ export function dockMotion(element: Element, from: number, velocity: number, tar
 
 /** Re-measure layouts after a dock width is committed. */
 export const PANE_SETTLED_EVENT = "printstash:pane-settled";
-/** Projects the sidebar's final width before its shell starts sliding. */
+/** Signals a dock change before the library's resting tracks are committed. */
 export const PANE_MOVING_EVENT = "printstash:pane-moving";
 
 export class PaneMovingEvent extends Event {
-  constructor(readonly targetSidebarWidth: number) {
+  constructor(readonly targetSidebarWidth: number | null) {
     super(PANE_MOVING_EVENT);
   }
 }

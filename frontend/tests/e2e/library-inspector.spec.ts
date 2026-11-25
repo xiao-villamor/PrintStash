@@ -122,7 +122,7 @@ test.describe("Library inline inspector", () => {
     });
   }
 
-  test("reflows cards without individual animations beside either panel", async ({ page }) => {
+  test("animates visible cards on both pane transitions", async ({ page }) => {
     const models = Array.from({ length: 92 }, (_, index) =>
       aModelListItem({ id: index + 1, name: `Part ${index + 1}` }),
     );
@@ -151,18 +151,32 @@ test.describe("Library inline inspector", () => {
     const sidebar = page.getByRole("button", { name: "Toggle sidebar", exact: true });
     const drawer = page.locator("#model-drawer");
 
+    const animations = () => page.evaluate(() => window.paneCardAnimations);
+    const beforeOpeningDetails = await animations();
+
     await details.click();
     await expect(drawer).toBeVisible();
+    await expect.poll(animations).toBeGreaterThan(beforeOpeningDetails);
+    await page.waitForFunction(() =>
+      document
+        .getElementById("model-drawer")
+        ?.getAnimations()
+        .every((animation) => animation.playState !== "running"),
+    );
+    const beforeClosingDetails = await animations();
     await details.click();
     await expect(drawer).toBeHidden();
+    await expect.poll(animations).toBeGreaterThan(beforeClosingDetails);
+
+    const beforeClosingSidebar = await animations();
     await sidebar.click();
     await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+    await expect.poll(animations).toBeGreaterThan(beforeClosingSidebar);
     await page.waitForFunction(() => !document.documentElement.hasAttribute("data-pane-moving"));
+    const beforeOpeningSidebar = await animations();
     await sidebar.click();
     await expect(sidebar).toHaveAttribute("aria-expanded", "true");
-    await page.waitForFunction(() => !document.documentElement.hasAttribute("data-pane-moving"));
-
-    expect(await page.evaluate(() => window.paneCardAnimations)).toBe(0);
+    await expect.poll(animations).toBeGreaterThan(beforeOpeningSidebar);
   });
 
   test("returns from the explicit full page to the same inspector", async ({ page }) => {

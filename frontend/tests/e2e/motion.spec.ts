@@ -514,18 +514,12 @@ test.describe("motion and layering", () => {
           animation.currentTime = Number(animation.effect?.getTiming().duration) * progress;
           const workspace = document.querySelector("main")!;
           const left = workspace.getBoundingClientRect().left;
-          const cards = [...workspace.querySelectorAll("[data-library-key]")].map((card) => {
-            const { x, y, width, height } = card.getBoundingClientRect();
-            return { key: card.getAttribute("data-library-key"), x: x - left, y, width, height };
-          });
-          return { paneWidth: element.getBoundingClientRect().width, left, cards };
+          return { paneWidth: element.getBoundingClientRect().width, left };
         }, fraction);
       const early = await sample(0.25);
       const late = await sample(0.75);
       expect(early.paneWidth).not.toBe(late.paneWidth);
       expect(late.left - early.left).toBeCloseTo(late.paneWidth - early.paneWidth);
-      expect(early.cards.length).toBeGreaterThan(0);
-      expect(late.cards).toEqual(early.cards);
       await pane.evaluate((element) => element.getAnimations()[0].finish());
       await expect(toggle).toHaveAttribute("aria-expanded", String(direction === "opening"));
       const workspace = page.getByRole("main");
