@@ -2,7 +2,7 @@
 
 <a href="screenshots/printstash-logo-dark.gif#gh-dark-mode-only"><img src="screenshots/printstash-logo-dark.gif" alt="PrintStash logo" height="160" /></a><a href="screenshots/printstash-logo-light.gif#gh-light-mode-only"><img src="screenshots/printstash-logo-light.gif" alt="PrintStash logo" height="160" /></a>
 
-### From import to print, with costs in view.
+### Manage your prints from file to finish.
 
 Import models, save slicer settings, manage prints, and estimate costs in one self-hosted library.
 
