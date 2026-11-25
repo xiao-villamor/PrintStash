@@ -84,8 +84,9 @@ describe("README logo", () => {
       frameControls.push(offset + graphicsControlMarker.length);
     }
 
-    it("references the GIF from the README", () => {
-      expect(readme).toContain(file);
+    it("matches the GIF to the GitHub theme", () => {
+      expect(readme).toContain(`href="${file}#gh-${theme}-mode-only"`);
+      expect(readme).toContain(`src="${file}"`);
       expect(asset.subarray(0, 6).toString()).toBe("GIF89a");
     });
 
