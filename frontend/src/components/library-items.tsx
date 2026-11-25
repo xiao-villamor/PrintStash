@@ -517,7 +517,7 @@ export function LibraryItems<T>({
     for (const { card, bounds } of visible) {
       const key = card.dataset.libraryKey!;
       const origin = before.cards.get(key);
-      if (!origin || origin.row !== rows.get(key)) {
+      if (!origin) {
         if (before.columns !== columns)
           cardAnimations.current.push(
             card.animate([{ opacity: 0.9 }, { opacity: 1 }], { duration, easing }),
@@ -526,6 +526,14 @@ export function LibraryItems<T>({
       }
       const x = origin.bounds.left - before.viewport.left - (bounds.left - viewport.left);
       const y = origin.bounds.top + before.scrollTop - (bounds.top + scrollTop);
+      // Keep motion local to the card's neighbors. Larger changes would move it
+      // over an unrelated thumbnail before it reaches the new cell.
+      if (origin.row !== rows.get(key) || Math.abs(x) > before.track + gap || Math.abs(y) > gap) {
+        cardAnimations.current.push(
+          card.animate([{ opacity: 0.9 }, { opacity: 1 }], { duration, easing }),
+        );
+        continue;
+      }
       const scaleX = origin.bounds.width / bounds.width;
       const scaleY = origin.bounds.height / bounds.height;
       if (
@@ -548,7 +556,7 @@ export function LibraryItems<T>({
         ),
       );
     }
-  }, [geometry.width, columns, track, keys, scrollRef]);
+  }, [geometry.width, columns, track, gap, keys, scrollRef]);
 
   useEffect(
     () => () => {

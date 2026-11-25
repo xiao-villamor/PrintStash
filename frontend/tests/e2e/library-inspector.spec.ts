@@ -8,6 +8,7 @@ useMockApi();
 declare global {
   interface Window {
     paneCardAnimations: number;
+    paneCardsCrossingCells: string[];
   }
 }
 
@@ -139,9 +140,24 @@ test.describe("Library inline inspector", () => {
     );
     await page.addInitScript(() => {
       window.paneCardAnimations = 0;
+      window.paneCardsCrossingCells = [];
       const animate = Element.prototype.animate;
       Element.prototype.animate = function (...args) {
-        if (this.matches("main [data-library-key]")) window.paneCardAnimations++;
+        if (this instanceof HTMLElement && this.matches("main [data-library-key]")) {
+          window.paneCardAnimations++;
+          const [frames] = args;
+          const transform = Array.isArray(frames) ? frames[0]?.transform : undefined;
+          const match = /^translate\(([-.\d]+)px, [-.\d]+px\) scale\(([-.\d]+),/.exec(
+            transform ?? "",
+          );
+          if (match && this.parentElement) {
+            const distance = Math.abs(Number(match[1]));
+            const spacing = Number.parseFloat(getComputedStyle(this.parentElement).columnGap);
+            const originalWidth = Number(match[2]) * this.offsetWidth;
+            if (distance > originalWidth + spacing + 1)
+              window.paneCardsCrossingCells.push(this.dataset.libraryKey ?? "");
+          }
+        }
         return animate.apply(this, args);
       };
     });
@@ -177,6 +193,7 @@ test.describe("Library inline inspector", () => {
     await sidebar.click();
     await expect(sidebar).toHaveAttribute("aria-expanded", "true");
     await expect.poll(animations).toBeGreaterThan(beforeOpeningSidebar);
+    expect(await page.evaluate(() => window.paneCardsCrossingCells)).toEqual([]);
   });
 
   test("returns from the explicit full page to the same inspector", async ({ page }) => {

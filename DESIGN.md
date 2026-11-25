@@ -399,8 +399,9 @@ Both docks use the same smooth cubic ease over the fast timing (200 ms), with
 inherited velocity on interruption. Opening or closing either dock commits the
 Library grid's final tracks before the pane moves. At the click, the library
 captures visible cards before the dock changes layout. Cards on the same row
-move from those positions using a compositor transform. Cards that wrap
-briefly fade into their destination cells. Card reflow uses the dock curve.
+move from those positions using a compositor transform when their destination
+is at most one cell away. Cards that wrap or move farther briefly fade in
+their destination cells. Card reflow uses the dock curve.
 The collapsed Collections strip uses the same track count for its layout and
 its card limit, so it keeps its height as the dock moves.
 The Collections shell edge and workspace move together.

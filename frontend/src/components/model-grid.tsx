@@ -1762,61 +1762,64 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     if (models) groupedModels.current.set(id, models);
     else groupedModels.current.delete(id);
   }, []);
-  function toggleSelect(id: number, range = false) {
-    // Capture this gesture once; React may replay the state updater.
-    const sortedModels = Array.from(
-      new Map(
-        [...selectionOrder.current, ...Array.from(groupedModels.current.values()).flat()].map(
-          (model) => [model.id, model],
-        ),
-      ).values(),
-    );
-    const clicked = sortedModels.find((model) => model.id === id);
-    const selection = clicked
-      ? modelSelection(clicked, selectedIds, selectedCollectionRows.values())
-      : ({ kind: "none" } as const);
-    if (selection.kind === "implied") {
-      lastSelectedModelId.current = id;
-      const remaining = new Map(selectedCollectionRows);
-      for (const collection of selection.collections) remaining.delete(collection.id);
-      setSelectedCollectionRows(remaining);
-      const explicit = new Set(selectedIds);
-      explicit.delete(id);
-      for (const model of sortedModels) {
-        if (
-          model.id !== id &&
-          modelSelection(model, selectedIds, selection.collections).kind === "implied" &&
-          modelSelection(model, selectedIds, remaining.values()).kind !== "implied"
-        ) {
-          explicit.add(model.id);
-          selectedModelSnapshot.current.set(model.id, model);
+  const toggleSelect = useCallback(
+    (id: number, range = false) => {
+      // Capture this gesture once; React may replay the state updater.
+      const sortedModels = Array.from(
+        new Map(
+          [...selectionOrder.current, ...Array.from(groupedModels.current.values()).flat()].map(
+            (model) => [model.id, model],
+          ),
+        ).values(),
+      );
+      const clicked = sortedModels.find((model) => model.id === id);
+      const selection = clicked
+        ? modelSelection(clicked, selectedIds, selectedCollectionRows.values())
+        : ({ kind: "none" } as const);
+      if (selection.kind === "implied") {
+        lastSelectedModelId.current = id;
+        const remaining = new Map(selectedCollectionRows);
+        for (const collection of selection.collections) remaining.delete(collection.id);
+        setSelectedCollectionRows(remaining);
+        const explicit = new Set(selectedIds);
+        explicit.delete(id);
+        for (const model of sortedModels) {
+          if (
+            model.id !== id &&
+            modelSelection(model, selectedIds, selection.collections).kind === "implied" &&
+            modelSelection(model, selectedIds, remaining.values()).kind !== "implied"
+          ) {
+            explicit.add(model.id);
+            selectedModelSnapshot.current.set(model.id, model);
+          }
         }
+        setSelectedIds(explicit);
+        return;
       }
-      setSelectedIds(explicit);
-      return;
-    }
-    const anchor = lastSelectedModelId.current;
-    const selectingRange = range && anchor !== null;
-    const from = selectingRange ? sortedModels.findIndex((model) => model.id === anchor) : -1;
-    const to = sortedModels.findIndex((model) => model.id === id);
-    const rangeModels =
-      from >= 0 && to >= 0 ? sortedModels.slice(Math.min(from, to), Math.max(from, to) + 1) : [];
-    lastSelectedModelId.current = id;
-    const explicitRange = rangeModels.filter(
-      (model) =>
-        modelSelection(model, selectedIds, selectedCollectionRows.values()).kind !== "implied",
-    );
-    for (const model of explicitRange) selectedModelSnapshot.current.set(model.id, model);
-    if (clicked) selectedModelSnapshot.current.set(id, clicked);
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (selectingRange && rangeModels.length > 0)
-        explicitRange.forEach((model) => next.add(model.id));
-      else if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
+      const anchor = lastSelectedModelId.current;
+      const selectingRange = range && anchor !== null;
+      const from = selectingRange ? sortedModels.findIndex((model) => model.id === anchor) : -1;
+      const to = sortedModels.findIndex((model) => model.id === id);
+      const rangeModels =
+        from >= 0 && to >= 0 ? sortedModels.slice(Math.min(from, to), Math.max(from, to) + 1) : [];
+      lastSelectedModelId.current = id;
+      const explicitRange = rangeModels.filter(
+        (model) =>
+          modelSelection(model, selectedIds, selectedCollectionRows.values()).kind !== "implied",
+      );
+      for (const model of explicitRange) selectedModelSnapshot.current.set(model.id, model);
+      if (clicked) selectedModelSnapshot.current.set(id, clicked);
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (selectingRange && rangeModels.length > 0)
+          explicitRange.forEach((model) => next.add(model.id));
+        else if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+    },
+    [selectedIds, selectedCollectionRows],
+  );
 
   const lastSelectedMultipartId = useRef<number | null>(null);
   function toggleMultipartSelect(id: number, range = false) {
