@@ -28,7 +28,8 @@ from app.db.models import (
 )
 from app.modules.derivatives import jobs as derivative_jobs
 from app.modules.derivatives import kinds, producers
-from app.modules.derivatives.source import DerivativeSource, subject_key
+from app.modules.derivatives.kinds import subject_key
+from app.modules.derivatives.source import DerivativeSource
 from app.modules.work.contracts import PassSubmission
 from tests.factories import content
 from tests.integration.api.v1._ingest_assertions import drain_work

@@ -1,10 +1,12 @@
 import { useId, useState } from "react";
+import { ArrowDownToLine, ArrowUpFromLine, Flame, Snowflake } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { PrinterFeedRows } from "@/components/printer-machine";
 import type { useMachineSetup } from "@/features/printers/materials";
 import { Link } from "@/lib/link";
 import { PartCoolingFan } from "@/components/printer-telemetry";
 import { Input } from "@/components/ui/input";
+import { RadioOption } from "@/components/ui/radio-option";
 import { extrudePrinter, homePrinter, jogPrinter, tunePrinter } from "@/lib/api/printers";
 import {
   PREHEAT_PRESETS,
@@ -289,6 +291,11 @@ export function PrinterControls({
                   )
                 }
               >
+                {distance > 0 ? (
+                  <ArrowDownToLine className="size-3.5" aria-hidden="true" />
+                ) : (
+                  <ArrowUpFromLine className="size-3.5" aria-hidden="true" />
+                )}
                 {uiText(label)} {millimetres(Math.abs(distance))}
               </Button>
             ))}
@@ -490,32 +497,27 @@ export function ThermalPresets({
         <legend className="mb-1.5 text-xs font-medium">{uiText("Material preset")}</legend>
         <div className="flex flex-wrap gap-1.5">
           {PREHEAT_PRESETS.map((preset) => (
-            <label
+            <RadioOption
               key={preset.name}
-              className="relative inline-flex cursor-action has-[:disabled]:cursor-disabled"
+              name={group}
+              checked={selected === preset}
+              onChange={() => setSelected(preset)}
             >
-              <input
-                type="radio"
-                name={group}
-                checked={selected === preset}
-                onChange={() => setSelected(preset)}
-                className="peer absolute inset-0 z-10 m-0 size-full opacity-0"
-              />
-              <span className="inline-flex h-8 items-center gap-1.5 border border-border px-2 text-xs transition-colors duration-press hover:bg-muted peer-checked:bg-accent peer-checked:text-accent-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:opacity-50 motion-reduce:transition-none">
-                <span className="font-medium">{preset.name}</span>{" "}
-                <span className="font-mono tabular-nums">
-                  {preset.hotend} / {preset.bed} °C
-                </span>
+              <span className="font-medium">{preset.name}</span>{" "}
+              <span className="font-mono tabular-nums">
+                {preset.hotend} / {preset.bed} °C
               </span>
-            </label>
+            </RadioOption>
           ))}
         </div>
       </fieldset>
       <div className="flex flex-wrap items-center gap-2">
         <Button size="xs" disabled={disabled} onClick={() => preheat(selected)}>
+          <Flame className="size-3.5" aria-hidden="true" />
           {uiText("Preheat")}
         </Button>
         <Button variant="outline" size="xs" disabled={disabled} onClick={cooldown}>
+          <Snowflake className="size-3.5" aria-hidden="true" />
           {uiText("Cooldown")}
         </Button>
       </div>

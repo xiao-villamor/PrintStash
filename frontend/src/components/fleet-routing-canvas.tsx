@@ -23,8 +23,8 @@ import {
   Layers3,
   Minus,
   Plus,
-  Printer,
 } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 import { Button } from "@/components/ui/button";
 import { knownUiText, uiText } from "@/lib/locale";
 import { Link } from "@/lib/link";
@@ -47,6 +47,7 @@ type Station = Node<
     chosen: boolean;
     image?: string;
     held?: boolean;
+    printing?: boolean;
     progress?: number | null;
     remaining?: number | null;
     select: () => void;
@@ -54,7 +55,7 @@ type Station = Node<
   "station"
 >;
 
-const icons = { job: FileBox, rule: GitBranch, printer: Printer, inlet: Layers3 };
+const icons = { job: FileBox, rule: GitBranch, printer: Printer3D, inlet: Layers3 };
 const nodeTypes = { station: StationNode };
 const fitOptions = { padding: 0.17, maxZoom: 1.2 };
 const pageSize = 3;
@@ -83,6 +84,7 @@ function StationNode({ data }: NodeProps<Station>) {
       data-kind={data.kind}
       data-chosen={data.chosen}
       data-held={data.held}
+      data-printing={data.printing}
     >
       {data.kind !== "job" && data.kind !== "inlet" && (
         <Handle type="target" position={Position.Left} isConnectable={data.kind === "printer"} />
@@ -181,17 +183,25 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
       },
     });
   }
-  function edge(source: string, target: string, registered = false, related = false) {
+  function edge(
+    source: string,
+    target: string,
+    registered = false,
+    related = false,
+    flowing = false,
+  ) {
     edges.push({
       id: source + ":" + target,
       source,
       target,
       type: "default",
-      className: registered
-        ? "routing-link-available"
-        : related || source === selected || target === selected
-          ? "routing-link-selected"
-          : "routing-link-assigned",
+      className: flowing
+        ? "routing-link-printing"
+        : registered
+          ? "routing-link-available"
+          : related || source === selected || target === selected
+            ? "routing-link-selected"
+            : "routing-link-assigned",
     });
   }
   if (!visible.length) {
@@ -211,8 +221,21 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
       title: uiText("Farm dispatcher"),
       detail: tracked.length ? uiText("Dispatched to printer") : uiText("Waiting for queued work"),
     });
-    edge(input, "dispatcher", !tracked.length);
-    for (const row of rows) edge("dispatcher", "printer-" + row.printer_id, !tracked.includes(row));
+    edge(
+      input,
+      "dispatcher",
+      !tracked.length,
+      false,
+      tracked.some((row) => row.status === "printing"),
+    );
+    for (const row of rows)
+      edge(
+        "dispatcher",
+        "printer-" + row.printer_id,
+        !tracked.includes(row),
+        false,
+        row.status === "printing",
+      );
   }
   visible.forEach((job, index) => {
     const id = "job-" + job.id;
@@ -259,6 +282,7 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
           ? undefined
           : printerArtwork(artwork === "model" ? printer?.model_name : null).imageUrl,
       held: !!(row.maintenance || row.pending_operator_release || row.drain_mode),
+      printing: row.status === "printing",
       progress: active ? row.progress : undefined,
       remaining: active ? row.remaining_minutes : undefined,
     });
@@ -278,7 +302,7 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
     if (job && printer) onEdit(job, printer);
   }
   const overview = !selectedJob && !selectedPrinter;
-  const InspectorIcon = selectedPrinter ? Printer : selectedJob ? FileBox : CircuitBoard;
+  const InspectorIcon = selectedPrinter ? Printer3D : selectedJob ? FileBox : CircuitBoard;
   return (
     <div className="routing-workspace">
       <div className="routing-grid">
@@ -459,7 +483,11 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
                   ))}
                 </div>
                 <p>
-                  {uiText("{count} queued", { count: jobs.length })}
+                  {jobs.length === 0
+                    ? uiText("Queue is empty")
+                    : jobs.length === 1
+                      ? uiText("1 item in queue")
+                      : uiText("{count} items in queue", { count: jobs.length })}
                   <span> · </span>
                   {uiText("{count} running", { count: running.length })}
                 </p>
@@ -471,7 +499,7 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
                     type="button"
                     onClick={() => setSelected("printer-" + row.printer_id)}
                   >
-                    <Printer size={16} />
+                    <Printer3D size={16} />
                     <span>
                       <strong>{row.name}</strong>
                       <small>{machineState(row)}</small>
@@ -480,12 +508,6 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
                   </button>
                 ))}
               </div>
-              {onAdd && (
-                <Button size="sm" onClick={onAdd}>
-                  <Plus />
-                  {uiText("Add to queue")}
-                </Button>
-              )}
             </>
           )}
         </aside>

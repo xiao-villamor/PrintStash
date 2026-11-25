@@ -59,7 +59,9 @@ export function CollectionCoverArtwork({
           </div>
         ))
       ) : (
-        <div className="col-span-full grid place-items-center bg-muted/30">{folder}</div>
+        <div className="col-span-full grid place-items-center rounded-md border border-dashed border-border-strong bg-muted/30">
+          {folder}
+        </div>
       )}
     </div>
   );

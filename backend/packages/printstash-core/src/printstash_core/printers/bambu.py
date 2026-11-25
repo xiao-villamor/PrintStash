@@ -259,6 +259,8 @@ class BambuClient:
         )
         client.username_pw_set("bblp", self.access_code)
         context = ssl.create_default_context()
+        # Bambu's CA certificates omit the Key Usage extension required by strict mode.
+        context.verify_flags &= ~ssl.VERIFY_X509_STRICT
         context.load_verify_locations(cadata=_BAMBU_CA_CERTIFICATES)
         context.check_hostname = False
         client.tls_set_context(context)

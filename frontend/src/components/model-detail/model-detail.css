@@ -115,9 +115,6 @@
   margin-inline: 20px;
   border-bottom-color: var(--border-strong);
 }
-.model-detail-tab-list {
-  column-gap: clamp(0.625rem, 2.5cqw, 1.5rem);
-}
 .model-detail-tab-label {
   display: inline-flex;
   align-items: center;
@@ -140,6 +137,9 @@
 .model-detail-content {
   padding: 16px 20px;
 }
+.model-detail-content:has(.production-estimate-form) {
+  scroll-padding-bottom: 5rem;
+}
 .detail-printer-status {
   display: flex;
   align-items: center;
@@ -149,9 +149,6 @@
 }
 .detail-printer-status > div {
   flex: 1;
-}
-.detail-context-footer {
-  padding: 8px 20px;
 }
 .detail-choice-field {
   min-width: 0;
@@ -171,37 +168,11 @@
   display: flex;
   flex-wrap: wrap;
 }
-.detail-visible-choices > label {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  background: var(--card);
-  font-size: 0.8125rem;
-}
-.detail-visible-choices > label[data-selected="true"] {
-  background: var(--accent);
-  border-color: var(--primary);
-}
-.detail-visible-choices input {
-  flex: none;
-  margin-top: 3px;
-  accent-color: var(--primary);
-}
-.detail-visible-choices label > span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
 .detail-visible-choices small {
   display: block;
   margin-top: 3px;
   color: var(--muted-foreground);
   font-size: 0.75rem;
-}
-.detail-visible-choices label:has(input:disabled) {
-  opacity: 0.5;
 }
 .detail-delivery-layout {
   display: grid;
@@ -242,8 +213,8 @@
 .detail-printer-summary [data-status="printing"] i {
   background: var(--warning);
 }
-.detail-printer-summary [data-status="error"] i {
-  background: var(--destructive);
+.detail-printer-summary [data-status="ready"] i {
+  background: var(--success);
 }
 @media (max-width: 1099px) {
   .model-detail-layout {
@@ -286,49 +257,19 @@
   }
 }
 
-.detail-revisions-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.8125rem;
-}
-.detail-revisions-table th {
-  text-align: left;
-  font-weight: 500;
-}
-.detail-revisions-table thead th {
-  color: var(--muted-foreground);
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
-.detail-revisions-table tbody tr:first-child > * {
-  padding: 12px 10px;
-  border-bottom: 1px solid var(--border);
-  vertical-align: top;
-}
-.detail-revisions-table tr > :nth-child(-n + 2) {
-  overflow-wrap: anywhere;
-}
-.detail-revisions-table tr > td:last-child {
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-.detail-revisions-table .is-inspected {
-  background: var(--accent);
-}
 .detail-inspected-revision > div:first-child {
   flex-wrap: wrap;
 }
 .model-detail-layout[data-expanded="true"] .model-detail-inspector {
   display: none;
 }
-/* Controls occupy their own rows so loading/error content cannot be covered. */
+/* The toolbar floats over the canvas. The dock and plate picker keep their own rows. */
 .model-detail-preview {
   display: grid;
   flex: 1 0 auto;
   min-height: min-content;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto auto minmax(20rem, 1fr) auto auto;
+  grid-template-rows: auto minmax(20rem, 1fr) auto auto;
 }
 @media (min-width: 1100px) {
   .model-detail-layout {
@@ -347,11 +288,12 @@
   .model-detail-preview {
     flex: 1 1 0;
     min-height: 24rem;
-    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
   }
 }
 .detail-preview-canvas {
-  grid-row: 3;
+  grid-row: 2;
+  grid-column: 1;
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -365,7 +307,7 @@
 @container model-preview (max-width: 28rem) {
   .model-detail-preview:has(.toolpath-layout) {
     flex: 1 0 auto;
-    grid-template-rows: auto auto minmax(20rem, max-content) auto auto;
+    grid-template-rows: auto minmax(20rem, max-content) auto auto;
   }
   .detail-preview-canvas:has(.toolpath-layout),
   .detail-preview-canvas .toolpath-layout {
@@ -378,22 +320,10 @@
 .detail-preview-heading {
   grid-row: 1;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 9px 12px 0;
+  min-width: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
   background: var(--card);
-}
-.detail-preview-heading > div:last-child button {
-  font-size: 0.8125rem;
-}
-@media (max-width: 1099px) {
-  .detail-preview-heading {
-    margin: 0;
-    padding: 10px 12px;
-    background: var(--card);
-    border-bottom: 1px solid var(--border);
-  }
 }
 .detail-preview-heading h2 {
   font-size: 0.875rem;
@@ -402,33 +332,33 @@
 }
 .detail-viewer-commandbar {
   grid-row: 2;
+  grid-column: 1;
+  z-index: 2;
+  align-self: start;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px 16px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--card);
+  gap: 8px;
+  margin: 12px;
+  pointer-events: none;
 }
 .detail-viewer-control-group {
   display: flex;
   align-items: center;
   gap: 2px;
-}
-.detail-viewer-commandbar .detail-mode-switch {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
   padding: 2px;
-}
-.detail-preview-style {
-  margin-left: auto;
-  max-width: 100%;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   background: var(--card);
-  color: var(--foreground);
-  padding: 4px 8px;
-  font-size: 0.8125rem;
+  pointer-events: auto;
+}
+.detail-viewer-actions {
+  margin-inline-start: auto;
+}
+@container model-preview (min-width: 27.01rem) {
+  .model-detail-preview:has(.toolpath-sidebar) .detail-viewer-commandbar {
+    margin-inline-end: calc(clamp(12rem, 32cqw, 15rem) + 12px);
+  }
 }
 .detail-viewer-commandbar button,
 .detail-viewer-dock button {
@@ -438,7 +368,7 @@
   font-size: 0.8125rem;
 }
 .detail-viewer-dock {
-  grid-row: 4;
+  grid-row: 3;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -455,31 +385,6 @@
   font-size: 0.75rem;
 }
 @media (max-width: 699px) {
-  .detail-preview-heading {
-    align-items: flex-start;
-  }
-  .detail-preview-heading > div:first-child {
-    max-width: 55%;
-  }
-  .detail-preview-heading > div:last-child {
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    flex-shrink: 1;
-  }
-  .detail-viewer-commandbar {
-    justify-self: stretch;
-    max-width: none;
-    margin: 0;
-    gap: 8px 20px;
-    padding: 8px 12px;
-    border-inline: 0;
-    border-top: 0;
-  }
-  .detail-viewer-control-group + .detail-viewer-control-group {
-    border-left: 0;
-    padding-left: 0;
-  }
-  .detail-preview-heading button,
   .detail-viewer-commandbar button,
   .detail-viewer-dock button {
     min-width: 44px;
@@ -539,20 +444,6 @@
   grid-column: 1;
   display: block;
 }
-.detail-history-evidence > div:first-child p,
-.detail-history-evidence [data-testid="reproducibility-level"] {
-  font-family: inherit;
-  font-size: inherit;
-}
-.detail-history-evidence [data-testid="reproducibility-level"] {
-  display: block;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--muted-foreground);
-  text-transform: none;
-  letter-spacing: normal;
-}
 .detail-history-evidence > dl {
   grid-column: 1 / -1;
 }
@@ -571,21 +462,6 @@
     grid-column: 1;
     grid-row: auto;
   }
-}
-
-.detail-delivery-mode .detail-choice-field {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.detail-delivery-mode .detail-choice-field > legend {
-  float: left;
-  margin: 0 8px 0 0;
-  font-size: 13px;
-  color: var(--muted-foreground);
-}
-.detail-delivery-mode .detail-visible-choices > label {
-  padding: 6px 8px;
 }
 
 .model-detail-heading {
@@ -615,7 +491,7 @@
 .model-detail-tabs [role="tab"] {
   line-height: 1.4;
 }
-/* Immediate press feedback and a local selection mark, without lateral travel. */
+/* Immediate press feedback; the filled segment marks the selection. */
 .model-detail-tabs [role="tab"] {
   transform-origin: center;
   transition:
@@ -627,23 +503,6 @@
   transform: scale(var(--scale-detail-enter));
   transition-duration: 0s;
 }
-.model-detail-tabs [role="tab"]::after,
-.model-detail-tab-overflow::after {
-  content: "";
-  position: absolute;
-  inset-inline: 0;
-  bottom: 0;
-  height: 2px;
-  background: var(--foreground);
-  visibility: hidden;
-  transform: scaleX(0.65);
-  transform-origin: center;
-  transition: transform var(--duration-fast) var(--ease-out);
-}
-.model-detail-tabs [data-active="true"]::after {
-  visibility: visible;
-  transform: scaleX(1);
-}
 .model-detail-tab-body {
   transform-origin: center top;
 }
@@ -654,10 +513,6 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .model-detail-tabs [role="tab"]:active {
-    transform: none;
-  }
-  .model-detail-tabs [role="tab"]::after {
-    transition: none;
     transform: none;
   }
 }
@@ -730,5 +585,25 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(5rem, 1fr));
     margin: 0;
+  }
+}
+
+/* Prepare print: choices are bordered cards and the two columns share a divider. */
+.detail-visible-choices:not(.is-inline) {
+  display: grid;
+  gap: 8px;
+}
+.detail-visible-choices > label {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+.detail-visible-choices > label:has(input:checked) {
+  border-color: var(--ring);
+}
+@media (min-width: 900px) {
+  .detail-delivery-layout > :nth-child(2) {
+    padding-left: 32px;
+    border-left: 1px solid var(--border);
   }
 }

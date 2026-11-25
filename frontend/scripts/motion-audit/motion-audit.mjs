@@ -48,7 +48,6 @@ const { values: args } = parseArgs({
 /** Elements whose motion is audited. Cards and skeleton cards carry data-library-key. */
 const TRACKED = [
   ["[data-library-key]", (el) => el.getAttribute("data-library-key")],
-  [".collections-pane-shell", () => "pane"],
   [".library-model-toolbar-wrap", () => "toolbar"],
   ["main h1", () => "title"],
   ["main h2", (el, i) => `heading:${i}`],
@@ -73,12 +72,15 @@ const THRESHOLDS = {
   abruptFraction: 0.35,
   // A dialog that takes longer than this from the click to be visible is slow.
   dialogReadyMs: 300,
+  // Allow a couple of frames for a 200 ms desktop pane animation to paint.
+  sidebarTravelMs: 250,
 };
 
 /** Injected sampler. Runs in the page; records until stop() resolves. */
 function installSampler(tracked) {
   const selectors = tracked.map(([selector, key]) => [selector, new Function(`return (${key})`)()]);
   const main = () => document.querySelector("main");
+  const sidebar = () => document.getElementById("collections-pane");
   const effectiveOpacity = (element) => {
     let opacity = 1;
     for (let node = element; node && node !== document.documentElement; node = node.parentElement) {
@@ -218,7 +220,14 @@ function installSampler(tracked) {
               (row) =>
                 `${row.closest("[data-library-renderer]")?.parentElement?.className?.slice(0, 40) ?? "grid"}: content ${row.scrollWidth}px in ${row.clientWidth}px (${row.style.gridTemplateColumns})`,
             );
-    frames.push({ t: now - started, elements, overflow });
+    frames.push({
+      t: now - started,
+      elements,
+      overflow,
+      sidebarWidth: sidebar()?.offsetWidth,
+      workspaceLeft: main()?.getBoundingClientRect().left,
+      workspaceScroll: main()?.scrollTop,
+    });
     requestAnimationFrame(sample);
   };
   requestAnimationFrame(sample);
@@ -234,6 +243,10 @@ function installSampler(tracked) {
 function analyse({ frames, longFrames, shifts }, label) {
   const findings = [];
   const add = (kind, t, detail) => findings.push({ kind, t: Math.round(t), detail });
+  const sidebar =
+    label === "sidebar-close" || label === "sidebar-open"
+      ? measureSidebarTravel(frames, label === "sidebar-open", add)
+      : null;
   // Dropped frames: rAF gaps. The first frame after the gesture often includes the click itself.
   for (let i = 1; i < frames.length; i++) {
     const dt = frames[i].t - frames[i - 1].t;
@@ -482,6 +495,7 @@ function analyse({ frames, longFrames, shifts }, label) {
     medianFrameMs: Math.round((dts[Math.floor(dts.length / 2)] ?? 0) * 10) / 10,
     p95FrameMs: Math.round((dts[Math.floor(dts.length * 0.95)] ?? 0) * 10) / 10,
     motionSettledMs: Math.round(bursts.at(-1)?.end ?? 0),
+    sidebar,
     phases: phases(frames),
     dialog:
       dialogShown === undefined
@@ -493,6 +507,77 @@ function analyse({ frames, longFrames, shifts }, label) {
     bursts,
     findings: dedupe(findings),
   };
+}
+
+function measureSidebarTravel(frames, opening, add) {
+  const from = frames[0]?.sidebarWidth;
+  const to = frames.at(-1)?.sidebarWidth;
+  if (
+    from === undefined ||
+    to === undefined ||
+    (opening ? to - from : from - to) <= THRESHOLDS.stillPx
+  ) {
+    add(
+      "sidebar-not-toggled",
+      0,
+      `expected pane to ${opening ? "open" : "close"}, width ${from} → ${to}px`,
+    );
+    return null;
+  }
+  const first = frames.findIndex(
+    (frame) => Math.abs(frame.sidebarWidth - from) > THRESHOLDS.stillPx,
+  );
+  const last = frames.find((frame) => Math.abs(frame.sidebarWidth - to) <= THRESHOLDS.stillPx);
+  const travelMs = Math.round(last.t - frames[first - 1].t);
+  if (travelMs > THRESHOLDS.sidebarTravelMs)
+    add("slow-sidebar", last.t, `${travelMs} ms to settle the pane width`);
+  const movingFrames = frames.slice(first, frames.indexOf(last));
+  const anchor = frames[first - 1];
+  const firstTravel = Math.abs(frames[first].workspaceLeft - anchor.workspaceLeft);
+  if (
+    firstTravel > THRESHOLDS.abruptMinPx &&
+    firstTravel > Math.abs(to - from) * THRESHOLDS.abruptFraction
+  )
+    add(
+      "workspace-snaps",
+      frames[first].t,
+      `workspace moves ${Math.round(firstTravel)} px in its first frame`,
+    );
+  const final = frames.at(-1);
+  if (anchor.workspaceScroll === 0 && final.workspaceScroll > THRESHOLDS.stillPx)
+    add(
+      "workspace-scroll-jump",
+      final.t,
+      `workspace scroll changes from 0 to ${final.workspaceScroll} px`,
+    );
+  for (const frame of frames.slice(first, frames.indexOf(last) + 1)) {
+    const panelTravel = frame.sidebarWidth - anchor.sidebarWidth;
+    const workspaceTravel = frame.workspaceLeft - anchor.workspaceLeft;
+    if (Math.abs(panelTravel - workspaceTravel) > THRESHOLDS.mismatchPx)
+      add(
+        "workspace-out-of-sync",
+        frame.t,
+        `pane ${Math.round(panelTravel)} px; workspace ${Math.round(workspaceTravel)} px`,
+      );
+  }
+  const initialFrame = movingFrames[0];
+  for (const { t, elements, workspaceLeft } of movingFrames.slice(1)) {
+    const workspaceTravel = workspaceLeft - initialFrame.workspaceLeft;
+    for (const [key, card] of Object.entries(elements)) {
+      if (!key.startsWith("/models") && !key.startsWith("collection:")) continue;
+      const initial = initialFrame.elements[key];
+      if (!initial || initial.area === 0 || card.area === 0) continue;
+      const change = Math.max(
+        Math.abs(card.x - initial.x - workspaceTravel),
+        Math.abs(initial.y - card.y),
+        Math.abs(initial.w - card.w),
+        Math.abs(initial.h - card.h),
+      );
+      if (change > THRESHOLDS.mismatchPx)
+        add("card-moves-with-sidebar", t, `${key} shifts ${Math.round(change)} px`);
+    }
+  }
+  return { from, to, travelMs };
 }
 
 /** When each stage of the Model grid became visible: placeholder, cards with
@@ -666,19 +751,28 @@ async function record(page, cdp, name, gesture, settleMs = 1500) {
   return { trace: { ...trace, network }, shots: aligned, name };
 }
 
+async function prepareSidebar(page, open) {
+  const toggle = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+  if ((await toggle.getAttribute("aria-expanded")) !== String(open)) await toggle.click();
+  await page.waitForFunction((expected) => {
+    const pane = document.getElementById("collections-pane");
+    return (
+      pane?.dataset.open === String(expected) && !("paneMoving" in document.documentElement.dataset)
+    );
+  }, open);
+  return () => toggle.click();
+}
+
 const scenarios = {
   async rest() {
     // No gesture: records the page at rest to check the rest invariants.
     return async () => {};
   },
   async "sidebar-close"(page) {
-    return () => page.locator('button[aria-label="Toggle sidebar"]').click();
+    return prepareSidebar(page, true);
   },
   async "sidebar-open"(page) {
-    // Precondition: closed pane. Close it without recording first.
-    await page.locator('button[aria-label="Toggle sidebar"]').click();
-    await page.waitForTimeout(1200);
-    return () => page.locator('button[aria-label="Toggle sidebar"]').click();
+    return prepareSidebar(page, false);
   },
   async "inspector-open"(page) {
     return () => page.locator('button[aria-label="Show or hide details"]').click();
@@ -779,6 +873,8 @@ for (const r of summary) {
     );
   if (r.dialog)
     lines.push(`dialog: visible ${r.dialog.shown} ms · opaque ${r.dialog.opaque ?? "never"} ms`);
+  if (r.sidebar)
+    lines.push(`sidebar: ${r.sidebar.from} → ${r.sidebar.to} px in ${r.sidebar.travelMs} ms`);
   if (r.network?.requests)
     lines.push(
       `network: ${r.network.requests} requests, done ${r.network.lastEndMs} ms · ${Object.entries(

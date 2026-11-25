@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@/lib/link";
+import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { uiText } from "@/lib/locale";
 import { userMessage } from "@/lib/errors";
@@ -51,18 +52,32 @@ export function LibraryBatchRecovery({
   return (
     <Modal
       open
-      onClose={() => {
-        if (!pending) onClose();
-      }}
+      variant="confirmation"
+      dismissible={!pending}
+      onClose={onClose}
       title={uiText("Batch needs review")}
-      className="max-w-lg"
+      description={uiText(
+        "Some changes could not be confirmed. Review the current models before making a new selection.",
+      )}
+      footer={
+        <>
+          {receipt.result.succeeded_count > 0 && receipt.undo && (
+            <Button
+              variant="outline"
+              loading={pending}
+              disabled={undo !== null || error !== null}
+              onClick={() => void undoConfirmed()}
+            >
+              {uiText("Undo confirmed changes")}
+            </Button>
+          )}
+          <Button variant="outline" disabled={pending} onClick={onClose}>
+            {uiText("Discard remaining batch")}
+          </Button>
+        </>
+      }
     >
       <div className="space-y-4 text-sm">
-        <p>
-          {uiText(
-            "Some changes could not be confirmed. Review the current models before making a new selection.",
-          )}
-        </p>
         <div>
           {intent.map((line) => (
             <p key={line}>{line}</p>
@@ -80,26 +95,6 @@ export function LibraryBatchRecovery({
             {error}
           </p>
         )}
-        <div className="flex justify-end gap-2">
-          {receipt.result.succeeded_count > 0 && receipt.undo && (
-            <button
-              type="button"
-              disabled={pending || undo !== null || error !== null}
-              onClick={() => void undoConfirmed()}
-              className="rounded border border-border px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"
-            >
-              {uiText("Undo confirmed changes")}
-            </button>
-          )}
-          <button
-            type="button"
-            disabled={pending}
-            onClick={onClose}
-            className="rounded bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
-          >
-            {uiText("Discard remaining batch")}
-          </button>
-        </div>
       </div>
     </Modal>
   );

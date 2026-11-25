@@ -11,12 +11,242 @@
  */
 import { expect, test, type WebSocketRoute } from "@playwright/test";
 import type { PrinterSnapshot } from "@/types";
+import { aPrinter } from "../../src/test-support/factories";
 
 import { collectPageProblems, useMockApi } from "./_setup";
 
 useMockApi();
 
 test.describe("printer routes", () => {
+  test("preserves destination usability across send modes", async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.route("**/api/v1/printers", async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        json: [
+          ...(await response.json()),
+          aPrinter({ id: 77, name: "Workshop printer", group: "Workshop" }),
+        ],
+      });
+    });
+    await page.route("**/api/v1/models/1", async (route) => {
+      const response = await route.fetch();
+      const model = await response.json();
+      const revision = model.files.find(
+        (file: { file_type: string }) => file.file_type === "gcode",
+      );
+      revision.original_filename = "workshop-case.gcode.3mf";
+      await route.fulfill({ response, json: model });
+    });
+    await page.route("**/api/v1/files/*/gcode-plates", (route) =>
+      route.fulfill({
+        json: {
+          plates: [1, 2],
+          identities: [
+            { number: 1, name: "Enclosure base", object_count: 1 },
+            { number: 2, name: "Enclosure lid and mounting clips", object_count: 3 },
+          ],
+          plate_metadata: [
+            {
+              number: 1,
+              metadata: { estimated_time_s: 6480, filament_weight_g: 97.4, filament_cost: null },
+            },
+            {
+              number: 2,
+              metadata: { estimated_time_s: 2820, filament_weight_g: 38.2, filament_cost: null },
+            },
+          ],
+        },
+      }),
+    );
+    await page.goto("/models/1?tab=revisions");
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
+    if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+    await page.getByRole("button", { name: "Prepare print", exact: true }).first().click();
+    const direct = page.getByRole("dialog", { name: /^Send Rev/ });
+    await direct.getByRole("radio", { name: /^Plate 02/ }).check();
+    const firstFrame = (await direct.boundingBox())!;
+    const firstFooter = (await direct.getByRole("button", { name: "Cancel" }).boundingBox())!;
+    const mode = direct.getByRole("radio", { name: "Add to queue", exact: true });
+    const firstSwitch = (await mode.boundingBox())!;
+    const start = direct.getByRole("checkbox", { name: "Start print immediately" });
+    await expect(start).toHaveCSS("width", "20px");
+    await expect(start).toHaveCSS("height", "20px");
+    const directDestination = direct.getByRole("button", { name: "Destination", exact: true });
+    await directDestination.click();
+    const picker = page.getByRole("dialog", { name: "Destination", exact: true });
+    const search = picker.getByRole("combobox", { name: "Search" });
+    await expect(search).toBeFocused();
+    const searchBox = (await search.boundingBox())!;
+    const pickerBox = (await picker.boundingBox())!;
+    expect(searchBox.x - pickerBox.x).toBeGreaterThanOrEqual(8);
+    await search.fill("Workshop");
+    const workshop = picker.getByRole("option", { name: /^Workshop printer/ });
+    await workshop.click();
+    await expect(workshop).toHaveAttribute("aria-selected", "true");
+    await picker.getByRole("button", { name: "Done", exact: true }).click();
+    const directSelection = await directDestination.innerText();
+    expect(directSelection).toContain("Workshop printer");
+    expect(
+      await direct
+        .locator(".queue-compose-body")
+        .evaluate((body) => body.scrollHeight - body.clientHeight),
+    ).toBeLessThanOrEqual(1);
+
+    await mode.click();
+    const queue = page.getByRole("dialog", { name: "Add to queue", exact: true });
+    expect(await queue.boundingBox()).toEqual(firstFrame);
+    const queueFooter = (await queue.getByRole("button", { name: "Cancel" }).boundingBox())!;
+    expect(queueFooter.y).toBeCloseTo(firstFooter.y, 0);
+    const queueSwitch = (await queue
+      .getByRole("radio", { name: "Add to queue", exact: true })
+      .boundingBox())!;
+    expect(queueSwitch.y).toBeCloseTo(firstSwitch.y, 0);
+    const compatibility = queue.getByRole("checkbox", {
+      name: "Allow material or nozzle mismatch",
+    });
+    await expect(compatibility).toHaveCSS("width", "20px");
+    await expect(compatibility).toHaveCSS("height", "20px");
+    const group = queue.getByRole("combobox", { name: "Target group", exact: true });
+    await group.selectOption("Workshop");
+    await group.focus();
+    const groupLabel = (await queue.getByText("Target group", { exact: true }).boundingBox())!;
+    expect(groupLabel.y + groupLabel.height).toBeLessThan((await group.boundingBox())!.y);
+    await queue.getByRole("radio", { name: "Choose printer", exact: true }).click();
+    const queuedDestination = queue.getByRole("button", { name: "Destination", exact: true });
+    await queuedDestination.click();
+    await expect(picker.getByRole("option")).toHaveCount(1);
+    await workshop.click();
+    await expect(picker).toHaveCount(0);
+    await expect(queuedDestination).toContainText("Workshop printer");
+    await expect(queuedDestination).toBeFocused();
+    await expect(queue.getByRole("radio", { name: /^Plate 02/ })).toBeChecked();
+    expect(
+      await queue
+        .locator(".queue-compose-body")
+        .evaluate((body) => body.scrollHeight - body.clientHeight),
+    ).toBeLessThanOrEqual(1);
+
+    await queue.getByRole("radio", { name: "Send now", exact: true }).click();
+    await expect(directDestination).toHaveText(directSelection);
+  });
+
+  test("keeps the queue dialog consistent across entry points", async ({ page }) => {
+    await page.route("**/api/v1/printers", async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        json: [...(await response.json()), aPrinter({ id: 77, name: "Workshop printer" })],
+      });
+    });
+    const widths: number[] = [];
+    for (const route of ["/models/1?tab=revisions", "/printers?tab=queue"]) {
+      await page.goto(route);
+      const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
+      if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
+      await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+      if (route.startsWith("/models")) {
+        await page.getByRole("button", { name: "Prepare print", exact: true }).click();
+        await page.getByRole("radio", { name: "Add to queue", exact: true }).click();
+      } else {
+        await page.getByRole("button", { name: "Add to queue", exact: true }).first().click();
+      }
+      const dialog = page.getByRole("dialog", { name: "Add to queue", exact: true });
+      const details = dialog.getByRole("complementary", { name: "Dispatch details" });
+      await expect(details).toBeVisible();
+      widths.push((await dialog.boundingBox())!.width);
+      await dialog.getByRole("radio", { name: "Choose printer", exact: true }).check();
+      await dialog.getByRole("button", { name: "Destination", exact: true }).click();
+      await page
+        .getByRole("dialog", { name: "Destination", exact: true })
+        .getByRole("option", { name: /^Workshop printer\b/ })
+        .click();
+      await expect(details.getByText("Workshop printer", { exact: true })).toBeVisible();
+      await dialog.getByRole("radio", { name: "Rush", exact: true }).check();
+      await expect(details.getByText("Rush", { exact: true })).toBeVisible();
+      const mismatch = dialog.getByRole("checkbox", {
+        name: "Allow material or nozzle mismatch",
+      });
+      await mismatch.click();
+      await expect(details.getByText("Allow mismatch", { exact: true })).toBeVisible();
+      const submit = dialog.getByRole("button", { name: "Add to queue", exact: true });
+      await expect(submit).toBeInViewport();
+      if (route.startsWith("/models")) {
+        const receipt = page.waitForRequest(
+          (request) => request.method() === "POST" && request.url().endsWith("/api/v1/fleet/queue"),
+        );
+        await submit.click();
+        expect((await receipt).postDataJSON()).toMatchObject({
+          strategy: "manual",
+          printer_id: 77,
+          priority: "rush",
+          compatibility_policy: "allow_mismatch",
+        });
+      } else {
+        await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      }
+      await expect(dialog).toHaveCount(0);
+    }
+    expect(widths).toEqual([960, 960]);
+  });
+
+  test("shares one visible radio control across print workflows", async ({ page }) => {
+    const scenarios = [
+      ["/models/1?tab=history", "Record result", "Result", "Success", "Failed"],
+      ["/printers?tab=queue", "Add to queue", "Priority", "Normal", "Rush"],
+    ];
+    for (const [route, action, group, initial, next] of scenarios) {
+      await page.goto(route);
+      const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
+      if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
+      await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+      await page.getByRole("button", { name: action, exact: true }).first().click();
+      const options = page.getByRole("dialog").getByRole("group", { name: group, exact: true });
+      const radio = options.getByRole("radio", { name: initial, exact: true });
+      await expect(radio).toBeChecked();
+      await expect(radio).toHaveCSS("opacity", "1");
+      await expect(radio).toHaveCSS("width", "16px");
+      await expect(radio.locator("xpath=..")).toHaveCSS("border-top-width", "0px");
+      await radio.focus();
+      await page.keyboard.press("ArrowRight");
+      const selected = options.getByRole("radio", { name: next, exact: true });
+      await expect(selected).toBeChecked();
+      await expect(selected).toBeFocused();
+      await expect(radio).not.toBeChecked();
+      await page.keyboard.press("Escape");
+    }
+  });
+
+  for (const theme of ["dark", "light"] as const) {
+    test(`shows a readable compatibility checkbox in ${theme} mode`, async ({ page }) => {
+      await page.addInitScript((mode) => localStorage.setItem("printstash.theme", mode), theme);
+      await page.goto("/printers?tab=queue");
+      const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
+      if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
+      await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+      await page.getByRole("button", { name: "Add to queue", exact: true }).first().click();
+      const dialog = page.getByRole("dialog", { name: "Add to queue" });
+      const label = "Allow material or nozzle mismatch";
+      const checkbox = dialog.getByRole("checkbox", { name: label });
+      const details = dialog.getByRole("complementary", { name: "Dispatch details" });
+      await expect(checkbox).toBeVisible();
+      await expect(checkbox).not.toBeChecked();
+      await expect(checkbox).toHaveCSS("width", "20px");
+      await expect(checkbox).toHaveCSS("height", "20px");
+
+      await dialog.getByText(label, { exact: true }).click();
+      await expect(checkbox).toBeChecked();
+      await expect(details.getByText("Allow mismatch", { exact: true })).toBeVisible();
+
+      await checkbox.press("Space");
+      await expect(checkbox).toBeFocused();
+      await expect(checkbox).not.toBeChecked();
+      await expect(details.getByText("Require compatible material")).toBeVisible();
+    });
+  }
+
   test("fits a long saved revision through the queue selection flow", async ({ page }) => {
     const name = "ContinuousWorkshopModel".repeat(9);
     const label = "ContinuousRevisionLabel".repeat(5);
@@ -33,6 +263,15 @@ test.describe("printer routes", () => {
       const model = await response.json();
       model.name = name;
       model.files[1].revision_label = label;
+      model.files.push(
+        ...Array.from({ length: 11 }, (_, index) => ({
+          ...model.files[1],
+          id: 100 + index,
+          gcode_revision_number: 2 + index,
+          revision_label: null,
+          original_filename: `other-part-${index + 1}.gcode`,
+        })),
+      );
       await route.fulfill({ response, json: model });
     });
     await page.setViewportSize({ width: 800, height: 650 });
@@ -41,6 +280,7 @@ test.describe("printer routes", () => {
     await page.getByText("Browse saved Revisions", { exact: true }).click();
     const picker = page.getByRole("dialog", { name: "Revision", exact: true });
     await picker.getByRole("button", { name, exact: true }).click();
+    await picker.getByRole("searchbox", { name: "Search revisions" }).fill(label);
     const revision = picker.getByRole("button", { name: new RegExp(label) });
     await expect(revision).toBeVisible();
     await expect
@@ -57,7 +297,7 @@ test.describe("printer routes", () => {
         }),
       )
       .toBeLessThanOrEqual(1);
-    await expect(dialog.getByRole("button", { name: "Save job" })).toBeInViewport();
+    await expect(dialog.getByRole("button", { name: "Add to queue" })).toBeInViewport();
   });
 
   test("printer list route loads configured printers through the frontend proxy", async ({
@@ -276,14 +516,19 @@ test.describe("printer routes", () => {
     await expect(page).toHaveURL(/\/printers\/3$/);
 
     await page.goBack();
-    await card.getByRole("button", { name: "Settings", exact: true }).click();
+    await page
+      .getByRole("article")
+      .filter({ has: page.getByRole("link", { name: "ender", exact: true }) })
+      .click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Edit connection", exact: true }).click();
     const settings = page.getByRole("dialog", { name: "Edit printer connection" });
     await expect(settings).toBeVisible();
     await expect(page).toHaveURL(/\/printers$/);
     await page.keyboard.press("Escape");
     await expect(settings).toBeHidden();
 
-    await card.getByRole("button", { name: /set model|creality/i }).click();
+    await card.click({ button: "right" });
+    await page.getByRole("menuitem", { name: "Set model", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "Choose printer model" })).toBeVisible();
     await expect(page).toHaveURL(/\/printers$/);
     await page.keyboard.press("Escape");

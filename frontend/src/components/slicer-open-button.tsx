@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
@@ -53,11 +54,16 @@ export function SlicerOpenButton({
   fileType,
   size = "md",
   showLabel = false,
+  primary = false,
+  outline = false,
 }: {
   fileId: number;
   fileType: string;
   size?: "sm" | "md";
   showLabel?: boolean;
+  primary?: boolean;
+  /** A bordered secondary button, for the action hierarchy's second tier. */
+  outline?: boolean;
 }) {
   useUiLocale();
   const [open, setOpen] = useState(false);
@@ -122,20 +128,34 @@ export function SlicerOpenButton({
       role="menu"
       aria-label={uiText("Open in slicer")}
       trigger={
-        <button
-          type="button"
-          data-menu-trigger
-          onClick={() => setOpen((o) => !o)}
-          title={uiText("Open in slicer")}
-          aria-label={uiText("Open in slicer")}
-          aria-haspopup="menu"
-          aria-expanded={open}
-          className="inline-flex items-center gap-0.5 text-on-surface-variant hover:text-primary p-2 rounded hover:bg-surface-container-high transition-colors"
-        >
-          <ExternalLink className={iconSize} />
-          {showLabel && <span className="px-1 text-xs">{uiText("Open in slicer")}</span>}
-          <ChevronDown className={chevronSize} />
-        </button>
+        primary || outline ? (
+          <Button
+            type="button"
+            variant={outline ? "outline" : "default"}
+            size={outline && size === "sm" ? "sm" : undefined}
+            aria-haspopup="menu"
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+          >
+            {uiText("Open in slicer")}
+            <ChevronDown className={chevronSize} aria-hidden />
+          </Button>
+        ) : (
+          <button
+            type="button"
+            data-menu-trigger
+            onClick={() => setOpen((o) => !o)}
+            title={uiText("Open in slicer")}
+            aria-label={uiText("Open in slicer")}
+            aria-haspopup="menu"
+            aria-expanded={open}
+            className="inline-flex items-center gap-0.5 text-on-surface-variant hover:text-primary p-2 rounded hover:bg-surface-container-high transition-colors"
+          >
+            <ExternalLink className={iconSize} />
+            {showLabel && <span className="px-1 text-xs">{uiText("Open in slicer")}</span>}
+            <ChevronDown className={chevronSize} />
+          </button>
+        )
       }
       contentClassName="w-48 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
     >

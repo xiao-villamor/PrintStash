@@ -23,6 +23,11 @@ module.exports = {
         destructive: {
           DEFAULT: "var(--destructive)",
           foreground: "var(--destructive-foreground)",
+          action: {
+            DEFAULT: "var(--destructive-action)",
+            foreground: "var(--destructive-action-foreground)",
+            hover: "var(--destructive-action-hover)",
+          },
         },
         muted: {
           DEFAULT: "var(--muted)",
@@ -61,7 +66,7 @@ module.exports = {
       },
       borderRadius: {
         DEFAULT: "var(--radius)",
-        lg: "var(--radius)",
+        lg: "var(--radius-popover)",
         md: "var(--radius)",
         sm: "var(--radius)",
       },

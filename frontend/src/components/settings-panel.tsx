@@ -1,5 +1,13 @@
 "use client";
 import { WorkbenchSidebarContent } from "@/components/collections-pane";
+import {
+  SETTINGS_SECTION_LABELS,
+  settingsSection,
+  type SettingsSection,
+} from "@/lib/settings-sections";
+import { SettingsNav, type SettingsNavGroup } from "@/components/settings-nav";
+import { SettingsToc } from "@/components/settings-toc";
+import { CardMetricsPreview, ThemeTiles } from "@/components/settings-appearance-parts";
 import { useCollectionsPane } from "@/lib/collections-pane-context";
 
 import { useContentReveal } from "@/lib/use-content-reveal";
@@ -79,51 +87,53 @@ import { BackupRunHistory } from "@/components/backup-run-history";
 import { CollectionPicker } from "@/components/collection-picker";
 import {
   Bell,
-  ArrowRightLeft,
   Boxes,
   Check,
   CircleArrowUp,
-  Clock,
   Cloud,
   Database,
   Download,
   Eraser,
-  Eye,
   Gpu,
+  Hourglass,
   Files,
   FolderSync,
-  Coins,
   FolderTree,
   HardDrive,
   HeartPulse,
   Activity,
-  FileText,
   Info,
   Images,
   KeyRound,
   Copy,
   Loader2,
   Palette,
-  Printer,
   Puzzle,
   ShieldCheck,
-  RefreshCw,
   RotateCcw,
+  Save,
+  Settings as SettingsIcon,
   Trash2,
   Search,
   Server,
-  Sun,
   Tag,
   UserPlus,
   Users,
+  Clock,
+  RefreshCw,
+  Globe,
+  Folder,
 } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
+import { FilamentSpool } from "@/components/ui/filament-spool";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Modal } from "@/components/ui/modal";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/ui/page-header";
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { TabBar } from "@/components/ui/tabs";
-import { inputClasses } from "@/components/ui/input";
+import { Input, inputClasses } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Localized } from "@/components/ui/localized";
 import { translateUiText } from "@/lib/locale";
@@ -180,7 +190,17 @@ import {
 import { toast } from "@/lib/toast";
 import { localeDefinitions, SUPPORTED_LOCALES, useI18n, type MessageKey } from "@/lib/i18n";
 import "./settings-panel.css";
-import { SettingsCard, SettingsNotice, SettingsSwitch } from "@/components/settings-card";
+import {
+  SettingsCard,
+  SettingsEmptyRow,
+  SettingsNotice,
+  SettingsChoiceCards,
+  SettingsStatus,
+  SettingsRowMenu,
+  SettingsScope,
+  SettingsSegmented,
+  SettingsSwitch,
+} from "@/components/settings-card";
 import {
   SETTINGS_BUTTON,
   SETTINGS_BUTTON_DANGER,
@@ -218,60 +238,40 @@ import type {
   UserUpdate,
 } from "@/types";
 
-type SettingsSection =
-  | "overview"
-  | "access"
-  | "storage"
-  | "backup"
-  | "remote-storage"
-  | "imports"
-  | "maintenance"
-  | "work"
-  | "ai-search"
-  | "libraries"
-  | "notifications"
-  | "sso"
-  | "spoolman"
-  | "design"
-  | "previews"
-  | "gpu"
-  | "trash"
-  | "about";
-
 const SETTINGS_SECTIONS: {
   id: SettingsSection;
   labelKey: MessageKey;
   icon: typeof Server;
 }[] = [
-  { id: "overview", labelKey: "settings.overview", icon: Server },
-  { id: "access", labelKey: "settings.access", icon: Users },
-  { id: "storage", labelKey: "settings.storage", icon: HardDrive },
-  { id: "backup", labelKey: "settings.backup", icon: Database },
-  { id: "remote-storage", labelKey: "settings.remoteStorage", icon: Cloud },
-  { id: "imports", labelKey: "settings.imports", icon: Download },
-  { id: "ai-search", labelKey: "aiSearch.settingsTitle", icon: Search },
-  { id: "maintenance", labelKey: "settings.maintenance", icon: HeartPulse },
-  { id: "work", labelKey: "settings.backgroundWork", icon: Activity },
-  { id: "libraries", labelKey: "settings.libraries", icon: FolderSync },
-  { id: "notifications", labelKey: "settings.notifications", icon: Bell },
-  { id: "sso", labelKey: "settings.sso", icon: ShieldCheck },
-  { id: "spoolman", labelKey: "settings.spoolman", icon: Boxes },
-  { id: "design", labelKey: "settings.design", icon: Palette },
-  { id: "previews", labelKey: "settings.previews", icon: Images },
-  { id: "gpu", labelKey: "settings.gpu", icon: Gpu },
-  { id: "trash", labelKey: "settings.trash", icon: Trash2 },
-  { id: "about", labelKey: "settings.about", icon: Info },
+  { id: "overview", labelKey: SETTINGS_SECTION_LABELS["overview"], icon: Server },
+  { id: "access", labelKey: SETTINGS_SECTION_LABELS["access"], icon: Users },
+  { id: "storage", labelKey: SETTINGS_SECTION_LABELS["storage"], icon: HardDrive },
+  { id: "backup", labelKey: SETTINGS_SECTION_LABELS["backup"], icon: Database },
+  { id: "remote-storage", labelKey: SETTINGS_SECTION_LABELS["remote-storage"], icon: Cloud },
+  { id: "imports", labelKey: SETTINGS_SECTION_LABELS["imports"], icon: Download },
+  { id: "ai-search", labelKey: SETTINGS_SECTION_LABELS["ai-search"], icon: Search },
+  { id: "maintenance", labelKey: SETTINGS_SECTION_LABELS["maintenance"], icon: HeartPulse },
+  { id: "work", labelKey: SETTINGS_SECTION_LABELS["work"], icon: Activity },
+  { id: "libraries", labelKey: SETTINGS_SECTION_LABELS["libraries"], icon: FolderSync },
+  { id: "notifications", labelKey: SETTINGS_SECTION_LABELS["notifications"], icon: Bell },
+  { id: "sso", labelKey: SETTINGS_SECTION_LABELS["sso"], icon: ShieldCheck },
+  { id: "spoolman", labelKey: SETTINGS_SECTION_LABELS["spoolman"], icon: FilamentSpool },
+  { id: "design", labelKey: SETTINGS_SECTION_LABELS["design"], icon: Palette },
+  { id: "previews", labelKey: SETTINGS_SECTION_LABELS["previews"], icon: Images },
+  { id: "gpu", labelKey: SETTINGS_SECTION_LABELS["gpu"], icon: Gpu },
+  { id: "trash", labelKey: SETTINGS_SECTION_LABELS["trash"], icon: Trash2 },
+  { id: "about", labelKey: SETTINGS_SECTION_LABELS["about"], icon: Info },
 ];
 
 const SETTINGS_GROUPS: { labelKey: MessageKey; ids: SettingsSection[] }[] = [
-  { labelKey: "Global settings", ids: ["overview"] },
   {
-    labelKey: "Library",
-    ids: ["storage", "backup", "remote-storage", "imports", "ai-search", "libraries", "trash"],
+    labelKey: "Vault",
+    ids: ["overview", "access", "storage", "backup", "remote-storage", "maintenance"],
   },
-  { labelKey: "Hardware & integrations", ids: ["spoolman", "notifications"] },
-  { labelKey: "Account", ids: ["access", "sso"] },
-  { labelKey: "System", ids: ["maintenance", "work", "design", "previews", "gpu", "about"] },
+  { labelKey: "Library", ids: ["imports", "libraries", "previews", "ai-search", "trash"] },
+  { labelKey: "Integrations", ids: ["spoolman", "notifications", "sso"] },
+  { labelKey: "This browser", ids: ["design", "gpu"] },
+  { labelKey: "System", ids: ["work", "about"] },
 ];
 
 const SETTINGS_SUBTITLES = {
@@ -294,15 +294,6 @@ const SETTINGS_SUBTITLES = {
   trash: "settings.subtitle.trash",
   about: "settings.subtitle.about",
 } satisfies Record<SettingsSection, MessageKey>;
-
-/** True when the `?section=` value names one of the sections we ship. */
-function isSettingsSection(value: string | null): value is SettingsSection {
-  return SETTINGS_SECTIONS.some((section) => section.id === value);
-}
-
-function settingsSection(value: string | null): SettingsSection {
-  return isSettingsSection(value) ? value : "overview";
-}
 
 /**
  * Resolve a `<select>` value back to the literal union it came from. The DOM hands
@@ -489,6 +480,26 @@ function useDeadlineReached(deadline: string | null): boolean {
   }, [deadline]);
 
   return deadline !== null && reachedDeadline === deadline;
+}
+
+/** How long a trashed item has left; the last days take the destructive tone. */
+function TrashExpiry({ expiresAt }: { expiresAt: string | null | undefined }) {
+  useUiLocale();
+  const [now] = useState(Date.now);
+  if (!expiresAt) return null;
+  const days = Math.ceil((Date.parse(expiresAt) - now) / 86_400_000);
+  if (Number.isNaN(days)) return null;
+  return (
+    <span
+      className={cn(
+        "mt-1.5 inline-flex h-5.5 items-center gap-1.5 rounded-full bg-foreground/10 px-2.5 text-xs font-medium",
+        days <= 3 ? "text-destructive" : "text-foreground/80",
+      )}
+    >
+      <Clock className="size-3" aria-hidden="true" />
+      {days <= 0 ? uiText("Expires today") : uiText("{value1} days left", { value1: String(days) })}
+    </span>
+  );
 }
 
 export function SettingsPanel() {
@@ -852,6 +863,17 @@ export function SettingsPanel() {
     (section) =>
       !["sso", "maintenance", "work", "ai-search"].includes(section.id) || user?.is_superuser,
   );
+
+  const settingsNavGroups: SettingsNavGroup[] = SETTINGS_GROUPS.flatMap((group) => {
+    const sections = group.ids.flatMap((id) => {
+      const section = visibleSettingsSections.find((item) => item.id === id);
+      return section ? [{ id: section.id, label: t(section.labelKey), icon: section.icon }] : [];
+    });
+    return sections.length ? [{ label: uiText(group.labelKey), sections }] : [];
+  });
+  // The Settings sidebar and the in-page rail are the same navigation; the rail
+  // shows whenever the sidebar is not already showing it.
+  const pageRail = !(sidebar && sidebar.open && sidebar.mode === "settings");
 
   function changeSection(section: SettingsSection) {
     const params = new URLSearchParams(searchParams.toString());
@@ -1941,7 +1963,7 @@ export function SettingsPanel() {
       },
       value: stats ? `${stats.printer_count}` : "...",
       desc: "Configured devices",
-      icon: Printer,
+      icon: Printer3D,
     },
   ];
 
@@ -2029,8 +2051,10 @@ export function SettingsPanel() {
     : null;
 
   const reviewExpiredButton = (
-    <button
+    <Button
       type="button"
+      variant="outline"
+      size="sm"
       onClick={() => setPurgeExpiredOpen(true)}
       disabled={
         !user?.is_superuser ||
@@ -2041,10 +2065,10 @@ export function SettingsPanel() {
         gcRead.isPending ||
         (gcPlan !== null && ["preview", "quarantined", "finalizing"].includes(gcPlan.state))
       }
-      className={BTN_SECONDARY}
     >
+      <Hourglass className="size-3.5" aria-hidden="true" />
       {trashBusy === "gc" ? uiText("Preparing") : uiText("Review expired")}
-    </button>
+    </Button>
   );
 
   const trashCleanupDetails =
@@ -2186,14 +2210,16 @@ export function SettingsPanel() {
     activeSection === "trash" ? (
       <form
         aria-label={uiText("Trash retention")}
-        className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 text-[13px] sm:px-5"
+        className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3.5 text-[13px] sm:px-5"
         onSubmit={(event) => {
           event.preventDefault();
           if (!saveTrashRetentionDisabled) saveTrashRetention();
         }}
       >
-        <Trash2 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-        <label htmlFor="trash-retention-days" className="text-foreground">
+        <span className="grid size-8 shrink-0 place-items-center rounded-md bg-foreground/10 text-muted-foreground">
+          <Trash2 className="size-4" aria-hidden />
+        </span>
+        <label htmlFor="trash-retention-days" className="font-medium text-foreground">
           {uiText("Keep deleted items for")}
         </label>
         <input
@@ -2215,7 +2241,7 @@ export function SettingsPanel() {
           disabled={
             !user?.is_superuser || !remoteConfigData || remoteConfig.isError || trashRetentionBusy
           }
-          className={cn(INPUT, "w-20 font-mono")}
+          className={cn(INPUT, "w-20 rounded-md font-mono")}
         />
         <span className="text-foreground">{uiText("days")}</span>
         <span id="trash-retention-hint" className="text-xs text-muted-foreground">
@@ -2237,7 +2263,14 @@ export function SettingsPanel() {
             disabled={saveTrashRetentionDisabled || trashRetentionDraft === null}
             className={BTN_PRIMARY}
           >
-            {trashRetentionBusy ? uiText("Saving") : uiText("Save retention")}
+            {trashRetentionBusy ? (
+              uiText("Saving")
+            ) : (
+              <>
+                <Save className="size-3.5" aria-hidden="true" />
+                {uiText("Save retention")}
+              </>
+            )}
           </button>
         </span>
       </form>
@@ -2247,7 +2280,6 @@ export function SettingsPanel() {
     activeSection === "trash" ? (
       <SettingsCard
         className="border-0"
-        icon={Trash2}
         title={uiText("Trash retention")}
         description={uiText(
           "Soft-deleted models stay restorable until the retention window expires.",
@@ -2271,7 +2303,7 @@ export function SettingsPanel() {
           </button>
         }
       >
-        <div className="settings-preference-fields px-4 sm:px-5">
+        <div className="settings-preference-fields">
           <label className="settings-preference-row">
             <span>{uiText("Days")}</span>
             <input
@@ -2305,13 +2337,12 @@ export function SettingsPanel() {
       <SettingsCard
         hideHeader={trashPage}
         className="border-0"
-        icon={Boxes}
         title={uiText("trash.itemsTitle")}
         description={uiText("multipart.trashHelp")}
       >
         {trashItems.length > 0 && (
-          <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3 text-xs text-muted-foreground sm:px-5">
-            <span className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3 border-b border-border bg-foreground/[0.03] px-4 py-3 text-xs text-muted-foreground sm:px-5">
+            <span className="flex items-center gap-3 font-medium text-foreground">
               <Checkbox
                 checked={selectedTrash.length === trashItems.length}
                 onChange={toggleAllTrash}
@@ -2339,6 +2370,7 @@ export function SettingsPanel() {
                   disabled={trashBusy !== null}
                   className={BTN_SECONDARY}
                 >
+                  <RotateCcw className="size-3.5" aria-hidden="true" />
                   {uiText("Restore selected")}
                 </button>
                 <button
@@ -2347,12 +2379,13 @@ export function SettingsPanel() {
                   disabled={trashBusy !== null}
                   className={BTN_DANGER}
                 >
+                  <Trash2 className="size-3.5" aria-hidden="true" />
                   {uiText("Delete selected")}
                 </button>
               </span>
             )}
             {trashItems.some((item) => item.kind === "model") && (
-              <span className="ml-auto font-mono tabular-nums">
+              <span className="ml-auto rounded-full bg-foreground/10 px-2.5 py-1 font-mono tabular-nums text-foreground/80">
                 {t("Known model storage: {size}", {
                   size: formatBytes(
                     trashItems.reduce(
@@ -2377,7 +2410,10 @@ export function SettingsPanel() {
               {uiText("settings.trashLoadFailed")}
             </p>
           ) : trashItems.length === 0 ? (
-            <p className="p-4 sm:p-5 text-sm text-muted-foreground">{uiText("Trash is empty.")}</p>
+            <SettingsEmptyRow className={trashPage ? "px-5" : undefined}>
+              <strong className="font-medium text-foreground">{uiText("Trash is empty.")}</strong>{" "}
+              {uiText("Deleted models wait here until the retention window ends.")}
+            </SettingsEmptyRow>
           ) : (
             trashItems.map((item) => (
               <div
@@ -2406,7 +2442,7 @@ export function SettingsPanel() {
                   <ProtectedThumbnail
                     path={item.kind === "model" ? item.thumbnail_url : null}
                     alt=""
-                    className="flex h-10 w-10 items-center justify-center bg-muted text-muted-foreground"
+                    className="flex size-12 items-center justify-center overflow-hidden rounded-md border border-border bg-muted text-muted-foreground"
                     imageClassName="h-full w-full object-cover"
                     placeholder={<Boxes className="h-5 w-5" aria-hidden />}
                   />
@@ -2427,6 +2463,7 @@ export function SettingsPanel() {
                       }),
                     ].join(" · ")}
                   </p>
+                  <TrashExpiry expiresAt={item.expires_at} />
                 </div>
                 <div
                   className={cn(
@@ -2440,6 +2477,7 @@ export function SettingsPanel() {
                     disabled={trashBusy !== null}
                     className={BTN_SECONDARY}
                   >
+                    <RotateCcw className="size-3.5" aria-hidden="true" />
                     {uiText("Restore")}
                   </button>
                   <button
@@ -2448,6 +2486,7 @@ export function SettingsPanel() {
                     disabled={trashBusy !== null}
                     className={BTN_DANGER}
                   >
+                    <Trash2 className="size-3.5" aria-hidden="true" />
                     {uiText("Delete")}
                   </button>
                 </div>
@@ -2460,9 +2499,10 @@ export function SettingsPanel() {
 
   return (
     <Localized>
-      <div className="w-full space-y-6">
+      <div className={cn("w-full space-y-6", !trashPage && "mx-auto max-w-7xl")}>
         <ConfirmModal
           open={restartConfirmOpen}
+          variant="default"
           onClose={() => {
             if (!restartBusy) setRestartConfirmOpen(false);
           }}
@@ -2527,6 +2567,7 @@ export function SettingsPanel() {
         />
         <ConfirmModal
           open={purgeExpiredOpen}
+          variant="default"
           onClose={() => setPurgeExpiredOpen(false)}
           onConfirm={createExpiredGcPreview}
           busy={trashBusy === "gc"}
@@ -2568,6 +2609,7 @@ export function SettingsPanel() {
         />
         <ConfirmModal
           open={adoptTarget !== null}
+          variant="default"
           onClose={() => {
             if (!adoptingBackup) setAdoptTarget(null);
           }}
@@ -2587,6 +2629,7 @@ export function SettingsPanel() {
         />
         <ConfirmModal
           open={adoptS3Target !== null}
+          variant="default"
           onClose={() => {
             if (!adoptingS3Backup) setAdoptS3Target(null);
           }}
@@ -2606,6 +2649,7 @@ export function SettingsPanel() {
         />
         <ConfirmModal
           open={adoptRemoteTarget !== null}
+          variant="default"
           onClose={() => {
             if (!adoptingRemoteBackup) setAdoptRemoteTarget(null);
           }}
@@ -2625,6 +2669,7 @@ export function SettingsPanel() {
         />
         <ConfirmModal
           open={printerImageWarningOpen}
+          variant="default"
           onClose={() => setPrinterImageWarningOpen(false)}
           onConfirm={() => {
             updatePrinterCardImagePreference(true);
@@ -2638,29 +2683,31 @@ export function SettingsPanel() {
         />
 
         <PageHeader
-          title={trashPage ? t("settings.trash") : t("settings.title")}
+          title={t(
+            activeSection === "overview"
+              ? "settings.title"
+              : SETTINGS_SECTION_LABELS[activeSection],
+          )}
           description={
-            trashPage ? (
-              uiText("Review trashed items by name before restoring or permanently removing them.")
-            ) : (
-              <>
-                {t(
-                  SETTINGS_SECTIONS.find((section) => section.id === activeSection)?.labelKey ??
-                    "settings.overview",
-                )}
-                {" · "}
-                {t(SETTINGS_SUBTITLES[activeSection])}
-              </>
-            )
+            trashPage
+              ? uiText(
+                  "Review trashed items by name before restoring or permanently removing them.",
+                )
+              : t(SETTINGS_SUBTITLES[activeSection])
           }
           actions={
             trashPage ? (
               <>
                 <Button size="sm" variant="outline" onClick={loadTrash} disabled={trashLoading}>
+                  <RefreshCw
+                    className={cn("size-3.5", trashLoading && "animate-spin")}
+                    aria-hidden="true"
+                  />
                   {t("Refresh")}
                 </Button>
                 {reviewExpiredButton}
                 <Button size="sm" variant="outline" onClick={() => changeSection("overview")}>
+                  <SettingsIcon className="size-3.5" aria-hidden="true" />
                   {t("settings.title")}
                 </Button>
               </>
@@ -2681,10 +2728,7 @@ export function SettingsPanel() {
         {!trashPage && (
           <div
             ref={mobileTabsRef}
-            className={cn(
-              "border-b border-border pb-3",
-              sidebar ? sidebar.open && sidebar.mode === "settings" && "md:hidden" : "lg:hidden",
-            )}
+            className={cn("border-b border-border pb-3", pageRail ? "lg:hidden" : "md:hidden")}
           >
             <TabBar
               tabs={visibleSettingsSections.map((section) => {
@@ -2711,74 +2755,44 @@ export function SettingsPanel() {
 
         <div
           className={
-            trashPage || sidebar
+            trashPage
               ? ""
-              : "lg:grid lg:grid-cols-[14.375rem_minmax(0,1fr)] lg:items-start lg:gap-5"
+              : pageRail
+                ? "lg:grid lg:grid-cols-[14.5rem_minmax(0,1fr)] lg:items-start lg:gap-8 xl:grid-cols-[14.5rem_minmax(0,1fr)_10.5rem]"
+                : "xl:grid xl:grid-cols-[minmax(0,1fr)_10.5rem] xl:items-start xl:gap-8"
           }
         >
           {!trashPage && (
-            <WorkbenchSidebarContent>
-              <nav
-                aria-label={uiText("Settings sections")}
-                hidden={sidebar !== null && sidebar.mode !== "settings"}
-                className={cn(
-                  "settings-nav",
-                  sidebar
-                    ? "h-full w-full overflow-y-auto px-3 pb-4"
-                    : "sticky top-0 hidden border border-border bg-card p-3.5 lg:block",
-                )}
-              >
+            <>
+              <WorkbenchSidebarContent>
                 {sidebar && (
-                  <h2 className="flex h-12 items-center px-1 font-mono text-2xs font-medium uppercase tracking-[.06em] text-muted-foreground">
-                    {t("settings.title")}
-                  </h2>
+                  <SettingsNav
+                    variant="sidebar"
+                    groups={settingsNavGroups}
+                    active={activeSection}
+                    onChange={(id) => changeSection(settingsSection(id))}
+                    hidden={sidebar.mode !== "settings"}
+                  />
                 )}
-                {SETTINGS_GROUPS.map((group) => {
-                  const sections = group.ids.flatMap((id) => {
-                    const section = visibleSettingsSections.find((item) => item.id === id);
-                    return section ? [section] : [];
-                  });
-                  if (!sections.length) return null;
-                  return (
-                    <div
-                      key={group.labelKey}
-                      className="border-b border-border px-1 py-2 last:border-b-0"
-                    >
-                      <p
-                        className={cn(
-                          "px-2 pb-1 font-mono text-2xs font-medium uppercase tracking-wider text-muted-foreground",
-                          group.labelKey === "Global settings" &&
-                            "pb-3 font-sans text-[13px] font-semibold normal-case tracking-normal text-foreground",
-                        )}
-                      >
-                        {uiText(group.labelKey)}
-                      </p>
-                      {sections.map((section) => {
-                        const Icon = section.icon;
-                        const isActive = section.id === activeSection;
-                        return (
-                          <button
-                            key={section.id}
-                            type="button"
-                            aria-current={isActive ? "page" : undefined}
-                            onClick={() => changeSection(section.id)}
-                            className={cn(
-                              "flex h-8 w-full items-center gap-2.5 px-2.5 text-left text-[13px] font-normal transition-[color,background-color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-                              isActive
-                                ? "bg-accent text-accent-foreground"
-                                : "text-muted-foreground hover:bg-popover-hover hover:text-foreground",
-                            )}
-                          >
-                            <Icon className="h-4 w-4 shrink-0" />
-                            <span>{t(section.labelKey)}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-              </nav>
-            </WorkbenchSidebarContent>
+              </WorkbenchSidebarContent>
+              {pageRail && (
+                <SettingsNav
+                  variant="page"
+                  groups={settingsNavGroups}
+                  active={activeSection}
+                  onChange={(id) => changeSection(settingsSection(id))}
+                  account={
+                    user
+                      ? {
+                          name: user.username,
+                          role: user.is_superuser ? uiText("Vault admin") : uiText("Member"),
+                        }
+                      : undefined
+                  }
+                  onBack={() => router.push("/")}
+                />
+              )}
+            </>
           )}
 
           <main ref={sectionMotion} className="settings-main min-w-0">
@@ -2910,8 +2924,28 @@ export function SettingsPanel() {
                   </SettingsNotice>
                 )}
                 <ImportCopyWarning storageHealth={storageHealth} />
-                <div className="overflow-hidden border border-border bg-card">
-                  <div className="grid grid-cols-2 gap-y-4 border-b border-border p-4 sm:p-5 lg:grid-cols-4">
+                {user?.is_superuser &&
+                  !ownedBackupRead.isPending &&
+                  !ownedBackupRead.isError &&
+                  !latestBackup && (
+                    <SettingsNotice
+                      tone="warning"
+                      title={uiText("This Vault has never been backed up")}
+                      action={
+                        <Button size="sm" onClick={() => changeSection("backup")}>
+                          {uiText("Open Backups")}
+                        </Button>
+                      }
+                    >
+                      <p>
+                        {uiText(
+                          "Create a backup before upgrading or moving storage. Automatic backups are off.",
+                        )}
+                      </p>
+                    </SettingsNotice>
+                  )}
+                <div className="space-y-6">
+                  <div className="grid grid-cols-2 gap-y-4 rounded-lg border border-border bg-card p-4 sm:p-5 lg:grid-cols-4">
                     {kpiItems.map((item) => (
                       <div
                         key={item.label}
@@ -2929,10 +2963,9 @@ export function SettingsPanel() {
                     ))}
                   </div>
 
-                  <div className="settings-inline-groups divide-y divide-border">
+                  <div className="grid items-start gap-6 xl:grid-cols-2">
                     {user?.is_superuser && (
                       <SettingsCard
-                        icon={ShieldCheck}
                         title={t("Data safety")}
                         description={t("Review backups and file checks for this Vault.")}
                         action={
@@ -2963,13 +2996,15 @@ export function SettingsPanel() {
                               </span>
                             </dt>
                             <dd>
-                              {ownedBackupRead.isPending
-                                ? t("Loading…")
-                                : ownedBackupRead.isError
-                                  ? t("Unavailable")
-                                  : latestBackup
-                                    ? formatDateTime(latestBackup.created_at)
-                                    : t("Never")}
+                              {ownedBackupRead.isPending ? (
+                                t("Loading…")
+                              ) : ownedBackupRead.isError ? (
+                                t("Unavailable")
+                              ) : latestBackup ? (
+                                formatDateTime(latestBackup.created_at)
+                              ) : (
+                                <SettingsStatus tone="warning">{t("Never")}</SettingsStatus>
+                              )}
                             </dd>
                           </div>
                           <div>
@@ -3016,41 +3051,8 @@ export function SettingsPanel() {
                         </dl>
                       </SettingsCard>
                     )}
-                    {user?.is_superuser && (
-                      <SettingsCard
-                        icon={Boxes}
-                        title={uiText("Sample collection")}
-                        action={
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            loading={addingSamples}
-                            onClick={async () => {
-                              setAddingSamples(true);
-                              try {
-                                const { job_id } = await addSampleCollection();
-                                toast.success(
-                                  uiText(
-                                    job_id
-                                      ? "Sample collection queued"
-                                      : "Sample collection already exists",
-                                  ),
-                                );
-                              } catch (error) {
-                                toast.error(userMessage(error));
-                              } finally {
-                                setAddingSamples(false);
-                              }
-                            }}
-                          >
-                            {uiText("Add sample collection")}
-                          </Button>
-                        }
-                      />
-                    )}
                     {/* System information */}
                     <SettingsCard
-                      icon={Server}
                       title={uiText("System")}
                       description={uiText("Server status and vault configuration")}
                       action={
@@ -3067,7 +3069,7 @@ export function SettingsPanel() {
                         ) : undefined
                       }
                     >
-                      <div className="pb-1 pr-5">
+                      <div>
                         {systemItems.map((item) => (
                           <div key={item.label} className="settings-readonly-row">
                             <div className="min-w-0">
@@ -3088,15 +3090,15 @@ export function SettingsPanel() {
                         ))}
                       </div>
                     </SettingsCard>
-
+                  </div>
+                  <div className="grid items-start gap-6 xl:grid-cols-2">
                     <SettingsCard
-                      icon={Download}
                       title={uiText("Library migration")}
                       description={uiText(
                         "Portable archive with models, metadata, print history, and original artifacts",
                       )}
                     >
-                      <div className="p-4 sm:p-5 space-y-4">
+                      <div className="space-y-4 py-4">
                         <p className="text-sm text-muted-foreground leading-relaxed">
                           {uiText(
                             "Export a versioned archive for migration to another PrintStash installation. Accounts, credentials, settings, and trash are excluded.",
@@ -3141,11 +3143,10 @@ export function SettingsPanel() {
 
                     {/* Data export */}
                     <SettingsCard
-                      icon={Download}
                       title={uiText("Data export")}
                       description={uiText("Metadata only — no raw STL/3MF/G-code files")}
                     >
-                      <div className="p-4 sm:p-5 space-y-4">
+                      <div className="space-y-4 py-4">
                         <p className="text-sm text-muted-foreground leading-relaxed">
                           {uiText(
                             "Download your searchable library context for spreadsheets, audits, migrations, or local AI prompts.",
@@ -3174,6 +3175,38 @@ export function SettingsPanel() {
                       </div>
                     </SettingsCard>
                   </div>
+                  {user?.is_superuser && (
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed border-border px-4 py-3">
+                      <p className="text-sm font-medium text-foreground">
+                        {uiText("Sample collection")}
+                      </p>
+
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        loading={addingSamples}
+                        onClick={async () => {
+                          setAddingSamples(true);
+                          try {
+                            const { job_id } = await addSampleCollection();
+                            toast.success(
+                              uiText(
+                                job_id
+                                  ? "Sample collection queued"
+                                  : "Sample collection already exists",
+                              ),
+                            );
+                          } catch (error) {
+                            toast.error(userMessage(error));
+                          } finally {
+                            setAddingSamples(false);
+                          }
+                        }}
+                      >
+                        {uiText("Add sample collection")}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -3182,7 +3215,6 @@ export function SettingsPanel() {
               <div className="settings-grouped">
                 {user?.is_superuser && (
                   <SettingsCard
-                    icon={Users}
                     title={uiText("Users")}
                     description={uiText(
                       "Create users, assign vault admins, disable accounts, and reset passwords.",
@@ -3197,17 +3229,44 @@ export function SettingsPanel() {
                       </Button>
                     }
                   >
-                    <div className="p-4 sm:p-5 space-y-4">
+                    <div className="space-y-4 py-4">
                       <Modal
                         open={createUserOpen}
                         onClose={() => {
                           if (usersBusy !== "create") setCreateUserOpen(false);
                         }}
                         title={t("Create user")}
+                        className="settings-dialog"
+                        footer={
+                          <>
+                            <Button
+                              variant="outline"
+                              onClick={() => setCreateUserOpen(false)}
+                              disabled={usersBusy === "create"}
+                            >
+                              {t("Cancel")}
+                            </Button>
+                            <button
+                              type="button"
+                              onClick={createUser}
+                              disabled={
+                                usersBusy !== null ||
+                                usersQuery.isError ||
+                                usersQuery.isPending ||
+                                !newUsername.trim() ||
+                                newUserPassword.trim().length < 8
+                              }
+                              className={cn(BTN_PRIMARY, "h-9")}
+                            >
+                              <UserPlus className="h-3.5 w-3.5" />
+                              {uiText("Create")}
+                            </button>
+                          </>
+                        }
                       >
                         <div className="grid gap-4">
                           <label className="block space-y-1">
-                            <span className="block text-[13px] font-medium text-foreground">
+                            <span className="block text-sm font-medium text-foreground">
                               {uiText("Username")}
                             </span>
                             <input
@@ -3225,7 +3284,7 @@ export function SettingsPanel() {
                             />
                           </label>
                           <label className="block space-y-1">
-                            <span className="block text-[13px] font-medium text-foreground">
+                            <span className="block text-sm font-medium text-foreground">
                               {uiText("Email")}
                             </span>
                             <input
@@ -3244,7 +3303,7 @@ export function SettingsPanel() {
                             />
                           </label>
                           <label className="block space-y-1">
-                            <span className="block text-[13px] font-medium text-foreground">
+                            <span className="block text-sm font-medium text-foreground">
                               {uiText("Initial password")}
                             </span>
                             <input
@@ -3265,34 +3324,12 @@ export function SettingsPanel() {
                             />
                           </label>
                         </div>
-                        <p id="new-user-password-help" className="text-xs text-muted-foreground">
+                        <p
+                          id="new-user-password-help"
+                          className="mt-2 text-xs text-muted-foreground"
+                        >
                           {uiText("Initial password: at least 8 characters.")}
                         </p>
-                        <div className="mt-5 flex justify-end gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setCreateUserOpen(false)}
-                            disabled={usersBusy === "create"}
-                          >
-                            {t("Cancel")}
-                          </Button>
-                          <button
-                            type="button"
-                            onClick={createUser}
-                            disabled={
-                              usersBusy !== null ||
-                              usersQuery.isError ||
-                              usersQuery.isPending ||
-                              !newUsername.trim() ||
-                              newUserPassword.trim().length < 8
-                            }
-                            className={BTN_PRIMARY}
-                          >
-                            <UserPlus className="h-3.5 w-3.5" />
-                            {uiText("Create")}
-                          </button>
-                        </div>
                       </Modal>
 
                       <div className="space-y-2">
@@ -3313,117 +3350,148 @@ export function SettingsPanel() {
                         ) : usersQuery.isError && users.length === 0 ? null : users.length === 0 ? (
                           <p className="text-sm text-muted-foreground">{uiText("No users.")}</p>
                         ) : (
-                          users.map((row) => (
+                          <div className="settings-users-table">
                             <div
-                              key={row.id}
-                              role="group"
-                              aria-label={`${uiText("User")}: ${row.username}`}
-                              className="border-b border-border py-3 last:border-b-0"
+                              aria-hidden
+                              data-user-columns
+                              className="items-center pb-3 text-sm text-muted-foreground"
                             >
-                              <div className="flex flex-col gap-3 md:flex-row md:items-center">
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-2">
-                                    <p className="settings-list-title truncate">{row.username}</p>
-                                    {row.is_superuser && (
-                                      <span className="settings-status">{uiText("Admin")}</span>
-                                    )}
-                                    {!row.is_active && (
-                                      <span className="settings-status" data-tone="danger">
-                                        {uiText("Disabled")}
-                                      </span>
-                                    )}
+                              <span>{uiText("User")}</span>
+                              <span>{uiText("Role")}</span>
+                              <span>{uiText("Created")}</span>
+                              <span />
+                            </div>
+                            {users.map((row) => (
+                              <div
+                                key={row.id}
+                                role="group"
+                                aria-label={`${uiText("User")}: ${row.username}`}
+                                data-user-columns
+                                className="border-t border-border py-3"
+                              >
+                                <div data-user-columns className="items-center">
+                                  <div className="flex min-w-0 items-center gap-3">
+                                    <span
+                                      aria-hidden
+                                      className="flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground/10 text-sm font-semibold uppercase"
+                                    >
+                                      {row.username.slice(0, 1)}
+                                    </span>
+                                    <div className="min-w-0">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <p className="settings-list-title wrap-anywhere">
+                                          {row.username}
+                                        </p>
+                                        {row.id === user?.id && (
+                                          <Badge variant="secondary">{uiText("You")}</Badge>
+                                        )}
+                                      </div>
+                                      <p className="settings-list-meta wrap-anywhere">
+                                        {row.email || uiText("No email")}
+                                      </p>
+                                    </div>
                                   </div>
-                                  <p className="text-xs text-muted-foreground">
-                                    {row.email || uiText("No email")}
-                                    {uiText(" · Created ")}
+                                  <div className="flex items-center gap-2 text-sm">
+                                    <span
+                                      aria-hidden
+                                      className={cn(
+                                        "size-1.5 shrink-0 rounded-full",
+                                        !row.is_active
+                                          ? "bg-destructive"
+                                          : row.is_superuser
+                                            ? "bg-primary"
+                                            : "bg-muted-foreground/50",
+                                      )}
+                                    />
+                                    {!row.is_active
+                                      ? uiText("Disabled")
+                                      : row.is_superuser
+                                        ? uiText("Admin")
+                                        : uiText("Member")}
+                                  </div>
+                                  <p className="text-sm text-muted-foreground">
                                     {formatDate(row.created_at)}
                                   </p>
+                                  <div className="flex flex-wrap items-center justify-end gap-1.5">
+                                    <button
+                                      type="button"
+                                      disabled={
+                                        usersBusy !== null ||
+                                        usersQuery.isError ||
+                                        usersQuery.isPending
+                                      }
+                                      onClick={() => setPasswordTarget(row.id)}
+                                      className={BTN_SECONDARY}
+                                    >
+                                      {uiText("Reset password")}
+                                    </button>
+                                    <SettingsRowMenu
+                                      label={uiText("More actions for {value1}", {
+                                        value1: row.username,
+                                      })}
+                                      disabled={
+                                        usersBusy !== null ||
+                                        usersQuery.isError ||
+                                        usersQuery.isPending
+                                      }
+                                      items={[
+                                        {
+                                          label: row.is_superuser
+                                            ? uiText("Remove admin")
+                                            : uiText("Make admin"),
+                                          onSelect: () =>
+                                            patchUser(row.id, { is_superuser: !row.is_superuser }),
+                                        },
+                                        {
+                                          label: row.is_active
+                                            ? uiText("Disable")
+                                            : uiText("Enable"),
+                                          danger: row.is_active,
+                                          onSelect: () =>
+                                            row.is_active
+                                              ? deactivateUser(row.id)
+                                              : patchUser(row.id, { is_active: true }),
+                                        },
+                                      ]}
+                                    />
+                                  </div>
                                 </div>
-                                <div className="flex flex-wrap gap-2">
-                                  <button
-                                    type="button"
-                                    disabled={
-                                      usersBusy !== null ||
-                                      usersQuery.isError ||
-                                      usersQuery.isPending
-                                    }
-                                    onClick={() =>
-                                      patchUser(row.id, { is_superuser: !row.is_superuser })
-                                    }
-                                    className={BTN_SECONDARY}
-                                  >
-                                    {row.is_superuser
-                                      ? uiText("Remove admin")
-                                      : uiText("Make admin")}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={
-                                      usersBusy !== null ||
-                                      usersQuery.isError ||
-                                      usersQuery.isPending
-                                    }
-                                    onClick={() => setPasswordTarget(row.id)}
-                                    className={BTN_SECONDARY}
-                                  >
-                                    {uiText("Reset password")}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={
-                                      usersBusy !== null ||
-                                      usersQuery.isError ||
-                                      usersQuery.isPending
-                                    }
-                                    onClick={() =>
-                                      row.is_active
-                                        ? deactivateUser(row.id)
-                                        : patchUser(row.id, { is_active: true })
-                                    }
-                                    className={BTN_SECONDARY}
-                                  >
-                                    {row.is_active ? uiText("Disable") : uiText("Enable")}
-                                  </button>
-                                </div>
+                                <ConfirmModal
+                                  open={passwordTarget === row.id}
+                                  onClose={() => setPasswordTarget(null)}
+                                  onConfirm={() => void resetUserPassword(row.id)}
+                                  variant="default"
+                                  busy={usersBusy === row.id}
+                                  title={uiText("Reset password")}
+                                  description={uiText("Set a new password for {value1}.", {
+                                    value1: row.username,
+                                  })}
+                                  confirmLabel={uiText("Reset password")}
+                                  confirmDisabled={
+                                    usersBusy !== null ||
+                                    usersQuery.isError ||
+                                    usersQuery.isPending ||
+                                    (passwordDrafts[row.id]?.trim().length ?? 0) < 8
+                                  }
+                                >
+                                  <label className="grid gap-2 text-sm font-medium">
+                                    {uiText("New password")}
+                                    <Input
+                                      value={passwordDrafts[row.id] ?? ""}
+                                      onChange={(event) =>
+                                        setPasswordDrafts((current) => ({
+                                          ...current,
+                                          [row.id]: event.target.value,
+                                        }))
+                                      }
+                                      type="password"
+                                      autoComplete="new-password"
+                                    />
+                                  </label>
+                                </ConfirmModal>
                               </div>
-                              <Modal
-                                open={passwordTarget === row.id}
-                                onClose={() => {
-                                  if (usersBusy !== row.id) setPasswordTarget(null);
-                                }}
-                                title={uiText("Reset password")}
-                              >
-                                <div className="grid gap-3">
-                                  <input
-                                    value={passwordDrafts[row.id] ?? ""}
-                                    onChange={(event) =>
-                                      setPasswordDrafts((current) => ({
-                                        ...current,
-                                        [row.id]: event.target.value,
-                                      }))
-                                    }
-                                    className={INPUT}
-                                    type="password"
-                                    placeholder={uiText("New password")}
-                                    aria-label={uiText("New password")}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => resetUserPassword(row.id)}
-                                    disabled={
-                                      usersBusy !== null ||
-                                      usersQuery.isError ||
-                                      usersQuery.isPending ||
-                                      (passwordDrafts[row.id]?.trim().length ?? 0) < 8
-                                    }
-                                    className={BTN_SECONDARY}
-                                  >
-                                    {uiText("Reset password")}
-                                  </button>
-                                </div>
-                              </Modal>
-                            </div>
-                          ))
+                            ))}
+                          </div>
                         )}
                       </div>
                     </div>
@@ -3432,13 +3500,12 @@ export function SettingsPanel() {
 
                 {user?.is_superuser && (
                   <SettingsCard
-                    icon={FolderTree}
                     title={uiText("Collection access")}
                     description={uiText(
                       "Assign view, edit, or admin access per user. Child collections inherit parent grants.",
                     )}
                   >
-                    <div className="p-4 sm:p-5 space-y-4">
+                    <div className="space-y-4 py-4">
                       <div className="settings-access-fields">
                         <label className="settings-preference-row">
                           <span className="text-[13px] font-medium text-foreground">
@@ -3479,7 +3546,7 @@ export function SettingsPanel() {
                                 onClick={() => setAccessPickerOpen((open) => !open)}
                                 aria-haspopup="dialog"
                                 aria-expanded={accessPickerOpen}
-                                className={`${INPUT} w-full text-left`}
+                                className={cn(INPUT, "w-full truncate text-left")}
                               >
                                 {accessCollection?.display_path ?? uiText("Select collection")}
                               </button>
@@ -3629,13 +3696,12 @@ export function SettingsPanel() {
 
                 {user?.is_superuser && (
                   <SettingsCard
-                    icon={Printer}
                     title={uiText("Printer access")}
                     description={uiText(
                       "Grant access per printer. Roles build from view to print, machine control, and administration.",
                     )}
                   >
-                    <div className="space-y-4 p-4 sm:p-5">
+                    <div className="space-y-4 py-4">
                       <div className="settings-access-fields">
                         <label className="settings-preference-row">
                           <span className="text-[13px] font-medium text-foreground">
@@ -3698,7 +3764,10 @@ export function SettingsPanel() {
                         <div className="settings-preference-row">
                           <span>
                             <label htmlFor="printer-access-role">{uiText("Role")}</label>
-                            <span id="printer-access-role-hint" className="settings-row-hint">
+                            <span
+                              id="printer-access-role-hint"
+                              className="settings-row-hint sr-only"
+                            >
                               {uiText(
                                 "View: status and history · Print: send and start jobs · Control: pause, cancel, temperatures, homing, emergency stop · Admin: settings, files, routing, and maintenance",
                               )}
@@ -3754,6 +3823,38 @@ export function SettingsPanel() {
                           {uiText("Save")}
                         </button>
                       </div>
+                      <dl className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                        {[
+                          {
+                            key: "view",
+                            role: uiText("View"),
+                            detail: uiText("Status and history"),
+                          },
+                          {
+                            key: "print",
+                            role: uiText("Print"),
+                            detail: uiText("Send and start jobs"),
+                          },
+                          {
+                            key: "control",
+                            role: uiText("Control"),
+                            detail: uiText("Pause, cancel, temperatures, homing, emergency stop"),
+                          },
+                          {
+                            key: "admin",
+                            role: uiText("Admin"),
+                            detail: uiText("Settings, files, routing, and maintenance"),
+                          },
+                        ].map(({ key, role, detail }) => (
+                          <div
+                            key={key}
+                            className="rounded-md border border-border bg-muted/30 px-3 py-2"
+                          >
+                            <dt className="text-sm font-semibold">{role}</dt>
+                            <dd className="mt-0.5 text-sm text-muted-foreground">{detail}</dd>
+                          </div>
+                        ))}
+                      </dl>
 
                       {accessPrintersQuery.isError && (
                         <div role="alert" className="flex items-center gap-2 text-sm">
@@ -3860,20 +3961,19 @@ export function SettingsPanel() {
                 )}
 
                 <SettingsCard
-                  icon={KeyRound}
                   title={uiText("API keys")}
                   description={uiText(
                     "Create credentials for scripts and integrations, then exchange them for a JWT at login.",
                   )}
                 >
-                  <div className="p-4 sm:p-5 space-y-4">
+                  <div className="space-y-4 py-4">
                     {!user ? (
                       <p className="text-sm text-muted-foreground">
                         {uiText("Sign in to create API keys.")}
                       </p>
                     ) : (
                       <>
-                        <div className="border border-border p-3">
+                        <div className="rounded-lg border border-border bg-muted/30 p-3">
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div className="min-w-0">
                               <p className="text-sm font-medium text-foreground">
@@ -3915,7 +4015,7 @@ export function SettingsPanel() {
 
                         <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
                           <label className="block space-y-1">
-                            <span className="block text-[13px] font-medium text-foreground">
+                            <span className="block text-sm font-medium text-foreground">
                               {uiText("Key name")}
                             </span>
                             <input
@@ -3975,7 +4075,7 @@ export function SettingsPanel() {
                           </div>
                         )}
 
-                        <div className="space-y-2">
+                        <div>
                           {apiKeysQuery.isError && (
                             <div role="alert" className="flex items-center gap-2 text-sm">
                               <p>{t("settings.accountKeysFailed")}</p>
@@ -3986,6 +4086,17 @@ export function SettingsPanel() {
                               >
                                 {t("Retry")}
                               </Button>
+                            </div>
+                          )}
+                          {apiKeys.length > 0 && (
+                            <div
+                              aria-hidden
+                              className="grid grid-cols-[minmax(0,1fr)_11rem_7rem_6rem] gap-3 pb-2 text-sm text-muted-foreground"
+                            >
+                              <span>{uiText("Name")}</span>
+                              <span>{uiText("Token")}</span>
+                              <span>{uiText("Last used")}</span>
+                              <span />
                             </div>
                           )}
                           {apiKeysQuery.isPending ? (
@@ -4001,22 +4112,24 @@ export function SettingsPanel() {
                                 key={key.id}
                                 role="group"
                                 aria-label={`${uiText("API key")}: ${key.name}`}
-                                className="flex items-center gap-3 border border-border rounded px-3 py-2"
+                                className="grid grid-cols-[minmax(0,1fr)_11rem_7rem_6rem] items-center gap-3 border-t border-border py-2.5"
                               >
-                                <div className="min-w-0 flex-1">
-                                  <p className="truncate text-sm text-foreground">{key.name}</p>
-                                  <p className="font-mono text-2xs text-muted-foreground">
-                                    {key.prefix}... ·{" "}
-                                    {key.last_used_at ? uiText("Used") : uiText("Never used")}
-                                  </p>
-                                </div>
+                                <p className="truncate text-sm font-medium text-foreground">
+                                  {key.name}
+                                </p>
+                                <p className="font-mono text-sm text-muted-foreground">
+                                  {key.prefix}…
+                                </p>
+                                <p className="text-sm text-muted-foreground">
+                                  {key.last_used_at ? uiText("Used") : uiText("Never used")}
+                                </p>
                                 <button
                                   type="button"
                                   onClick={() => deleteApiKey(key.id)}
                                   disabled={
                                     keyBusy || apiKeysQuery.isError || apiKeysQuery.isPending
                                   }
-                                  className={BTN_DANGER}
+                                  className={cn(BTN_DANGER, "justify-self-end")}
                                   aria-label={uiText("Revoke API key")}
                                 >
                                   {uiText("settings.pairedBrowsers.revokeAction")}
@@ -4026,8 +4139,8 @@ export function SettingsPanel() {
                           )}
                         </div>
 
-                        <div className="border border-border p-3">
-                          <p className="text-xs text-muted-foreground leading-relaxed">
+                        <div className="border-t border-border pt-3">
+                          <p className="text-sm text-muted-foreground leading-relaxed">
                             {uiText("Use your username with this API key on")}{" "}
                             <code className="font-mono">/api/v1/auth/login</code>
                             {uiText(
@@ -4045,7 +4158,7 @@ export function SettingsPanel() {
             )}
 
             {activeSection === "storage" && (
-              <div className="settings-storage border border-border bg-card">
+              <div className="settings-storage space-y-5">
                 <TabBar
                   tabs={[
                     { key: "location", label: t("Location") },
@@ -4058,8 +4171,8 @@ export function SettingsPanel() {
                   ]}
                   active={storageTab}
                   onChange={setStorageTab}
-                  className="flex-wrap gap-1 px-5 pt-4"
-                  tabClassName="px-2.5 py-1 text-sm text-muted-foreground hover:bg-muted"
+                  className="inline-flex gap-0.5 rounded-lg border border-border bg-card p-0.75"
+                  tabClassName="h-7.5 rounded-md px-3 text-sm font-medium text-muted-foreground hover:text-foreground"
                   activeTabClassName="bg-accent text-accent-foreground"
                   showIndicator={false}
                 />
@@ -4067,8 +4180,6 @@ export function SettingsPanel() {
                   <StorageConfigCard storageHealth={storageHealth} migrationManaged />
                   {user?.is_superuser && (
                     <SettingsCard
-                      className="settings-storage-migration"
-                      icon={ArrowRightLeft}
                       title={t("migration.title")}
                       description={t("migration.description")}
                       action={
@@ -4228,7 +4339,58 @@ export function SettingsPanel() {
                   </p>
                 )}
                 <SettingsCard
-                  icon={Clock}
+                  title={uiText("Manual backup")}
+                  description={t("settings.backupManualDescription")}
+                  stackActionOnMobile
+                  action={
+                    <div className="flex flex-wrap gap-2">
+                      <label
+                        className={cn(
+                          BTN_SECONDARY,
+                          "cursor-action",
+                          (!user?.is_superuser || uploadingBackup) &&
+                            "pointer-events-none opacity-50",
+                        )}
+                      >
+                        {uploadingBackup && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                        {uploadingBackup
+                          ? t("settings.backupUploading")
+                          : t("settings.backupUploadAction")}
+                        <input
+                          type="file"
+                          className="sr-only"
+                          aria-label={t("settings.backupUploadTitle")}
+                          accept=".tar.gz,application/gzip"
+                          disabled={!user?.is_superuser || uploadingBackup}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            event.target.value = "";
+                            if (file) void handleBackupUpload(file);
+                          }}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleBackupNow}
+                        disabled={!user?.is_superuser || backingUp}
+                        className={BTN_PRIMARY}
+                      >
+                        {backingUp ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            {uiText(" Backing up…")}
+                          </>
+                        ) : (
+                          uiText(" Backup now")
+                        )}
+                      </button>
+                    </div>
+                  }
+                >
+                  <p className="settings-footnote pr-5">{t("settings.backupUploadDescription")}</p>
+                </SettingsCard>
+
+                <SettingsCard
                   title={t("settings.backupPolicyTitle")}
                   description={t("settings.backupPolicyDescription")}
                   stackActionOnMobile
@@ -4257,7 +4419,7 @@ export function SettingsPanel() {
                     </button>
                   }
                 >
-                  <div className="space-y-5 p-4 sm:p-5">
+                  <div className="space-y-3">
                     <div>
                       <div className="settings-preference-row">
                         <span>
@@ -4424,16 +4586,15 @@ export function SettingsPanel() {
                           </div>
                         ))}
                         {backupConnections.length === 0 ? (
-                          <p className="py-4 text-sm text-muted-foreground">
+                          <SettingsEmptyRow>
                             {t("settings.backupNoRemoteDestinations")}
-                          </p>
+                          </SettingsEmptyRow>
                         ) : null}
                       </div>
                     </div>
                   </div>
                 </SettingsCard>
                 <SettingsCard
-                  icon={RefreshCw}
                   title={t("settings.backupRetentionTitle")}
                   description={t("settings.backupRetentionDescription")}
                   stackActionOnMobile
@@ -4460,7 +4621,7 @@ export function SettingsPanel() {
                     </button>
                   }
                 >
-                  <div className="p-4 sm:p-5">
+                  <div>
                     <div className="settings-preference-row">
                       <span>
                         <label htmlFor="backup-retention-days">
@@ -4507,63 +4668,11 @@ export function SettingsPanel() {
                     )}
                   </div>
                 </SettingsCard>
-                <SettingsCard
-                  icon={HardDrive}
-                  title={uiText("Manual backup")}
-                  description={t("settings.backupManualDescription")}
-                  stackActionOnMobile
-                  action={
-                    <div className="flex flex-wrap gap-2">
-                      <label
-                        className={cn(
-                          BTN_SECONDARY,
-                          "cursor-action",
-                          (!user?.is_superuser || uploadingBackup) &&
-                            "pointer-events-none opacity-50",
-                        )}
-                      >
-                        {uploadingBackup && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                        {uploadingBackup
-                          ? t("settings.backupUploading")
-                          : t("settings.backupUploadAction")}
-                        <input
-                          type="file"
-                          className="sr-only"
-                          aria-label={t("settings.backupUploadTitle")}
-                          accept=".tar.gz,application/gzip"
-                          disabled={!user?.is_superuser || uploadingBackup}
-                          onChange={(event) => {
-                            const file = event.target.files?.[0];
-                            event.target.value = "";
-                            if (file) void handleBackupUpload(file);
-                          }}
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        onClick={handleBackupNow}
-                        disabled={!user?.is_superuser || backingUp}
-                        className={BTN_PRIMARY}
-                      >
-                        {backingUp ? (
-                          <>
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            {uiText(" Backing up…")}
-                          </>
-                        ) : (
-                          uiText(" Backup now")
-                        )}
-                      </button>
-                    </div>
-                  }
-                >
-                  <p className="settings-footnote pr-5">{t("settings.backupUploadDescription")}</p>
-                </SettingsCard>
+
                 {user?.is_superuser && (
                   <BackupRunHistory onPublished={() => void ownedBackupRead.refetch()} />
                 )}
                 <SettingsCard
-                  icon={RotateCcw}
                   title={uiText("Restore backup")}
                   description={uiText(
                     "Recover the vault database and stored files from a previous backup.",
@@ -4940,8 +5049,57 @@ export function SettingsPanel() {
             )}
 
             {activeSection === "remote-storage" && (
-              <div>
+              <div className="settings-grouped">
                 <RemoteStorageConnections disabled={!user?.is_superuser} />
+                <SettingsCard
+                  title={uiText("What you can connect")}
+                  description={uiText(
+                    "Each connection can serve library sources, backup replicas, or both.",
+                  )}
+                >
+                  <ul className="grid gap-3 py-4 sm:grid-cols-2">
+                    {[
+                      {
+                        key: "s3",
+                        Icon: Cloud,
+                        name: uiText("S3-compatible object storage"),
+                        detail: uiText("R2, B2, Wasabi, MinIO, Garage"),
+                      },
+                      {
+                        key: "webdav",
+                        Icon: Globe,
+                        name: uiText("Nextcloud and WebDAV"),
+                        detail: uiText("Any WebDAV server"),
+                      },
+                      {
+                        key: "sftp",
+                        Icon: Server,
+                        name: uiText("NAS over SFTP"),
+                        detail: uiText("Synology, TrueNAS, QNAP, Unraid"),
+                      },
+                      {
+                        key: "drive",
+                        Icon: Folder,
+                        name: uiText("Google Drive"),
+                        detail: uiText("Library sources"),
+                      },
+                    ].map(({ key, Icon, name, detail }) => (
+                      <li
+                        key={key}
+                        className="flex items-start gap-3 rounded-lg border border-border bg-muted/30 p-3"
+                      >
+                        <Icon
+                          className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                          aria-hidden
+                        />
+                        <div>
+                          <p className="text-sm font-semibold">{name}</p>
+                          <p className="text-sm text-muted-foreground">{detail}</p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </SettingsCard>
               </div>
             )}
 
@@ -4996,52 +5154,31 @@ export function SettingsPanel() {
                 )}
 
                 <SettingsCard
-                  icon={Sun}
                   title={t("Theme and language")}
                   description={t("Theme and language apply to this browser.")}
+                  action={<SettingsScope scope="browser" />}
                 >
-                  <div className="settings-preference-fields">
-                    <label className="settings-preference-row">
-                      <span>{t("Theme")}</span>
-                      <select
-                        value={themeMode}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          if (value === "light" || value === "dark" || value === "system")
-                            setThemeMode(value);
-                        }}
-                        className={inputClasses}
-                      >
-                        <option value="light">{t("Light")}</option>
-                        <option value="dark">{t("Dark")}</option>
-                        <option value="system">{t("System")}</option>
-                      </select>
-                    </label>
-                    <label className="settings-preference-row">
+                  <div className="pt-4">
+                    <div className="pb-4">
+                      <ThemeTiles value={themeMode} onChange={setThemeMode} />
+                    </div>
+                    <div className="settings-preference-row border-t border-border">
                       <span>{t("locale.label")}</span>
-                      <select
+                      <SettingsSegmented
+                        label={t("locale.label")}
                         value={locale}
-                        onChange={(event) => {
-                          const selected = SUPPORTED_LOCALES.find(
-                            (item) => item === event.target.value,
-                          );
-                          if (selected) setLocale(selected);
-                        }}
-                        className={inputClasses}
-                      >
-                        {SUPPORTED_LOCALES.map((option) => (
-                          <option key={option} value={option}>
-                            {localeDefinitions[option].name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                        options={SUPPORTED_LOCALES.map((option) => ({
+                          value: option,
+                          label: localeDefinitions[option].name,
+                        }))}
+                        onChange={setLocale}
+                      />
+                    </div>
                   </div>
                 </SettingsCard>
 
                 <SettingsCard
-                  icon={Printer}
-                  title={uiText("Printer cards")}
+                  title={uiText("Printers and prints")}
                   description={uiText(
                     "Choose whether printer cards include a visual. Plain cards remain more compact and information-dense.",
                   )}
@@ -5049,93 +5186,51 @@ export function SettingsPanel() {
                   <div className="settings-preference-fields">
                     <div className="settings-preference-row">
                       <div>
-                        <p className="text-[13px] font-medium text-foreground">
+                        <p className="text-sm font-medium text-foreground">
                           {uiText("Show printer image on printer cards")}
                         </p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
+                        <p className="mt-0.5 text-sm text-muted-foreground">
                           {uiText("Shows a printer portrait in Fleet and printer details.")}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-label={uiText("Show printer image on printer cards")}
-                          aria-checked={showPrinterCardImage}
-                          onClick={() => {
-                            if (showPrinterCardImage) updatePrinterCardImagePreference(false);
-                            else setPrinterImageWarningOpen(true);
-                          }}
-                          className={`relative inline-flex h-5 w-9 shrink-0 items-center border transition-colors ${
-                            showPrinterCardImage
-                              ? "border-primary bg-primary"
-                              : "border-input bg-muted"
-                          }`}
-                        >
-                          <span
-                            className={`inline-block h-4 w-4 bg-primary-foreground transition-transform ${
-                              showPrinterCardImage ? "translate-x-4" : "translate-x-0"
-                            }`}
-                          />
-                        </button>
-                        <span className="text-xs text-foreground">
-                          {showPrinterCardImage ? uiText("On") : uiText("Off")}
-                        </span>
-                      </div>
+                      <SettingsSwitch
+                        checked={showPrinterCardImage}
+                        onChange={(next) => {
+                          if (!next) updatePrinterCardImagePreference(false);
+                          else setPrinterImageWarningOpen(true);
+                        }}
+                        label={uiText("Show printer image on printer cards")}
+                      />
                     </div>
-                  </div>
-                </SettingsCard>
-
-                {/* Print tracking behaviour */}
-                <SettingsCard
-                  icon={Printer}
-                  title={uiText("Print tracking")}
-                  description={uiText(
-                    "Automatically promote a revision to known-good after its first successful print. A manual failed/archived verdict is never overridden.",
-                  )}
-                >
-                  <div className="settings-preference-fields">
                     <div className="settings-preference-row">
-                      <span className="text-[13px] text-foreground">
-                        {uiText("Auto-mark known good on successful print")}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-label={uiText("Auto-mark known good on successful print")}
-                          aria-checked={autoMarkKnownGood}
-                          disabled={
-                            !user?.is_superuser ||
-                            !remoteConfigData ||
-                            remoteConfig.isError ||
-                            preferenceCommand.blocked ||
-                            backupPolicy.isPending
-                          }
-                          onClick={() => saveAutoMarkKnownGood(!autoMarkKnownGood)}
-                          className={`relative inline-flex h-5 w-9 shrink-0 items-center border transition-colors disabled:opacity-50 ${
-                            autoMarkKnownGood
-                              ? "border-primary bg-primary"
-                              : "border-input bg-muted"
-                          }`}
-                        >
-                          <span
-                            className={`inline-block h-4 w-4 transform bg-white transition-transform ${
-                              autoMarkKnownGood ? "translate-x-4" : "translate-x-0"
-                            }`}
-                          />
-                        </button>
-                        <span className="text-xs text-foreground">
-                          {autoMarkKnownGood ? uiText("On") : uiText("Off")}
-                        </span>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          {uiText("Auto-mark known good on successful print")}
+                        </p>
+                        <p className="mt-0.5 text-sm text-muted-foreground">
+                          {uiText(
+                            "Automatically promote a revision to known-good after its first successful print. A manual failed/archived verdict is never overridden.",
+                          )}
+                        </p>
                       </div>
+                      <SettingsSwitch
+                        checked={autoMarkKnownGood}
+                        disabled={
+                          !user?.is_superuser ||
+                          !remoteConfigData ||
+                          remoteConfig.isError ||
+                          preferenceCommand.blocked ||
+                          backupPolicy.isPending
+                        }
+                        onChange={(next) => saveAutoMarkKnownGood(next)}
+                        label={uiText("Auto-mark known good on successful print")}
+                      />
                     </div>
                   </div>
                 </SettingsCard>
 
                 {/* Currency for cost tracking */}
                 <SettingsCard
-                  icon={Coins}
                   title={uiText("Currency")}
                   description={uiText(
                     "Currency used to display cost figures in statistics and filament pricing.",
@@ -5171,7 +5266,6 @@ export function SettingsPanel() {
 
                 {/* Card metrics picker */}
                 <SettingsCard
-                  icon={Palette}
                   title={uiText("Model card metrics")}
                   description={uiText(
                     "Choose which 3 stats appear on each model card in the grid.",
@@ -5182,37 +5276,39 @@ export function SettingsPanel() {
                     </button>
                   }
                 >
-                  <div className="settings-preference-fields">
-                    {([0, 1, 2] as const).map((slot) => (
-                      <label key={slot} className="settings-preference-row">
-                        <span>{uiText("Metric {value1}", { value1: String(slot + 1) })}</span>
-                        <select
-                          value={cardMetrics[slot]}
-                          onChange={(event) => {
-                            const option = CARD_METRIC_OPTIONS.find(
-                              (item) => item.id === event.target.value,
-                            );
-                            if (option) updateCardMetric(slot, option.id);
-                          }}
-                          className={INPUT}
-                        >
-                          {CARD_METRIC_OPTIONS.map((opt) => (
-                            <option
-                              key={opt.id}
-                              value={opt.id}
-                              disabled={cardMetrics.some((id, i) => i !== slot && id === opt.id)}
-                            >
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ))}
+                  <div className="flex flex-col gap-6 py-4 lg:flex-row lg:items-start">
+                    <div className="min-w-0 flex-1">
+                      {([0, 1, 2] as const).map((slot) => (
+                        <label key={slot} className="settings-preference-row">
+                          <span>{uiText("Metric {value1}", { value1: String(slot + 1) })}</span>
+                          <select
+                            value={cardMetrics[slot]}
+                            onChange={(event) => {
+                              const option = CARD_METRIC_OPTIONS.find(
+                                (item) => item.id === event.target.value,
+                              );
+                              if (option) updateCardMetric(slot, option.id);
+                            }}
+                            className={INPUT}
+                          >
+                            {CARD_METRIC_OPTIONS.map((opt) => (
+                              <option
+                                key={opt.id}
+                                value={opt.id}
+                                disabled={cardMetrics.some((id, i) => i !== slot && id === opt.id)}
+                              >
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ))}
+                    </div>
+                    <CardMetricsPreview metrics={cardMetrics} />
                   </div>
                 </SettingsCard>
 
                 <SettingsCard
-                  icon={Info}
                   title={uiText("Model metadata")}
                   description={uiText("Choose which metadata fields appear on model detail pages.")}
                   action={
@@ -5241,18 +5337,18 @@ export function SettingsPanel() {
                     </>
                   }
                 >
-                  <div className="space-y-2 pb-4 pr-5">
-                    <p className="text-xs text-muted-foreground">
+                  <div className="space-y-3 py-4">
+                    <p className="text-sm text-muted-foreground">
                       {uiText("{value1} of {value2} shown", {
                         value1: String(METADATA_FIELDS.filter((f) => metadataPrefs[f.id]).length),
                         value2: String(METADATA_FIELDS.length),
                       })}
                     </p>
-                    <div className="grid gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                       {METADATA_FIELDS.map((field) => (
                         <label
                           key={field.id}
-                          className="flex h-8 items-center gap-2 text-[13px] text-foreground"
+                          className="flex min-h-9 items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-1.5 text-sm text-foreground"
                         >
                           <Checkbox
                             checked={metadataPrefs[field.id]}
@@ -5272,7 +5368,6 @@ export function SettingsPanel() {
               <div className="settings-grouped">
                 {user?.is_superuser && (
                   <SettingsCard
-                    icon={Gpu}
                     title={t("gpu.server.title")}
                     description={t("gpu.server.description")}
                     action={
@@ -5290,36 +5385,38 @@ export function SettingsPanel() {
                   </SettingsCard>
                 )}
                 <SettingsCard
-                  icon={Gpu}
                   title={uiText("3D rendering")}
                   description={uiText("Choose how 3D models are rendered in this browser.")}
+                  action={<SettingsScope scope="browser" />}
                 >
-                  <div className="settings-preference-fields">
-                    <label className="settings-preference-row">
-                      <span>
-                        {uiText("Mesh renderer")}
-                        <span className="settings-row-hint">
-                          {uiText(
-                            "WebGPU requires HTTPS or localhost. Unavailable devices use WebGL.",
-                          )}
-                        </span>
-                      </span>
-                      <select
-                        aria-label={uiText("Mesh renderer")}
-                        value={previewPreferences.meshRenderer}
-                        onChange={(event) =>
-                          savePreviewPreference({
-                            meshRenderer: selectedOption(MESH_RENDERERS, event.target.value),
-                          })
-                        }
-                        className={INPUT}
-                      >
-                        <option value="webgl">{uiText("WebGL compatibility")}</option>
-                        <option value="auto">{uiText("Automatic · experimental")}</option>
-                        <option value="webgpu">{uiText("WebGPU · experimental")}</option>
-                      </select>
-                    </label>
-                  </div>
+                  <SettingsChoiceCards
+                    label={uiText("Mesh renderer")}
+                    value={previewPreferences.meshRenderer}
+                    onChange={(value) =>
+                      savePreviewPreference({
+                        meshRenderer: selectedOption(MESH_RENDERERS, value),
+                      })
+                    }
+                    options={[
+                      {
+                        value: "webgl",
+                        label: uiText("WebGL compatibility"),
+                        detail: uiText("Works on every supported browser."),
+                      },
+                      {
+                        value: "auto",
+                        label: uiText("Automatic · experimental"),
+                        detail: uiText(
+                          "WebGPU requires HTTPS or localhost. Unavailable devices use WebGL.",
+                        ),
+                      },
+                      {
+                        value: "webgpu",
+                        label: uiText("WebGPU · experimental"),
+                        detail: uiText("Fastest on recent GPUs. Unavailable devices use WebGL."),
+                      },
+                    ]}
+                  />
                 </SettingsCard>
               </div>
             )}
@@ -5339,98 +5436,97 @@ export function SettingsPanel() {
                 )}
 
                 <SettingsCard
-                  icon={Eye}
                   title={uiText("Interactive previews")}
                   description={uiText(
                     "Balance sharpness against GPU use in the 3D Model and G-code viewers. This preference is saved in this browser.",
                   )}
+                  action={<SettingsScope scope="browser" />}
                 >
                   <div className="settings-preference-fields">
-                    <label className="settings-preference-row">
+                    <div className="settings-preference-row">
                       <span>
                         {uiText("Preview quality")}
                         <span className="settings-row-hint">
                           {uiText("Performance 1× · Balanced 1.5× · High detail 2×")}
                         </span>
                       </span>
-                      <select
-                        aria-label={uiText("Preview quality")}
+                      <SettingsSegmented
+                        label={uiText("Preview quality")}
                         value={previewPreferences.previewQuality}
-                        onChange={(event) =>
+                        onChange={(value) =>
                           savePreviewPreference({
-                            previewQuality: selectedOption(PREVIEW_QUALITIES, event.target.value),
+                            previewQuality: selectedOption(PREVIEW_QUALITIES, value),
                           })
                         }
-                        className={INPUT}
-                      >
-                        <option value="performance">{uiText("Performance · 1×")}</option>
-                        <option value="balanced">{uiText("Balanced · 1.5×")}</option>
-                        <option value="detail">{uiText("High detail · 2×")}</option>
-                      </select>
-                    </label>
+                        options={[
+                          { value: "performance", label: uiText("Performance · 1×") },
+                          { value: "balanced", label: uiText("Balanced · 1.5×") },
+                          { value: "detail", label: uiText("High detail · 2×") },
+                        ]}
+                      />
+                    </div>
 
-                    <label className="settings-preference-row">
+                    <div className="settings-preference-row">
                       <span>
                         {uiText("Screenshot resolution")}
                         <span className="settings-row-hint">
                           {uiText("Standard 1× · Sharp 2× · Print-ready 3×")}
                         </span>
                       </span>
-                      <select
-                        aria-label={uiText("Screenshot resolution")}
-                        value={previewPreferences.screenshotScale}
-                        onChange={(event) =>
+                      <SettingsSegmented
+                        label={uiText("Screenshot resolution")}
+                        value={String(previewPreferences.screenshotScale)}
+                        onChange={(value) =>
                           savePreviewPreference({
-                            screenshotScale: selectedOption(
-                              SCREENSHOT_SCALES,
-                              Number(event.target.value),
-                            ),
+                            screenshotScale: selectedOption(SCREENSHOT_SCALES, Number(value)),
                           })
                         }
-                        className={INPUT}
-                      >
-                        <option value={1}>{uiText("Standard · 1×")}</option>
-                        <option value={2}>{uiText("Sharp · 2×")}</option>
-                        <option value={3}>{uiText("Print-ready · 3×")}</option>
-                      </select>
-                    </label>
+                        options={[
+                          { value: "1", label: uiText("Standard · 1×") },
+                          { value: "2", label: uiText("Sharp · 2×") },
+                          { value: "3", label: uiText("Print-ready · 3×") },
+                        ]}
+                      />
+                    </div>
                   </div>
                 </SettingsCard>
 
                 <SettingsCard
-                  icon={Images}
                   title={uiText("Model preview images")}
                   description={uiText(
                     "Choose the resolution of generated Model card images. Higher settings take longer to render and use more memory and storage.",
                   )}
                   action={
-                    <button
-                      type="button"
-                      onClick={recreateModelImages}
-                      disabled={!user?.is_superuser || previewBusy !== null}
-                      className={BTN_SECONDARY}
-                    >
-                      {previewBusy === "rebuild" && (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      )}
-                      {uiText("Recreate all images")}
-                    </button>
+                    <>
+                      <SettingsScope scope="vault" />
+                      <button
+                        type="button"
+                        onClick={recreateModelImages}
+                        disabled={!user?.is_superuser || previewBusy !== null}
+                        className={BTN_SECONDARY}
+                      >
+                        {previewBusy === "rebuild" && (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        )}
+                        {uiText("Recreate all images")}
+                      </button>
+                    </>
                   }
                 >
                   <div className="settings-preference-fields">
-                    <label className="settings-preference-row">
+                    <div className="settings-preference-row">
                       <span>
                         {uiText("Model image quality")}
                         <span className="settings-row-hint">
                           {uiText("Compact 320 × 240 · Standard 640 × 480 · High 1280 × 960")}
                         </span>
                       </span>
-                      <select
-                        aria-label={uiText("Model image quality")}
-                        value={modelThumbnailWidth}
-                        onChange={(event) =>
+                      <SettingsSegmented
+                        label={uiText("Model image quality")}
+                        value={String(modelThumbnailWidth)}
+                        onChange={(value) =>
                           saveModelThumbnailWidth(
-                            selectedOption(MODEL_THUMBNAIL_WIDTHS, Number(event.target.value)),
+                            selectedOption(MODEL_THUMBNAIL_WIDTHS, Number(value)),
                           )
                         }
                         disabled={
@@ -5441,22 +5537,24 @@ export function SettingsPanel() {
                           preferenceCommand.blocked ||
                           backupPolicy.isPending
                         }
-                        className={INPUT}
-                      >
-                        {modelThumbnailWidth !== 320 &&
+                        options={[
+                          ...(modelThumbnailWidth !== 320 &&
                           modelThumbnailWidth !== 640 &&
-                          modelThumbnailWidth !== 1280 && (
-                            <option value={modelThumbnailWidth}>
-                              {translateUiText(locale, "Custom")} · {modelThumbnailWidth} ×{" "}
-                              {Math.round((modelThumbnailWidth * 3) / 4)}
-                            </option>
-                          )}
-                        <option value={320}>{uiText("Compact · 320 × 240")}</option>
-                        <option value={640}>{uiText("Standard · 640 × 480")}</option>
-                        <option value={1280}>{uiText("High · 1280 × 960")}</option>
-                      </select>
-                    </label>
-                    <div className="settings-preference-row">
+                          modelThumbnailWidth !== 1280
+                            ? [
+                                {
+                                  value: String(modelThumbnailWidth),
+                                  label: `${translateUiText(locale, "Custom")} · ${modelThumbnailWidth} × ${Math.round((modelThumbnailWidth * 3) / 4)}`,
+                                },
+                              ]
+                            : []),
+                          { value: "320", label: uiText("Compact · 320 × 240") },
+                          { value: "640", label: uiText("Standard · 640 × 480") },
+                          { value: "1280", label: uiText("High · 1280 × 960") },
+                        ]}
+                      />
+                    </div>
+                    <div className="settings-preference-row settings-preference-row--stack">
                       <span>
                         {uiText("Multi-angle previews")}
                         <span className="settings-row-hint">
@@ -5465,28 +5563,49 @@ export function SettingsPanel() {
                           )}
                         </span>
                       </span>
-                      <select
-                        className={INPUT}
+                      <div
+                        role="radiogroup"
                         aria-label={uiText("Multi-angle previews")}
-                        value={selectedPreviewMode}
-                        onChange={(event) => {
-                          const mode = event.target.value;
-                          if (mode === "single" || mode === "oblique" || mode === "oblique-poles")
-                            void saveMultiAnglePreviews(mode);
-                        }}
-                        disabled={
-                          !user?.is_superuser ||
-                          !remoteConfigData ||
-                          remoteConfig.isError ||
-                          previewBusy !== null ||
-                          preferenceCommand.blocked ||
-                          backupPolicy.isPending
-                        }
+                        className="grid w-full gap-2 @min-[36rem]:grid-cols-3"
                       >
-                        <option value="single">{previewModeLabel("single")}</option>
-                        <option value="oblique">{previewModeLabel("oblique")}</option>
-                        <option value="oblique-poles">{previewModeLabel("oblique-poles")}</option>
-                      </select>
+                        {(["single", "oblique", "oblique-poles"] as const).map((mode) => {
+                          const selected = selectedPreviewMode === mode;
+                          return (
+                            <button
+                              key={mode}
+                              type="button"
+                              role="radio"
+                              aria-checked={selected}
+                              disabled={
+                                !user?.is_superuser ||
+                                !remoteConfigData ||
+                                remoteConfig.isError ||
+                                previewBusy !== null ||
+                                preferenceCommand.blocked ||
+                                backupPolicy.isPending
+                              }
+                              onClick={() => void saveMultiAnglePreviews(mode)}
+                              className={cn(
+                                "flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+                                selected
+                                  ? "border-primary bg-primary/10"
+                                  : "border-border bg-muted/30 hover:bg-popover-hover",
+                              )}
+                            >
+                              <span
+                                aria-hidden
+                                className={cn(
+                                  "flex size-4 shrink-0 items-center justify-center rounded-full border",
+                                  selected ? "border-primary" : "border-border",
+                                )}
+                              >
+                                {selected && <span className="size-2 rounded-full bg-primary" />}
+                              </span>
+                              {previewModeLabel(mode)}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                     <div className="settings-preference-row">
                       <span>
@@ -5553,16 +5672,22 @@ export function SettingsPanel() {
                 )}
                 {trashPage ? (
                   <>
-                    <div className="overflow-hidden border border-border bg-card">
+                    <div
+                      data-trash-page
+                      className="overflow-hidden rounded-lg border border-border bg-card"
+                    >
                       {trashRetentionBar}
                       {trashCleanupDetails}
                     </div>
-                    <div className="overflow-hidden border border-border bg-card">
+                    <div
+                      data-trash-page
+                      className="overflow-hidden rounded-lg border border-border bg-card"
+                    >
                       {trashItemsCard}
                     </div>
                   </>
                 ) : (
-                  <div className="settings-inline-groups divide-y divide-border overflow-hidden border border-border bg-card">
+                  <div className="settings-grouped">
                     {trashRetentionCard}
                     {trashItemsCard}
                   </div>
@@ -5573,7 +5698,6 @@ export function SettingsPanel() {
             {activeSection === "about" && (
               <div className="settings-grouped">
                 <SettingsCard
-                  icon={Info}
                   title={uiText("Version")}
                   description={uiText("Self-hosted asset management for 3D printing workflows.")}
                   action={
@@ -5598,12 +5722,12 @@ export function SettingsPanel() {
                     </div>
                   }
                 >
-                  <div className="pb-2 pr-5">
+                  <div className="pb-2">
                     {releaseStatus?.status === "update_available" &&
                       releaseStatus.latest_version && (
                         <div
                           role="status"
-                          className="mb-2 flex flex-wrap items-center justify-between gap-3 border border-border p-3"
+                          className="my-2 flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3"
                         >
                           <div className="flex min-w-0 items-start gap-2">
                             <CircleArrowUp
@@ -5665,13 +5789,12 @@ export function SettingsPanel() {
                 </SettingsCard>
 
                 <SettingsCard
-                  icon={FileText}
                   title={uiText("Latest changes")}
                   description={uiText("What changed in the current release")}
                 >
                   {latestRelease && (
-                    <div className="max-w-[80ch] pb-4 pr-5">
-                      <p className="text-[13px] font-semibold text-foreground">
+                    <div className="max-w-[80ch] py-4">
+                      <p className="text-sm font-semibold text-foreground">
                         {uiText("v{value1}", { value1: String(latestRelease.version ?? "") })}
                         <span className="font-normal text-muted-foreground">
                           {" · "}
@@ -5694,6 +5817,7 @@ export function SettingsPanel() {
               </div>
             )}
           </main>
+          {!trashPage && <SettingsToc scope=".settings-main" section={activeSection} />}
         </div>
       </div>
     </Localized>

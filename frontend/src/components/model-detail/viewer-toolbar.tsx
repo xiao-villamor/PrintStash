@@ -4,22 +4,15 @@ import { Button } from "@/components/ui/button";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { toast } from "sonner";
-import type {
-  ViewerControls,
-  ViewerDisplayMode,
-  ViewerCameraPreset,
-} from "@/components/stl-viewer";
+import type { ViewerControls, ViewerCameraPreset } from "@/components/stl-viewer";
 
 import { ViewerModeSwitch, type ViewerMode } from "@/components/viewer-mode-switch";
 import type { ToolpathAvailability } from "@/lib/toolpath-preview";
 
 export type { ViewerMode } from "@/components/viewer-mode-switch";
-const DISPLAY_MODES: readonly ViewerDisplayMode[] = ["solid", "xray", "wireframe"];
 const CAMERA_PRESETS: readonly ViewerCameraPreset[] = ["isometric", "front", "top"];
 
 export function ViewerToolbar({
-  displayMode,
-  setDisplayMode,
   showGrid,
   setShowGrid,
   controls,
@@ -30,16 +23,12 @@ export function ViewerToolbar({
   gcodeOnly = false,
   viewerReady,
   filename,
-  expanded = false,
-  onExpand,
   showDimensions = true,
   onDimensions,
   notifyScreenshotError = toast.error,
   camera,
   setCamera,
 }: {
-  displayMode: ViewerDisplayMode;
-  setDisplayMode: (mode: ViewerDisplayMode) => void;
   showGrid: boolean;
   setShowGrid: (visible: boolean) => void;
   controls: React.RefObject<ViewerControls | null>;
@@ -50,8 +39,6 @@ export function ViewerToolbar({
   gcodeOnly?: boolean;
   viewerReady: boolean;
   filename?: string;
-  expanded?: boolean;
-  onExpand?: () => void;
   showDimensions?: boolean;
   onDimensions?: (visible: boolean) => void;
   notifyScreenshotError?: (message: string) => void;
@@ -76,37 +63,14 @@ export function ViewerToolbar({
           <h2>{uiText("Model preview")}</h2>
           {filename && <span className="break-all text-xs text-muted-foreground">{filename}</span>}
         </div>
-        <div className="flex shrink-0 gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            aria-label={uiText("Screenshot")}
-            disabled={!viewerReady || gcodeOnly}
-            onClick={() => {
-              const result = controls.current?.screenshot();
-              if (result)
-                void result.catch(() =>
-                  notifyScreenshotError(uiText("Screenshot could not be created")),
-                );
-            }}
-          >
-            <Camera className="h-3.5 w-3.5" />
-            {uiText("Screenshot")}
-          </Button>
-          {onExpand && (
-            <Button
-              data-preview-expand
-              variant="outline"
-              size="sm"
-              aria-pressed={expanded}
-              onClick={onExpand}
-            >
-              {expanded ? uiText("Collapse preview") : uiText("Expand")}
-            </Button>
-          )}
-        </div>
       </div>
-      <div className="detail-viewer-commandbar">
+      <div
+        className="detail-viewer-commandbar"
+        data-preview-controls
+        tabIndex={-1}
+        role="group"
+        aria-label={uiText("Model preview")}
+      >
         <ViewerModeSwitch
           className="detail-viewer-control-group detail-mode-switch"
           mode={viewerMode}
@@ -142,28 +106,24 @@ export function ViewerToolbar({
             </Button>
           )}
         </div>
-        {viewerMode === "model" && (
-          <select
-            aria-label={uiText("Display")}
-            className="detail-preview-style"
-            disabled={!viewerReady}
-            value={displayMode}
-            onChange={(event) => {
-              const selected = DISPLAY_MODES.find((mode) => mode === event.target.value);
-              if (selected) setDisplayMode(selected);
+        <div className="detail-viewer-control-group detail-viewer-actions">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={uiText("Screenshot")}
+            title={uiText("Screenshot")}
+            disabled={!viewerReady || gcodeOnly}
+            onClick={() => {
+              const result = controls.current?.screenshot();
+              if (result)
+                void result.catch(() =>
+                  notifyScreenshotError(uiText("Screenshot could not be created")),
+                );
             }}
           >
-            {DISPLAY_MODES.map((mode) => (
-              <option key={mode} value={mode}>
-                {mode === "wireframe"
-                  ? uiText("Wireframe")
-                  : mode === "xray"
-                    ? uiText("X-Ray")
-                    : uiText("Solid")}
-              </option>
-            ))}
-          </select>
-        )}
+            <Camera className="size-4" aria-hidden />
+          </Button>
+        </div>
       </div>
       <div className="detail-viewer-dock">
         <div className="flex">

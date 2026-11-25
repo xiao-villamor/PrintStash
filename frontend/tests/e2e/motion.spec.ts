@@ -31,23 +31,27 @@ declare global {
   }
 }
 
-async function recordPanelMotion(page: Page, id: string) {
-  await page.addInitScript((panelId) => {
-    window.panelMotions = [];
-    const animate = Element.prototype.animate;
-    Element.prototype.animate = function (...args) {
-      const animation = animate.apply(this, args);
-      if (this.id === panelId && animation.effect instanceof KeyframeEffect) {
-        const frames = animation.effect.getKeyframes();
-        window.panelMotions.push({
-          widths: frames.map((frame) => parseFloat(String(frame.width))),
-          transforms: frames.map((frame) => String(frame.transform ?? "none")),
-          duration: Number(animation.effect.getTiming().duration),
-        });
-      }
-      return animation;
-    };
-  }, id);
+async function recordPanelMotion(page: Page, id: string, pause = false) {
+  await page.addInitScript(
+    ({ panelId, pause }) => {
+      window.panelMotions = [];
+      const animate = Element.prototype.animate;
+      Element.prototype.animate = function (...args) {
+        const animation = animate.apply(this, args);
+        if (this.id === panelId && animation.effect instanceof KeyframeEffect) {
+          if (pause) animation.pause();
+          const frames = animation.effect.getKeyframes();
+          window.panelMotions.push({
+            widths: frames.map((frame) => parseFloat(String(frame.width))),
+            transforms: frames.map((frame) => String(frame.transform ?? "none")),
+            duration: Number(animation.effect.getTiming().duration),
+          });
+        }
+        return animation;
+      };
+    },
+    { panelId: id, pause },
+  );
 }
 
 async function folderWithDescription(page: Page) {
@@ -444,11 +448,38 @@ test.describe("motion and layering", () => {
       if (reducedMotion === "no-preference") {
         expect(motions[0].widths[0]).toBe(0);
         expect(motions[0].widths.at(-1)).toBeGreaterThan(0);
-        expect(motions[0].duration).toBeLessThanOrEqual(300);
+        expect(motions[0].duration).toBe(200);
         expect(
           motions[0].widths.every(
             (width, index, widths) => index === 0 || width >= widths[index - 1],
           ),
+        ).toBe(true);
+      }
+    });
+  }
+
+  for (const reducedMotion of ["no-preference", "reduce"] as const) {
+    test(`closing the collections pane respects ${reducedMotion}`, async ({ page }) => {
+      await page.emulateMedia({ reducedMotion });
+      await recordPanelMotion(page, "collections-pane");
+      await page.goto("/");
+      const toggle = page
+        .locator("header")
+        .getByRole("button", { name: "Toggle sidebar", exact: true });
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+      await toggle.press("Enter");
+      await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      await expect(page.locator("#collections-pane")).toHaveCSS("width", "0px");
+
+      const motions = await page.evaluate(() => window.panelMotions);
+      expect(motions).toHaveLength(reducedMotion === "reduce" ? 0 : 1);
+      if (reducedMotion === "no-preference") {
+        const [motion] = motions;
+        expect(motion.duration).toBe(200);
+        expect(motion.widths[0]).toBeGreaterThan(0);
+        expect(motion.widths.at(-1)).toBe(0);
+        expect(
+          motion.widths.every((width, index, widths) => index === 0 || width <= widths[index - 1]),
         ).toBe(true);
       }
     });
@@ -461,6 +492,88 @@ test.describe("motion and layering", () => {
     expect(
       (await animationStarts(page)).filter((start) => start.target.includes("pane-in")),
     ).toEqual([]);
+  });
+
+  for (const direction of ["opening", "closing"] as const) {
+    test(`workspace glides as one surface while ${direction} Collections`, async ({ page }) => {
+      await recordPanelMotion(page, "collections-pane", true);
+      await page.goto("/?c=maraio&type=all");
+      const pane = page.locator("#collections-pane");
+      const toggle = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+      await expect(page.getByRole("link", { name: "skadis_kitchen-roll_screw" })).toBeVisible();
+      if (direction === "opening") {
+        await toggle.click();
+        await pane.evaluate((element) => element.getAnimations()[0].finish());
+        await expect(pane).toHaveCSS("width", "0px");
+      }
+
+      await toggle.click();
+      const sample = (fraction: number) =>
+        pane.evaluate((element, progress) => {
+          const animation = element.getAnimations()[0];
+          animation.currentTime = Number(animation.effect?.getTiming().duration) * progress;
+          const workspace = document.querySelector("main")!;
+          const left = workspace.getBoundingClientRect().left;
+          return { paneWidth: element.getBoundingClientRect().width, left };
+        }, fraction);
+      const early = await sample(0.25);
+      const late = await sample(0.75);
+      expect(early.paneWidth).not.toBe(late.paneWidth);
+      expect(late.left - early.left).toBeCloseTo(late.paneWidth - early.paneWidth);
+      await pane.evaluate((element) => element.getAnimations()[0].finish());
+      await expect(toggle).toHaveAttribute("aria-expanded", String(direction === "opening"));
+      const workspace = page.getByRole("main");
+      await expect(pane).toHaveCSS("width", direction === "opening" ? /^[1-9]\d+px$/ : "0px");
+      await expect(workspace).toHaveJSProperty("scrollTop", 0);
+    });
+  }
+
+  test("collection strip keeps the same card dimensions at both sidebar positions", async ({
+    page,
+  }) => {
+    // This width crosses a collection column breakpoint when the sidebar opens.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.route("**/api/v1/collections/lookup?**", (route) => {
+      const query = new URL(route.request().url()).searchParams;
+      if (query.get("path") !== "maraio" && query.get("id") !== "1") return route.fallback();
+      return route.fulfill({
+        json: {
+          collection: aCollectionNode({ id: 1, name: "maraio", path: "maraio", child_count: 3 }),
+          ancestors: [],
+        },
+      });
+    });
+    await page.route("**/api/v1/collections/children?**", (route) => {
+      const parent = new URL(route.request().url()).searchParams.get("parent_id");
+      if (parent !== "1") return route.fallback();
+      return route.fulfill({
+        json: {
+          items: ["Garden", "Backpack wall mount", "Bag holder"].map((name, index) =>
+            aCollectionNode({ id: index + 2, name, path: `maraio/folder-${index}`, parent_id: 1 }),
+          ),
+          next_cursor: null,
+        },
+      });
+    });
+    await page.goto("/?c=maraio&type=all");
+    const workspace = page.getByRole("main");
+    const card = workspace.getByRole("button", { name: /^Backpack wall mount/ });
+    const toggle = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+    const pane = page.locator("#collections-pane");
+    await expect(card).toBeVisible();
+    const geometry = () =>
+      card.evaluate((button) => {
+        const { x, y, width, height } = button.getBoundingClientRect();
+        return { x: x - button.closest("main")!.getBoundingClientRect().x, y, width, height };
+      });
+    const initial = await geometry();
+    const initiallyOpen = (await toggle.getAttribute("aria-expanded")) === "true";
+    for (const open of [!initiallyOpen, initiallyOpen]) {
+      await toggle.click();
+      await expect(pane).toHaveCSS("width", open ? /^[1-9]\d+px$/ : "0px");
+      await expect(page.locator("html")).not.toHaveAttribute("data-pane-moving");
+      expect(await geometry()).toEqual(initial);
+    }
   });
 
   for (const [reducedMotion, moves] of [
@@ -491,7 +604,7 @@ test.describe("motion and layering", () => {
       expect(motions.length > 0).toBe(moves);
       if (moves) {
         expect(motions[0].transforms[0]).not.toBe(motions[0].transforms.at(-1));
-        expect(motions[0].duration).toBeLessThanOrEqual(300);
+        expect(motions[0].duration).toBe(200);
       }
     });
   }

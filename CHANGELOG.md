@@ -2,6 +2,53 @@
 
 ## Unreleased
 
+### Fixed
+
+- Bambu LAN connects on Python 3.14 with bundled Bambu CA certificates that lack the Key Usage extension.
+
+- PostgreSQL library browsing works when none of the requested Models have an automatic thumbnail.
+
+- “Preparing previews” completes after a successful rebuild even when older library failures remain, and gives a specific reason when new preview work fails.
+
+- A card whose published views cannot be read now offers a compact retry icon that asks the server to recreate the Model's views (`POST /api/v1/models/{id}/previews/regenerate`), then looks again. The request is refused while multi-angle views are switched off.
+
+- Library card controls stay visible over any cover. The selection box, the previous and next arrows and the view label are outlined chips with their own fill, so they no longer disappear into the dark area around a photo or render.
+
+- Model details lead with the next print action, group revisions and production costs under Print, and keep source files, publication data, and recorded results in their own sections. Opening a source or profile preserves the return to the original library view. Overview shows the current revision, the estimate source, and the next print action. Tags save from the inline picker, and Prepare print carries over the selected preview plate.
+
+### Performance
+
+- Model details shows the selected cover during opening and initializes the interactive body after the pane docks.
+
+### Changed
+
+- Collections moves the workspace as one surface and fits the grid after the slide. Model details reflows nearby and wrapping cards without a second layout change when the pane docks. Closing Model details returns focus to a card or control in the library.
+
+- The Trash page uses rounded surfaces and icons on its actions, shows how many days each deleted item has left (the last three days in the destructive tone), and has an illustrated empty state.
+
+- An empty collection now shows an illustration, one Upload files action and a drop hint, instead of also offering Import from URL and Connect folder or NAS, which add to the library rather than to that collection.
+
+- Printers: each printer card now has a right-click menu (or Shift+F10) with Open page, Edit connection, Set model and Remove printer, replacing the card footer and the Manage printers tab. The fleet summary sits under the tabs, jobs that are printing animate on the routing graph, the Profiles page, slicer configurations and their dialogs follow the new surface style, and the printer detail page shows the printer photo and its status in the header, uses status pills in Files, Jobs and Diagnostics, and groups Settings into section cards with a section list, switches and a sticky save bar. The dark theme uses a softer destructive red.
+
+- Library cards are 280 px wide and show the revision status as one badge beside the revision, with time, weight and layer height on one line. The model panel shows the same badge in its header, labelled key figures for the recommended revision, and the collection, creation date and source link under the description.
+
+### Added
+
+- Model guides and attachments have their own Documentation tab.
+- Model attachments accept file drops and clicks on the empty upload area, and the Markdown editor shows a live preview beside the draft.
+- Model attachments open in an in-app reader. Write Markdown directly on a model and export it using the browser’s Save as PDF dialog.
+
+- The 3D viewer uses the saved material color of single-color 3MF projects when the file provides one.
+
+- Press Ctrl+F (⌘F on Mac) in a collection to open an editor-style find bar. It counts the matching models, steps through them with Enter and Shift+Enter, rings the current one, and closes with Esc.
+
+- Assign a printer cost profile to a connected printer. Prints launched from PrintStash show an estimated production cost, then record the cost of the completed, failed, or stopped run using available measurements. History identifies estimates and partial costs.
+
+- G-code costing fills draft prices from matching saved presets or the embedded slicer cost and previews the selling price, profit, and a stacked per-piece cost breakdown as you edit.
+- Model costing saves per-piece production estimates for STL and G-code Artifacts. Use filament presets or individual Spoolman spools, enter print time or copy it from measured print history, and include printer amortization, maintenance, electricity, and other hourly costs. Apply reusable profit margin and tax templates to calculate a price.
+- Filament presets can calculate cost per kilogram from a spool's purchase price and net filament weight. Printer presets can store operating costs for reuse in estimates.
+- Add optional Statistics panels for print outcomes, failures by printer, filament use by printer, and coverage of recorded measurements, slicer estimates, and material costs.
+
 ### Security
 
 - Updated image decoding and outbound TLS dependencies, along with Python and uv in the backend image.
@@ -15,6 +62,25 @@
 ### Changed
 
 - The backend uses SQLModel 0.0.50 and SQLAlchemy 2.1.9. Application timestamps retain their existing storage format on SQLite and PostgreSQL.
+
+- Controls use 6px corners, floating menus and dialogs use 8px corners, and cards and panels stay square.
+
+- Model preview places its controls inside the viewer and uses an icon button for screenshots.
+
+- Print history separates the model and printer from the recorded result. Queue dialogs opened from a model or printer share dispatch details, searchable selectors, and the add action. Print forms and printer material presets share visible radio controls.
+
+- Print History uses centered dialogs for manual records and printer imports. Printer Jobs and Model History use the same reproducibility badges. Profiles aligns with other pages, and the maintenance log action has the same label in the fleet and on a printer.
+
+- The Add to queue compatibility option uses the shared checkbox with a clear checkmark, keyboard focus, and a clickable label.
+
+- Edit connections and remove printers from the Manage printers tab. Warning dialogs share a compact layout, accessible consequence text, and high-contrast destructive actions.
+
+- Printers and Model print controls share a 3D printer icon with a nozzle and build plate.
+- Filament presets, Model costing, and Spoolman settings use a filament spool icon.
+
+- Profiles shows material cost, a breakdown of the hourly machine rate, and the printers assigned to the selected preset. Printer settings show existing presets with their cost setup status and link to the selected profile.
+
+- Costing shows the final price and the production cost side by side, with proportional bars for each expense. Statistics groups period totals above the activity chart and brings the first visible ranking alongside it on wide displays.
 
 - The full image builds Apache OpenDAL 0.59.5 (Python binding 0.47.12) for S3, WebDAV and Google Drive Library sources and backup replicas. Image builds now fail if a supported remote storage service is missing from the OpenDAL build.
 
@@ -63,7 +129,7 @@
 - Opening Search keeps the collection and grid you were browsing. The Search sidebar searches the current collection and offers a switch to search the whole library and back. Recent searches can be removed one by one or cleared, and the AI Search status sits in one compact note. Switching sidebar tools no longer stalls the page and settles in 150 ms.
 - The Filters picker leads with quick toggles for Favorites, Printed and similar candidates, then groups the remaining filters into Files and library and Printing with a distinct icon per filter and a summary of each active selection. A filter page can be cleared on its own.
 - Model views fills the dialog with the selected image, separates renders from photos in the thumbnail strip, keeps the selected thumbnail in view, shows full view names and supports the arrow keys. Image controls in dark mode let the image show through.
-- Library cards move to their new places on the details panel's own motion when it opens or closes, the same way they follow the Collections sidebar, instead of jumping ahead of it. A card that moves to another row now slides in from the edge of that row instead of crossing the others.
+- Library cards ease into new positions as Model Details opens or closes. Cards entering the viewport or changing rows on close move into their new cells alongside the departing panel.
 - G-code previews colour each line by what the slicer says it prints (outer and inner walls, infill, top and bottom, bridges, support, skirt and brim) instead of a rainbow by height. A legend under Layers hides or shows each feature. G-code without slicer feature markers is shaded in one hue by height.
 - G-code previews draw each printed line as a shaded tube as wide as the line itself, so a print reads as a solid object with visible layers instead of faint one-pixel lines.
 - Favorites leaves the navigation rail: it is a Library filter, at the top of the Filters picker, and Collections no longer clears it.
@@ -164,6 +230,16 @@
 - The default number of simultaneous mesh jobs is now one per usable CPU (it was one more). With admission no longer stalling, the extra job only competed for the CPU: on a 3-CPU, 8 GB install a 60-file archive's thumbnails finish in 38.7 s instead of 44.9 s, at the same CPU cost. `VAULT_MAX_RENDER_JOBS` and *Models processed at once* still override it.
 
 ### Fixed
+
+- Search groups filters and print history in one draft with an explicit Apply action. Library and Search use the same native sort control.
+- Settings shows the active section in the fixed navigation bar while its content scrolls.
+- Background work identifies the Model and Artifact behind recent derivative failures, including older jobs, and shows when each attempt failed.
+
+- Desktop Search keeps the global header and filters visible while results scroll.
+- Statistics, printer settings, and notification forms use the shared selection controls. Notifications and Spoolman use the standard settings switches.
+- Remote storage, notification channel, and production estimate forms keep Cancel and their primary action in a consistent footer.
+
+- Statistics excludes the internal `__external__` model from rankings while keeping its jobs in the totals. All-time activity charts handle monthly data.
 
 - Background mesh thumbnail generation uses temporary space on the PrintStash data volume, so a full system temp directory no longer blocks it.
 

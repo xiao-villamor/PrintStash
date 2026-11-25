@@ -16,10 +16,10 @@ import {
   Search,
   Star,
   Tags,
-  Printer,
   X,
   type LucideIcon,
 } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -32,7 +32,7 @@ import {
 import { filterValueText } from "@/lib/filter-labels";
 import { historyKeys } from "@/lib/search-filters";
 import { useI18n } from "@/lib/i18n";
-import type { MessageKey } from "@/lib/locale";
+import { FILTER_SECTIONS, QUICK_FILTERS } from "@/features/library/filter-sections";
 import type { ModelFacetsRead, PrinterRead, SavedViewFilters, TagRead } from "@/types";
 
 export type LibraryFilterField =
@@ -70,32 +70,11 @@ const ICONS = {
   storage: HardDrive,
   has_similar_candidates: Copy,
   tags: Tags,
-  printer: Printer,
+  printer: Printer3D,
   favorites: Star,
   uploaded: Calendar,
   history: History,
 } as const satisfies Record<Category, LucideIcon>;
-/** The category list reads as three short, familiar groups instead of one long column. */
-const SECTIONS: { label: MessageKey; ids: Category[] }[] = [
-  {
-    label: "library.filters.sectionFiles",
-    ids: ["file_type", "storage", "tags", "uploaded"],
-  },
-  {
-    label: "library.filters.sectionPrinting",
-    ids: [
-      "material_type",
-      "slicer_name",
-      "printer_model",
-      "printer",
-      "revision_status",
-      "print_outcome",
-      "history",
-    ],
-  },
-];
-/** Two-state filters toggle in place: opening a page for one checkbox was a detour. */
-const QUICK: Category[] = ["favorites", "printed", "has_similar_candidates"];
 const facetsOrder: (keyof ModelFacetsRead)[] = [
   "material_type",
   "file_type",
@@ -455,12 +434,12 @@ export function LibraryFilterPicker({
               <h3 className="px-2 pb-1 pt-1.5 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                 {t("library.filters.sectionQuick")}
               </h3>
-              {QUICK.map((id) => {
+              {QUICK_FILTERS.map((id) => {
                 const group = groups.find((item) => item.id === id);
                 return group ? quickRow(group) : null;
               })}
             </section>
-            {SECTIONS.map((section) => (
+            {FILTER_SECTIONS.map((section) => (
               <section key={section.label} aria-label={t(section.label)} className="px-1 py-1">
                 <h3 className="px-2 pb-1 pt-1.5 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                   {t(section.label)}

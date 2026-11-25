@@ -1,8 +1,17 @@
+import { useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { useUiLocale } from "@/lib/i18n";
 import { uiText } from "@/lib/locale";
 import type { FileRead } from "@/types";
+import { revisionStatusLabel } from "./presentation";
 
+function revisionName(file: FileRead) {
+  return uiText("Rev {value1}", { value1: String(file.gcode_revision_number ?? file.version) });
+}
+
+/** The revision a Print view describes, switchable without leaving the view. */
 export function RevisionPicker({
   files,
   selected,
@@ -13,36 +22,58 @@ export function RevisionPicker({
   onSelect: (id: number) => void;
 }) {
   useUiLocale();
+  const [open, setOpen] = useState(false);
   if (!selected) return null;
-  const recommended = files.find((file) => file.is_recommended);
   return (
-    <section className="detail-revision-picker" aria-label={uiText("Inspect revision")}>
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex min-w-0 flex-wrap gap-1" role="group" aria-label={uiText("Revisions")}>
-          {files.map((file) => (
-            <Button
-              key={file.id}
-              size="sm"
-              variant="outline"
-              aria-pressed={selected.id === file.id}
-              className={selected.id === file.id ? "bg-accent text-accent-foreground" : ""}
-              onClick={() => onSelect(file.id)}
-              title={file.original_filename}
-            >
-              {uiText("Rev {value1}", {
-                value1: String(file.gcode_revision_number ?? file.version),
-              })}
-              {file.is_recommended && <> · {uiText("Recommended")}</>}
-            </Button>
-          ))}
-        </div>
-        {recommended && recommended.id !== selected.id && (
-          <Button size="sm" variant="ghost" onClick={() => onSelect(recommended.id)}>
-            {uiText("Return to recommended revision")}
+    <div className="flex min-w-0 items-center gap-2.5">
+      <span className="text-sm text-muted-foreground">{uiText("Revision")}</span>
+      <DropdownMenu
+        open={open}
+        onOpenChange={setOpen}
+        portal
+        align="start"
+        aria-label={uiText("Inspect revision")}
+        contentClassName="w-72 border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+        trigger={
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            data-menu-trigger
+            aria-haspopup="menu"
+            aria-expanded={open}
+            title={selected.original_filename}
+            onClick={() => setOpen((value) => !value)}
+          >
+            {revisionName(selected)} · {revisionStatusLabel(selected.revision_status)}
+            <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden />
           </Button>
-        )}
-      </div>
-      <p className="mt-1 break-all text-xs text-muted-foreground">{selected.original_filename}</p>
-    </section>
+        }
+      >
+        {files.map((file) => (
+          <button
+            key={file.id}
+            type="button"
+            role="menuitemradio"
+            aria-checked={file.id === selected.id}
+            title={file.original_filename}
+            onClick={() => {
+              setOpen(false);
+              onSelect(file.id);
+            }}
+            className={`flex w-full flex-col px-3 py-2 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none ${file.id === selected.id ? "bg-muted" : ""}`}
+          >
+            <span>
+              {revisionName(file)}
+              {file.revision_label ? ` · ${file.revision_label}` : ""}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {revisionStatusLabel(file.revision_status)}
+              {file.is_recommended ? ` · ${uiText("Recommended")}` : ""}
+            </span>
+          </button>
+        ))}
+      </DropdownMenu>
+    </div>
   );
 }

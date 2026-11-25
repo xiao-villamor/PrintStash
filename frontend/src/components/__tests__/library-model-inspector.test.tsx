@@ -1,56 +1,35 @@
 /** Inline inspection shares real query/edit/session owners; keys must keep that command context. */
 import "@testing-library/jest-dom/vitest";
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryModelInspector } from "@/components/library-model-inspector";
 import { aModel, aPrinter, aRevision } from "@/test-support/factories";
 import { json, renderApp, type RouteTable } from "@/test-support/render";
-import { clearLogin } from "@/lib/auth-store";
-import { modelPrintJobsOptions } from "@/features/library/model-detail";
-import type { ModelPrintJobRead } from "@/types";
 
 const file = aRevision({ id: 7, model_id: 1, gcode_revision_number: 1, is_recommended: true });
 const model = aModel({ name: "Bracket", description: "Original description", files: [file] });
 const printer = aPrinter({ id: 7, name: "Workshop" });
-function record(state: "completed" | "failed" = "completed"): ModelPrintJobRead {
-  return {
-    id: 44,
-    printer_id: printer.id,
-    printer_name: printer.name,
-    file_id: file.id,
-    remote_filename: file.original_filename,
-    source: "manual",
-    external_display_name: null,
-    artifact_evidence: "vault",
-    gcode_revision_number: 1,
-    revision_label: null,
-    state,
-    material_type: null,
-    error: null,
-    filament_used_g: null,
-    actual_duration_s: null,
-    filament_cost: null,
-    spool_id: null,
-    spool_name: null,
-    started_at: null,
-    finished_at: null,
-    created_at: "2026-06-04T00:00:00Z",
-  };
-}
-function setup(routes: RouteTable = {}, canWrite = true) {
+function setup(routes: RouteTable = {}, canWrite = true, motionLocked = false) {
   const onClose = vi.fn<() => void>();
   return {
     onClose,
-    ...renderApp(<LibraryModelInspector id={1} open canWrite={canWrite} onClose={onClose} />, {
-      routes: {
-        "GET /api/v1/models/1": json(model),
-        "GET /api/v1/models/1/print-jobs": json([]),
-        "GET /api/v1/printers": json([printer]),
-        "POST /api/v1/models/1/print-jobs": json(record()),
-        ...routes,
+    ...renderApp(
+      <LibraryModelInspector
+        id={1}
+        open
+        motionLocked={motionLocked}
+        canWrite={canWrite}
+        onClose={onClose}
+      />,
+      {
+        routes: {
+          "GET /api/v1/models/1": json(model),
+          "GET /api/v1/printers": json([printer]),
+          ...routes,
+        },
       },
-    }),
+    ),
   };
 }
 async function ready() {
@@ -66,6 +45,16 @@ beforeAll(async () => {
 beforeEach(() => window.localStorage.clear());
 
 describe("Library model inspector", () => {
+  it("mounts the interactive details after the opening motion settles", async () => {
+    const app = setup({}, true, true);
+    await screen.findByRole("heading", { name: "Bracket" });
+    expect(screen.queryByRole("region", { name: "Print this revision" })).not.toBeInTheDocument();
+
+    app.rerender(<LibraryModelInspector id={1} open canWrite onClose={app.onClose} />);
+
+    expect(await screen.findByRole("region", { name: "Print this revision" })).toBeVisible();
+  });
+
   it("renders a Markdown description in the inspector", async () => {
     setup({
       "GET /api/v1/models/1": json(
@@ -76,7 +65,7 @@ describe("Library model inspector", () => {
     expect(screen.getByText("two").tagName).toBe("STRONG");
   });
 
-  it("prioritizes delivery actions in the Print tab", async () => {
+  it("shows delivery actions for the displayed revision", async () => {
     const longLabel = "WallMount".repeat(12);
     setup({
       "GET /api/v1/models/1": json(
@@ -84,16 +73,10 @@ describe("Library model inspector", () => {
       ),
     });
     await ready();
-    const print = within(screen.getByRole("tabpanel", { name: "Print" }));
-    expect(print.getByRole("heading", { name: `Rev 1 · ${longLabel}` })).toBeVisible();
+    const print = within(screen.getByRole("region", { name: "Print this revision" }));
+    expect(print.getByText(`Rev 1 · ${longLabel}`)).toBeVisible();
     expect(print.getByRole("button", { name: "Send to printer" })).toBeEnabled();
     expect(print.getByRole("button", { name: "Download G-code" })).toBeEnabled();
-    expect(print.queryByRole("region", { name: "Log print outcome" })).toBeNull();
-
-    await userEvent.click(screen.getByRole("tab", { name: /History/ }));
-    const outcomes = within(screen.getByRole("region", { name: "Log print outcome" }));
-    expect(outcomes.getByRole("combobox")).toHaveDisplayValue("Workshop");
-    expect(outcomes.getByRole("button", { name: "Successful" })).toBeEnabled();
   });
 
   it("offers download when there is no configured printer", async () => {
@@ -101,30 +84,6 @@ describe("Library model inspector", () => {
     await screen.findByRole("heading", { name: "Bracket" });
     expect(screen.getByRole("button", { name: "Download G-code" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Send to printer" })).toBeNull();
-  });
-
-  it("logs the focused revision once when a numeric key is held", async () => {
-    let created = false;
-    const app = setup({
-      "GET /api/v1/models/1/print-jobs": () => json(created ? [record()] : []),
-      "POST /api/v1/models/1/print-jobs": () => {
-        created = true;
-        return json(record());
-      },
-    });
-    await ready();
-    screen.getByRole("tab", { name: "Print" }).focus();
-    fireEvent.keyDown(window, { key: "1", code: "Digit1", shiftKey: true });
-    await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
-    fireEvent.keyDown(window, { key: "1", code: "Digit1", repeat: true });
-    await screen.findByText(/Workshop ·/);
-    expect(app.requestsWithMethod("POST")).toHaveLength(1);
-    expect(JSON.parse(app.requestsWithMethod("POST")[0].body)).toMatchObject({
-      file_id: 7,
-      printer_id: 7,
-      state: "completed",
-      error: null,
-    });
   });
 
   it("leaves numeric keys to the native input owner", async () => {
@@ -139,69 +98,13 @@ describe("Library model inspector", () => {
     expect(app.requestsWithMethod("POST")).toEqual([]);
   });
 
-  it("cancels the failure draft before closing details", async () => {
-    const app = setup();
-    await ready();
-    screen.getByRole("tab", { name: "Print" }).focus();
-    fireEvent.keyDown(window, { key: "2" });
-    const note = await screen.findByRole("textbox", { name: /What went wrong/ });
-    await userEvent.type(note, "Corner lifted");
-    fireEvent.keyDown(note, { key: "Escape" });
-    expect(screen.queryByRole("textbox", { name: /What went wrong/ })).not.toBeInTheDocument();
-    expect(app.onClose).not.toHaveBeenCalled();
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(app.onClose).toHaveBeenCalledOnce();
-    expect(app.requestsWithMethod("POST")).toEqual([]);
-  });
+  it("allows download with read-only access", async () => {
+    setup({}, false);
+    const print = within(await screen.findByRole("region", { name: "Print this revision" }));
 
-  it("saves the optional failed note only through an owned Mod Enter", async () => {
-    const app = setup({
-      "POST /api/v1/models/1/print-jobs": json({ ...record("failed"), error: "Corner lifted" }),
-    });
-    await ready();
-    await userEvent.click(screen.getByRole("tab", { name: /History/ }));
-    await userEvent.click(screen.getByRole("button", { name: "Failed" }));
-    const note = screen.getByRole("textbox", { name: /What went wrong/ });
-    await userEvent.type(note, "Corner lifted");
-    for (const extra of [
-      { isComposing: true },
-      { repeat: true },
-      { altKey: true },
-      { shiftKey: true },
-    ])
-      fireEvent.keyDown(note, { key: "Enter", ctrlKey: true, ...extra });
-    expect(app.requestsWithMethod("POST")).toEqual([]);
-    fireEvent.keyDown(note, { key: "Enter", ctrlKey: true });
-    await screen.findByText("Corner lifted");
-    expect(JSON.parse(app.requestsWithMethod("POST")[0].body)).toMatchObject({
-      file_id: 7,
-      printer_id: 7,
-      state: "failed",
-      error: "Corner lifted",
-    });
-  });
-
-  it("disables outcome writes for a read-only inspector", async () => {
-    const app = setup({}, false);
-    await screen.findByRole("heading", { name: "Bracket" });
-    await userEvent.click(screen.getByRole("tab", { name: /History/ }));
-    expect(screen.queryByRole("button", { name: "Successful" })).not.toBeInTheDocument();
-    screen.getByRole("tab", { name: "Print" }).focus();
-    fireEvent.keyDown(window, { key: "1" });
-    expect(app.requestsWithMethod("POST")).toEqual([]);
+    expect(print.queryByRole("button", { name: "Send to printer" })).not.toBeInTheDocument();
+    expect(print.getByRole("button", { name: "Download G-code" })).toBeEnabled();
     expect(screen.getByRole("link", { name: "Open page" })).toHaveAttribute("href", "/models/1");
-  });
-
-  it("retires a late outcome receipt with its private session", async () => {
-    const pending = Promise.withResolvers<Response>();
-    const app = setup({ "POST /api/v1/models/1/print-jobs": () => pending.promise });
-    await ready();
-    await userEvent.click(screen.getByRole("tab", { name: /History/ }));
-    await userEvent.click(screen.getByRole("button", { name: "Successful" }));
-    await act(async () => clearLogin());
-    await act(async () => pending.resolve(json(record())));
-    expect(screen.queryByText(/Workshop ·/)).not.toBeInTheDocument();
-    expect(app.client.getQueryData(modelPrintJobsOptions(1).queryKey)).toBeUndefined();
   });
 
   for (const [label, status] of [

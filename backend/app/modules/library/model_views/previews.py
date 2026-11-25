@@ -7,7 +7,7 @@ import json
 from collections import defaultdict
 from dataclasses import dataclass
 
-from sqlalchemy import Integer, String, and_, column, func, values
+from sqlalchemy import Integer, String, and_, cast, column, func, literal, values
 from sqlmodel import Session, col, select
 
 from app.core.errors import ErrorKind, OperationError
@@ -116,7 +116,8 @@ def _preview_sources(session: Session, models: list[Model]):
                 (
                     model.id,
                     model.cover_filename,
-                    model.thumbnail_file_id,
+                    # PostgreSQL otherwise infers text for an all-NULL VALUES column.
+                    cast(literal(model.thumbnail_file_id, Integer), Integer),
                     model.thumbnail_path,
                 )
                 for model in models

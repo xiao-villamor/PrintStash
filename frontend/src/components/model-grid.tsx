@@ -1,9 +1,12 @@
 "use client";
 
+import { FILTER_SELECT } from "@/lib/filter-input";
 import { LibraryStatusFilters } from "@/components/library-status-filters";
 import { CollectionHeaderTags } from "@/components/collection-header-tags";
 import "./library-header.css";
 import { LibraryCollectionGroup } from "@/components/library-collection-group";
+import { LibraryEmptyCollection } from "@/components/library-empty-collection";
+import { LibraryFindBar } from "@/components/library-find-bar";
 import { LibraryCollectionsRegion } from "@/components/library-collections-region";
 
 import { arrivingKeys, entryKeys } from "@/lib/library-arrivals";
@@ -30,10 +33,10 @@ import {
 } from "@/features/library/reading-position";
 import { LibraryItems, type LibraryInspectorDock } from "@/components/library-items";
 import {
+  InspectorWillMoveEvent,
   LIBRARY_INSPECTOR_MAX_WIDTH,
   LIBRARY_INSPECTOR_MIN_WIDTH,
 } from "@/components/use-inspector-motion";
-import { PANE_MOVING_EVENT, PANE_SETTLED_EVENT } from "@/components/use-collections-pane-motion";
 import { LibraryItemLink } from "@/features/library/navigation";
 import { useModelOpenIntent } from "@/features/library/model-detail";
 import { useLibraryEntry, type LibraryEntry } from "@/features/library/navigation-state";
@@ -135,7 +138,7 @@ import { CollectionReadme } from "@/components/collection-readme";
 import { useCollectionReadmeRenderer } from "@/components/use-collection-readme-renderer";
 import { MultipartModelTagsDialog } from "@/components/multipart-model-tags-dialog";
 import { MultipartModelCard } from "@/components/multipart-model-card";
-import { useCollectionsPaneOpen } from "@/lib/collections-pane-context";
+import { useCollectionsPaneOpen, useHasCollectionsPane } from "@/lib/collections-pane-context";
 import { subscribeUploadRequests } from "@/lib/upload-requests";
 import { LibraryCollectionsPane, LibraryBreadcrumbs } from "@/components/collections-pane";
 import { FilterSidebar } from "@/components/filter-sidebar";
@@ -166,12 +169,10 @@ import {
   List,
   FileText,
   X,
-  Printer,
   Folder,
   ChevronRight,
   Plus,
   Star,
-  ArrowUpDown,
   Rows3,
   History,
   Check,
@@ -180,10 +181,10 @@ import {
   ListChecks,
   SlidersHorizontal,
   ScanSearch,
-  Search,
   FolderTree,
   Boxes,
 } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 import {
   listCollectionChildren,
   searchCollections,
@@ -319,64 +320,11 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 type MenuTriggerSize = "xs" | "sm";
 type MenuTriggerVariant = "outline" | "ghost";
 
-/** Narrows the current folder (and everything below it) by name, without leaving it. */
-function FolderSearch({
-  value,
-  onCommit,
-  placeholder,
-}: {
-  value: string;
-  onCommit: (value: string) => void;
-  placeholder: string;
-}) {
-  const [draft, setDraft] = useState(value);
-  const [committed, setCommitted] = useState(value);
-  // Navigation (back, a cleared filter chip) replaces the URL value; follow it.
-  if (value !== committed) {
-    setCommitted(value);
-    setDraft(value);
-  }
-  useEffect(() => {
-    if (draft.trim() === value.trim()) return;
-    const timer = window.setTimeout(() => onCommit(draft), 150);
-    return () => window.clearTimeout(timer);
-  }, [draft, value, onCommit]);
-  return (
-    <label className="library-folder-search relative flex min-w-0 items-center">
-      <Search
-        aria-hidden
-        className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-muted-foreground"
-      />
-      <input
-        type="search"
-        data-library-search
-        value={draft}
-        aria-label={placeholder}
-        placeholder={placeholder}
-        onChange={(event) => setDraft(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") onCommit(draft);
-          if (event.key === "Escape" && draft) {
-            event.preventDefault();
-            setDraft("");
-            onCommit("");
-          }
-        }}
-        className="h-8 w-full min-w-0 border border-input bg-card pl-8 pr-7 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      />
-      <kbd className="pointer-events-none absolute right-2 font-mono text-xs text-muted-foreground">
-        /
-      </kbd>
-    </label>
-  );
-}
-
-const COMPACT_COLLECTION_HEIGHT = 60;
+const COMPACT_COLLECTION_HEIGHT = 84;
 
 /**
  * One row of collections above the models, expandable per folder. It owns its
- * column count, so a pane animation that changes the row size re-renders this
- * strip only, never the whole library mid-motion.
+ * column count, so a width change re-renders this strip only.
  */
 function CollectionStrip({
   total,
@@ -387,31 +335,12 @@ function CollectionStrip({
   total: number;
   overview: boolean;
   resetKey: string;
-  children: (
-    limit: number | null,
-    onColumns: (columns: number) => void,
-    extraColumns: number,
-  ) => ReactNode;
+  children: (singleRow: boolean, onColumns: (columns: number) => void) => ReactNode;
 }) {
   useUiLocale();
   const [expandedFor, setExpandedFor] = useState<string | null>(null);
   const [rowSize, setRowSize] = useState(4);
   const expanded = expandedFor === resetKey;
-  // While the pane moves, the row already holds its resting column count (the
-  // grid switches at the start of the motion). One more collection stays
-  // rendered beyond the row's clipped edge: closing, the moving edge uncovers
-  // it; opening, the narrowing row slides the leaving one out under the edge.
-  const [extra, setExtra] = useState(0);
-  useEffect(() => {
-    const moving = () => setExtra(1);
-    const settled = () => setExtra(0);
-    window.addEventListener(PANE_MOVING_EVENT, moving);
-    window.addEventListener(PANE_SETTLED_EVENT, settled);
-    return () => {
-      window.removeEventListener(PANE_MOVING_EVENT, moving);
-      window.removeEventListener(PANE_SETTLED_EVENT, settled);
-    };
-  }, []);
   // How many collections the resting row leaves out, so "N more" fades in or
   // out together with the pane motion rather than after it.
   const hidden = Math.max(0, total - rowSize);
@@ -441,145 +370,8 @@ function CollectionStrip({
           </Button>
         </div>
       )}
-      {children(
-        overview || expanded ? null : rowSize + extra,
-        setRowSize,
-        overview || expanded ? 0 : extra,
-      )}
+      {children(!overview && !expanded, setRowSize)}
     </>
-  );
-}
-
-interface SortMenuProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  sortKey: SortKey;
-  onSelect: (sortKey: SortKey) => void;
-  labelFor: (value: string) => string;
-  triggerSize: MenuTriggerSize;
-  triggerVariant?: MenuTriggerVariant;
-  triggerRole?: "menuitem";
-  triggerClassName?: string;
-  wrapperClassName?: string;
-}
-
-function SortMenu({
-  open,
-  onOpenChange,
-  sortKey,
-  onSelect,
-  labelFor,
-  triggerSize,
-  triggerVariant = "outline",
-  triggerRole,
-  triggerClassName,
-  wrapperClassName,
-}: SortMenuProps) {
-  useUiLocale();
-  return (
-    <DropdownMenu
-      open={open}
-      onOpenChange={onOpenChange}
-      align="end"
-      className={wrapperClassName}
-      trigger={
-        <Button
-          type="button"
-          variant={triggerVariant}
-          size={triggerSize}
-          role={triggerRole}
-          data-menu-trigger
-          aria-haspopup="menu"
-          aria-expanded={open}
-          aria-label={labelFor("Sort models")}
-          onClick={() => onOpenChange(!open)}
-          className={cn(triggerClassName)}
-        >
-          <ArrowUpDown className="h-3.5 w-3.5 shrink-0" />
-          <span className="min-w-0 flex-1 truncate">
-            {labelFor(SORT_OPTIONS.find((option) => option.value === sortKey)?.label ?? "Newest")}
-          </span>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        </Button>
-      }
-      contentClassName="w-52 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
-    >
-      {SORT_OPTIONS.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          role="menuitemradio"
-          aria-checked={sortKey === option.value}
-          onClick={() => {
-            onSelect(option.value);
-            onOpenChange(false);
-          }}
-          className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sortKey === option.value ? "bg-accent text-accent-foreground" : ""}`}
-        >
-          <span className="flex-1">{labelFor(option.label)}</span>
-          {sortKey === option.value && <Check className="h-3.5 w-3.5" />}
-        </button>
-      ))}
-    </DropdownMenu>
-  );
-}
-
-interface PrinterMenuProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  value: string;
-  options: { value: string; label: string }[];
-  onSelect: (value: string) => void;
-  onIntent: () => void;
-}
-
-/** Same menu as Sort, so both toolbar choices open the same way (below, end-aligned). */
-function PrinterMenu({ open, onOpenChange, value, options, onSelect, onIntent }: PrinterMenuProps) {
-  useUiLocale();
-  const current = options.find((option) => option.value === value) ?? options[0];
-  return (
-    <DropdownMenu
-      open={open}
-      onOpenChange={onOpenChange}
-      align="end"
-      trigger={
-        <Button
-          type="button"
-          variant="outline"
-          size="xs"
-          data-menu-trigger
-          aria-haspopup="menu"
-          aria-expanded={open}
-          aria-label={uiText("Printer")}
-          onFocus={onIntent}
-          onPointerDown={onIntent}
-          onClick={() => onOpenChange(!open)}
-          className="library-toolbar-printer h-8 w-36 max-w-full"
-        >
-          <Printer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-          <span className="min-w-0 flex-1 truncate text-left">{current?.label}</span>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        </Button>
-      }
-      contentClassName="w-52 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
-    >
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          role="menuitemradio"
-          aria-checked={value === option.value}
-          onClick={() => {
-            onSelect(option.value);
-            onOpenChange(false);
-          }}
-          className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${value === option.value ? "bg-accent text-accent-foreground" : ""}`}
-        >
-          <span className="min-w-0 flex-1 truncate">{option.label}</span>
-          {value === option.value && <Check className="h-3.5 w-3.5" />}
-        </button>
-      ))}
-    </DropdownMenu>
   );
 }
 
@@ -736,7 +528,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const { locale, t } = useI18n();
   const ui = useCallback((value: string) => translateUiText(locale, value), [locale]);
   const router = useRouter();
-  const paneOpen = useCollectionsPaneOpen();
+  const hasCollectionsPane = useHasCollectionsPane();
   const { savedViewsHost, setSavedViewsAvailable } = useNavigationShell();
   const searchParams = useSearchParams();
   const auth = useRequireAuth();
@@ -895,9 +687,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     )
       localStorage.setItem(LIBRARY_VIEW_KEY, "all");
   }, [initialLibraryPreferences.view]);
-  const [sortOpen, setSortOpen] = useState(false);
   const [displayOpen, setDisplayOpen] = useState(false);
-  const [printerMenuOpen, setPrinterMenuOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const toolbarMenuOpener = useRef<HTMLElement | null>(null);
   const filtersOpener = useRef<HTMLButtonElement>(null);
@@ -1092,15 +882,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const params = new URLSearchParams(searchParams.toString());
     params.set("scope", next);
     router.replace(`/?${params}`);
-  }
-
-  function setFolderQuery(next: string) {
-    const params = new URLSearchParams(searchParams.toString());
-    const value = next.trim();
-    if (value) params.set("q", value);
-    else params.delete("q");
-    const qs = params.toString();
-    router.replace(qs ? `/?${qs}` : "/");
   }
 
   function setStructuredFilter(key: LibraryFilterField, values: string[]) {
@@ -1781,6 +1562,69 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const startupContent = useRef<HTMLElement>(null);
   const listContent = useRef<HTMLDivElement>(null);
   const readingRenderers = useRef(new Map<string, LibraryReadingRenderer>());
+  const [findOpen, setFindOpen] = useState(false);
+  const findHighlight = useRef<HTMLElement | null>(null);
+  const findFrame = useRef(0);
+  const findOpener = useRef<HTMLElement | null>(null);
+  // Bring one find match into view and ring it. The list is virtual, so a match
+  // far down is first scrolled into existence and then located.
+  const revealFound = useCallback((id: number | null) => {
+    cancelAnimationFrame(findFrame.current);
+    findHighlight.current?.classList.remove("library-find-current");
+    findHighlight.current = null;
+    if (id === null) return;
+    const key = `/models/${id}`;
+    let attempts = 0;
+    function reveal() {
+      const anchor = startupContent.current?.querySelector<HTMLElement>(
+        libraryReadingSelector(key),
+      );
+      const card = anchor?.closest<HTMLElement>("[data-library-key]") ?? anchor;
+      if (card) {
+        card.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
+        // The ring belongs on the rounded card, not on the grid cell around it.
+        const ringed = card.matches(".library-model-card")
+          ? card
+          : (card.querySelector<HTMLElement>(".library-model-card") ?? card);
+        ringed.classList.add("library-find-current");
+        findHighlight.current = ringed;
+        return;
+      }
+      attempts += 1;
+      if (attempts > 60) return;
+      readingRenderers.current.get("models")?.reveal(key);
+      findFrame.current = requestAnimationFrame(reveal);
+    }
+    reveal();
+  }, []);
+  useEffect(() => {
+    function keydown(event: KeyboardEvent) {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.key.toLowerCase() !== "f" ||
+        !(event.metaKey || event.ctrlKey) ||
+        event.shiftKey ||
+        event.altKey ||
+        modalOverlayOpen()
+      )
+        return;
+      event.preventDefault();
+      setFindOpen((open) => {
+        // Remember where focus was so closing the bar gives it back there,
+        // rather than ringing the whole collection.
+        if (!open)
+          findOpener.current =
+            document.activeElement instanceof HTMLElement &&
+            document.activeElement !== document.body
+              ? document.activeElement
+              : null;
+        return true;
+      });
+    }
+    window.addEventListener("keydown", keydown);
+    return () => window.removeEventListener("keydown", keydown);
+  }, []);
   const reading = useLibraryReadingPosition(
     snapshot?.entry,
     viewMode,
@@ -1918,61 +1762,64 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     if (models) groupedModels.current.set(id, models);
     else groupedModels.current.delete(id);
   }, []);
-  function toggleSelect(id: number, range = false) {
-    // Capture this gesture once; React may replay the state updater.
-    const sortedModels = Array.from(
-      new Map(
-        [...selectionOrder.current, ...Array.from(groupedModels.current.values()).flat()].map(
-          (model) => [model.id, model],
-        ),
-      ).values(),
-    );
-    const clicked = sortedModels.find((model) => model.id === id);
-    const selection = clicked
-      ? modelSelection(clicked, selectedIds, selectedCollectionRows.values())
-      : ({ kind: "none" } as const);
-    if (selection.kind === "implied") {
-      lastSelectedModelId.current = id;
-      const remaining = new Map(selectedCollectionRows);
-      for (const collection of selection.collections) remaining.delete(collection.id);
-      setSelectedCollectionRows(remaining);
-      const explicit = new Set(selectedIds);
-      explicit.delete(id);
-      for (const model of sortedModels) {
-        if (
-          model.id !== id &&
-          modelSelection(model, selectedIds, selection.collections).kind === "implied" &&
-          modelSelection(model, selectedIds, remaining.values()).kind !== "implied"
-        ) {
-          explicit.add(model.id);
-          selectedModelSnapshot.current.set(model.id, model);
+  const toggleSelect = useCallback(
+    (id: number, range = false) => {
+      // Capture this gesture once; React may replay the state updater.
+      const sortedModels = Array.from(
+        new Map(
+          [...selectionOrder.current, ...Array.from(groupedModels.current.values()).flat()].map(
+            (model) => [model.id, model],
+          ),
+        ).values(),
+      );
+      const clicked = sortedModels.find((model) => model.id === id);
+      const selection = clicked
+        ? modelSelection(clicked, selectedIds, selectedCollectionRows.values())
+        : ({ kind: "none" } as const);
+      if (selection.kind === "implied") {
+        lastSelectedModelId.current = id;
+        const remaining = new Map(selectedCollectionRows);
+        for (const collection of selection.collections) remaining.delete(collection.id);
+        setSelectedCollectionRows(remaining);
+        const explicit = new Set(selectedIds);
+        explicit.delete(id);
+        for (const model of sortedModels) {
+          if (
+            model.id !== id &&
+            modelSelection(model, selectedIds, selection.collections).kind === "implied" &&
+            modelSelection(model, selectedIds, remaining.values()).kind !== "implied"
+          ) {
+            explicit.add(model.id);
+            selectedModelSnapshot.current.set(model.id, model);
+          }
         }
+        setSelectedIds(explicit);
+        return;
       }
-      setSelectedIds(explicit);
-      return;
-    }
-    const anchor = lastSelectedModelId.current;
-    const selectingRange = range && anchor !== null;
-    const from = selectingRange ? sortedModels.findIndex((model) => model.id === anchor) : -1;
-    const to = sortedModels.findIndex((model) => model.id === id);
-    const rangeModels =
-      from >= 0 && to >= 0 ? sortedModels.slice(Math.min(from, to), Math.max(from, to) + 1) : [];
-    lastSelectedModelId.current = id;
-    const explicitRange = rangeModels.filter(
-      (model) =>
-        modelSelection(model, selectedIds, selectedCollectionRows.values()).kind !== "implied",
-    );
-    for (const model of explicitRange) selectedModelSnapshot.current.set(model.id, model);
-    if (clicked) selectedModelSnapshot.current.set(id, clicked);
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (selectingRange && rangeModels.length > 0)
-        explicitRange.forEach((model) => next.add(model.id));
-      else if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
+      const anchor = lastSelectedModelId.current;
+      const selectingRange = range && anchor !== null;
+      const from = selectingRange ? sortedModels.findIndex((model) => model.id === anchor) : -1;
+      const to = sortedModels.findIndex((model) => model.id === id);
+      const rangeModels =
+        from >= 0 && to >= 0 ? sortedModels.slice(Math.min(from, to), Math.max(from, to) + 1) : [];
+      lastSelectedModelId.current = id;
+      const explicitRange = rangeModels.filter(
+        (model) =>
+          modelSelection(model, selectedIds, selectedCollectionRows.values()).kind !== "implied",
+      );
+      for (const model of explicitRange) selectedModelSnapshot.current.set(model.id, model);
+      if (clicked) selectedModelSnapshot.current.set(id, clicked);
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (selectingRange && rangeModels.length > 0)
+          explicitRange.forEach((model) => next.add(model.id));
+        else if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+    },
+    [selectedIds, selectedCollectionRows],
+  );
 
   const lastSelectedMultipartId = useRef<number | null>(null);
   function toggleMultipartSelect(id: number, range = false) {
@@ -2485,37 +2332,36 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     setInspectorDock((previous) =>
       previous?.width === dock?.width &&
       previous?.paddingOffset === dock?.paddingOffset &&
-      previous?.custom === dock?.custom &&
       previous?.maxWidth === dock?.maxWidth
         ? previous
         : dock,
     );
   }, []);
-  const [inspectorMotion, setInspectorMotion] = useState<{
-    open: boolean;
-    locked: { dock: LibraryInspectorDock | null } | null;
-  }>({ open: inspectorOpen, locked: inspectorOpen ? { dock: null } : null });
-  const appliedDock = inspectorMotion.locked ? inspectorMotion.locked.dock : inspectorDock;
-  if (inspectorMotion.open !== inspectorOpen) {
-    // The spring's travel is relative to its width. Hold the current width
-    // through the entrance, exit, or a reversal, then apply the latest fit.
-    setInspectorMotion({ open: inspectorOpen, locked: { dock: appliedDock } });
-  }
+  const [inspectorMotion, setInspectorMotion] = useState({
+    open: inspectorOpen,
+    moving: inspectorOpen,
+  });
+  if (inspectorMotion.open !== inspectorOpen)
+    setInspectorMotion({ open: inspectorOpen, moving: true });
   const settleInspectorDock = useCallback(() => {
-    setInspectorMotion((motion) => (motion.locked ? { ...motion, locked: null } : motion));
+    setInspectorMotion((motion) => (motion.moving ? { ...motion, moving: false } : motion));
   }, []);
+  // Publish the fitted dock before the pane slides. Settling enables the
+  // controls and viewer without applying another grid width.
   const inspectorDockStyle: CSSProperties & {
     "--library-inspector-width"?: string;
     "--library-inspector-padding-offset"?: string;
-  } = appliedDock
+  } = inspectorDock
     ? {
-        "--library-inspector-width": `${appliedDock.width}px`,
-        "--library-inspector-padding-offset": `${appliedDock.paddingOffset}px`,
+        "--library-inspector-width": `${inspectorDock.width}px`,
+        "--library-inspector-padding-offset": `${inspectorDock.paddingOffset}px`,
       }
     : {};
-  const inspectorKeyboardOpener = useRef<HTMLElement | null>(null);
+  const inspectorOpener = useRef<HTMLElement | null>(null);
   const setInspector = useCallback(
     (intent: InspectorIntent) => {
+      if (intent.open !== (libraryInspectorIntents.get(inspectorScope)?.open ?? false))
+        window.dispatchEvent(new InspectorWillMoveEvent(intent.open ? "opening" : "closing"));
       libraryInspectorIntents.set(inspectorScope, intent);
       while (libraryInspectorIntents.size > 20)
         libraryInspectorIntents.delete(libraryInspectorIntents.keys().next().value!);
@@ -2525,8 +2371,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   );
   const inspectModel = useCallback(
     (id: number, opener: HTMLElement | null) => {
-      // Capture focus modality before the drawer moves focus to its title.
-      inspectorKeyboardOpener.current = opener?.matches(":focus-visible") ? opener : null;
+      inspectorOpener.current = opener;
       setInspector({ id, open: true });
     },
     [setInspector],
@@ -2616,7 +2461,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       treeFocus?.entryKey !== entry.key ||
       treeFocus?.id !== inspectorIntent?.id ||
       !inspectorOpen ||
-      inspectorMotion.locked !== null
+      inspectorMotion.moving
     )
       return;
     const key = `/models/${treeFocus.id}`;
@@ -2645,16 +2490,33 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       window.clearTimeout(highlightTimer);
       highlighted?.classList.remove("library-tree-spotlight");
     };
-  }, [entry.key, inspectorIntent?.id, inspectorMotion.locked, inspectorOpen, treeFocus]);
+  }, [entry.key, inspectorIntent?.id, inspectorMotion.moving, inspectorOpen, treeFocus]);
 
   const closeInspector = useCallback(() => {
     if (inspectorIntent) setInspector({ ...inspectorIntent, open: false });
     requestAnimationFrame(() => {
-      const opener = inspectorKeyboardOpener.current;
-      if (opener?.isConnected) opener.focus({ preventScroll: true });
-      else startupContent.current?.focus({ preventScroll: true });
+      if (libraryInspectorIntents.get(inspectorScope)?.open) return;
+      const opener = inspectorOpener.current;
+      const main = startupContent.current;
+      if (
+        opener?.isConnected &&
+        opener !== document.body &&
+        opener !== main &&
+        !opener.closest("[inert]") &&
+        opener.getClientRects().length > 0
+      ) {
+        opener.focus({ preventScroll: true });
+        return;
+      }
+      // Reflow can replace a card's DOM node while the inspector is open.
+      const card = inspectorIntent
+        ? main?.querySelector<HTMLElement>(libraryReadingSelector(`/models/${inspectorIntent.id}`))
+        : null;
+      const control =
+        card ?? document.querySelector<HTMLButtonElement>('button[aria-controls="model-drawer"]');
+      control?.focus({ preventScroll: true });
     });
-  }, [inspectorIntent, setInspector]);
+  }, [inspectorIntent, inspectorScope, setInspector]);
   const toggleInspector = useCallback(() => {
     if (!inspectorAvailable) return;
     if (inspectorOpen) closeInspector();
@@ -3407,57 +3269,23 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               </Button>
             )}
             {filterControl("shrink-0")}
-            {canViewPrinters && (
-              <div className="min-w-0 max-w-full">
-                <PrinterMenu
-                  open={printerMenuOpen}
-                  onOpenChange={setPrinterMenuOpen}
-                  value={
-                    selectedPrinterId !== null
-                      ? String(selectedPrinterId)
-                      : (selectedPrinterPresence ?? "")
-                  }
-                  options={[
-                    { value: "", label: uiText("Any printer") },
-                    { value: "any", label: uiText("On a printer") },
-                    { value: "none", label: uiText("Vault only") },
-                    ...printers.map((printer) => ({
-                      value: String(printer.id),
-                      label: printer.name,
-                    })),
-                  ]}
-                  onIntent={() => startup.request("filters")}
-                  onSelect={(value) => {
-                    if (value === "any" || value === "none") setSelectedPrinterPresence(value);
-                    else setSelectedPrinterId(value ? Number(value) : null);
-                  }}
-                />
-              </div>
-            )}
           </div>
           <div className="library-display-controls ml-auto flex min-w-0 flex-wrap items-center gap-2">
-            {docView === "models" && (
-              <FolderSearch
-                value={query}
-                onCommit={setFolderQuery}
-                placeholder={
-                  selectedName
-                    ? uiText("Search in {value1}", { value1: selectedName })
-                    : uiText("Search models")
-                }
-              />
-            )}
-            {libraryActions}
-            <SortMenu
-              open={sortOpen}
-              onOpenChange={setSortOpen}
-              sortKey={sortKey}
-              onSelect={selectSort}
-              labelFor={ui}
-              triggerSize="xs"
-              triggerClassName="library-toolbar-sort h-8 w-32 max-w-full"
-              wrapperClassName="min-w-0 max-w-full"
-            />
+            <select
+              aria-label={uiText("Sort models")}
+              className={cn(FILTER_SELECT, "library-toolbar-sort w-32 max-w-full")}
+              value={sortKey}
+              onChange={(event) => {
+                const option = SORT_OPTIONS.find((item) => item.value === event.target.value);
+                if (option) selectSort(option.value);
+              }}
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {ui(option.label)}
+                </option>
+              ))}
+            </select>
             <div className="flex items-center bg-muted/50">
               {(["grid", "list"] as const).map((mode) => (
                 <Button
@@ -3681,7 +3509,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         {/* Stitch layout: filter sidebar + main content */}
         <LibraryCollectionsPane>
           <FilterSidebar
-            collectionsOnly={paneOpen !== null}
+            collectionsOnly={hasCollectionsPane}
             filtersOpen={false}
             outlinerFilters={baseFilters}
             tags={tags}
@@ -3729,6 +3557,19 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         </LibraryCollectionsPane>
         {savedViewsHost && auth.isAuthenticated && createPortal(savedViewControl(), savedViewsHost)}
 
+        {findOpen && docView === "models" && (
+          <LibraryFindBar
+            models={visibleModels}
+            onReveal={revealFound}
+            onClose={() => {
+              setFindOpen(false);
+              const opener = findOpener.current;
+              findOpener.current = null;
+              if (opener?.isConnected && opener !== startupContent.current)
+                opener.focus({ preventScroll: true });
+            }}
+          />
+        )}
         <main
           ref={startupContent}
           tabIndex={-1}
@@ -3737,7 +3578,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           data-inspector-grid={(docView === "models" && viewMode === "grid") || undefined}
           data-inspector-layout={docView === "models" ? viewMode : undefined}
           data-inspector-compact-dock={
-            (viewMode === "grid" && compact && !!appliedDock) || undefined
+            (viewMode === "grid" && compact && !!inspectorDock) || undefined
           }
           style={inspectorDockStyle}
           className="@container/library relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-background pb-24 md:pb-0"
@@ -3938,7 +3779,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </div>
               </div>
               {newCollectionButton}
-              {paneOpen === null && (
+              {!hasCollectionsPane && (
                 <Button
                   onClick={() => {
                     setDropPreload(null);
@@ -4168,12 +4009,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       overview={false}
                       resetKey={selectedCollection ?? ""}
                     >
-                      {(limit, onColumns, extraColumns) => (
+                      {(singleRow, onColumns) => (
                         <LibraryItems
-                          items={Array.from(
-                            { length: Math.min(reservedCollections, limit ?? reservedCollections) },
-                            (_, index) => index,
-                          )}
+                          items={Array.from({ length: reservedCollections }, (_, index) => index)}
                           itemKey={(index) => `collection-placeholder:${index}`}
                           renderItem={() => <div className="library-collection-placeholder" />}
                           scrollRef={startupContent}
@@ -4183,10 +4021,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           freezeInspectorTracks={inspectorOpen}
                           compact={compact}
                           estimateSize={COMPACT_COLLECTION_HEIGHT}
+                          keepCollectionCardWidth
                           minCardWidth={300}
                           virtualize={false}
+                          singleRow={singleRow}
                           onColumnsChange={onColumns}
-                          extraColumns={extraColumns}
                         />
                       )}
                     </CollectionStrip>
@@ -4203,12 +4042,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       overview={collectionOverview}
                       resetKey={displayedPath ?? ""}
                     >
-                      {(limit, onColumns, extraColumns) => (
+                      {(singleRow, onColumns) => (
                         <LibraryItems
                           key={`collections:${displayedPath ?? ""}`}
-                          items={
-                            limit === null ? visibleCollections : visibleCollections.slice(0, limit)
-                          }
+                          items={visibleCollections}
                           itemKey={(collection) => `collection:${collection.id}`}
                           renderItem={(collection) => (
                             <LibraryCardFill
@@ -4281,9 +4118,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           freezeInspectorTracks={inspectorOpen}
                           compact={!collectionOverview && compact}
                           estimateSize={collectionOverview ? 266 : COMPACT_COLLECTION_HEIGHT}
+                          keepCollectionCardWidth={!collectionOverview}
                           minCardWidth={collectionOverview ? undefined : 300}
+                          singleRow={singleRow}
                           onColumnsChange={onColumns}
-                          extraColumns={extraColumns}
                         />
                       )}
                     </CollectionStrip>
@@ -4315,81 +4153,96 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   visibleMultipartModels.length === 0 &&
                   visibleCollections.length === 0 &&
                   !hasMore ? (
-                  <EmptyState
-                    title={uiText(
-                      emptyFavorites
-                        ? "No favorites yet"
-                        : selectedCollection && !hasActiveFilters
-                          ? "library.collectionEmpty"
-                          : "No models found",
-                    )}
-                    description={
-                      emptyFavorites
-                        ? uiText("Star a model or multipart set to see it here.")
-                        : hasActiveFilters
-                          ? uiText("Try clearing some filters.")
-                          : selectedCollection
-                            ? uiText(
-                                canUploadHere
-                                  ? "library.collectionEmptyHelp"
-                                  : "library.collectionReadOnlyEmptyHelp",
-                              )
-                            : uiText(
-                                "Upload a model when you're ready, or skim the wiki first if this is a new install.",
-                              )
-                    }
-                    action={
-                      emptyFavorites ? (
-                        <Button type="button" variant="outline" size="xs" onClick={toggleFavorites}>
-                          {uiText("aiSearch.backToLibrary")}
-                        </Button>
-                      ) : hasActiveFilters ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="xs"
-                          onClick={() => clearAllFilters()}
-                        >
-                          {uiText("Clear all filters")}
-                        </Button>
-                      ) : selectedCollection && !canUploadHere ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleCollectionChange(null)}
-                        >
-                          {uiText("aiSearch.backToLibrary")}
-                        </Button>
-                      ) : (
-                        <div className="flex flex-wrap items-center justify-center gap-2">
-                          <GettingStartedReminder />
+                  selectedCollection && canUploadHere && !emptyFavorites && !hasActiveFilters ? (
+                    <LibraryEmptyCollection
+                      disabled={!canUploadToVault}
+                      onUpload={() => {
+                        setDropPreload({ files: [], mode: "files" });
+                        setUploadOpen(true);
+                      }}
+                    />
+                  ) : (
+                    <EmptyState
+                      title={uiText(
+                        emptyFavorites
+                          ? "No favorites yet"
+                          : selectedCollection && !hasActiveFilters
+                            ? "library.collectionEmpty"
+                            : "No models found",
+                      )}
+                      description={
+                        emptyFavorites
+                          ? uiText("Star a model or multipart set to see it here.")
+                          : hasActiveFilters
+                            ? uiText("Try clearing some filters.")
+                            : selectedCollection
+                              ? uiText(
+                                  canUploadHere
+                                    ? "library.collectionEmptyHelp"
+                                    : "library.collectionReadOnlyEmptyHelp",
+                                )
+                              : uiText(
+                                  "Upload a model when you're ready, or skim the wiki first if this is a new install.",
+                                )
+                      }
+                      action={
+                        emptyFavorites ? (
                           <Button
                             type="button"
-                            size="sm"
-                            disabled={!canUploadToVault}
-                            onClick={() => {
-                              setDropPreload({ files: [], mode: "files" });
-                              setUploadOpen(true);
-                            }}
+                            variant="outline"
+                            size="xs"
+                            onClick={toggleFavorites}
                           >
-                            {uiText("Upload files")}
+                            {uiText("aiSearch.backToLibrary")}
                           </Button>
-                          {canUploadToVault && (
-                            <Button asChild variant="outline" size="sm">
-                              <Link href="/inbox">{uiText("Import from URL")}</Link>
+                        ) : hasActiveFilters ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="xs"
+                            onClick={() => clearAllFilters()}
+                          >
+                            {uiText("Clear all filters")}
+                          </Button>
+                        ) : selectedCollection && !canUploadHere ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleCollectionChange(null)}
+                          >
+                            {uiText("aiSearch.backToLibrary")}
+                          </Button>
+                        ) : (
+                          <div className="flex flex-wrap items-center justify-center gap-2">
+                            <GettingStartedReminder />
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={!canUploadToVault}
+                              onClick={() => {
+                                setDropPreload({ files: [], mode: "files" });
+                                setUploadOpen(true);
+                              }}
+                            >
+                              {uiText("Upload files")}
                             </Button>
-                          )}
-                          {user?.is_superuser && (
-                            <Button asChild variant="outline" size="sm">
-                              <Link href="/settings">{uiText("Connect folder or NAS")}</Link>
-                            </Button>
-                          )}
-                        </div>
-                      )
-                    }
-                    className="flex-1 py-20"
-                  />
+                            {canUploadToVault && (
+                              <Button asChild variant="outline" size="sm">
+                                <Link href="/inbox">{uiText("Import from URL")}</Link>
+                              </Button>
+                            )}
+                            {user?.is_superuser && (
+                              <Button asChild variant="outline" size="sm">
+                                <Link href="/settings">{uiText("Connect folder or NAS")}</Link>
+                              </Button>
+                            )}
+                          </div>
+                        )
+                      }
+                      className="flex-1 py-20"
+                    />
+                  )
                 ) : viewMode === "grid" ? (
                   <div
                     // One grid across folders: a Model shown in both (subfolders
@@ -4461,15 +4314,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       layout="grid"
                       freezeInspectorTracks={inspectorOpen}
                       onInspectorDockChange={receiveInspectorDock}
-                      inspectorDockLocked={inspectorMotion.locked !== null}
                       preferredInspectorWidth={preferredInspectorWidth}
-                      appliedInspectorCustomWidth={appliedDock?.custom}
                       estimateSize={compact ? 290 : 250}
                       compact={compact}
                     />
                     <LoadMore
                       paused={reading.status === "restoring" || !browseReady}
-                      layoutKey={`${viewMode}:${paneOpen ?? true}`}
+                      layout={viewMode}
                       hasMore={snapshot?.moreFolders ?? false}
                       loading={fetchingFolders || currentRefresh !== null}
                       failed={folderPages.isFetchNextPageError}
@@ -4480,7 +4331,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     />
                     <LoadMore
                       paused={reading.status === "restoring" || !browseReady}
-                      layoutKey={`${viewMode}:${paneOpen ?? true}`}
+                      layout={viewMode}
                       hasMore={hasMore && !refreshRequired}
                       loading={loadingMore}
                       failed={modelQuery.isFetchNextPageError}
@@ -4534,7 +4385,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       />
                       <LoadMore
                         paused={reading.status === "restoring" || !browseReady}
-                        layoutKey={`${viewMode}:${paneOpen ?? true}`}
+                        layout={viewMode}
                         hasMore={snapshot?.moreFolders ?? false}
                         loading={fetchingFolders || currentRefresh !== null}
                         failed={folderPages.isFetchNextPageError}
@@ -4591,13 +4442,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                         layout="list"
                         freezeInspectorTracks={inspectorOpen}
                         onInspectorDockChange={receiveInspectorDock}
-                        inspectorDockLocked={inspectorMotion.locked !== null}
                         preferredInspectorWidth={preferredInspectorWidth}
                       />
                     </div>
                     <LoadMore
                       paused={reading.status === "restoring" || !browseReady}
-                      layoutKey={`${viewMode}:${paneOpen ?? true}`}
+                      layout={viewMode}
                       hasMore={hasMore && !refreshRequired}
                       loading={loadingMore}
                       failed={modelQuery.isFetchNextPageError}
@@ -4617,14 +4467,16 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             key={entry.session}
             id={inspectorIntent.id}
             open={inspectorOpen}
+            motionLocked={inspectorMotion.moving}
+            summary={visibleModels.find((model) => model.id === inspectorIntent.id)}
             style={inspectorDockStyle}
             onMotionSettled={settleInspectorDock}
             resize={
-              appliedDock && appliedDock.maxWidth >= LIBRARY_INSPECTOR_MIN_WIDTH
+              inspectorDock && inspectorDock.maxWidth >= LIBRARY_INSPECTOR_MIN_WIDTH
                 ? {
-                    current: appliedDock.width,
-                    max: appliedDock.maxWidth,
-                    locked: inspectorMotion.locked !== null,
+                    current: inspectorDock.width,
+                    max: inspectorDock.maxWidth,
+                    locked: inspectorMotion.moving,
                     onResize: chooseInspectorWidth,
                   }
                 : null
@@ -4981,7 +4833,7 @@ function ModelListRow({
                   key={p.printer_id}
                   className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1 py-px font-mono text-3xs uppercase tracking-wider text-emerald-600"
                 >
-                  <Printer className="h-3 w-3" />
+                  <Printer3D className="h-3 w-3" />
                   {p.printer_name}
                 </span>
               ))}
@@ -5013,19 +4865,21 @@ function LoadMore({
   loading,
   failed = false,
   paused = false,
-  layoutKey,
+  layout,
   onClick,
   folders = false,
 }: {
   hasMore: boolean;
   paused?: boolean;
-  layoutKey: string;
+  layout: ViewMode;
   loading: boolean;
   failed?: boolean;
   onClick: () => void;
   folders?: boolean;
 }) {
   useUiLocale();
+  const paneOpen = useCollectionsPaneOpen();
+  const layoutKey = `${layout}:${paneOpen ?? true}`;
   const sentinel = useRef<HTMLDivElement>(null);
   const load = useRef(onClick);
   useLayoutEffect(() => {

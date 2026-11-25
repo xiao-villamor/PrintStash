@@ -17,6 +17,7 @@ export function Toaster() {
         style: {
           fontFamily: "var(--font-mono), monospace",
           fontSize: "13px",
+          borderRadius: "var(--radius-popover)",
           border: "1px solid var(--outline-variant)",
           background: "var(--surface-container-lowest)",
           color: "var(--on-surface)",

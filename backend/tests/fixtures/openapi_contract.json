@@ -323,6 +323,90 @@
         "title": "ArchiveSelectRequest",
         "type": "object"
       },
+      "ArtifactCostingRead": {
+        "properties": {
+          "costs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PieceCosts"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
+          "edit_version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Edit Version",
+            "type": "integer"
+          },
+          "estimate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductionEstimate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "multiple_filaments": {
+            "title": "Multiple Filaments",
+            "type": "boolean"
+          },
+          "slicer_filament_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slicer Filament Cost"
+          }
+        },
+        "required": [
+          "edit_epoch",
+          "edit_version",
+          "currency",
+          "estimate",
+          "costs",
+          "slicer_filament_cost",
+          "multiple_filaments"
+        ],
+        "title": "ArtifactCostingRead",
+        "type": "object"
+      },
+      "ArtifactCostingUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "estimate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductionInputs"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "estimate"
+        ],
+        "title": "ArtifactCostingUpdate",
+        "type": "object"
+      },
       "ArtifactOutcomeRead": {
         "properties": {
           "average_duration_s": {
@@ -5683,6 +5767,68 @@
         "title": "ConsoleEntry",
         "type": "object"
       },
+      "CostedMaterial": {
+        "additionalProperties": false,
+        "properties": {
+          "cost_per_kg": {
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Cost Per Kg",
+            "type": "number"
+          },
+          "grams": {
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Grams",
+            "type": "number"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "spool_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spool Id"
+          }
+        },
+        "required": [
+          "name",
+          "grams",
+          "cost_per_kg"
+        ],
+        "title": "CostedMaterial",
+        "type": "object"
+      },
+      "CostedPrinter": {
+        "additionalProperties": false,
+        "properties": {
+          "expenses": {
+            "$ref": "#/components/schemas/PrinterExpenses"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "expenses"
+        ],
+        "title": "CostedPrinter",
+        "type": "object"
+      },
       "CultsConnectRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6049,6 +6195,18 @@
               }
             ],
             "title": "Collection Id"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
           },
           "multipart_model_id": {
             "anyOf": [
@@ -9448,6 +9606,53 @@
         ],
         "title": "JobPriority",
         "type": "string"
+      },
+      "JobProductionCost": {
+        "properties": {
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "estimated": {
+            "title": "Estimated",
+            "type": "boolean"
+          },
+          "machine": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Machine"
+          },
+          "material": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material"
+          },
+          "total": {
+            "title": "Total",
+            "type": "number"
+          }
+        },
+        "required": [
+          "currency",
+          "material",
+          "machine",
+          "total",
+          "estimated"
+        ],
+        "title": "JobProductionCost",
+        "type": "object"
       },
       "JobStagingSummary": {
         "properties": {
@@ -13193,6 +13398,16 @@
             "title": "Printer Name",
             "type": "string"
           },
+          "production_cost": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobProductionCost"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "remote_filename": {
             "title": "Remote Filename",
             "type": "string"
@@ -16349,6 +16564,59 @@
         "title": "ParsedSearch",
         "type": "object"
       },
+      "PieceCosts": {
+        "properties": {
+          "amortization": {
+            "title": "Amortization",
+            "type": "number"
+          },
+          "electricity": {
+            "title": "Electricity",
+            "type": "number"
+          },
+          "extra": {
+            "title": "Extra",
+            "type": "number"
+          },
+          "final_price": {
+            "title": "Final Price",
+            "type": "number"
+          },
+          "maintenance": {
+            "title": "Maintenance",
+            "type": "number"
+          },
+          "material": {
+            "title": "Material",
+            "type": "number"
+          },
+          "price_before_tax": {
+            "title": "Price Before Tax",
+            "type": "number"
+          },
+          "production": {
+            "title": "Production",
+            "type": "number"
+          },
+          "tax": {
+            "title": "Tax",
+            "type": "number"
+          }
+        },
+        "required": [
+          "material",
+          "amortization",
+          "maintenance",
+          "electricity",
+          "extra",
+          "production",
+          "price_before_tax",
+          "tax",
+          "final_price"
+        ],
+        "title": "PieceCosts",
+        "type": "object"
+      },
       "PlanRequest": {
         "properties": {
           "plan_digest": {
@@ -16478,6 +16746,16 @@
             "title": "Failed",
             "type": "integer"
           },
+          "latest_failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewActivityFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "remaining": {
             "minimum": 0.0,
             "title": "Remaining",
@@ -16499,9 +16777,29 @@
           "completed",
           "remaining",
           "skipped",
-          "failed"
+          "failed",
+          "latest_failure"
         ],
         "title": "PreviewActivity",
+        "type": "object"
+      },
+      "PreviewActivityFailure": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "at"
+        ],
+        "title": "PreviewActivityFailure",
         "type": "object"
       },
       "PreviewImageKind": {
@@ -16597,6 +16895,94 @@
         "title": "PreviewState",
         "type": "string"
       },
+      "PricingRates": {
+        "additionalProperties": false,
+        "properties": {
+          "margin_percent": {
+            "maximum": 99.99,
+            "minimum": 0.0,
+            "title": "Margin Percent",
+            "type": "number"
+          },
+          "tax_percent": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Tax Percent",
+            "type": "number"
+          }
+        },
+        "required": [
+          "margin_percent",
+          "tax_percent"
+        ],
+        "title": "PricingRates",
+        "type": "object"
+      },
+      "PricingTemplateCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "margin_percent": {
+            "maximum": 99.99,
+            "minimum": 0.0,
+            "title": "Margin Percent",
+            "type": "number"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "tax_percent": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Tax Percent",
+            "type": "number"
+          }
+        },
+        "required": [
+          "margin_percent",
+          "tax_percent",
+          "name"
+        ],
+        "title": "PricingTemplateCreate",
+        "type": "object"
+      },
+      "PricingTemplateRead": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "margin_percent": {
+            "maximum": 99.99,
+            "minimum": 0.0,
+            "title": "Margin Percent",
+            "type": "number"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "tax_percent": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Tax Percent",
+            "type": "number"
+          }
+        },
+        "required": [
+          "margin_percent",
+          "tax_percent",
+          "name",
+          "id"
+        ],
+        "title": "PricingTemplateRead",
+        "type": "object"
+      },
       "PrintArtifactFormat": {
         "description": "Stored print formats a provider can accept without conversion.",
         "enum": [
@@ -16687,6 +17073,39 @@
         "title": "PrintBatchRead",
         "type": "object"
       },
+      "PrintDataCoverageRead": {
+        "properties": {
+          "known_cost": {
+            "title": "Known Cost",
+            "type": "integer"
+          },
+          "recorded_filament": {
+            "title": "Recorded Filament",
+            "type": "integer"
+          },
+          "recorded_time": {
+            "title": "Recorded Time",
+            "type": "integer"
+          },
+          "slicer_filament": {
+            "title": "Slicer Filament",
+            "type": "integer"
+          },
+          "slicer_time": {
+            "title": "Slicer Time",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "recorded_time",
+          "slicer_time",
+          "recorded_filament",
+          "slicer_filament",
+          "known_cost"
+        ],
+        "title": "PrintDataCoverageRead",
+        "type": "object"
+      },
       "PrintJobIdentityRead": {
         "description": "Identity reported by a printer; absent values stay absent.",
         "properties": {
@@ -16773,6 +17192,17 @@
       },
       "PrintJobRead": {
         "properties": {
+          "actual_duration_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Duration S"
+          },
           "artifact_capture_error": {
             "anyOf": [
               {
@@ -17108,6 +17538,16 @@
             "$ref": "#/components/schemas/JobPriority",
             "default": "normal"
           },
+          "production_cost": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobProductionCost"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "progress": {
             "title": "Progress",
             "type": "number"
@@ -17375,6 +17815,24 @@
         "title": "PrintJobState",
         "type": "string"
       },
+      "PrintOutcomesRead": {
+        "properties": {
+          "cancelled": {
+            "title": "Cancelled",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "failed",
+          "cancelled"
+        ],
+        "title": "PrintOutcomesRead",
+        "type": "object"
+      },
       "PrintStatisticsRead": {
         "properties": {
           "avg_filament_g": {
@@ -17396,14 +17854,34 @@
             "title": "Cost Over Time",
             "type": "array"
           },
+          "data_coverage": {
+            "$ref": "#/components/schemas/PrintDataCoverageRead"
+          },
           "end_at": {
             "format": "date-time",
             "title": "End At",
             "type": "string"
           },
+          "outcomes": {
+            "$ref": "#/components/schemas/PrintOutcomesRead"
+          },
           "period": {
             "title": "Period",
             "type": "string"
+          },
+          "printer_failures": {
+            "items": {
+              "$ref": "#/components/schemas/PrinterFailuresRead"
+            },
+            "title": "Printer Failures",
+            "type": "array"
+          },
+          "printer_filaments": {
+            "items": {
+              "$ref": "#/components/schemas/PrinterFilamentStatRead"
+            },
+            "title": "Printer Filaments",
+            "type": "array"
           },
           "start_at": {
             "anyOf": [
@@ -17484,7 +17962,11 @@
         },
         "required": [
           "period",
-          "end_at"
+          "end_at",
+          "outcomes",
+          "printer_failures",
+          "data_coverage",
+          "printer_filaments"
         ],
         "title": "PrintStatisticsRead",
         "type": "object"
@@ -17836,6 +18318,18 @@
             ],
             "title": "Bambu Serial"
           },
+          "cost_profile_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Profile Id"
+          },
           "elegoo_centauri_access_code": {
             "anyOf": [
               {
@@ -18049,6 +18543,165 @@
           "name"
         ],
         "title": "PrinterCreate",
+        "type": "object"
+      },
+      "PrinterExpenses": {
+        "additionalProperties": false,
+        "properties": {
+          "acquisition_cost": {
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Acquisition Cost",
+            "type": "number"
+          },
+          "electricity_per_kwh": {
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Electricity Per Kwh",
+            "type": "number"
+          },
+          "extra_per_hour": {
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Extra Per Hour",
+            "type": "number"
+          },
+          "lifetime_hours": {
+            "maximum": 1000000.0,
+            "minimum": 1.0,
+            "title": "Lifetime Hours",
+            "type": "number"
+          },
+          "lifetime_maintenance": {
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Lifetime Maintenance",
+            "type": "number"
+          },
+          "power_watts": {
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Power Watts",
+            "type": "number"
+          }
+        },
+        "required": [
+          "acquisition_cost",
+          "lifetime_hours",
+          "lifetime_maintenance",
+          "power_watts",
+          "electricity_per_kwh",
+          "extra_per_hour"
+        ],
+        "title": "PrinterExpenses",
+        "type": "object"
+      },
+      "PrinterFailuresRead": {
+        "properties": {
+          "completed": {
+            "title": "Completed",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "printer_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printer Id"
+          }
+        },
+        "required": [
+          "printer_id",
+          "name",
+          "failed",
+          "completed"
+        ],
+        "title": "PrinterFailuresRead",
+        "type": "object"
+      },
+      "PrinterFilamentStatRead": {
+        "properties": {
+          "material_brand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Brand"
+          },
+          "material_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Type"
+          },
+          "print_count": {
+            "title": "Print Count",
+            "type": "integer"
+          },
+          "printer_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printer Id"
+          },
+          "printer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printer Name"
+          },
+          "total_g": {
+            "title": "Total G",
+            "type": "number"
+          }
+        },
+        "required": [
+          "printer_id",
+          "printer_name",
+          "material_type",
+          "material_brand",
+          "print_count",
+          "total_g"
+        ],
+        "title": "PrinterFilamentStatRead",
         "type": "object"
       },
       "PrinterFileRead": {
@@ -18340,6 +18993,16 @@
       "PrinterProfileCreate": {
         "additionalProperties": false,
         "properties": {
+          "expenses": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrinterExpenses"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "name": {
             "maxLength": 128,
             "minLength": 1,
@@ -18417,6 +19080,16 @@
             "exclusiveMinimum": 0.0,
             "title": "Edit Version",
             "type": "integer"
+          },
+          "expenses": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrinterExpenses"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "id": {
             "title": "Id",
@@ -18501,6 +19174,16 @@
       "PrinterProfileUpdate": {
         "additionalProperties": false,
         "properties": {
+          "expenses": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrinterExpenses"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "name": {
             "anyOf": [
               {
@@ -18606,6 +19289,17 @@
           },
           "capabilities": {
             "$ref": "#/components/schemas/PrinterCapabilities"
+          },
+          "cost_profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Profile Id"
           },
           "created_at": {
             "format": "date-time",
@@ -19074,6 +19768,18 @@
             ],
             "title": "Bambu Serial"
           },
+          "cost_profile_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Profile Id"
+          },
           "elegoo_centauri_access_code": {
             "anyOf": [
               {
@@ -19320,6 +20026,109 @@
         ],
         "title": "ProcessRole",
         "type": "string"
+      },
+      "ProductionEstimate": {
+        "additionalProperties": false,
+        "properties": {
+          "currency": {
+            "maxLength": 3,
+            "minLength": 3,
+            "title": "Currency",
+            "type": "string"
+          },
+          "materials": {
+            "items": {
+              "$ref": "#/components/schemas/CostedMaterial"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Materials",
+            "type": "array"
+          },
+          "pieces": {
+            "maximum": 100000.0,
+            "minimum": 1.0,
+            "title": "Pieces",
+            "type": "integer"
+          },
+          "pricing": {
+            "$ref": "#/components/schemas/PricingRates"
+          },
+          "print_minutes": {
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Print Minutes",
+            "type": "number"
+          },
+          "printer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CostedPrinter"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "pieces",
+          "print_minutes",
+          "materials",
+          "printer",
+          "pricing",
+          "currency"
+        ],
+        "title": "ProductionEstimate",
+        "type": "object"
+      },
+      "ProductionInputs": {
+        "additionalProperties": false,
+        "properties": {
+          "materials": {
+            "items": {
+              "$ref": "#/components/schemas/CostedMaterial"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Materials",
+            "type": "array"
+          },
+          "pieces": {
+            "maximum": 100000.0,
+            "minimum": 1.0,
+            "title": "Pieces",
+            "type": "integer"
+          },
+          "pricing": {
+            "$ref": "#/components/schemas/PricingRates"
+          },
+          "print_minutes": {
+            "maximum": 1000000.0,
+            "minimum": 0.0,
+            "title": "Print Minutes",
+            "type": "number"
+          },
+          "printer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CostedPrinter"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "pieces",
+          "print_minutes",
+          "materials",
+          "printer",
+          "pricing"
+        ],
+        "title": "ProductionInputs",
+        "type": "object"
       },
       "ProfileSettingsKind": {
         "enum": [
@@ -22414,6 +23223,17 @@
             ],
             "title": "Color Hex"
           },
+          "cost_per_kg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Per Kg"
+          },
           "filament_id": {
             "anyOf": [
               {
@@ -25391,6 +26211,322 @@
         "title": "VolumeUnavailableCause",
         "type": "string"
       },
+      "WorkFailure": {
+        "properties": {
+          "artifact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkFailureArtifact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "committed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Committed At"
+          },
+          "completion": {
+            "anyOf": [
+              {
+                "enum": [
+                  "complete",
+                  "partial"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completion"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_item": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Item"
+          },
+          "deduplicated": {
+            "default": 0,
+            "title": "Deduplicated",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "failed": {
+            "default": 0,
+            "title": "Failed",
+            "type": "integer"
+          },
+          "failed_items": {
+            "items": {
+              "$ref": "#/components/schemas/JobFailedItem"
+            },
+            "title": "Failed Items",
+            "type": "array"
+          },
+          "file_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Id"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/JobKind"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/WorkPriority"
+          },
+          "processed": {
+            "default": 0,
+            "title": "Processed",
+            "type": "integer"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "resubmits": {
+            "title": "Resubmits",
+            "type": "integer"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "retryable": {
+            "default": false,
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "skipped": {
+            "default": 0,
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "enum": [
+                  "resolving",
+                  "discovering",
+                  "downloading",
+                  "inspecting",
+                  "extracting",
+                  "hashing",
+                  "ingesting",
+                  "snapshotting",
+                  "archiving",
+                  "verifying",
+                  "publishing",
+                  "finalizing",
+                  "completed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "staging": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobStagingSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          },
+          "succeeded": {
+            "default": 0,
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "total_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Steps"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "staging",
+          "kind",
+          "state",
+          "priority",
+          "attempts",
+          "resubmits",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "WorkFailure",
+        "type": "object"
+      },
+      "WorkFailureArtifact": {
+        "properties": {
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "integer"
+          },
+          "model_name": {
+            "title": "Model Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id",
+          "model_name",
+          "filename"
+        ],
+        "title": "WorkFailureArtifact",
+        "type": "object"
+      },
       "WorkOverview": {
         "properties": {
           "definitions": {
@@ -25413,7 +26549,7 @@
           },
           "failed_jobs": {
             "items": {
-              "$ref": "#/components/schemas/JobStatus"
+              "$ref": "#/components/schemas/WorkFailure"
             },
             "title": "Failed Jobs",
             "type": "array"
@@ -32312,6 +33448,144 @@
           }
         ],
         "summary": "The preview a slicer saved for one plate of a 3MF",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/v1/files/{file_id}/production-cost": {
+      "get": {
+        "operationId": "get_production_cost_api_v1_files__file_id__production_cost_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactCostingRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read a per-piece production estimate",
+        "tags": [
+          "files"
+        ]
+      },
+      "put": {
+        "operationId": "put_production_cost_api_v1_files__file_id__production_cost_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactCostingUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactCostingRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Save a per-piece production estimate",
         "tags": [
           "files"
         ]
@@ -40462,6 +41736,57 @@
         ]
       }
     },
+    "/api/v1/models/{model_id}/previews/regenerate": {
+      "post": {
+        "operationId": "regenerate_model_previews_api_v1_models__model_id__previews_regenerate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Regenerate Model Previews Api V1 Models  Model Id  Previews Regenerate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Recreate a Model's multi-angle views",
+        "tags": [
+          "models"
+        ]
+      }
+    },
     "/api/v1/models/{model_id}/previews/{generation}": {
       "get": {
         "operationId": "get_model_preview_manifest_api_v1_models__model_id__previews__generation__get",
@@ -45389,6 +46714,155 @@
         "summary": "Search",
         "tags": [
           "outliner"
+        ]
+      }
+    },
+    "/api/v1/pricing-templates": {
+      "get": {
+        "operationId": "list_templates_api_v1_pricing_templates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 51,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PricingTemplateRead"
+                  },
+                  "title": "Response List Templates Api V1 Pricing Templates Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List Templates",
+        "tags": [
+          "pricing-templates"
+        ]
+      },
+      "post": {
+        "operationId": "create_template_api_v1_pricing_templates_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricingTemplateCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingTemplateRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Create Template",
+        "tags": [
+          "pricing-templates"
+        ]
+      }
+    },
+    "/api/v1/pricing-templates/{template_id}": {
+      "delete": {
+        "operationId": "delete_template_api_v1_pricing_templates__template_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "title": "Template Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Delete Template",
+        "tags": [
+          "pricing-templates"
         ]
       }
     },

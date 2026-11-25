@@ -1,3 +1,4 @@
+import type { JobProductionCost, PrinterExpenses } from "./production-costing";
 import type { ModelPreviews } from "./previews";
 import type { EditingBase } from "./editing";
 import type { PreviewLook } from "./config";
@@ -210,6 +211,7 @@ export interface ModelPrintJobRead {
   filament_used_g: number | null;
   actual_duration_s: number | null;
   filament_cost: number | null;
+  production_cost?: JobProductionCost | null;
   spool_id: number | null;
   spool_name: string | null;
   started_at: string | null;
@@ -435,6 +437,25 @@ export interface PrintStatisticsRead {
   top_models: ModelStatRead[];
   top_printers: PrinterStatRead[];
   cost_over_time: TimeBucketRead[];
+  outcomes: { failed: number; cancelled: number };
+  printer_failures: {
+    printer_id: number | null;
+    name: string | null;
+    failed: number;
+    completed: number;
+  }[];
+  data_coverage: {
+    recorded_time: number;
+    slicer_time: number;
+    recorded_filament: number;
+    slicer_filament: number;
+    known_cost: number;
+  };
+  printer_filaments: (Pick<FilamentStatRead, "material_type" | "material_brand" | "print_count"> & {
+    printer_id: number | null;
+    printer_name: string | null;
+    total_g: number;
+  })[];
 }
 
 export interface ModelUpdate {
@@ -709,6 +730,7 @@ export interface PreviewActivity {
   remaining: number;
   skipped: number;
   failed: number;
+  latest_failure: { reason: string; at: string } | null;
 }
 
 /** `GET /api/v1/admin/work`: the Background work settings page. */
@@ -716,7 +738,11 @@ export interface WorkOverview {
   lanes: WorkLane[];
   definitions: WorkDefinition[];
   executors: WorkExecutor[];
-  failed_jobs: JobStatus[];
+  failed_jobs: Array<
+    JobStatus & {
+      artifact?: { model_id: number; model_name: string; filename: string } | null;
+    }
+  >;
   failed_derivatives: number;
 }
 
@@ -1134,6 +1160,7 @@ export interface PrinterProfileRead extends EditingBase {
   usage_count: number;
   created_at: string;
   updated_at: string;
+  expenses: PrinterExpenses | null;
 }
 
 export interface PrinterProfileCreate {
@@ -1142,6 +1169,7 @@ export interface PrinterProfileCreate {
   slicer_name?: string | null;
   nozzle_diameter_mm?: number | null;
   notes?: string | null;
+  expenses?: PrinterExpenses | null;
 }
 
 export interface PrinterProfileUpdate {
@@ -1150,6 +1178,7 @@ export interface PrinterProfileUpdate {
   slicer_name?: string | null;
   nozzle_diameter_mm?: number | null;
   notes?: string | null;
+  expenses?: PrinterExpenses | null;
 }
 
 export interface TagRead {

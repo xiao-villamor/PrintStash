@@ -35,6 +35,7 @@ export function createDocument(payload: {
   collection_id: number | null;
   body?: string;
   multipart_model_id?: number | null;
+  model_id?: number;
 }): Promise<DocumentRead> {
   return sendJson<DocumentRead>("/api/v1/documents", "POST", payload);
 }

@@ -133,8 +133,6 @@ describe("RevisionsTab", () => {
     renderRevisions({ revisions: [aRevision()] });
 
     const filename = await screen.findByText("part_0.2mm.gcode");
-    expect(filename).not.toBeVisible();
-    await userEvent.click(screen.getByText("G-code file", { exact: true }));
     expect(filename).toBeVisible();
     expect(screen.getAllByText("part_0.2mm.gcode")).toHaveLength(1);
   });
@@ -143,11 +141,11 @@ describe("RevisionsTab", () => {
     it("moves revision focus with the arrow selection", async () => {
       const user = userEvent.setup();
       renderRevisions();
-      await user.click(await screen.findByRole("button", { name: /^Rev 1\s*PLA draft$/ }));
+      await user.click(await screen.findByRole("button", { name: /^Rev 1\s*PLA draft/ }));
 
       await user.keyboard("{ArrowDown}");
 
-      const next = screen.getByRole("button", { name: /^Rev 2\s*PLA draft$/ });
+      const next = screen.getByRole("button", { name: /^Rev 2\s*PLA draft/ });
       expect(next).toHaveFocus();
       expect(next).toHaveAttribute("aria-pressed", "true");
     });
@@ -155,11 +153,11 @@ describe("RevisionsTab", () => {
     it("keeps focus on the last revision at the boundary", async () => {
       const user = userEvent.setup();
       renderRevisions();
-      await user.click(await screen.findByRole("button", { name: /^Rev 2\s*PLA draft$/ }));
+      await user.click(await screen.findByRole("button", { name: /^Rev 2\s*PLA draft/ }));
 
       await user.keyboard("{ArrowDown}");
 
-      expect(screen.getByRole("button", { name: /^Rev 2\s*PLA draft$/ })).toHaveFocus();
+      expect(screen.getByRole("button", { name: /^Rev 2\s*PLA draft/ })).toHaveFocus();
     });
   });
 
@@ -170,7 +168,7 @@ describe("RevisionsTab", () => {
     ] as const)("logs %s for the focused revision", async (key, state) => {
       const user = userEvent.setup();
       const view = renderRevisions();
-      await user.click(await screen.findByRole("button", { name: /^Rev 2\s*PLA draft$/ }));
+      await user.click(await screen.findByRole("button", { name: /^Rev 2\s*PLA draft/ }));
       await user.keyboard(key);
       expect(view.onLogPrint).toHaveBeenCalledExactlyOnceWith(21, state);
     });
@@ -328,23 +326,16 @@ describe("RevisionsTab", () => {
         ],
       });
       expect(
-        within(screen.getByRole("table"))
-          .getAllByRole("columnheader")
-          .map((column) => column.textContent),
-      ).toEqual(["Revision", "Printer results", "Time"]);
+        within(screen.getByRole("list", { name: "Revisions" })).getAllByRole("listitem"),
+      ).toHaveLength(2);
 
-      await user.click(screen.getByRole("button", { name: /^Rev 1\s*Draft$/ }));
+      await user.click(screen.getByRole("button", { name: /^Rev 1\s*Draft/ }));
       expect(screen.getByText("Check the fit.")).toBeVisible();
       expect(screen.queryByText("Fit confirmed.")).not.toBeInTheDocument();
-      const profile = screen.getByText("Printer profile", { exact: true });
-      expect(profile).not.toBeVisible();
-      await user.click(screen.getByText("Print setup", { exact: true }));
-      expect(profile).toBeVisible();
 
-      await user.click(screen.getByRole("button", { name: /^Rev 2\s*Final$/ }));
+      await user.click(screen.getByRole("button", { name: /^Rev 2\s*Final/ }));
       expect(screen.getByText("Fit confirmed.")).toBeVisible();
       expect(screen.queryByText("Check the fit.")).not.toBeInTheDocument();
-      expect(screen.getByText("Printer profile", { exact: true })).not.toBeVisible();
     });
 
     it("shows a revision's label", async () => {
@@ -408,13 +399,29 @@ describe("RevisionsTab", () => {
     });
   });
 
+  it.each([
+    ["Archive revision", { revision_status: "archived" }],
+    ["Set as recommended", { is_recommended: true }],
+  ])("applies %s to the selected revision", async (action, patch) => {
+    const user = userEvent.setup();
+    const view = renderRevisions({
+      routes: { "PATCH /api/v1/models/1/files/20/revision": json(aModel()) },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "More actions for Rev 1" }));
+    await user.click(screen.getByRole("menuitem", { name: action }));
+
+    await waitFor(() => expect(view.onModel).toHaveBeenCalledOnce());
+    expect(JSON.parse(view.requestsWithMethod("PATCH")[0].body ?? "{}")).toEqual(patch);
+  });
+
   describe("deleting a revision", () => {
     it("asks before deleting", async () => {
       // A revision is bytes nobody can re-slice from memory.
       const user = userEvent.setup();
       renderRevisions();
 
-      await user.click(screen.getByRole("button", { name: "More" }));
+      await user.click(await screen.findByRole("button", { name: "More actions for Rev 1" }));
       await user.click(screen.getByRole("menuitem", { name: "Move to trash" }));
 
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
@@ -425,7 +432,7 @@ describe("RevisionsTab", () => {
       const { requestsWithMethod } = renderRevisions({
         routes: { "DELETE /api/v1/models/1/files/20/revision": json({ id: 1 }) },
       });
-      await user.click(screen.getByRole("button", { name: "More" }));
+      await user.click(await screen.findByRole("button", { name: "More actions for Rev 1" }));
       await user.click(screen.getByRole("menuitem", { name: "Move to trash" }));
 
       const dialog = await screen.findByRole("dialog");
@@ -441,7 +448,7 @@ describe("RevisionsTab", () => {
     it("deletes nothing when the user backs out", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderRevisions();
-      await user.click(screen.getByRole("button", { name: "More" }));
+      await user.click(await screen.findByRole("button", { name: "More actions for Rev 1" }));
       await user.click(screen.getByRole("menuitem", { name: "Move to trash" }));
 
       const dialog = await screen.findByRole("dialog");
@@ -456,7 +463,8 @@ describe("RevisionsTab", () => {
       const user = userEvent.setup();
       renderRevisions();
 
-      await user.click(await screen.findByRole("button", { name: "Edit labels" }));
+      await user.click(await screen.findByRole("button", { name: "More actions for Rev 1" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Edit labels" }));
 
       expect(await screen.findByRole("button", { name: "Cancel selection" })).toBeInTheDocument();
     });
@@ -464,11 +472,12 @@ describe("RevisionsTab", () => {
     it("leaves selection mode on request", async () => {
       const user = userEvent.setup();
       renderRevisions();
-      await user.click(await screen.findByRole("button", { name: "Edit labels" }));
+      await user.click(await screen.findByRole("button", { name: "More actions for Rev 1" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Edit labels" }));
 
       await user.click(screen.getByRole("button", { name: "Cancel selection" }));
 
-      expect(screen.getByRole("button", { name: "Edit labels" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "More actions for Rev 1" })).toBeInTheDocument();
     });
   });
 
@@ -484,7 +493,8 @@ describe("RevisionsTab", () => {
   describe("applying one label to several revisions", () => {
     /** Enter selection mode and tick the first revision. */
     async function selectFirst(user: ReturnType<typeof userEvent.setup>) {
-      await user.click(await screen.findByRole("button", { name: "Edit labels" }));
+      await user.click(await screen.findByRole("button", { name: "More actions for Rev 1" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Edit labels" }));
       await user.click(await screen.findByRole("checkbox", { name: "Select revision 1" }));
     }
 
@@ -494,7 +504,8 @@ describe("RevisionsTab", () => {
       const user = userEvent.setup();
       renderRevisions();
 
-      await user.click(await screen.findByRole("button", { name: "Edit labels" }));
+      await user.click(await screen.findByRole("button", { name: "More actions for Rev 1" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Edit labels" }));
 
       expect(screen.getByRole("button", { name: /Apply label/ })).toBeDisabled();
     });
@@ -577,7 +588,9 @@ describe("RevisionsTab", () => {
 
       await user.click(screen.getByRole("button", { name: /Apply label/ }));
 
-      expect(await screen.findByRole("button", { name: "Edit labels" })).toBeInTheDocument();
+      expect(
+        await screen.findByRole("button", { name: "More actions for Rev 1" }),
+      ).toBeInTheDocument();
     });
 
     it("stays in selection mode when the batch is refused", async () => {

@@ -38,26 +38,26 @@
       0.5fr
     );
   align-items: center;
-  gap: 16px;
-  padding: 9px 16px;
+  gap: 20px;
+  padding: 10px 20px;
 }
 .queue-register-columns {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 550;
   color: var(--muted-foreground);
   background: var(--muted);
 }
 .queue-register-row {
-  min-height: 64px;
+  min-height: 76px;
   border-top: 1px solid var(--border);
 }
 .queue-register-row strong,
 .queue-register-empty strong {
   font-weight: 580;
-  font-size: 13px;
+  font-size: 14px;
 }
 .queue-register-row small {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted-foreground);
 }
 .queue-register-name,
@@ -103,7 +103,8 @@
 }
 .queue-register-actions {
   justify-content: flex-end;
-  gap: 3px;
+  align-self: stretch;
+  gap: 6px;
 }
 .queue-register-columns span:last-child {
   text-align: end;
@@ -125,12 +126,27 @@
   background: var(--success);
 }
 .queue-register-progress progress {
-  height: 4px;
-  width: 65px;
+  height: 5px;
+  width: 88px;
+  appearance: none;
+  border: 0;
+  border-radius: 9999px;
+  overflow: hidden;
+  background: var(--muted);
   accent-color: var(--primary);
 }
+.queue-register-progress progress::-webkit-progress-bar {
+  background: var(--muted);
+}
+.queue-register-progress progress::-webkit-progress-value {
+  background: var(--primary);
+}
+.queue-register-progress progress::-moz-progress-bar {
+  background: var(--primary);
+}
 .queue-register-progress span {
-  font-size: 11px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 .queue-register-empty {
   padding: 17px 20px;
@@ -144,51 +160,48 @@
 .queue-register-empty button {
   margin-left: auto;
 }
-.queue-compose-dialog {
-  width: min(880px, calc(100vw - 32px));
-  max-width: min(880px, calc(100vw - 32px));
+.print-task-dialog {
+  height: min(62rem, calc(100dvh - 2rem));
 }
-.queue-compose-dialog .queue-compose-body {
-  padding: 0;
-  overflow-y: auto;
+.queue-compose-body {
+  scrollbar-gutter: stable;
 }
 .queue-compose {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(200px, 28%);
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 32%);
   align-items: stretch;
 }
 .queue-compose-fields,
 .queue-ticket {
   min-width: 0;
-  padding: 21px 24px;
+  padding: 24px;
 }
 .queue-compose-fields {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 17px;
+  gap: 20px;
+  align-content: start;
 }
 .queue-compose-group {
   min-width: 0;
 }
 .queue-compose-group legend,
 .queue-compose-label {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 .queue-compose-group legend {
-  margin-bottom: 7px;
+  margin-bottom: 8px;
 }
 .queue-revision-choice {
   display: flex;
-  align-items: center;
-  gap: 13px;
-  background: var(--muted);
-  padding: 12px;
-  border-radius: 5px;
+  align-items: start;
+  gap: 12px;
 }
 .queue-revision-choice > svg {
   flex: none;
   color: var(--primary);
+  margin-top: 2px;
 }
 .queue-revision-choice > div {
   flex: 1;
@@ -198,102 +211,26 @@
   background: var(--card);
 }
 .queue-revision-choice label {
+  font-weight: 500;
+}
+/* The two columns of the prepare dialog open with a plain group heading. */
+.prepare-group-heading {
+  margin: 0 0 14px;
+  color: var(--foreground);
+  font-size: 0.875rem;
   font-weight: 600;
 }
-.queue-options,
-.queue-printer-choices {
+.queue-options {
   display: flex;
   gap: 5px;
   flex-wrap: wrap;
 }
-.queue-options label,
-.queue-printer-choices label {
-  position: relative;
-  min-width: 0;
-}
 .queue-options label {
   flex: 1;
 }
-.queue-options input,
-.queue-printer-choices input {
-  position: absolute;
-  opacity: 0;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-.queue-options label > span,
-.queue-printer-choices label > span {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 8px 10px;
-  font-size: 12px;
-  transition:
-    border-color var(--duration-fast) var(--ease-out),
-    background-color var(--duration-fast) var(--ease-out);
-}
-.queue-options label > span {
-  justify-content: center;
-  min-height: 35px;
-}
-.queue-options input:checked + span,
-.queue-printer-choices input:checked + span {
-  background: color-mix(in srgb, var(--primary) 12%, var(--card));
-  border-color: var(--primary);
-}
-.queue-options input:focus-visible + span,
-.queue-printer-choices input:focus-visible + span {
-  outline: 2px solid var(--ring);
-  outline-offset: 1px;
-}
-.queue-printer-choices {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  max-height: 180px;
-  overflow: auto;
-  padding: 2px;
-}
-.queue-printer-choices label > span > span {
-  display: grid;
-  min-width: 0;
-  flex: 1;
-}
-.queue-printer-choices label b {
-  overflow-wrap: anywhere;
-  font-weight: 550;
-}
-.queue-printer-choices small,
 .queue-ticket small {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted-foreground);
-}
-.queue-printer-choices svg {
-  flex: none;
-  color: var(--muted-foreground);
-}
-.queue-printer-choices label > span > svg:last-child {
-  opacity: 0;
-}
-.queue-printer-choices input:checked + span > svg:last-child {
-  opacity: 1;
-  color: var(--primary);
-}
-.queue-group-filter,
-.queue-material-policy {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  font-size: 13px;
-}
-.queue-group-filter select {
-  margin-left: auto;
-  max-width: 65%;
-}
-.queue-material-policy input {
-  accent-color: var(--primary);
 }
 .queue-ticket {
   background: var(--muted);
@@ -301,13 +238,13 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 19px;
+  gap: 20px;
 }
 .queue-ticket-route {
   display: grid;
   grid-template-columns: 19px minmax(0, 1fr);
-  column-gap: 9px;
-  row-gap: 20px;
+  column-gap: 8px;
+  row-gap: 16px;
   position: relative;
 }
 .queue-ticket-route:before {
@@ -332,19 +269,19 @@
 }
 .queue-ticket-route b,
 .queue-ticket dd {
-  font-size: 13px;
-  font-weight: 570;
+  font-size: 14px;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 .queue-ticket dl {
   border-top: 1px solid var(--border);
-  padding-top: 15px;
+  padding-top: 16px;
   display: grid;
   gap: 3px;
 }
 .queue-ticket dt,
 .queue-ticket p {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted-foreground);
 }
 .queue-ticket p {
@@ -360,7 +297,7 @@
   padding: 12px 24px;
   border-top: 1px solid var(--border);
 }
-@media (max-width: 700px) {
+@media (max-width: 767px) {
   .queue-compose {
     grid-template-columns: 1fr;
   }
@@ -368,6 +305,8 @@
     border-left: 0;
     border-top: 1px solid var(--border);
   }
+}
+@media (max-width: 700px) {
   .queue-register-columns {
     display: none;
   }
@@ -385,13 +324,6 @@
     grid-column: 2;
   }
 }
-@media (prefers-reduced-motion: reduce) {
-  .queue-options label > span,
-  .queue-printer-choices label > span {
-    transition: none;
-  }
-}
-
 .queue-plates {
   overflow: auto;
   max-height: 120px;

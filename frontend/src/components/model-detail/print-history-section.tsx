@@ -6,23 +6,55 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { useId, useState } from "react";
-import { CheckCircle2, XCircle } from "lucide-react";
+import { CheckCircle2, CircleAlert, XCircle } from "lucide-react";
 
 import { createManualPrintJob, getModelPrintJobs, importPrintJobsFromPrinter } from "@/lib/api";
 import { usePrinters, useSpoolmanStatus, useSpools } from "@/lib/queries";
-import { formatCost, formatDuration, formatGrams, timeAgo } from "@/lib/format";
+import { formatCost, formatGrams, timeAgo } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { FileRead, ModelPrintJobRead } from "@/types";
 import { PrintJobReproducibility } from "@/components/print-job-reproducibility";
+import { PrintJobCost } from "@/components/print-job-cost";
 import { printJobArtifactLabel } from "@/lib/print-job-reproducibility";
 
+import { formatPlateEstimate } from "./format-plate-estimate";
 import { PRINT_JOB_PRESENTATION } from "./presentation";
 import { Modal } from "@/components/ui/modal";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ChoiceField } from "./choice-field";
+import { Input, inputClasses } from "@/components/ui/input";
+import { OptionPicker } from "@/components/ui/option-picker";
 import { Localized } from "@/components/ui/localized";
 
 type PrintHistoryMode = "manual" | "auto";
+type RecordOutcome = "completed" | "failed" | "cancelled";
+
+const RECORD_OUTCOMES: readonly { value: RecordOutcome; label: string }[] = [
+  {
+    value: "completed",
+    get label() {
+      return uiText("Success");
+    },
+  },
+  {
+    value: "failed",
+    get label() {
+      return uiText("Failed");
+    },
+  },
+  {
+    value: "cancelled",
+    get label() {
+      return uiText("Cancelled");
+    },
+  },
+];
+
+const OUTCOME_DOT = {
+  completed: "bg-success",
+  failed: "bg-destructive",
+  cancelled: "bg-warning",
+} satisfies Record<RecordOutcome, string>;
 
 export function PrintHistorySection({
   jobs,
@@ -31,6 +63,13 @@ export function PrintHistorySection({
   gcodeFiles,
   onJobCreated,
   initialEntry,
+  revisionFilter = null,
+  onRevisionFilter,
+  onAddRevision,
+  onOpenRevision,
+  onViewActivity,
+  onDraftClosed,
+  showHistory = true,
 }: {
   jobs: ModelPrintJobRead[];
   modelName?: string;
@@ -38,6 +77,13 @@ export function PrintHistorySection({
   gcodeFiles: FileRead[];
   onJobCreated: (job: ModelPrintJobRead) => void;
   initialEntry?: { fileId: number; state: "completed" | "failed" } | null;
+  revisionFilter?: number | null;
+  onRevisionFilter?: (fileId: number | null) => void;
+  onAddRevision?: () => void;
+  onOpenRevision?: (fileId: number) => void;
+  onViewActivity?: () => void;
+  onDraftClosed?: () => void;
+  showHistory?: boolean;
 }) {
   useUiLocale();
   const formId = useId();
@@ -57,10 +103,12 @@ export function PrintHistorySection({
   const [adhocPrinter, setAdhocPrinter] = useState(false);
   const [adhocPrinterName, setAdhocPrinterName] = useState("");
   const [selectedFileId, setSelectedFileId] = useState<number | null>(
-    initialEntry?.fileId ?? gcodeFiles[0]?.id ?? null,
+    initialEntry?.fileId ?? revisionFilter ?? gcodeFiles[0]?.id ?? null,
   );
+  const selectedRevision = gcodeFiles.find((file) => file.id === selectedFileId);
+  const estimatedFilament = selectedRevision?.metadata?.filament_weight_g;
   const [selectedSpoolId, setSelectedSpoolId] = useState<number | null>(null);
-  const [jobState, setJobState] = useState<string>(initialEntry?.state ?? "completed");
+  const [jobState, setJobState] = useState<RecordOutcome | null>(initialEntry?.state ?? null);
   const [startedAt, setStartedAt] = useState("");
   const [finishedAt, setFinishedAt] = useState("");
   const [jobError, setJobError] = useState("");
@@ -81,9 +129,9 @@ export function PrintHistorySection({
     setSelectedPrinterId(null);
     setAdhocPrinter(false);
     setAdhocPrinterName("");
-    setSelectedFileId(gcodeFiles[0]?.id ?? null);
+    setSelectedFileId(revisionFilter ?? gcodeFiles[0]?.id ?? null);
     setSelectedSpoolId(null);
-    setJobState("completed");
+    setJobState(null);
     setStartedAt("");
     setFinishedAt("");
     setJobError("");
@@ -96,8 +144,23 @@ export function PrintHistorySection({
     ? adhocPrinterName.trim().length > 0
     : !!selectedPrinterId;
 
+  // The first unmet requirement, in the order the dialog asks for them.
+  const blockedReason =
+    jobState === null
+      ? uiText("Choose the observed outcome.")
+      : !selectedFileId
+        ? uiText("Choose revision")
+        : !manualPrinterReady
+          ? uiText("Choose the printer that ran it.")
+          : null;
+
+  function closeRecord() {
+    setShowAdd(false);
+    onDraftClosed?.();
+  }
+
   async function submitManual() {
-    if (submitting || !manualPrinterReady || !selectedFileId) return;
+    if (submitting || blockedReason !== null || jobState === null || !selectedFileId) return;
     setSubmitting(true);
     try {
       const spool =
@@ -116,11 +179,17 @@ export function PrintHistorySection({
         spool_filament_id: spool ? spool.filament_id : null,
         started_at: startedAt || null,
         finished_at: finishedAt || null,
-        error: jobError || null,
+        error: jobState === "completed" ? null : jobError.trim() || null,
       });
       onJobCreated(job);
-      setShowAdd(false);
-      toast.success(uiText("Print record added"));
+      closeRecord();
+      if (onViewActivity)
+        toast.successAction(
+          uiText("Print record added"),
+          `${uiText("View activity")} ›`,
+          onViewActivity,
+        );
+      else toast.success(uiText("Print record added"));
     } catch (e) {
       toast.error(e);
     } finally {
@@ -154,70 +223,118 @@ export function PrintHistorySection({
     }
   }
 
+  const visibleJobs =
+    revisionFilter === null ? jobs : jobs.filter((job) => job.file_id === revisionFilter);
+
   return (
     <Localized>
       <section>
-        <div className="detail-history-heading">
-          <h2>{uiText("Print history")}</h2>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" onClick={openAdd}>
-              {uiText("Add record")}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                openAdd();
-                setMode("auto");
-              }}
-            >
-              {uiText("Import from printer")}
-            </Button>
-          </div>
-        </div>
-        <p className="detail-history-intro">
-          {uiText("Recorded results for each printer and revision.")}
-        </p>
+        {showHistory && (
+          <>
+            <div className="flex h-8 items-center justify-between gap-3 px-0.5">
+              <h2 className="text-sm font-medium text-muted-foreground">
+                {uiText("Print history")} · {visibleJobs.length}
+              </h2>
+              {gcodeFiles.length > 0 ? (
+                <div className="flex gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      openAdd();
+                      setMode("auto");
+                    }}
+                  >
+                    {uiText("Import from printer")}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={openAdd}>
+                    {uiText("modelDetail.recordResult")}
+                  </Button>
+                </div>
+              ) : (
+                onAddRevision && (
+                  <Button size="sm" onClick={onAddRevision}>
+                    {uiText("Add revision")}
+                  </Button>
+                )
+              )}
+            </div>
 
+            {onRevisionFilter && (gcodeFiles.length > 1 || revisionFilter !== null) && (
+              <label className="flex flex-wrap items-center gap-2 text-sm">
+                {uiText("G-code Revision")}
+                <select
+                  className={inputClasses}
+                  value={revisionFilter ?? ""}
+                  onChange={(event) => {
+                    onRevisionFilter(
+                      gcodeFiles.find((file) => file.id === Number(event.target.value))?.id ?? null,
+                    );
+                  }}
+                >
+                  <option value="">{uiText("modelDetail.allRevisions")}</option>
+                  {gcodeFiles.map((file) => (
+                    <option key={file.id} value={file.id}>
+                      {uiText("Rev {value1}", {
+                        value1: String(file.gcode_revision_number ?? file.version),
+                      })}
+                      {file.revision_label && ` · ${file.revision_label}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </>
+        )}
         {/* Add record panel */}
         <Modal
           open={showAdd}
           onClose={() => {
-            if (!submitting && !importing) setShowAdd(false);
+            if (!submitting && !importing) closeRecord();
           }}
-          title={mode === "manual" ? uiText("Add print record") : uiText("Import from printer")}
-          description={
-            mode === "manual"
-              ? uiText(
-                  "Record an observed result for one Revision on one printer. This does not change the recommended Revision.",
-                )
-              : undefined
+          title={
+            mode === "manual" ? uiText("modelDetail.recordResult") : uiText("Import from printer")
           }
-          className={
-            mode === "manual"
-              ? "absolute inset-y-0 right-0 h-dvh max-h-none max-w-[680px] rounded-none"
-              : "max-w-160"
-          }
-          bodyClassName={mode === "manual" ? "flex-1" : undefined}
+          description={mode === "manual" ? modelName : undefined}
+          dismissible={!submitting && !importing}
+          className={mode === "manual" ? "max-w-170" : undefined}
+          bodyClassName={mode === "manual" ? "p-0" : undefined}
           footer={
             <>
+              {mode === "manual" && blockedReason && (
+                <p
+                  id={`${formId}-reason`}
+                  className="me-auto flex items-center gap-2 text-sm text-muted-foreground"
+                >
+                  <CircleAlert className="size-4 shrink-0 text-warning" aria-hidden />
+                  {blockedReason}
+                </p>
+              )}
               <Button
                 variant="outline"
+                size="sm"
                 disabled={submitting || importing}
-                onClick={() => setShowAdd(false)}
+                onClick={closeRecord}
               >
-                {mode === "manual" ? uiText("Cancel") : uiText("Close")}
+                {uiText("Cancel")}
               </Button>
               {mode === "manual" ? (
                 <Button
+                  size="sm"
                   onClick={submitManual}
                   loading={submitting}
-                  disabled={!manualPrinterReady || !selectedFileId}
+                  disabled={blockedReason !== null}
+                  aria-describedby={blockedReason ? `${formId}-reason` : undefined}
                 >
                   {uiText("Save record")}
                 </Button>
               ) : (
-                <Button onClick={runAutoImport} loading={importing} disabled={!selectedPrinterId}>
+                <Button
+                  size="sm"
+                  onClick={runAutoImport}
+                  loading={importing}
+                  disabled={!selectedPrinterId}
+                >
                   {uiText("Fetch & Import")}
                 </Button>
               )}
@@ -243,68 +360,124 @@ export function PrintHistorySection({
             }}
           >
             {mode === "manual" ? (
-              <div className="space-y-4">
-                {modelName && (
-                  <dl className="grid grid-cols-[1fr_2fr] gap-x-4 gap-y-2 bg-plate p-4 text-[13px]">
-                    <dt className="text-muted-foreground">{uiText("Model")}</dt>
-                    <dd>{modelName}</dd>
-                    <dt className="text-muted-foreground">{uiText("Revision")}</dt>
-                    <dd>
-                      {selectedFileId != null
-                        ? `${uiText("Rev ")}${gcodeFiles.find((file) => file.id === selectedFileId)?.gcode_revision_number ?? gcodeFiles.find((file) => file.id === selectedFileId)?.version ?? "—"}`
-                        : "—"}
-                    </dd>
-                  </dl>
-                )}
-                <h3 className="text-sm font-semibold">{uiText("Print context")}</h3>
-                <div className="space-y-4">
-                  <ChoiceField<number | "other">
-                    label={uiText("Printer")}
-                    inline
-                    value={adhocPrinter ? "other" : selectedPrinterId}
-                    options={[
-                      ...printers.map((printer) => ({ value: printer.id, label: printer.name })),
-                      { value: "other", label: uiText("Other (not listed)…") },
-                    ]}
-                    onChange={(value) => {
-                      setAdhocPrinter(value === "other");
-                      setSelectedPrinterId(value === "other" ? null : value);
+              <div className="space-y-5 px-6 py-5">
+                <div className="flex justify-end">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setMode("auto");
+                      setSelectedPrinterId(null);
                     }}
-                  />
-                  <ChoiceField
+                  >
+                    {uiText("Import from printer")}
+                  </Button>
+                </div>
+                <fieldset className="min-w-0">
+                  <legend className="mb-1.5 text-sm font-medium">
+                    {uiText("Observed outcome")}
+                  </legend>
+                  <div className="grid grid-cols-3 gap-2">
+                    {RECORD_OUTCOMES.map((outcome) => (
+                      <label
+                        key={outcome.value}
+                        className="flex min-h-11 cursor-action items-center gap-3 rounded-lg border border-border bg-card px-3 text-sm hover:bg-muted has-checked:border-muted-foreground has-checked:bg-accent has-focus-visible:outline-2 has-focus-visible:outline-ring"
+                      >
+                        <input
+                          type="radio"
+                          name={`${formId}-outcome`}
+                          className="size-4 shrink-0 accent-primary"
+                          checked={jobState === outcome.value}
+                          onChange={() => setJobState(outcome.value)}
+                        />
+                        {outcome.label}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <OptionPicker
                     label={uiText("G-code Revision")}
-                    inline
+                    searchPlaceholder={uiText("Search revisions")}
                     value={selectedFileId}
                     options={gcodeFiles.map((file) => ({
                       value: file.id,
-                      label: `${uiText("Rev ")}${file.gcode_revision_number ?? file.version}`,
+                      label: `${uiText("Rev ")}${file.gcode_revision_number ?? file.version}${file.revision_label ? ` · ${file.revision_label}` : ""}`,
                       description: file.original_filename,
                     }))}
                     onChange={setSelectedFileId}
                   />
+                  <OptionPicker
+                    label={uiText("Printer")}
+                    searchPlaceholder={uiText("Search printers")}
+                    value={selectedPrinterId}
+                    placeholder={uiText("Choose printer")}
+                    options={printers.map((printer) => ({
+                      value: printer.id,
+                      label: printer.name,
+                    }))}
+                    onChange={(printerId) => {
+                      setAdhocPrinter(false);
+                      setSelectedPrinterId(printerId);
+                    }}
+                    other={{
+                      label: uiText("Other (not listed)…"),
+                      selected: adhocPrinter,
+                      onSelect: () => {
+                        setAdhocPrinter(true);
+                        setSelectedPrinterId(null);
+                      },
+                    }}
+                  />
                 </div>
                 {adhocPrinter && (
                   <div>
-                    <label
-                      className="block text-xs font-medium text-on-surface-variant mb-1"
-                      htmlFor={`${formId}-3`}
-                    >
+                    <label className="mb-1.5 block text-sm font-medium" htmlFor={`${formId}-3`}>
                       {uiText("Printer name")}
                     </label>
-                    <input
+                    <Input
                       id={`${formId}-3`}
                       value={adhocPrinterName}
                       onChange={(e) => setAdhocPrinterName(e.target.value)}
                       maxLength={128}
                       placeholder={uiText("e.g. Garage Prusa MK4")}
-                      className="min-w-0 w-full h-10 bg-card text-foreground text-sm border border-input rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>
                 )}
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium" htmlFor={`${formId}-6`}>
+                      {uiText("Started (opt.)")}
+                    </label>
+                    <Input
+                      id={`${formId}-6`}
+                      type="datetime-local"
+                      value={startedAt}
+                      onChange={(e) => setStartedAt(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium" htmlFor={`${formId}-7`}>
+                      {uiText("Finished (opt.)")}
+                    </label>
+                    <Input
+                      id={`${formId}-7`}
+                      type="datetime-local"
+                      value={finishedAt}
+                      onChange={(e) => setFinishedAt(e.target.value)}
+                    />
+                  </div>
+                </div>
+                {estimatedFilament != null && (
+                  <p className="text-sm text-muted-foreground">
+                    {uiText("Filament estimate")} ·{" "}
+                    {formatPlateEstimate("filament_weight_g", estimatedFilament)} ·{" "}
+                    {uiText("G-code estimate")}
+                  </p>
+                )}
                 {spoolmanEnabled && spools.length > 0 && (
-                  <ChoiceField<number | "none">
+                  <OptionPicker<number | "none">
                     label={uiText("Spool (opt.)")}
-                    inline
                     value={selectedSpoolId ?? "none"}
                     onChange={(value) => setSelectedSpoolId(value === "none" ? null : value)}
                     options={[
@@ -329,70 +502,26 @@ export function PrintHistorySection({
                     ]}
                   />
                 )}
-                <h3 className="border-t border-border pt-5 text-sm font-semibold">
-                  {uiText("Observed outcome")}
-                </h3>
-                <ChoiceField
-                  label={uiText("Result")}
-                  value={jobState}
-                  options={[
-                    { value: "completed", label: uiText("Completed") },
-                    { value: "failed", label: uiText("Failed") },
-                    { value: "cancelled", label: uiText("Cancelled") },
-                  ]}
-                  onChange={setJobState}
-                  inline
-                />
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <div>
-                    <label
-                      className="block text-xs font-medium text-on-surface-variant mb-1"
-                      htmlFor={`${formId}-6`}
-                    >
-                      {uiText("Started (opt.)")}
-                    </label>
-                    <input
-                      id={`${formId}-6`}
-                      type="datetime-local"
-                      value={startedAt}
-                      onChange={(e) => setStartedAt(e.target.value)}
-                      className="min-w-0 w-full h-10 bg-card text-foreground text-sm border border-input rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
-                  <div>
-                    <label
-                      className="block text-xs font-medium text-on-surface-variant mb-1"
-                      htmlFor={`${formId}-7`}
-                    >
-                      {uiText("Finished (opt.)")}
-                    </label>
-                    <input
-                      id={`${formId}-7`}
-                      type="datetime-local"
-                      value={finishedAt}
-                      onChange={(e) => setFinishedAt(e.target.value)}
-                      className="min-w-0 w-full h-10 bg-card text-foreground text-sm border border-input rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
-                </div>
                 {(jobState === "failed" || jobState === "cancelled") && (
                   <div>
-                    <label
-                      className="block text-xs font-medium text-on-surface-variant mb-1"
-                      htmlFor={`${formId}-8`}
-                    >
-                      {uiText("Error (opt.)")}
+                    <label className="mb-1.5 block text-sm font-medium" htmlFor={`${formId}-8`}>
+                      {uiText("What went wrong")}
                     </label>
-                    <input
+                    <textarea
                       id={`${formId}-8`}
+                      rows={3}
+                      maxLength={1024}
+                      className={`${inputClasses} h-auto resize-none py-2`}
                       ref={(node) => {
                         if (initialEntry?.state === "failed") node?.setAttribute("autofocus", "");
                       }}
                       value={jobError}
                       onChange={(e) => setJobError(e.target.value)}
                       placeholder={uiText("Describe what went wrong…")}
-                      className="min-w-0 w-full h-10 bg-card text-foreground text-sm border border-input rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                     />
+                    <p className="mt-1.5 text-sm text-muted-foreground">
+                      {uiText("Saved with the record and shown in Activity.")}
+                    </p>
                   </div>
                 )}
               </div>
@@ -426,8 +555,10 @@ export function PrintHistorySection({
                     </Button>
                   </div>
                 ) : (
-                  <ChoiceField
+                  <OptionPicker
                     label={uiText("Printer")}
+                    searchPlaceholder={uiText("Search printers")}
+                    placeholder={uiText("Choose printer")}
                     value={selectedPrinterId}
                     options={importPrinters.map((printer) => ({
                       value: printer.id,
@@ -471,68 +602,98 @@ export function PrintHistorySection({
           </div>
         </Modal>
 
-        {jobs.length === 0 ? (
-          <p className="text-sm text-on-surface-variant">
-            {uiText("No print history yet. Add a record manually or import from a printer.")}
-          </p>
-        ) : (
-          <div>
-            {jobs.map((job) => {
-              const present = PRINT_JOB_PRESENTATION[job.state];
-              return (
-                <article key={job.id} className="detail-history-record">
-                  <div className="detail-history-identity">
-                    <span className="break-words">
-                      {job.source === "external"
-                        ? printJobArtifactLabel(job)
-                        : uiText("Rev {value1}", {
-                            value1: String(job.gcode_revision_number ?? "—"),
-                          })}
-                      {" · "}
-                      {job.printer_name}
-                      {" · "}
-                      <span
-                        className={
-                          present.tone === "error" ? "text-destructive" : "text-foreground"
-                        }
-                      >
-                        {present.label}
-                      </span>
-                    </span>
-                  </div>
-                  <p className="text-xs text-on-surface-variant">
-                    {job.material_type ? `${job.material_type} · ` : ""}
-                    {timeAgo(job.created_at)}
+        {showHistory && (
+          <div className="mt-2 overflow-hidden rounded-lg border border-border bg-card">
+            {visibleJobs.length === 0 ? (
+              <div className="space-y-2.5 px-3.5 py-4 text-sm/5">
+                <p>
+                  {gcodeFiles.length === 0
+                    ? uiText("modelDetail.historyNeedsRevision")
+                    : revisionFilter === null
+                      ? uiText("No print history yet.")
+                      : uiText("modelDetail.noRevisionActivity")}
+                </p>
+                {gcodeFiles.length > 0 && revisionFilter === null && (
+                  <p className="text-muted-foreground">
+                    {uiText(
+                      "Record a result after each print, or import past jobs from a connected printer.",
+                    )}
                   </p>
-                  {job.source === "external" && (
-                    <p className="text-xs uppercase tracking-wider text-on-surface-variant">
-                      {knownUiText(job.artifact_evidence)}
-                    </p>
-                  )}
-                  <PrintJobReproducibility
-                    job={job}
-                    previewHref={`/models/${modelId}`}
-                    presentation="history"
-                  />
-                  {(job.actual_duration_s != null || job.filament_used_g != null) && (
-                    <p className="text-xs text-on-surface-variant">
-                      <span>{uiText("measured")}</span>
-                      {job.actual_duration_s != null
-                        ? ` · ${formatDuration(job.actual_duration_s)}`
-                        : ""}
-                      {job.filament_used_g != null ? ` · ${formatGrams(job.filament_used_g)}` : ""}
-                      {job.filament_cost != null ? ` · ${formatCost(job.filament_cost)}` : ""}
-                    </p>
-                  )}
-                  {job.spool_name && (
-                    <p className="text-xs text-on-surface-variant">
-                      {uiText("spool · {value1}", { value1: String(job.spool_name ?? "") })}
-                    </p>
-                  )}
-                  {job.error && <p className="text-xs text-error break-words">{job.error}</p>}
-                </article>
-              );
-            })}
+                )}
+              </div>
+            ) : (
+              visibleJobs.map((job) => {
+                const revision = gcodeFiles.find((file) => file.id === job.file_id);
+                const present = PRINT_JOB_PRESENTATION[job.state];
+                const outcomeDot =
+                  job.state === "completed" || job.state === "failed" || job.state === "cancelled"
+                    ? OUTCOME_DOT[job.state]
+                    : "bg-muted-foreground";
+                return (
+                  <article
+                    key={job.id}
+                    className="flex items-start gap-3 border-t border-border px-3.5 py-3 text-sm first:border-t-0"
+                  >
+                    <Badge variant="outline" className="min-w-24 gap-1.5 text-sm">
+                      <span aria-hidden className={`size-2 shrink-0 rounded-full ${outcomeDot}`} />
+                      {job.state === "completed" ? uiText("Success") : present.label}
+                    </Badge>
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <span className="break-words">
+                          {job.source === "external"
+                            ? printJobArtifactLabel(job)
+                            : uiText("Rev {value1}", {
+                                value1: String(job.gcode_revision_number ?? "—"),
+                              })}
+                          {" · "}
+                          {job.printer_name}
+                        </span>
+                        {revision && onOpenRevision && (
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            onClick={() => onOpenRevision(revision.id)}
+                          >
+                            {uiText("modelDetail.viewRevision")}
+                          </Button>
+                        )}
+                      </div>
+                      <p className="text-sm text-muted-foreground tabular-nums">
+                        {timeAgo(job.finished_at ?? job.started_at ?? job.created_at)}
+                        {job.material_type ? ` · ${job.material_type}` : ""}
+                        {job.actual_duration_s != null
+                          ? ` · ${formatPlateEstimate("estimated_time_s", job.actual_duration_s)}`
+                          : ""}
+                        {job.filament_used_g != null
+                          ? ` · ${formatPlateEstimate("filament_weight_g", job.filament_used_g)}`
+                          : ""}
+                        {job.filament_cost != null && job.production_cost == null
+                          ? ` · ${formatCost(job.filament_cost)}`
+                          : ""}
+                      </p>
+                      {job.source === "external" && (
+                        <p className="text-xs uppercase tracking-wider text-muted-foreground">
+                          {knownUiText(job.artifact_evidence)}
+                        </p>
+                      )}
+                      <PrintJobReproducibility
+                        job={job}
+                        previewHref={`/models/${modelId}`}
+                        presentation="history"
+                      />
+                      {job.production_cost && <PrintJobCost cost={job.production_cost} />}
+                      {job.spool_name && (
+                        <p className="text-sm text-muted-foreground">
+                          {uiText("spool · {value1}", { value1: String(job.spool_name ?? "") })}
+                        </p>
+                      )}
+                      {job.error && <p className="break-words text-sm text-error">{job.error}</p>}
+                    </div>
+                  </article>
+                );
+              })
+            )}
           </div>
         )}
       </section>

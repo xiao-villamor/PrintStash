@@ -182,7 +182,7 @@ describe("Audit schedules", () => {
     expect(within(form).queryByLabelText("Frequency")).not.toBeInTheDocument();
     expect(within(form).queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
 
-    await user.click(within(form).getByRole("checkbox", { name: "Run automatically" }));
+    await user.click(within(form).getByRole("switch", { name: "Quick check Run automatically" }));
     expect(within(form).getByLabelText("Frequency")).toBeVisible();
     expect(within(form).getByLabelText("Day of week")).toHaveValue("6");
     expect(within(form).getByRole("option", { name: "Sunday" })).toBeInTheDocument();
@@ -201,7 +201,7 @@ describe("Audit schedules", () => {
       },
     });
     const form = await screen.findByRole("form", { name: "Quick check schedule" });
-    await user.click(within(form).getByRole("checkbox", { name: "Run automatically" }));
+    await user.click(within(form).getByRole("switch", { name: "Quick check Run automatically" }));
     await user.click(within(form).getByRole("button", { name: "Save changes" }));
     await waitFor(() =>
       expect(view.requestsWithMethod("PUT")[0]?.body).toContain('"enabled":true'),
@@ -220,7 +220,7 @@ describe("Audit schedules", () => {
       },
     });
     const form = await screen.findByRole("form", { name: "Quick check schedule" });
-    await user.click(within(form).getByRole("checkbox", { name: "Run automatically" }));
+    await user.click(within(form).getByRole("switch", { name: "Quick check Run automatically" }));
     await user.selectOptions(within(form).getByLabelText("Frequency"), "monthly");
     await user.click(within(form).getByText("Advanced settings"));
     await user.selectOptions(
@@ -310,7 +310,7 @@ describe("Audit schedules", () => {
       },
     });
     const form = await screen.findByRole("form", { name: "Quick check schedule" });
-    await user.click(within(form).getByRole("checkbox", { name: "Run automatically" }));
+    await user.click(within(form).getByRole("switch", { name: "Quick check Run automatically" }));
     await user.click(within(form).getByRole("button", { name: "Save changes" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Could not save audit schedule");
     expect(within(form).getByRole("button", { name: "Save changes" })).toBeEnabled();

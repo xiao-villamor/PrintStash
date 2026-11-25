@@ -1,5 +1,6 @@
 .printer-reference-surface {
   border: 1px solid var(--border);
+  border-radius: var(--radius-popover);
   background: var(--card);
   padding: 20px;
 }
@@ -70,6 +71,7 @@
 }
 .printer-reference-note {
   border: 1px solid var(--border);
+  border-radius: var(--radius);
   background: var(--accent);
   padding: 12px 14px;
   font-size: 12px;

@@ -1,5 +1,6 @@
 "use client";
 
+import { SETTINGS_SECTION_LABELS, settingsSection } from "@/lib/settings-sections";
 import { requestUpload } from "@/lib/upload-requests";
 import { useUiLocale } from "@/lib/i18n";
 
@@ -74,12 +75,10 @@ export function TopBar() {
   const searchParams = useSearchParams();
   const pane = useCollectionsPane();
   const attachBreadcrumbs = pane?.attachBreadcrumbs;
-  const titleKey =
-    pathname === "/settings" &&
-    searchParams.get("section") === "trash" &&
-    searchParams.get("view") !== "settings"
-      ? "settings.trash"
-      : pageTitle(pathname);
+  const section = pathname === "/settings" ? settingsSection(searchParams.get("section")) : null;
+  const titleKey = section ? SETTINGS_SECTION_LABELS[section] : pageTitle(pathname);
+  const settingsBreadcrumb =
+    section !== null && (section !== "trash" || searchParams.get("view") === "settings");
   const desktop = useMediaQuery("(min-width: 768px)");
   const mobileCollections = useMobileFilterDrawer();
   const router = useRouter();
@@ -268,6 +267,14 @@ export function TopBar() {
           <Link href={homeHref} className="shrink-0 text-muted-foreground hover:text-foreground">
             PrintStash
           </Link>
+          {settingsBreadcrumb && (
+            <>
+              <span aria-hidden className="text-muted-foreground">
+                /
+              </span>
+              <span className="shrink-0 text-muted-foreground">{t("settings.title")}</span>
+            </>
+          )}
           {recordRoute && (
             <>
               <span aria-hidden className="text-muted-foreground">

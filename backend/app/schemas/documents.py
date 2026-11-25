@@ -34,6 +34,7 @@ class DocumentCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     collection_id: Optional[int] = None
     multipart_model_id: Optional[int] = None
+    model_id: int | None = Field(default=None, gt=0)
     body: Optional[str] = Field(default=None, max_length=1_000_000)
 
 

@@ -9,43 +9,31 @@ import {
   type RefObject,
 } from "react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import {
-  PANE_MOVING_EVENT,
-  PANE_SETTLED_EVENT,
-  PaneMovingEvent,
-  type PaneMotion,
-} from "@/components/use-collections-pane-motion";
+import { PANE_SETTLED_EVENT } from "@/components/use-collections-pane-motion";
 import {
   libraryReadingSelector,
   type LibraryReadingRenderer,
 } from "@/features/library/reading-position";
 import { cn } from "@/lib/utils";
+import { durationToken } from "@/lib/css-time";
 import {
   clampInspectorWidth,
+  INSPECTOR_WILL_MOVE_EVENT,
+  InspectorWillMoveEvent,
   LIBRARY_INSPECTOR_MAX_WIDTH,
   LIBRARY_INSPECTOR_MIN_WIDTH,
 } from "./use-inspector-motion";
 import "./library-items.css";
 
 const NATIVE_RENDER_LIMIT = 120;
-/**
- * Narrowest card a column may hold. Columns share the row's measured width.
- * When the Collections pane starts moving, the grid switches at once to the
- * tracks of the width it will rest at, and every card travels from where it
- * was to its new cell in lockstep with the pane (see `PaneMotion`), so the
- * reflow is one continuous motion instead of a pop when the pane rests.
- */
-const CARD_WIDTH = 230;
+/** Narrowest card a column may hold. Columns share the row's measured width. */
+const CARD_WIDTH = 280;
 const COMPACT_CARD_WIDTH = 280;
 const SINGLE_COLUMN_MAX = 400;
 
 /** One width scale for collection and Model rows, independent of item count. */
 function preferredCardWidth(compact: boolean) {
   return compact ? COMPACT_CARD_WIDTH : CARD_WIDTH;
-}
-
-function fadeIn(progress: readonly number[], last: number): Keyframe[] {
-  return progress.map((value, index) => ({ offset: index / last, opacity: value }));
 }
 
 function fittingColumns(width: number, track: number, gap: number) {
@@ -59,9 +47,29 @@ function fittedTrack(width: number, preferredWidth: number, gap: number) {
     : Math.max(preferredWidth, Math.floor((width - gap * (columns - 1)) / columns));
 }
 
+interface PaneCardSnapshot {
+  closing: boolean;
+  columns: number;
+  track: number;
+  width: number;
+  scrollTop: number;
+  cards: Map<string, { bounds: DOMRect; row: number }>;
+  viewport: DOMRect;
+}
+
+function cardIsVisible(bounds: DOMRect, viewport: DOMRect, right = viewport.right) {
+  return (
+    bounds.width > 0 &&
+    bounds.height > 0 &&
+    bounds.left < right &&
+    bounds.right > viewport.left &&
+    bounds.top < viewport.bottom &&
+    bounds.bottom > viewport.top
+  );
+}
+
 export interface LibraryInspectorDock {
   maxWidth: number;
-  custom: boolean;
   width: number;
   paddingOffset: number;
 }
@@ -78,19 +86,18 @@ interface LibraryItemsProps<T> {
   estimateSize?: number;
   /** Keep the closed grid's tracks while the docked inspector consumes space. */
   freezeInspectorTracks?: boolean;
+  /** Keep collection strip tracks the same at both sidebar positions. */
+  keepCollectionCardWidth?: boolean;
   /** Only the Model results measure the dock's width. */
   onInspectorDockChange?: (dock: LibraryInspectorDock | null) => void;
-  inspectorDockLocked?: boolean;
   preferredInspectorWidth?: number | null;
-  appliedInspectorCustomWidth?: boolean;
   /** A production-build comparison can disable the renderer without changing cards or data. */
   virtualize?: boolean;
   className?: string;
-  /** Columns rendered beyond the measured ones, clipped at the row's edge (e.g.
-   *  a collection the moving pane is about to uncover). Tracks keep their width. */
-  extraColumns?: number;
   /** Narrowest card for this list when its cards are wider than model cards. */
   minCardWidth?: number;
+  /** Keep a collapsed collection strip to one row during the layout commit. */
+  singleRow?: boolean;
   /** Reports how many cards fit one row, e.g. to show a single row of collections. */
   onColumnsChange?: (columns: number) => void;
 }
@@ -109,12 +116,11 @@ export function LibraryItems<T>({
   virtualize = import.meta.env.VITE_LIBRARY_VIRTUALIZATION !== "off",
   className,
   freezeInspectorTracks = false,
+  keepCollectionCardWidth = false,
   onInspectorDockChange,
-  inspectorDockLocked = false,
   preferredInspectorWidth = null,
-  appliedInspectorCustomWidth = false,
-  extraColumns = 0,
   minCardWidth,
+  singleRow = false,
   onColumnsChange,
 }: LibraryItemsProps<T>) {
   "use no memo";
@@ -141,39 +147,43 @@ export function LibraryItems<T>({
   const focusRestore = useRef<{ key: string; index: number } | null>(null);
   const restore = useRef<{ key: string; offset: number } | null>(null);
   const readyGeometry = useRef<typeof geometry | null>(null);
-  // Card positions captured when the pane starts moving, consumed after the
-  // grid commits its resting tracks. Flights are the running card motions.
-  const flip = useRef<{
-    before: Map<string, DOMRect>;
-    motion: PaneMotion;
-    /** The columns and cell pitch the captured positions were laid out in. */
+  const paneCards = useRef<PaneCardSnapshot | null>(null);
+  const cardAnimations = useRef<Animation[]>([]);
+  const snapshotExpiry = useRef<number | null>(null);
+  const paintedGrid = useRef<{
     columns: number;
-    pitch: number;
+    track: number;
+    width: number;
     keys: readonly string[];
-  } | null>(null);
-  const painted = useRef<{ columns: number; pitch: number; keys: readonly string[] }>({
+  }>({
     columns: 1,
-    pitch: 0,
+    track: 0,
+    width: 0,
     keys: [],
   });
-  const flights = useRef<Animation[]>([]);
   const gap = layout === "list" ? 0 : compact ? 8 : 16;
   const preferredWidth = minCardWidth ?? preferredCardWidth(compact);
   const track = geometry.track || preferredWidth;
+  const columns = layout === "list" ? 1 : geometry.columns;
+  // Apply the strip's limit using the same geometry as its grid tracks. The
+  // parent updates the hidden count separately and may still have the old limit.
+  const displayedItems = useMemo(
+    () => (singleRow ? items.slice(0, columns) : items),
+    [columns, items, singleRow],
+  );
   // Production-card measurements favor native rows for short loaded snapshots.
   // Larger snapshots bound their DOM while retaining the same row/card identities.
   const virtual =
-    virtualize && items.length > NATIVE_RENDER_LIMIT && "ResizeObserver" in globalThis;
-  const columns = layout === "list" ? 1 : geometry.columns + extraColumns;
-  useEffect(() => {
+    virtualize && displayedItems.length > NATIVE_RENDER_LIMIT && "ResizeObserver" in globalThis;
+  useLayoutEffect(() => {
     if (geometry.width > 0) onColumnsChange?.(layout === "list" ? 1 : geometry.columns);
   }, [layout, geometry.columns, geometry.width, onColumnsChange]);
-  const keys = useMemo(() => items.map(itemKey), [items, itemKey]);
+  const keys = useMemo(() => displayedItems.map(itemKey), [displayedItems, itemKey]);
   const pinnedIndex = pinned === null ? -1 : keys.indexOf(pinned);
   const pinnedRow = pinnedIndex < 0 ? null : Math.floor(pinnedIndex / columns);
   const revealedIndex = revealed === null ? -1 : keys.indexOf(revealed);
   const revealedRow = revealedIndex < 0 ? null : Math.floor(revealedIndex / columns);
-  const rows = Math.ceil(items.length / columns);
+  const rows = Math.ceil(displayedItems.length / columns);
   // TanStack exposes mutable measurements; this component opts out of React Compiler above.
   // oxlint-disable-next-line react/incompatible-library -- Virtualizer is consumed only within this uncompiled renderer.
   const virtualizer = useVirtualizer({
@@ -206,13 +216,11 @@ export function LibraryItems<T>({
     const node = root.current;
     const scroll = scrollRef.current;
     if (!node || !scroll) return;
-    const measure = (restingWidth?: number) => {
-      const measuredWidth = restingWidth ?? node.clientWidth;
-      // Hidden surfaces have no layout yet; observe again when they become visible.
-      if (node.clientWidth === 0) return;
-      // While the Collections pane moves, the grid already holds the tracks of
-      // its resting width (set when the motion started); never refit mid-motion.
-      if (restingWidth === undefined && "paneMoving" in document.documentElement.dataset) return;
+    const measure = () => {
+      const measuredWidth = node.clientWidth;
+      // Collections carries the existing grid with the workspace. Keep its
+      // tracks pinned until the shell finishes moving.
+      if (measuredWidth === 0 || "paneMoving" in document.documentElement.dataset) return;
       // The scroll surface docks the inspector with right padding. Recover the
       // closed width, including when the Collections pane targets a new width.
       const style =
@@ -223,6 +231,9 @@ export function LibraryItems<T>({
       // A scrollbar can appear as the cards rewrap. The outer frame tells us
       // whether the closed layout itself changed or just the open grid did.
       const scrollbarWidth = scroll.offsetWidth - scroll.clientWidth;
+      const collectionsPaneWidth = keepCollectionCardWidth
+        ? (document.querySelector<HTMLElement>("[data-collections-pane]")?.offsetWidth ?? 0)
+        : 0;
       const closedFrameWidth = measuredWidth + dockWidth + scrollbarWidth;
       const inset = style?.getPropertyValue("--library-inspector-inset");
       const gutter = style?.getPropertyValue("--library-inspector-gutter");
@@ -249,7 +260,7 @@ export function LibraryItems<T>({
             ? 0
             : frozen
               ? previous.closedTrack
-              : fittedTrack(measuredWidth + dockWidth, preferredWidth, gap);
+              : fittedTrack(measuredWidth + dockWidth + collectionsPaneWidth, preferredWidth, gap);
         let width = measuredWidth;
         let inspectorMaxWidth = 0;
         let inspectorWidth = 0;
@@ -276,21 +287,24 @@ export function LibraryItems<T>({
             inspectorWidth = baseWidth;
             inspectorPaddingOffset = 12;
           }
-          // Size the grid and the dock in the same layout pass. During the
-          // spring, the measured row already reflects the locked padding.
+          // Use the fitted dock and grid width from the same layout pass.
           const fitted = inspectorCustomWidth || (layout === "grid" && available >= closedTrack);
-          if (docked && !inspectorDockLocked && fitted)
-            width = closedFrameWidth - reservedSpace - inspectorWidth;
+          if (docked && fitted) width = closedFrameWidth - reservedSpace - inspectorWidth;
         }
         const nextColumns =
-          layout === "list" ? 1 : fittingColumns(width, docked ? closedTrack : preferredWidth, gap);
-        const customTracks =
-          layout === "grid" &&
-          docked &&
-          (inspectorDockLocked ? appliedInspectorCustomWidth : inspectorCustomWidth);
+          layout === "list"
+            ? 1
+            : fittingColumns(
+                width,
+                docked || keepCollectionCardWidth ? closedTrack : preferredWidth,
+                gap,
+              );
+        const customTracks = layout === "grid" && docked && inspectorCustomWidth;
         const nextTrack = customTracks
           ? (width - (nextColumns - 1) * gap) / nextColumns
-          : closedTrack;
+          : keepCollectionCardWidth
+            ? Math.min(closedTrack, width)
+            : closedTrack;
         if (
           previous.columns === nextColumns &&
           previous.track === nextTrack &&
@@ -304,8 +318,6 @@ export function LibraryItems<T>({
           previous.gap === gap &&
           previous.docked === docked &&
           Math.abs(previous.margin - margin) < 1 &&
-          // Tracks are derived from the measured width, which is never
-          // measured while the pane moves (see above).
           previous.width === width &&
           previous.height === scroll.clientHeight
         )
@@ -331,15 +343,17 @@ export function LibraryItems<T>({
               focused!,
             ),
           };
-        const bounds = scroll.getBoundingClientRect();
-        const anchor = Array.from(node.querySelectorAll<HTMLElement>("[data-library-key]")).find(
-          (candidate) => candidate.getBoundingClientRect().bottom > bounds.top,
-        );
-        if (resized && !restore.current && anchor?.dataset.libraryKey)
-          restore.current = {
-            key: anchor.dataset.libraryKey,
-            offset: anchor.getBoundingClientRect().top - bounds.top,
-          };
+        // Several collection grids can share this scroller. Only the grid at
+        // the reading edge can restore an anchor, and the top stays at zero.
+        if (resized && !restore.current && scroll.scrollTop > 0) {
+          const top = scroll.getBoundingClientRect().top;
+          for (const card of node.querySelectorAll<HTMLElement>("[data-library-key]")) {
+            const bounds = card.getBoundingClientRect();
+            if (bounds.top > top || bounds.bottom <= top) continue;
+            restore.current = { key: card.dataset.libraryKey!, offset: bounds.top - top };
+            break;
+          }
+        }
         return {
           columns: nextColumns,
           margin,
@@ -367,23 +381,52 @@ export function LibraryItems<T>({
     });
     observer.observe(node);
     observer.observe(scroll);
-    const settled = () => measure();
-    const moving = (event: Event) => {
-      if (!(event instanceof PaneMovingEvent) || node.clientWidth === 0) return;
-      // Visual positions, including any flight a reversed pane interrupts.
-      const before = new Map<string, DOMRect>();
-      for (const card of node.querySelectorAll<HTMLElement>("[data-library-key]"))
-        before.set(card.dataset.libraryKey!, card.getBoundingClientRect());
-      for (const flight of flights.current) flight.cancel();
-      flights.current = [];
-      flip.current = { before, motion: event.motion, ...painted.current };
-      measure(Math.max(1, Math.round(node.clientWidth + event.motion.contentDelta)));
+    const movingInspector = (event: Event) => {
+      if (
+        !(event instanceof InspectorWillMoveEvent) ||
+        "paneMoving" in document.documentElement.dataset
+      )
+        return;
+      if (layout === "grid" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        const viewport = scroll.getBoundingClientRect();
+        const closing = event.direction === "closing";
+        const drawer = closing
+          ? document.querySelector("#model-drawer:not([hidden])")?.getBoundingClientRect()
+          : undefined;
+        const right = drawer?.width ? Math.min(viewport.right, drawer.left) : viewport.right;
+        const { columns, track, width, keys } = paintedGrid.current;
+        const rows = new Map(keys.map((key, index) => [key, Math.floor(index / columns)]));
+        const cards: PaneCardSnapshot["cards"] = new Map();
+        for (const card of node.querySelectorAll<HTMLElement>("[data-library-key]")) {
+          const key = card.dataset.libraryKey!;
+          const row = rows.get(key);
+          const bounds = card.getBoundingClientRect();
+          if (row !== undefined && cardIsVisible(bounds, viewport, right))
+            cards.set(key, { bounds, row });
+        }
+        paneCards.current = {
+          closing,
+          columns,
+          track,
+          width,
+          cards,
+          viewport,
+          scrollTop: scroll.scrollTop,
+        };
+        if (snapshotExpiry.current !== null) cancelAnimationFrame(snapshotExpiry.current);
+        // The projection is committed before paint. A dock that leaves the
+        // grid unchanged must not carry this snapshot into a later resize.
+        snapshotExpiry.current = requestAnimationFrame(() => {
+          snapshotExpiry.current = null;
+          paneCards.current = null;
+        });
+      }
     };
-    window.addEventListener(PANE_SETTLED_EVENT, settled);
-    window.addEventListener(PANE_MOVING_EVENT, moving);
+    window.addEventListener(PANE_SETTLED_EVENT, measure);
+    window.addEventListener(INSPECTOR_WILL_MOVE_EVENT, movingInspector);
     return () => {
-      window.removeEventListener(PANE_SETTLED_EVENT, settled);
-      window.removeEventListener(PANE_MOVING_EVENT, moving);
+      window.removeEventListener(PANE_SETTLED_EVENT, measure);
+      window.removeEventListener(INSPECTOR_WILL_MOVE_EVENT, movingInspector);
       observer.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
     };
@@ -393,32 +436,23 @@ export function LibraryItems<T>({
     gap,
     preferredWidth,
     freezeInspectorTracks,
+    keepCollectionCardWidth,
     onInspectorDockChange,
-    inspectorDockLocked,
     preferredInspectorWidth,
-    appliedInspectorCustomWidth,
   ]);
 
-  const { inspectorMaxWidth, inspectorWidth, inspectorCustomWidth, inspectorPaddingOffset } =
-    geometry;
+  const { inspectorMaxWidth, inspectorWidth, inspectorPaddingOffset } = geometry;
   useLayoutEffect(() => {
     onInspectorDockChange?.(
       inspectorWidth
         ? {
             width: inspectorWidth,
             maxWidth: inspectorMaxWidth,
-            custom: inspectorCustomWidth,
             paddingOffset: inspectorPaddingOffset,
           }
         : null,
     );
-  }, [
-    inspectorMaxWidth,
-    inspectorWidth,
-    inspectorCustomWidth,
-    inspectorPaddingOffset,
-    onInspectorDockChange,
-  ]);
+  }, [inspectorMaxWidth, inspectorWidth, inspectorPaddingOffset, onInspectorDockChange]);
 
   useLayoutEffect(() => {
     return () => onInspectorDockChange?.(null);
@@ -441,108 +475,119 @@ export function LibraryItems<T>({
       virtualizer.measureElement(row);
   }, [columns, track, compact, layout, virtual, virtualizer]);
 
-  // The layout as painted: a pane motion captures it as the cards' origin,
-  // and the reflow below reads it after the resting tracks commit.
   useLayoutEffect(() => {
-    painted.current = { columns, pitch: track + gap, keys };
-  }, [columns, track, gap, keys]);
+    paintedGrid.current = { columns, track, width: geometry.width, keys };
+  }, [columns, track, geometry.width, keys]);
 
-  // Pane-driven reflow: keep the reading anchor, then fly every card from its
-  // captured position to its new cell along the pane's own progress curve.
   useLayoutEffect(() => {
-    const pending = flip.current;
-    flip.current = null;
+    const before = paneCards.current;
     const node = root.current;
     const scroll = scrollRef.current;
-    if (!pending || !node) return;
-    const saved = restore.current;
-    restore.current = null;
-    if (saved && scroll) {
-      const anchor = node.querySelector<HTMLElement>(
-        `[data-library-key="${CSS.escape(saved.key)}"]`,
-      );
-      if (anchor)
-        scroll.scrollTop +=
-          anchor.getBoundingClientRect().top - scroll.getBoundingClientRect().top - saved.offset;
-    }
-    const focused = focusRestore.current;
-    focusRestore.current = null;
-    if (focused)
-      node
-        .querySelector<HTMLElement>(`[data-library-key="${CSS.escape(focused.key)}"]`)
-        ?.querySelectorAll<HTMLElement>("button,a,input,[tabindex]")
-        [focused.index]?.focus({ preventScroll: true });
-    const { progress, durationMs } = pending.motion;
-    const { columns, keys } = painted.current;
-    const indexes = new Map(keys.map((key, index) => [key, index]));
-    const last = progress.length - 1;
-    if (last < 1 || durationMs <= 0) return;
-    for (const card of node.querySelectorAll<HTMLElement>("[data-library-key]")) {
-      const after = card.getBoundingClientRect();
+    if (!before || !node || !scroll) return;
+    if (before.columns === columns && before.track === track && before.width === geometry.width)
+      return;
+    paneCards.current = null;
+    for (const animation of cardAnimations.current) animation.cancel();
+    cardAnimations.current = [];
+
+    const viewport = scroll.getBoundingClientRect();
+    const scrollTop = scroll.scrollTop;
+    const visible = [...node.querySelectorAll<HTMLElement>("[data-library-key]")]
+      .map((card) => ({ card, bounds: card.getBoundingClientRect() }))
+      .filter(({ bounds }) => cardIsVisible(bounds, viewport));
+    if (visible.length === 0) return;
+    const duration = durationToken(node, "--duration-fast") * 1000;
+    const easing = getComputedStyle(node).getPropertyValue("--ease-dock").trim();
+    const timing = { duration, easing };
+    const arrival = [
+      { opacity: 0.4, transform: `translateY(${gap}px)` },
+      { opacity: 1, transform: "none" },
+    ];
+    const fade = [{ opacity: 0.9 }, { opacity: 1 }];
+    const rows = new Map(keys.map((key, index) => [key, Math.floor(index / columns)]));
+    for (const { card, bounds } of visible) {
       const key = card.dataset.libraryKey!;
-      const before = pending.before.get(key);
-      const index = indexes.get(key);
-      let keyframes: Keyframe[];
-      if (before && index !== undefined) {
-        // A card that wraps one row would cross the grid diagonally. It
-        // instead rides its new row like a conveyor: it starts where it would
-        // sit if its old row continued, just past the edge, right behind
-        // the neighbour it follows, so no cell empties and nothing crosses.
-        const rows = Math.floor(index / pending.columns) - Math.floor(index / Math.max(1, columns));
-        const wraps = rows !== 0;
-        if (Math.abs(rows) > 1) {
-          keyframes = fadeIn(progress, last);
-        } else {
-          const dx = before.left - after.left + rows * pending.columns * pending.pitch;
-          const dy = wraps ? 0 : before.top - after.top;
-          if (!wraps && Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
-          // Transform only: it runs on the compositor. Animating width would
-          // relayout every card on every frame of the pane motion.
-          keyframes = progress.map((value, index) => {
-            const frame: Keyframe = {
-              offset: index / last,
-              transform: `translate(${dx * (1 - value)}px, ${dy * (1 - value)}px)`,
-            };
-            // Entering past the grid edge, it becomes visible as it arrives.
-            if (wraps) frame.opacity = Math.min(1, value * 2);
-            return frame;
-          });
-        }
-      } else {
-        // Newly rendered cards (e.g. a row the reflow brings into view) fade in.
-        keyframes = fadeIn(progress, last);
+      const origin = before.cards.get(key);
+      if (!origin) {
+        // A close can reveal cards even when only the track width changes.
+        if (before.closing || before.columns !== columns)
+          cardAnimations.current.push(card.animate(before.closing ? arrival : fade, timing));
+        continue;
       }
-      flights.current.push(card.animate(keyframes, { duration: durationMs, easing: "linear" }));
+      const x = origin.bounds.left - before.viewport.left - (bounds.left - viewport.left);
+      const y = origin.bounds.top + before.scrollTop - (bounds.top + scrollTop);
+      const changedRow = origin.row !== rows.get(key);
+      // A long move enters from the gap nearest its origin. That gives each
+      // reflowing row movement without passing over other cards.
+      if (changedRow || Math.abs(x) > before.track + gap || Math.abs(y) > gap) {
+        const offset =
+          changedRow || Math.abs(y) > gap
+            ? `translateY(${Math.sign(y) * gap}px)`
+            : `translateX(${Math.sign(x) * gap}px)`;
+        cardAnimations.current.push(
+          card.animate(
+            before.closing
+              ? [
+                  { opacity: 0.65, transform: offset },
+                  { opacity: 1, transform: "none" },
+                ]
+              : fade,
+            timing,
+          ),
+        );
+        continue;
+      }
+      const scaleX = origin.bounds.width / bounds.width;
+      const scaleY = origin.bounds.height / bounds.height;
+      if (
+        Math.abs(x) < 0.5 &&
+        Math.abs(y) < 0.5 &&
+        Math.abs(scaleX - 1) < 0.002 &&
+        Math.abs(scaleY - 1) < 0.002
+      )
+        continue;
+      cardAnimations.current.push(
+        card.animate(
+          [
+            {
+              transformOrigin: "top left",
+              transform: `translate(${x}px, ${y}px) scale(${scaleX}, ${scaleY})`,
+            },
+            { transformOrigin: "top left", transform: "none" },
+          ],
+          timing,
+        ),
+      );
     }
-  }, [geometry, scrollRef]);
+  }, [geometry.width, columns, track, gap, keys, scrollRef]);
+
   useEffect(
     () => () => {
-      for (const flight of flights.current) flight.cancel();
+      if (snapshotExpiry.current !== null) cancelAnimationFrame(snapshotExpiry.current);
+      for (const animation of cardAnimations.current) animation.cancel();
     },
     [],
   );
 
   useLayoutEffect(() => {
     const saved = restore.current;
-    if (!saved) return;
-    const index = keys.indexOf(saved.key);
-    if (index < 0) {
-      restore.current = null;
-      return;
-    }
-    if (virtual) {
+    if (!saved && !focusRestore.current) return;
+    const index = saved ? keys.indexOf(saved.key) : -1;
+    if (virtual && saved && index >= 0) {
       setRevealed(saved.key);
       virtualizer.scrollToIndex(Math.floor(index / columns), { align: "start" });
     }
     const frame = requestAnimationFrame(() => {
-      const node = root.current?.querySelector<HTMLElement>(
-        `[data-library-key="${CSS.escape(saved.key)}"]`,
-      );
-      const scroll = scrollRef.current;
-      virtualizer.cancelScroll();
-      if (node && scroll)
-        scroll.scrollTop +=
-          node.getBoundingClientRect().top - scroll.getBoundingClientRect().top - saved.offset;
+      if (saved) {
+        const node = root.current?.querySelector<HTMLElement>(
+          `[data-library-key="${CSS.escape(saved.key)}"]`,
+        );
+        const scroll = scrollRef.current;
+        virtualizer.cancelScroll();
+        if (node && scroll)
+          scroll.scrollTop +=
+            node.getBoundingClientRect().top - scroll.getBoundingClientRect().top - saved.offset;
+      }
       const focused = focusRestore.current;
       if (focused) {
         root.current
@@ -605,12 +650,10 @@ export function LibraryItems<T>({
     };
   }, [readingRenderers, readingId, keys, columns, virtual, virtualizer, geometry]);
 
-  // A card's content depends on its item, not on the grid: a column change
-  // (e.g. the pane starting to move) reuses the same elements, so React skips
-  // re-rendering every card and the motion's first frame is not delayed.
+  // A card's content depends on its item. Column changes reuse the same elements.
   const contents = useMemo(
-    () => items.map((item, index) => renderItem(item, index)),
-    [items, renderItem],
+    () => displayedItems.map((item, index) => renderItem(item, index)),
+    [displayedItems, renderItem],
   );
   const child = (item: T, index: number) => (
     <div
@@ -697,9 +740,10 @@ export function LibraryItems<T>({
             marginBottom: virtual || row.index === rows - 1 ? undefined : gap,
           }}
         >
-          {(virtual ? items.slice(row.index * columns, (row.index + 1) * columns) : items).map(
-            (item, index) => child(item, (virtual ? row.index * columns : 0) + index),
-          )}
+          {(virtual
+            ? displayedItems.slice(row.index * columns, (row.index + 1) * columns)
+            : displayedItems
+          ).map((item, index) => child(item, (virtual ? row.index * columns : 0) + index))}
         </div>
       ))}
     </div>

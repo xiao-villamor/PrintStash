@@ -40,7 +40,9 @@ export function isSlicedRevision(file: FileRead) {
   return file.original_filename.toLowerCase().endsWith(".gcode.3mf");
 }
 
-export function revisionLabel(revision: FileRead) {
+export function revisionLabel(
+  revision: Pick<FileRead, "revision_label" | "gcode_revision_number" | "version">,
+) {
   return (
     revision.revision_label ||
     `${uiText("Revision")} ${revision.gcode_revision_number ?? revision.version}`

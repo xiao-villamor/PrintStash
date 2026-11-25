@@ -59,7 +59,7 @@ test.describe("farm routing canvas", () => {
       const queued = page.waitForResponse(
         (r) => r.url().endsWith("/fleet/queue") && r.request().method() === "POST",
       );
-      await composer.getByRole("button", { name: "Save job" }).click();
+      await composer.getByRole("button", { name: "Add to queue" }).click();
       const response = await queued;
       expect(response.status()).toBe(201);
       const saved: PrintJobRead = await response.json();

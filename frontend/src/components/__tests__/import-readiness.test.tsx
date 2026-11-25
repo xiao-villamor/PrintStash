@@ -14,7 +14,7 @@ describe("ImportReadiness", () => {
         checkedAt={Date.parse("2026-01-01T00:00:00Z")}
       />,
     );
-    expect(screen.getByText("Not checked")).toBeVisible();
+    expect(screen.getAllByText("Not checked")).toHaveLength(2);
     expect(screen.getByText("Checked when reserving an upload")).toBeVisible();
     expect(screen.getByText("Responded at the last check")).toBeVisible();
     expect(document.querySelector("time")).toHaveAttribute("datetime", "2026-01-01T00:00:00.000Z");

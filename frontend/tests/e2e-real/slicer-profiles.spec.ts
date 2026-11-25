@@ -70,7 +70,7 @@ for (const width of [1440, 390]) {
         .click();
       await expect(filamentDetails.getByRole("article")).toHaveCount(2);
       const profileRow = page.getByRole("region", {
-        name: `Profile: ${filament!.name}`,
+        name: `Preset: ${filament!.name}`,
         exact: true,
       });
       await expect(profileRow.getByRole("textbox")).toHaveCount(0);
@@ -93,7 +93,7 @@ for (const width of [1440, 390]) {
       }
       await page.screenshot({ path: testInfo.outputPath("profile-overview.png"), fullPage: true });
       await profileRow
-        .getByRole("button", { name: `Edit profile ${filament!.name}`, exact: true })
+        .getByRole("button", { name: `Edit preset ${filament!.name}`, exact: true })
         .click();
       await expect(
         profileRow.getByRole("textbox", { name: `Filament notes ${filament!.id}`, exact: true }),

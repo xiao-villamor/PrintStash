@@ -411,3 +411,46 @@ class TestConditionalPrinterEditing:
         accepted = client.patch(url, headers=headers, json={"notes": "After rollback"})
         assert accepted.status_code == 200
         assert accepted.json()["notes"] == "After rollback"
+
+
+EXPENSES = {
+    "acquisition_cost": 500,
+    "lifetime_hours": 1000,
+    "lifetime_maintenance": 100,
+    "power_watts": 200,
+    "electricity_per_kwh": 0.25,
+    "extra_per_hour": 1,
+}
+
+
+class TestPrinterExpenses:
+    def test_persists_printer_expenses_without_changing_slicer_settings(
+        self, client, auth_headers
+    ):
+        root = "/api/v1/printer-profiles"
+        created = client.post(
+            root,
+            headers=auth_headers,
+            json={"name": "Voron", "nozzle_diameter_mm": 0.4},
+        ).json()
+        assert created["expenses"] is None
+        edited = client.patch(
+            f"{root}/{created['id']}", headers=auth_headers, json={"expenses": EXPENSES}
+        )
+        assert edited.status_code == 200, edited.text
+        assert edited.json()["expenses"] == EXPENSES
+        assert (
+            client.get(root, headers=auth_headers).json()[0]["nozzle_diameter_mm"]
+            == 0.4
+        )
+
+    @pytest.mark.parametrize("expenses", [None, EXPENSES])
+    def test_creates_printer_presets_with_optional_expenses(
+        self, client, auth_headers, expenses
+    ):
+        root = "/api/v1/printer-profiles"
+        response = client.post(
+            root, headers=auth_headers, json={"name": "Voron", "expenses": expenses}
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["expenses"] == expenses

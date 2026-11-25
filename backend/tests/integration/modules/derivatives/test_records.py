@@ -33,8 +33,9 @@ from app.modules.derivatives.kinds import (
     THREE_MF_VIEWER_STL_RECIPE,
     group,
     recipes_for,
+    subject_key,
 )
-from app.modules.derivatives.source import DerivativeSource, subject_key
+from app.modules.derivatives.source import DerivativeSource
 from tests.factories import build_derivative
 
 

@@ -22,7 +22,7 @@ describe("profile fact origins", () => {
       />,
     );
     expect(screen.getByText("Provider estimate")).toBeVisible();
-    expect(screen.getByText("505 min")).toBeVisible();
+    expect(screen.getByText("8h 24m 37s")).toBeVisible();
     expect(screen.getByText("433 g")).toBeVisible();
     expect(
       screen.getByText("Imported profile; not a measured or tested print result."),

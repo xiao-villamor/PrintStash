@@ -1,71 +1,41 @@
-.settings-grouped {
+/* ── Settings language ─────────────────────────────────────────────────────
+   Every section is a stack of groups. A group is a heading with its actions
+   above a light bordered box that holds only rows (Linear and Cursor settings),
+   so the box carries no header rule and no icon tile. */
+
+.settings-grouped,
+.settings-inline-groups,
+.settings-imports,
+.settings-maintenance,
+.settings-notifications,
+.settings-storage-pane:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settings-card-box {
   border: 1px solid var(--border);
+  border-radius: var(--radius-popover);
   background: var(--card);
+  padding: 4px 20px;
 }
 
-.settings-imports {
-  border: 1px solid var(--border);
-  background: var(--card);
+.settings-card-box:has(> [hidden]:only-child) {
+  display: none;
 }
 
-.settings-maintenance {
-  border: 1px solid var(--border);
-  background: var(--card);
+.settings-card-box[data-tone="danger"] {
+  border-color: color-mix(in oklab, var(--destructive) 45%, var(--border));
 }
 
-.settings-notifications {
-  border: 1px solid var(--border);
-  background: var(--card);
-}
-
-.settings-maintenance > .bg-card {
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-}
-
-.settings-maintenance > .bg-card + .bg-card {
+.settings-card-foot {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 0;
   border-top: 1px solid var(--border);
-}
-
-.settings-imports > .bg-card,
-.settings-imports fieldset > section {
-  border-right: 0;
-  border-left: 0;
-  border-radius: 0;
-}
-
-.settings-imports > .bg-card {
-  border-top: 0;
-}
-
-.settings-imports fieldset {
-  margin-top: 0;
-}
-
-.settings-grouped > .settings-card,
-.settings-inline-groups > .settings-card {
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-}
-
-.settings-grouped > .settings-card + .settings-card,
-.settings-inline-groups > .settings-card + .settings-card {
-  border-top: 1px solid var(--border);
-}
-
-.settings-grouped > .settings-card > .settings-card-head,
-.settings-inline-groups > .settings-card > .settings-card-head {
-  border: 0;
-  padding-bottom: 12px;
-}
-
-.settings-grouped > .settings-card > :not(.settings-card-head),
-.settings-inline-groups > .settings-card > :not(.settings-card-head) {
-  margin-left: 64px;
-  padding-top: 0;
-  padding-left: 0;
 }
 
 .settings-grouped > [role="alert"],
@@ -73,26 +43,12 @@
   padding: 16px 20px;
 }
 
-.settings-card-foot {
-  display: flex;
-  justify-content: flex-end;
-  padding: 4px 20px 16px;
-}
-
-.settings-grouped > .settings-card > .settings-card-foot,
-.settings-inline-groups > .settings-card > .settings-card-foot {
-  padding-left: 0;
-}
-
 .settings-preference-fields {
-  padding-right: 20px;
-  padding-bottom: 12px;
+  min-width: 0;
 }
 
 .settings-safety-rows {
-  padding-right: 20px;
-  padding-bottom: 4px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .settings-safety-rows > div {
@@ -113,18 +69,17 @@
 
 .settings-safety-rows dd {
   text-align: right;
-  font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
 
 .settings-preference-row {
   display: grid;
-  grid-template-columns: 240px minmax(0, 440px);
+  grid-template-columns: minmax(0, 1fr) minmax(0, min(50%, 22rem));
   gap: 24px;
   align-items: center;
   padding: 14px 0;
   border-bottom: 1px solid var(--border);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
 }
 
@@ -132,21 +87,36 @@
   border-bottom: 0;
 }
 
-.settings-access-fields .settings-access-submit {
+.settings-access-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 9rem auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.settings-access-fields .settings-preference-row {
   display: flex;
-  width: fit-content;
-  margin: 12px 0 0 auto;
-}
-
-.settings-storage-pane > .bg-card,
-.settings-storage-pane > [data-slot="card"] {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 0;
   border: 0;
-  border-radius: 0;
-  box-shadow: none;
 }
 
-.settings-storage-pane > * + * {
-  border-top: 1px solid var(--border);
+.settings-access-fields .settings-preference-row > :first-child {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.settings-access-fields .settings-access-submit {
+  display: inline-flex;
+  width: fit-content;
+}
+
+@container (max-width: 38rem) {
+  .settings-access-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .settings-storage-summary > div {
@@ -163,7 +133,7 @@
 }
 
 .settings-storage-summary dt {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
 }
 
@@ -175,57 +145,22 @@
   font-size: 12px;
 }
 
-.settings-storage-migration > .settings-card-head {
-  border-bottom: 0;
-}
-
-@media (max-width: 767px) {
-  .settings-grouped > .settings-card > :not(.settings-card-head),
-  .settings-inline-groups > .settings-card > :not(.settings-card-head) {
-    margin-left: 16px;
-    padding-right: 16px;
-  }
-
-  .settings-preference-row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
-  }
-}
-
-/* ── Settings language (Zed-like) ──────────────────────────────────────────
-   One layer for every section: compact square controls, label + hint on the
-   left with the control on the right, text-only statuses and text-only
-   buttons. Section components keep their markup; this layer owns the look. */
-
-.settings-main select,
-.settings-main
+:where(.settings-main, .settings-dialog) select,
+:where(.settings-main, .settings-dialog)
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]) {
-  height: 34px;
-  min-height: 34px;
-  padding: 7px 10px;
-  border-radius: 0;
-  font-size: 13px;
+  height: 36px;
+  min-height: 36px;
+  padding: 7px 12px;
+  border-radius: var(--radius);
+  font-size: 14px;
   font-weight: 400;
-  line-height: 18px;
+  line-height: 20px;
 }
 
-.settings-main select {
-  padding-right: 28px;
-}
-
-.settings-main textarea {
-  border-radius: 0;
-  font-size: 13px;
+:where(.settings-main, .settings-dialog) textarea {
+  border-radius: var(--radius);
+  font-size: 14px;
   font-weight: 400;
-}
-
-/* Text buttons carry no leading icon; spinners and icon-only buttons stay. */
-.settings-main
-  :is(button, a, label)[class*="inline-flex"]:not([aria-label]):not([title]):not(
-    :has(.sr-only)
-  ):not([class*="w-8"]):not([class*="w-9"]):not([class*="w-10"])
-  > svg:not(.animate-spin) {
-  display: none;
 }
 
 .settings-main [role="switch"] {
@@ -241,15 +176,15 @@
   background: var(--card);
 }
 
-/* Statuses are aligned mono text, never pills. */
+/* Badges are neutral pills; only a failure is red. */
 .settings-main [data-slot="badge"] {
-  height: auto;
-  padding: 0;
+  height: 20px;
+  padding: 0 8px;
   border: 0;
-  border-radius: 0;
-  background: none;
-  color: var(--muted-foreground);
-  font: 500 12px/1.4 var(--font-mono);
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
+  color: color-mix(in oklab, var(--foreground) 82%, transparent);
+  font: 500 12px/1 var(--font-sans);
   gap: 6px;
 }
 
@@ -266,41 +201,67 @@
   background: var(--warning);
 }
 
+/* Where a setting applies: this browser or the whole Vault. */
+.settings-scope {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
 .settings-status {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   white-space: nowrap;
-  color: var(--muted-foreground);
-  font: 500 12px/1.4 var(--font-mono);
+  color: var(--foreground);
+  font: 400 14px/1.4 var(--font-sans);
 }
 
 .settings-status[data-tone="danger"] {
   color: var(--destructive);
 }
 
-.settings-status[data-tone="warning"]::before {
+.settings-status::before {
   content: "";
   width: 6px;
   height: 6px;
   border-radius: 50%;
+  flex: none;
+  background: var(--muted-foreground);
+}
+
+.settings-status[data-tone="warning"]::before {
   background: var(--warning);
 }
 
-/* Group heads: 32px icon tile, title, description wrapped at reading width. */
+.settings-status[data-tone="danger"]::before {
+  background: var(--destructive);
+}
+
+/* Group heads: title and description at reading width above the box. */
 .settings-main .settings-card-head p {
   max-width: 72ch;
   line-height: 1.5;
 }
 
-.settings-main .settings-preview-look .settings-card-head p {
-  max-width: none;
+/* Let long choice groups take more room without squeezing out the label. */
+.settings-preference-row:has(> .settings-segmented) {
+  grid-template-columns: minmax(0, 1fr) fit-content(70%);
 }
 
-/* Rows: label and hint on the left, control on the right. */
-.settings-preference-row {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 320px);
-  align-items: center;
+.settings-preference-row:has(> .settings-row-switch) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.settings-preference-row.settings-preference-row--stack {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
 }
 
 .settings-preference-row > :first-child {
@@ -310,7 +271,7 @@
 }
 
 .settings-preference-row > :not(:first-child) {
-  justify-self: stretch;
+  min-width: 0;
 }
 
 .settings-preference-row > .settings-row-switch {
@@ -345,7 +306,7 @@
   align-items: center;
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .settings-readonly-row:last-child {
@@ -375,11 +336,13 @@
 
 .settings-list-row > :first-child {
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.settings-list-row > :last-child {
+.settings-list-row > :last-child:not(:first-child) {
   display: flex;
   flex-shrink: 0;
+  max-width: 60%;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
@@ -387,7 +350,7 @@
 }
 
 .settings-list-title {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--foreground);
 }
@@ -406,13 +369,14 @@
   color: var(--muted-foreground);
 }
 
-@media (max-width: 767px) {
+@container (max-width: 32rem) {
   .settings-list-row {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .settings-list-row > :last-child {
+  .settings-list-row > :last-child:not(:first-child) {
+    max-width: 100%;
     justify-content: flex-start;
   }
 
@@ -427,7 +391,7 @@
 
 .settings-preference-row > :first-child,
 .settings-preference-row > :first-child > p:first-child {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--foreground);
 }
@@ -443,39 +407,13 @@
   justify-self: end;
 }
 
-.settings-main .settings-preference-row [data-menu-trigger] {
-  height: 34px;
-  padding: 7px 10px;
-  border-radius: 0;
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 18px;
-}
-
-/* Settings body copy is 13px throughout, like the rows around it. */
-.settings-main .text-sm {
-  font-size: 13px;
-  line-height: 1.45;
-}
-
-/* Body of a group inside panels that do not use the grouped indent rule. */
 .settings-section-body {
-  padding: 0 20px 16px 64px;
-}
-
-@media (max-width: 767px) {
-  .settings-section-body {
-    padding: 0 16px 16px;
-  }
-}
-
-.settings-grouped > .settings-card > .settings-section-body {
-  padding-left: 0;
+  padding-bottom: 12px;
 }
 
 .settings-main [role="alert"],
 .settings-main [role="status"] {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .settings-storage-summary dt {
@@ -484,26 +422,121 @@
   gap: 2px;
 }
 
-/* Phones stack each row: label and hint above a full-width control. Declared
-   last so it wins over the two-column row rule above. */
-@media (max-width: 767px) {
-  .settings-preference-row {
+.settings-main {
+  container-type: inline-size;
+  transform-origin: center top;
+}
+
+.settings-preference-row > .settings-segmented {
+  justify-self: end;
+}
+
+.settings-users-table {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  column-gap: 24px;
+}
+
+.settings-users-table [data-user-columns] {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+@container (max-width: 32rem) {
+  .settings-preference-row,
+  .settings-preference-row:has(> .settings-segmented) {
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
   }
 
-  .settings-preference-row > :not(:first-child):has([role="switch"]),
-  .settings-preference-row > [role="switch"] {
+  .settings-preference-row > .settings-segmented {
     justify-self: start;
+  }
+
+  .settings-users-table,
+  .settings-users-table [data-user-columns] {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 8px;
+  }
+
+  .settings-users-table [aria-hidden="true"][data-user-columns] {
+    display: none;
   }
 }
 
-/* A group head outside a SettingsCard: no rule under it, like grouped cards. */
-.settings-card-head.settings-card-head--flush {
-  border-bottom: 0;
-  padding-bottom: 12px;
+/* Theme tiles show each theme regardless of the one in use. */
+.settings-theme-swatch {
+  position: relative;
 }
 
-.settings-main {
-  transform-origin: center top;
+.settings-theme-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-theme-layer[data-theme="light"] {
+  background: #f6f7f9;
+  color: #0c0f14;
+}
+
+.settings-theme-layer[data-theme="dark"] {
+  background: #0c0f14;
+  color: #edf1f7;
+}
+
+.settings-theme-layer[data-clip="half"] {
+  clip-path: inset(0 50% 0 0);
+}
+
+.settings-theme-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 18%;
+  padding: 0 8px;
+  border-bottom: 1px solid color-mix(in oklab, currentColor 14%, transparent);
+}
+
+.settings-theme-titlebar > i {
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0.35;
+}
+
+.settings-theme-body {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  padding: 8px;
+}
+
+.settings-theme-side {
+  width: 22%;
+  border-radius: 3px;
+  background: currentColor;
+  opacity: 0.12;
+}
+
+.settings-theme-main {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 6px;
+}
+
+.settings-theme-main > span {
+  border-radius: 3px;
+  background: currentColor;
+  opacity: 0.16;
+}
+
+.settings-theme-main > span:first-child {
+  grid-column: 1 / -1;
+  opacity: 0.22;
 }

@@ -4,9 +4,9 @@ const KEYFRAME_COUNT = 60;
 
 /** A continuous ease into rest, with no spring response or oscillation.
  * A reversal carries its current velocity through a short, smooth turn.
- * Both docked panels (Collections and the Model inspector) move on it, so the
- * cards reflowing beside either one move the same way. */
-export function dockMotion(from: number, velocity: number, target: number, duration: number) {
+ * Both docked panels (Collections and the Model inspector) use it. */
+export function dockMotion(element: Element, from: number, velocity: number, target: number) {
+  const duration = durationToken(element, "--duration-fast");
   const distance = target - from;
   const tangent = velocity * duration;
   const sample = (seconds: number) => {
@@ -29,30 +29,8 @@ export function dockMotion(from: number, velocity: number, target: number, durat
   return { samples, duration, sample };
 }
 
-/** While the pane moves, `html[data-pane-moving]` is set; when it rests, the
- * `PANE_SETTLED_EVENT` fires. Layouts that would reflow with the boundary (the
- * Library grid's column count) wait for it, so they change once, at rest,
- * instead of popping cards in and out mid-motion. */
+/** Re-measure layouts after a dock width is committed. */
 export const PANE_SETTLED_EVENT = "printstash:pane-settled";
-/** Fires when the pane starts moving. `detail` is a {@link PaneMotion}: layouts
- * beside the pane move to their resting arrangement in lockstep with it. */
-export const PANE_MOVING_EVENT = "printstash:pane-moving";
-
-export interface PaneMotion {
-  opening: boolean;
-  /** How much wider (positive) or narrower the content beside the pane ends up. */
-  contentDelta: number;
-  durationMs: number;
-  /** Normalised progress 0→1 at evenly spaced times across `durationMs`. */
-  progress: readonly number[];
-}
-
-export class PaneMovingEvent extends Event {
-  constructor(readonly motion: PaneMotion) {
-    super(PANE_MOVING_EVENT);
-  }
-}
-
 function setMoving(moving: boolean) {
   const root = document.documentElement;
   if (moving) root.dataset.paneMoving = "";
@@ -62,8 +40,7 @@ function setMoving(moving: boolean) {
   }
 }
 
-/** Only the shell column changes width; its contents retain their intrinsic
- * width and move inside a clip. Resizing remains direct, without spring lag. */
+/** Move the shell edge with the workspace with the workspace and fit the grid when it settles. */
 export function useCollectionsPaneMotion(open: boolean) {
   const viewport = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -90,39 +67,23 @@ export function useCollectionsPaneMotion(open: boolean) {
     const finish = () => {
       settled = true;
       velocity.current = 0;
-      setMoving(false);
       shell.style.width = `${open ? fullWidth : 0}px`;
       body.style.visibility = open ? "visible" : "hidden";
       widthAnimation?.cancel();
+      setMoving(false);
     };
     if (!initialized.current || reduced.matches || !desktop.matches || fullWidth === 0) {
       initialized.current = true;
       finish();
     } else {
-      const duration = durationToken(shell, "--duration-slow");
-      const motion = dockMotion(
-        fromWidth / fullWidth,
-        velocity.current / fullWidth,
-        open ? 1 : 0,
-        duration,
-      );
+      const target = open ? 1 : 0;
+      const targetWidth = target * fullWidth;
+      const motion = dockMotion(shell, fromWidth / fullWidth, velocity.current / fullWidth, target);
       trajectory = motion;
-      if (Math.abs(fromWidth - (open ? fullWidth : 0)) < 0.5 && Math.abs(velocity.current) < 1)
-        finish();
+      if (Math.abs(fromWidth - targetWidth) < 0.5 && Math.abs(velocity.current) < 1) finish();
       else {
         body.style.visibility = "visible";
         setMoving(true);
-        const fromPosition = fromWidth / fullWidth;
-        const span = (open ? 1 : 0) - fromPosition;
-        const detail: PaneMotion = {
-          opening: open,
-          contentDelta: fromWidth - (open ? fullWidth : 0),
-          durationMs: motion.duration * 1000,
-          progress: motion.samples.map((sample) =>
-            Math.abs(span) < 1e-6 ? 1 : (sample.position - fromPosition) / span,
-          ),
-        };
-        window.dispatchEvent(new PaneMovingEvent(detail));
         const timing = {
           duration: motion.duration * 1000,
           easing: "linear",
@@ -164,7 +125,7 @@ export function useCollectionsPaneMotion(open: boolean) {
       widthAnimation?.cancel();
     };
   }, [open]);
-  // A pane removed mid-motion must not leave the Library waiting for rest.
+  // Clear the motion marker if the shell unmounts during a toggle.
   useEffect(() => () => setMoving(false), []);
 
   return { viewport, content };

@@ -1,4 +1,5 @@
 import type { EditingBase } from "./editing";
+import type { JobProductionCost } from "./production-costing";
 
 /**
  * One value inside a JSON blob a printer provider owns rather than PrintStash:
@@ -100,6 +101,7 @@ export interface PrinterRead extends EditingBase {
   drain_updated_at: string | null;
   provider_material_sync_enabled: boolean;
   operator_release_required: boolean;
+  cost_profile_id?: number | null;
   status: PrinterStatus;
   last_seen_at: string | null;
   last_error: string | null;
@@ -206,6 +208,7 @@ export interface PrinterCreate {
   group?: string;
   provider_material_sync_enabled?: boolean;
   operator_release_required?: boolean;
+  cost_profile_id?: number | null;
 }
 
 export interface PrinterUpdate {
@@ -232,6 +235,7 @@ export interface PrinterUpdate {
   group?: string;
   provider_material_sync_enabled?: boolean;
   operator_release_required?: boolean;
+  cost_profile_id?: number | null;
 }
 
 export interface PrintJobRead {
@@ -242,6 +246,8 @@ export interface PrintJobRead {
   remote_filename: string;
   state: PrintJobState;
   progress: number;
+  actual_duration_s?: number | null;
+  production_cost?: JobProductionCost | null;
   source: string;
   external_display_name: string | null;
   external_task_id: string | null;

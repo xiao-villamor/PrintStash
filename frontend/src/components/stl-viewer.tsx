@@ -112,8 +112,10 @@ function Mesh({
   comparison,
   overlay = false,
   look,
+  color,
 }: {
   look: PreviewLook;
+  color?: string;
   geometry: THREE.BufferGeometry;
   displayMode: ViewerDisplayMode;
   onSized: (size: THREE.Vector3) => void;
@@ -172,6 +174,15 @@ function Mesh({
           opacity={0.42}
           depthWrite={false}
         />
+      ) : color ? (
+        <meshStandardMaterial
+          color={color}
+          roughness={0.75}
+          wireframe={displayMode === "wireframe"}
+          transparent={displayMode === "xray"}
+          opacity={displayMode === "xray" ? 0.3 : 1}
+          depthWrite={displayMode !== "xray"}
+        />
       ) : (
         // The card thumbnails' studio shade, keyed by the camera-relative
         // normal, so the 3D view colours every surface like its thumbnail.
@@ -207,6 +218,7 @@ function Scene({
   comparisonCamera,
   overlay,
   look,
+  color,
 }: Required<
   Omit<
     STLViewerProps,
@@ -229,6 +241,7 @@ function Scene({
     onLoadedChange?: (loaded: boolean) => void;
     onGeometrySize?: (size: number) => void;
     screenshotScale: ScreenshotScale;
+    color?: string;
     geometry: THREE.BufferGeometry;
     overlayGeometry: THREE.BufferGeometry | null;
     renderer: MeshRenderer;
@@ -460,6 +473,7 @@ function Scene({
         <Mesh
           key={url}
           look={look}
+          color={color}
           geometry={geometry}
           displayMode={displayMode}
           onSized={handleSized}
@@ -802,6 +816,7 @@ export function STLViewer({
         comparison={comparison}
         comparisonCamera={comparisonCamera}
         look={shownLook}
+        color={parsed.color}
         overlay={
           overlay !== undefined && overlayPreview.state === "ready"
             ? { ...overlay, url: overlayPreview.url }

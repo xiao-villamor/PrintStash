@@ -32,7 +32,7 @@ from app.db.models import (
 )
 from app.modules.identity import printer_rbac, rbac
 from app.modules.media.sliced_gcode import selected_plate
-from app.modules.printing import materials
+from app.modules.printing import materials, production_costing
 from app.modules.printing.printer_files import (
     build_traceable_remote_filename,
     upsert_printer_file,
@@ -160,6 +160,8 @@ async def send_to_printer(
             else None
         ),
     )
+    if payload.start_print:
+        production_costing.launch_job_cost(session, p, job, f)
     session.add(job)
     session.commit()
     session.refresh(job)
@@ -178,6 +180,7 @@ async def send_to_printer(
         job.state = PrintJobState.FAILED
         job.error = _provider_action_code(exc)
         job.finished_at = utcnow()
+        job.production_cost = None
         session.add(job)
         session.commit()
         raise OperationError(
@@ -187,6 +190,7 @@ async def send_to_printer(
         job.state = PrintJobState.FAILED
         job.error = exc.code
         job.finished_at = utcnow()
+        job.production_cost = None
         session.add(job)
         session.commit()
         error_kind = {
@@ -203,6 +207,7 @@ async def send_to_printer(
         job.state = PrintJobState.FAILED
         job.error = "provider_error"
         job.finished_at = utcnow()
+        job.production_cost = None
         session.add(job)
         session.commit()
         raise OperationError("provider_error", kind=ErrorKind.UPSTREAM) from exc

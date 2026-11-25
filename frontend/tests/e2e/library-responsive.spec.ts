@@ -282,7 +282,7 @@ test.describe("Library responsive layout", () => {
     await main.getByRole("button", { name: "Filters", exact: true }).focus();
 
     await page.keyboard.press("Tab");
-    await expect(main.getByRole("button", { name: "Sort models", exact: true })).toBeFocused();
+    await expect(main.getByRole("combobox", { name: "Sort models", exact: true })).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(main.getByRole("button", { name: "More", exact: true })).toBeFocused();
     await page.keyboard.press("Enter");
@@ -449,7 +449,7 @@ test.describe("Collection header", () => {
         toolbar.getByRole("heading", { name: "Models" }),
         status,
         filters,
-        toolbar.getByRole("button", { name: "Sort models" }),
+        toolbar.getByRole("combobox", { name: "Sort models" }),
       ].map((locator) => locator.boundingBox()),
     );
     const centers = boxes.map((box) => box!.y + box!.height / 2);

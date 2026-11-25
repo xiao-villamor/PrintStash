@@ -22,7 +22,6 @@ function renderToolbar(
     setShowGrid?: (visible: boolean) => void;
     notifyScreenshotError?: (message: string) => void;
     viewerMode?: "model" | "gcode";
-    displayMode?: "solid" | "xray" | "wireframe";
     showGrid?: boolean;
     hasGcode?: boolean;
   } = {},
@@ -39,8 +38,6 @@ function renderToolbar(
   };
   render(
     <ViewerToolbar
-      displayMode={actions.displayMode ?? "solid"}
-      setDisplayMode={vi.fn<(mode: "solid" | "xray" | "wireframe") => void>()}
       showGrid={actions.showGrid ?? true}
       setShowGrid={actions.setShowGrid ?? vi.fn<(visible: boolean) => void>()}
       controls={controls}
@@ -57,7 +54,7 @@ function renderToolbar(
 describe("ViewerToolbar screenshot", () => {
   it("keeps model controls inert until the preview is ready", () => {
     renderToolbar(false);
-    expect(screen.getByRole("combobox", { name: "Display" })).toBeDisabled();
+    expect(screen.queryByRole("combobox", { name: "Display" })).not.toBeInTheDocument();
     for (const name of ["Fit to view", "Screenshot", "Build plate grid"]) {
       expect(screen.getByRole("button", { name })).toBeDisabled();
     }
@@ -160,8 +157,6 @@ describe("ViewerToolbar selection", () => {
       captureImage: async () => new Blob(),
     };
     const props = {
-      displayMode: "solid" as const,
-      setDisplayMode: () => {},
       showGrid: true,
       setShowGrid: () => {},
       controls,
@@ -187,10 +182,12 @@ describe("ViewerToolbar selection", () => {
     expect(screen.getByRole("button", { name: "G-code" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("announces the active rendering style", () => {
-    renderToolbar(true, undefined, { displayMode: "xray" });
+  it("offers a named screenshot icon without a display or expand control", () => {
+    renderToolbar(true);
 
-    expect(screen.getByRole("combobox", { name: "Display" })).toHaveValue("xray");
+    expect(screen.getByRole("button", { name: "Screenshot" })).toHaveTextContent(/^$/);
+    expect(screen.queryByRole("combobox", { name: "Display" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Expand" })).not.toBeInTheDocument();
   });
 
   it.each([true, false])("announces grid visibility when it is %s", (visible) => {

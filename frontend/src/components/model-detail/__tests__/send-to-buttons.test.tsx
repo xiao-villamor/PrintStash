@@ -182,6 +182,7 @@ function spoolmanStatus(enabled: boolean): SpoolmanStatus {
 
 interface PanelOptions {
   preselectPlate?: number;
+  onDelivered?: (fileId: number, message: string) => void;
   initialDeliveryMode?: "send" | "queue";
   open?: boolean;
   preselectPrinterId?: number;
@@ -199,6 +200,7 @@ interface PanelOptions {
 // same shapes the API returns.
 function renderPanel({
   preselectPlate,
+  onDelivered,
   metadata = null,
   spools,
   filename = "cube.gcode",
@@ -223,6 +225,7 @@ function renderPanel({
         <AuthContext.Provider value={adminAuth}>
           <SendToButtons
             commands={commands}
+            onDelivered={onDelivered}
             preselectFileId={preselectPlate === undefined ? undefined : 42}
             preselectPlate={preselectPlate}
             initialDeliveryMode={initialDeliveryMode}
@@ -269,15 +272,44 @@ beforeEach(() => {
   });
 });
 
+describe("Printer status summary", () => {
+  it("summarizes unavailable printers without listing machine names", () => {
+    renderPanel({
+      open: false,
+      printers: [
+        aPrinter({ id: 91, name: "Workshop offline", status: "offline" }),
+        aPrinter({ id: 92, name: "Workshop error", status: "error" }),
+        aPrinter({ id: 93, name: "Workshop ready", status: "ready" }),
+        aPrinter({ id: 94, name: "Workshop paused", status: "paused" }),
+      ],
+    });
+
+    expect(screen.getByText("1 ready")).toBeVisible();
+    expect(screen.getByText("1 in use")).toBeVisible();
+    expect(screen.getByText("2 unavailable")).toBeVisible();
+    expect(screen.queryByText("Workshop offline")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Manage printers" })).toHaveAttribute(
+      "href",
+      "/printers",
+    );
+  });
+});
+
 describe("SendToQueue", () => {
   it("preserves the inspector's explicit printer through confirmation", async () => {
     const chosen = aPrinter({ id: 9, name: "Chosen printer" });
     sendToPrinter.mockResolvedValue(queuedJob);
     renderPanel({ open: true, preselectPrinterId: 9, printers: [printer, chosen] });
-    await waitFor(() =>
-      expect(screen.getByRole("checkbox", { name: "Select Chosen printer" })).toBeChecked(),
+    await userEvent.click(await screen.findByRole("button", { name: /^Destination$/ }));
+    expect(await screen.findByRole("option", { name: /^Chosen printer/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
     );
-    expect(screen.getByRole("checkbox", { name: "Select Farm printer" })).not.toBeChecked();
+    expect(screen.getByRole("option", { name: /^Farm printer/ })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(sendToPrinter).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
     await waitFor(() =>
@@ -296,10 +328,16 @@ describe("SendToQueue", () => {
       access: { ...printer.access, can_print: false },
     });
     renderPanel({ open: true, preselectPrinterId: 9, printers: [printer, denied] });
-    await waitFor(() =>
-      expect(screen.getByRole("checkbox", { name: "Select Farm printer" })).not.toBeChecked(),
+    await userEvent.click(await screen.findByRole("button", { name: /^Destination$/ }));
+    expect(await screen.findByRole("option", { name: /^Farm printer/ })).toHaveAttribute(
+      "aria-selected",
+      "false",
     );
-    expect(screen.getByRole("checkbox", { name: "Select Denied printer" })).toBeDisabled();
+    expect(screen.getByRole("option", { name: /^Denied printer/ })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(screen.getByRole("button", { name: "Send to printer" })).toBeDisabled();
     expect(sendToPrinter).not.toHaveBeenCalled();
   });
@@ -354,9 +392,11 @@ describe("SendToQueue", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
 
-    expect(screen.getByText("Format unsupported")).toBeVisible();
-    expect(screen.getByRole("checkbox", { name: "Select Text-only printer" })).toBeDisabled();
-    expect(screen.getByRole("checkbox", { name: "Select Core One" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: /^Destination$/ }));
+    expect(
+      await screen.findByRole("option", { name: /Text-only printer.*Format unsupported/ }),
+    ).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("option", { name: /^Core One/ })).not.toHaveAttribute("aria-disabled");
   });
 
   it("refreshes fleet projections after a queue command", async () => {
@@ -402,6 +442,7 @@ describe("SendToQueue", () => {
           vendor_name: null,
           material: null,
           color_hex: null,
+          cost_per_kg: null,
           remaining_weight: 10,
           used_weight: null,
           archived: false,
@@ -429,6 +470,7 @@ describe("SendToQueue", () => {
           vendor_name: null,
           material: null,
           color_hex: null,
+          cost_per_kg: null,
           remaining_weight: null,
           used_weight: null,
           archived: false,
@@ -478,14 +520,14 @@ describe("SendToQueue", () => {
   });
 
   it("creates an atomic batch when copies is greater than one", async () => {
-    renderPanel();
+    renderPanel({ printers: [{ ...printer, group: "Workshop" }] });
 
     await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
     await userEvent.click(screen.getByRole("radio", { name: "Add to queue" }));
     await userEvent.clear(screen.getByLabelText("Copies"));
     await userEvent.type(screen.getByLabelText("Copies"), "3");
     await userEvent.click(screen.getByRole("radio", { name: "Rush" }));
-    await userEvent.type(screen.getByLabelText("Printer group"), "Workshop");
+    await userEvent.selectOptions(screen.getByLabelText("Target group"), "Workshop");
     await userEvent.click(screen.getAllByRole("button", { name: "Add to queue" }).at(-1)!);
 
     await waitFor(() =>
@@ -503,9 +545,12 @@ describe("SendToQueue", () => {
     // "Send now" is per-printer, unlike the queue: the fleet does not choose,
     // so each selected machine gets its own upload.
     sendToPrinter.mockResolvedValue(queuedJob);
-    renderPanel();
+    renderPanel({ printers: [printer, aPrinter({ id: 9, name: "Spare printer" })] });
 
     await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Destination$/ }));
+    await userEvent.click(await screen.findByRole("option", { name: /^Spare printer/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
     await userEvent.click(screen.getAllByRole("button", { name: "Send to printer" }).at(-1)!);
 
     await waitFor(() =>
@@ -513,6 +558,10 @@ describe("SendToQueue", () => {
         7,
         expect.objectContaining({ file_id: 42, start_print: false }),
       ),
+    );
+    expect(sendToPrinter).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({ file_id: 42, start_print: false }),
     );
   });
 
@@ -550,7 +599,9 @@ describe("SendToQueue", () => {
     renderPanel();
 
     await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
-    await userEvent.click(screen.getByLabelText("Select Farm printer"));
+    await userEvent.click(screen.getByRole("button", { name: /^Destination$/ }));
+    await userEvent.click(await screen.findByRole("option", { name: /^Farm printer/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
 
     expect(screen.getAllByRole("button", { name: "Send to printer" }).at(-1)).toBeDisabled();
   });
@@ -592,6 +643,22 @@ describe("SendToButtons sliced archives", () => {
     await userEvent.click(screen.getByRole("radio", { name: /^Plate 02/ }));
     expect(screen.getByRole("radio", { name: /^Plate 02/ })).toBeChecked();
   });
+  it("carries the preview plate into Prepare print while requiring a printer", async () => {
+    const onDelivered = vi.fn<(fileId: number, message: string) => void>();
+    renderPanel({
+      open: true,
+      onDelivered,
+      preselectPlate: 10,
+      filename: "project.gcode.3mf",
+      plates: [2, 10],
+    });
+    expect(
+      await screen.findByRole("radio", { name: /Plate 10.*Selected in preview/ }),
+    ).toBeChecked();
+    expect(screen.getByText("Choose a printer to continue.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Send to printer" })).toBeDisabled();
+  });
+
   it("requires a choice when several plates exist", async () => {
     renderPanel({ open: true, filename: "project.gcode.3mf", plates: [2, 10] });
     for (const choice of await screen.findAllByRole("radio", { name: /^Plate / })) {
@@ -671,7 +738,8 @@ describe("SendToButtons sliced archives", () => {
     });
     client.setQueryData(["gcode-plates", 43], { plates: [2, 10] });
     await userEvent.click(await screen.findByRole("radio", { name: /^Plate 10/ }));
-    await userEvent.click(screen.getByRole("radio", { name: /Rev 2/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Revision$/ }));
+    await userEvent.click(await screen.findByRole("option", { name: /^Rev 2/ }));
     for (const choice of await screen.findAllByRole("radio", { name: /^Plate / })) {
       expect(choice).not.toBeChecked();
     }

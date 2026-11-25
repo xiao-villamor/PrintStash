@@ -6,7 +6,12 @@ import {
   SETTINGS_BUTTON_PRIMARY,
   SETTINGS_FIELD,
 } from "@/components/settings-controls";
-import { SettingsNotice, SettingsStatus, SettingsGroupHead } from "@/components/settings-card";
+import {
+  SettingsCard,
+  SettingsEmptyRow,
+  SettingsNotice,
+  SettingsStatus,
+} from "@/components/settings-card";
 import { Switch } from "@/components/ui/switch";
 import { describeSourceLocation } from "@/lib/library-source-location";
 import {
@@ -19,7 +24,7 @@ import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { FolderSync, Plus, RefreshCw } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Modal } from "@/components/ui/modal";
 import { useQuery } from "@tanstack/react-query";
@@ -39,7 +44,6 @@ import { getSessionVersion } from "@/lib/session-transport";
 import { parseApiError, userMessage } from "@/lib/errors";
 import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/lib/toast";
 import { Localized } from "@/components/ui/localized";
@@ -289,14 +293,11 @@ export function ExternalLibrariesPanel(props: {
   const { t } = useI18n();
   if (!props.canEdit || !user?.is_superuser)
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>{uiText("Library sources")}</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <SettingsCard title={uiText("Library sources")}>
+        <div className="py-4 text-sm">
           <p>{t("librarySources.adminRequired")}</p>
-        </CardContent>
-      </Card>
+        </div>
+      </SettingsCard>
     );
   return <AdminLibrarySourcesPanel {...props} />;
 }
@@ -585,11 +586,8 @@ function AdminLibrarySourcesPanel({
   if (retired) return null;
   if (!allowed || !config.data || denied)
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>{uiText("Library sources")}</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <SettingsCard title={uiText("Library sources")}>
+        <div className="py-4 text-sm">
           {!allowed ? (
             <p>{t("librarySources.adminRequired")}</p>
           ) : config.isPending ? (
@@ -614,21 +612,17 @@ function AdminLibrarySourcesPanel({
               </Button>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </SettingsCard>
     );
 
   return (
     <Localized>
-      <div className="overflow-hidden border border-border bg-card">
-        <SettingsGroupHead
-          icon={FolderSync}
-          level={3}
-          title={uiText("Scanning")}
-          description={uiText("Applies to every Library source.")}
-          className="settings-card-head--flush"
-        />
-        <div className="settings-section-body">
+      <SettingsCard
+        title={uiText("Scanning")}
+        description={uiText("Applies to every Library source.")}
+      >
+        <div>
           <div className="settings-preference-row">
             <span>{uiText("Library sources enabled")}</span>
             <Switch
@@ -640,12 +634,12 @@ function AdminLibrarySourcesPanel({
               disabled={!allowed || config.isError || enableBusy || toggleReview.phase !== "idle"}
             />
           </div>
-          <div className="settings-preference-row">
-            <span>{uiText("Auto-scan enabled")}</span>
+          <div className="settings-readonly-row">
+            <span className="font-medium">{uiText("Auto-scan enabled")}</span>
             <span className="text-xs text-muted-foreground">{uiText("Configured per source")}</span>
           </div>
-          <div className="settings-preference-row">
-            <span>{uiText("Scan schedule")}</span>
+          <div className="settings-readonly-row">
+            <span className="font-medium">{uiText("Scan schedule")}</span>
             <span className="text-xs text-muted-foreground">{uiText("Configured per source")}</span>
           </div>
         </div>
@@ -784,26 +778,24 @@ function AdminLibrarySourcesPanel({
             </div>
           </section>
         )}
-        <SettingsGroupHead
-          icon={FolderSync}
-          level={3}
-          title={uiText("Sources")}
-          description={uiText(
-            "PrintStash stores catalog metadata and thumbnails only; source files stay in their original location.",
-          )}
-          action={
-            <Button
-              size="sm"
-              disabled={!enabled || !commandsAllowed}
-              onClick={() => setAddOpen(true)}
-            >
-              {uiText("Add source")}
-            </Button>
-          }
-          className="settings-card-head--flush border-t"
-        />
-        {enabled && (
-          <div className="settings-section-body space-y-4">
+      </SettingsCard>
+      <SettingsCard
+        title={uiText("Sources")}
+        description={uiText(
+          "PrintStash stores catalog metadata and thumbnails only; source files stay in their original location.",
+        )}
+        action={
+          <Button
+            size="sm"
+            disabled={!enabled || !commandsAllowed}
+            onClick={() => setAddOpen(true)}
+          >
+            {uiText("Add source")}
+          </Button>
+        }
+      >
+        {enabled ? (
+          <div className="space-y-4 py-3">
             {(sources.isError || sources.data?.kind === "disabled") && (
               <div role="alert">
                 <p>{t("librarySources.sourcesFailed")}</p>
@@ -818,17 +810,13 @@ function AdminLibrarySourcesPanel({
             !sources.isError &&
             sources.data?.kind === "enabled" &&
             libraries.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center">
-                <FolderSync className="h-7 w-7 text-muted-foreground/50" />
-                <p className="text-sm font-medium text-foreground">
-                  {uiText("No library sources yet")}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {uiText(
-                    "Add a mounted folder or connect remote storage to index existing models without copying them into the Vault.",
-                  )}
-                </p>
-              </div>
+              <SettingsEmptyRow>
+                {uiText("No library sources yet")}
+                {". "}
+                {uiText(
+                  "Add a mounted folder or connect remote storage to index existing models without copying them into the Vault.",
+                )}
+              </SettingsEmptyRow>
             ) : (
               <ul>
                 {libraries.map((lib) => {
@@ -1058,6 +1046,34 @@ function AdminLibrarySourcesPanel({
                 if (busyId !== "create") setAddOpen(false);
               }}
               title={uiText("Add a library source")}
+              className="settings-dialog"
+              dismissible={busyId !== "create"}
+              footer={
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={busyId === "create"}
+                    onClick={() => setAddOpen(false)}
+                  >
+                    {uiText("Cancel")}
+                  </Button>
+                  <button
+                    type="button"
+                    disabled={
+                      !commandsAllowed ||
+                      busyId !== null ||
+                      (sourceKind !== "mounted" &&
+                        (connectionRead.isPending || connectionRead.isError))
+                    }
+                    onClick={handleCreate}
+                    className={cn(BTN_PRIMARY, "h-9")}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    {busyId === "create" ? uiText("Adding") : uiText("Add source")}
+                  </button>
+                </>
+              }
             >
               <div
                 className="space-y-3"
@@ -1066,7 +1082,7 @@ function AdminLibrarySourcesPanel({
                 }}
               >
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  <label className="flex flex-col gap-1 text-sm font-medium text-foreground">
                     {uiText("Source name")}
                     <input
                       className={INPUT}
@@ -1077,7 +1093,7 @@ function AdminLibrarySourcesPanel({
                       onChange={(e) => setName(e.target.value)}
                     />
                   </label>
-                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  <label className="flex flex-col gap-1 text-sm font-medium text-foreground">
                     {uiText("Source type")}
                     <select
                       className={INPUT}
@@ -1099,7 +1115,7 @@ function AdminLibrarySourcesPanel({
                     </select>
                   </label>
                   {sourceKind === "mounted" ? (
-                    <label className="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2">
+                    <label className="flex flex-col gap-1 text-sm font-medium text-foreground sm:col-span-2">
                       {uiText("Mounted folder path")}
                       <input
                         className={INPUT}
@@ -1112,7 +1128,7 @@ function AdminLibrarySourcesPanel({
                     </label>
                   ) : (
                     <>
-                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                      <label className="flex flex-col gap-1 text-sm font-medium text-foreground">
                         {uiText("Remote connection")}
                         <select
                           className={INPUT}
@@ -1140,7 +1156,7 @@ function AdminLibrarySourcesPanel({
                             ))}
                         </select>
                       </label>
-                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                      <label className="flex flex-col gap-1 text-sm font-medium text-foreground">
                         {uiText("Path within connection (optional)")}
                         <input
                           className={INPUT}
@@ -1153,7 +1169,7 @@ function AdminLibrarySourcesPanel({
                       </label>
                     </>
                   )}
-                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  <label className="flex flex-col gap-1 text-sm font-medium text-foreground">
                     {uiText("Scan schedule")}
                     <ScheduleControl
                       value={scanSchedule}
@@ -1163,7 +1179,7 @@ function AdminLibrarySourcesPanel({
                     />
                   </label>
                   {sourceKind === "mounted" && (
-                    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    <label className="flex flex-col gap-1 text-sm font-medium text-foreground">
                       {uiText("Real-time watching")}
                       <select
                         className={INPUT}
@@ -1179,7 +1195,7 @@ function AdminLibrarySourcesPanel({
                       </select>
                     </label>
                   )}
-                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  <label className="flex flex-col gap-1 text-sm font-medium text-foreground">
                     {uiText("Collection layout")}
                     <select
                       className={INPUT}
@@ -1193,7 +1209,7 @@ function AdminLibrarySourcesPanel({
                     </select>
                   </label>
                 </div>
-                <p className="text-2xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {uiText(
                     "PrintStash stores catalog metadata and thumbnails only; source files stay in their original location.",
                   )}{" "}
@@ -1205,76 +1221,65 @@ function AdminLibrarySourcesPanel({
                         "Remote sources use bounded manual or scheduled scans and are always read-only.",
                       )}
                 </p>
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    disabled={
-                      !commandsAllowed ||
-                      busyId !== null ||
-                      (sourceKind !== "mounted" &&
-                        (connectionRead.isPending || connectionRead.isError))
-                    }
-                    onClick={handleCreate}
-                    className={BTN_PRIMARY}
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    {busyId === "create" ? uiText("Adding") : uiText("Add source")}
-                  </button>
-                </div>
               </div>
             </Modal>
           </div>
+        ) : (
+          <div className="opacity-50">
+            <SettingsEmptyRow>{uiText("Turn on Library sources to add one.")}</SettingsEmptyRow>
+          </div>
         )}
+      </SettingsCard>
 
-        {commandsAllowed && (
-          <ConfirmModal
-            open={deleteTarget !== null && deleteTarget.readVersion === sources.dataUpdatedAt}
-            onClose={() => setDeleteTarget(null)}
-            title={uiText("Remove library source?")}
-            description={
-              (deleteTarget
-                ? uiText(
-                    '"{value1}" will be removed and its indexed models moved to trash. Source files remain untouched in their mounted folder or remote storage.',
-                    { value1: String(deleteTarget.source.name) },
-                  )
-                : "") + (command.error ? `\n\n${userMessage(command.error)}` : "")
-            }
-            confirmLabel={uiText("Remove")}
-            busy={deleteTarget !== null && busyId === deleteTarget.source.id}
-            onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
-          />
-        )}
-        {commandsAllowed && (
-          <ConfirmModal
-            open={enrollTarget !== null && enrollTarget.readVersion === sources.dataUpdatedAt}
-            onClose={() => {
-              if (busyId === null) setEnrollTarget(null);
-            }}
-            title={uiText("Enroll mounted source root?")}
-            description={
-              (enrollTarget
-                ? uiText(
-                    "Verify that this exact mounted path belongs to this PrintStash installation before enrolling it: {value1}. This re-enables safe scans, watching, and writeback.",
-                    { value1: String(enrollTarget.source.root_path) },
-                  )
-                : "") + (command.error ? `\n\n${userMessage(command.error)}` : "")
-            }
-            confirmLabel={uiText("Enroll root")}
-            busy={enrollTarget !== null && busyId === enrollTarget.source.id}
-            onConfirm={() => enrollTarget && handleEnroll(enrollTarget)}
-          />
-        )}
-        {editTarget && (
-          <EditLibrarySourceModal
-            key={editTarget.id}
-            source={editTarget}
-            location={describeSourceLocation({ ...editTarget, source_prefix: "" }, connections)}
-            disabled={!commandsAllowed || command.blocked || busyId !== null}
-            onSave={(payload) => void handleUpdate(editTarget, payload)}
-            onClose={() => setEditTarget(null)}
-          />
-        )}
-      </div>
+      {commandsAllowed && (
+        <ConfirmModal
+          open={deleteTarget !== null && deleteTarget.readVersion === sources.dataUpdatedAt}
+          onClose={() => setDeleteTarget(null)}
+          title={uiText("Remove library source?")}
+          description={
+            (deleteTarget
+              ? uiText(
+                  '"{value1}" will be removed and its indexed models moved to trash. Source files remain untouched in their mounted folder or remote storage.',
+                  { value1: String(deleteTarget.source.name) },
+                )
+              : "") + (command.error ? `\n\n${userMessage(command.error)}` : "")
+          }
+          confirmLabel={uiText("Remove")}
+          busy={deleteTarget !== null && busyId === deleteTarget.source.id}
+          onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
+        />
+      )}
+      {commandsAllowed && (
+        <ConfirmModal
+          open={enrollTarget !== null && enrollTarget.readVersion === sources.dataUpdatedAt}
+          onClose={() => {
+            if (busyId === null) setEnrollTarget(null);
+          }}
+          variant="default"
+          title={uiText("Enroll mounted source root?")}
+          description={
+            (enrollTarget
+              ? uiText(
+                  "Verify that this exact mounted path belongs to this PrintStash installation before enrolling it: {value1}. This re-enables safe scans, watching, and writeback.",
+                  { value1: String(enrollTarget.source.root_path) },
+                )
+              : "") + (command.error ? `\n\n${userMessage(command.error)}` : "")
+          }
+          confirmLabel={uiText("Enroll root")}
+          busy={enrollTarget !== null && busyId === enrollTarget.source.id}
+          onConfirm={() => enrollTarget && handleEnroll(enrollTarget)}
+        />
+      )}
+      {editTarget && (
+        <EditLibrarySourceModal
+          key={editTarget.id}
+          source={editTarget}
+          location={describeSourceLocation({ ...editTarget, source_prefix: "" }, connections)}
+          disabled={!commandsAllowed || command.blocked || busyId !== null}
+          onSave={(payload) => void handleUpdate(editTarget, payload)}
+          onClose={() => setEditTarget(null)}
+        />
+      )}
     </Localized>
   );
 }

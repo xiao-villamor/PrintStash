@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from pydantic import NaiveDatetime
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -88,9 +89,32 @@ class PrinterProfile(SQLModel, table=True):
     slicer_name: Optional[str] = Field(default=None, max_length=64, index=True)
     nozzle_diameter_mm: Optional[float] = None
     notes: Optional[str] = None
+    expenses: Optional[dict[str, float]] = Field(
+        default=None, sa_column=Column(JSON(none_as_null=True), nullable=True)
+    )
 
     created_at: NaiveDatetime = Field(default_factory=utcnow)
     updated_at: NaiveDatetime = Field(default_factory=utcnow)
+
+
+class PricingTemplate(SQLModel, table=True):
+    __tablename__ = "pricing_templates"
+    __table_args__ = (
+        CheckConstraint(
+            "margin_percent >= 0 AND margin_percent <= 99.99",
+            name="margin_percent_range",
+        ),
+        CheckConstraint(
+            "tax_percent >= 0 AND tax_percent <= 100", name="tax_percent_range"
+        ),
+    )
+
+    id: str = Field(
+        default_factory=lambda: uuid4().hex, primary_key=True, max_length=32
+    )
+    name: str = Field(unique=True, max_length=200)
+    margin_percent: float
+    tax_percent: float
 
 
 for _profile in (FilamentProfile, PrinterProfile):
@@ -161,6 +185,9 @@ class Printer(SQLModel, table=True):
     # precedence is model_name, falling back to detected_model.
     model_name: Optional[str] = Field(default=None, max_length=128)
     detected_model: Optional[str] = Field(default=None, max_length=128)
+    cost_profile_id: int | None = Field(
+        default=None, foreign_key="printer_profiles.id", ondelete="SET NULL", index=True
+    )
     notes: Optional[str] = None
     group: Optional[str] = Field(default=None, max_length=128, index=True)
     is_default: bool = Field(
@@ -429,6 +456,12 @@ class PrintJob(SQLModel, table=True):
     # COMPLETED; backfilled for pre-existing rows by migration 175be54ef975.
     cost: Optional[float] = None
     filament_g_effective: Optional[float] = None
+    production_rates: dict | None = Field(
+        default=None, sa_column=Column(JSON(none_as_null=True), nullable=True)
+    )
+    production_cost: dict | None = Field(
+        default=None, sa_column=Column(JSON(none_as_null=True), nullable=True)
+    )
 
     # Spoolman spool this print consumed, selected when starting/logging the
     # job. A soft reference (Spoolman owns the spool table) — not an FK. The

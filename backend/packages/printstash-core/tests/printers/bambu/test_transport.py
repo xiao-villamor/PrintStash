@@ -52,6 +52,7 @@ BRIEF = 0.05
 class FakeSSLContext:
     def __init__(self) -> None:
         self.check_hostname = True
+        self.verify_flags = ssl.VERIFY_X509_STRICT
         self.cadata: str | None = None
 
     def load_verify_locations(self, *, cadata: str) -> None:
@@ -111,6 +112,21 @@ class TestMqttClient:
 
         assert context.cadata == _BAMBU_CA_CERTIFICATES
         assert mqtt.context is context
+
+    def test_allows_legacy_bambu_ca_extensions(self) -> None:
+        mqtt = FakeMqttClient()
+        default_flags = ssl.create_default_context().verify_flags
+
+        make_client(mqtt_client_factory=lambda: mqtt)._mqtt_client()
+
+        assert mqtt.context.verify_flags == default_flags & ~ssl.VERIFY_X509_STRICT
+
+    def test_requires_a_verified_server_certificate(self) -> None:
+        mqtt = FakeMqttClient()
+
+        make_client(mqtt_client_factory=lambda: mqtt)._mqtt_client()
+
+        assert mqtt.context.verify_mode == ssl.CERT_REQUIRED
 
     def test_disables_hostname_verification(
         self, monkeypatch: pytest.MonkeyPatch

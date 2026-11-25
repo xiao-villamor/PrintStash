@@ -1042,7 +1042,7 @@ describe("MultipartModelDetailPage", () => {
     await waitFor(() => expect(requestsWithMethod("PUT")).toHaveLength(1));
     expect(JSON.parse(requestsWithMethod("PUT")[0].body).cover_image_url).toBe(coverImageUrl);
     expect(await screen.findByTitle("Custom cover image")).toBeVisible();
-    expect(screen.getByRole("img", { name: "Desk organiser" })).toHaveAttribute(
+    expect(await screen.findByRole("img", { name: "Desk organiser" })).toHaveAttribute(
       "src",
       coverImageUrl,
     );

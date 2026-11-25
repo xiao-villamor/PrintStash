@@ -7,8 +7,8 @@ useMockApi();
 
 declare global {
   interface Window {
-    /** Starting transforms of card animations, recorded by the glide test. */
-    cardGlides: string[];
+    paneCardAnimations: number;
+    paneCardsCrossingCells: string[];
   }
 }
 
@@ -123,7 +123,7 @@ test.describe("Library inline inspector", () => {
     });
   }
 
-  test("glides reflowed cards beside either panel", async ({ page }) => {
+  test("animates visible cards only on Details transitions", async ({ page }) => {
     const models = Array.from({ length: 92 }, (_, index) =>
       aModelListItem({ id: index + 1, name: `Part ${index + 1}` }),
     );
@@ -139,32 +139,74 @@ test.describe("Library inline inspector", () => {
       }),
     );
     await page.addInitScript(() => {
-      window.cardGlides = [];
-      const glides = window.cardGlides;
+      window.paneCardAnimations = 0;
+      window.paneCardsCrossingCells = [];
       const animate = Element.prototype.animate;
       Element.prototype.animate = function (...args) {
-        const result = animate.apply(this, args);
-        const [frames] = args;
-        if (this.matches("main [data-library-key]") && Array.isArray(frames))
-          glides.push(String(frames[0]?.transform ?? "none"));
-        return result;
+        if (this instanceof HTMLElement && this.matches("main [data-library-key]")) {
+          window.paneCardAnimations++;
+          const [frames] = args;
+          const transform = Array.isArray(frames) ? frames[0]?.transform : undefined;
+          const match = /^translate\(([-.\d]+)px, [-.\d]+px\) scale\(([-.\d]+),/.exec(
+            String(transform ?? ""),
+          );
+          if (match && this.parentElement) {
+            const distance = Math.abs(Number(match[1]));
+            const spacing = Number.parseFloat(getComputedStyle(this.parentElement).columnGap);
+            const originalWidth = Number(match[2]) * this.offsetWidth;
+            if (distance > originalWidth + spacing + 1)
+              window.paneCardsCrossingCells.push(this.dataset.libraryKey ?? "");
+          }
+        }
+        const animation = animate.apply(this, args);
+        if (this.id === "model-drawer" && this.getAttribute("data-state") === "open")
+          animation.pause();
+        return animation;
       };
     });
     await page.goto("/?type=all&sort=date-desc");
     await expect(page.getByRole("heading", { name: "Part 92", exact: true })).toBeVisible();
+    const details = page.getByRole("button", { name: "Show or hide details", exact: true });
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+    const drawer = page.locator("#model-drawer");
 
-    const glided = () =>
-      page.evaluate(
-        () => window.cardGlides.filter((start) => start.startsWith("translate(")).length,
-      );
+    const animations = () => page.evaluate(() => window.paneCardAnimations);
+    const beforeOpeningDetails = await animations();
 
-    // Both panels carry the cards the same way: neither may jump them.
-    await page.getByRole("button", { name: "Show or hide details", exact: true }).click();
-    await expect.poll(glided).toBeGreaterThan(0);
-    await page.waitForFunction(() => document.documentElement.dataset.paneMoving === undefined);
-    const afterDetails = await glided();
-    await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
-    await expect.poll(glided).toBeGreaterThan(afterDetails);
+    await details.click();
+    await expect(drawer).toBeVisible();
+    await expect.poll(animations).toBeGreaterThan(beforeOpeningDetails);
+    const readLayout = () =>
+      page.evaluate(() => ({
+        paneWidth: document.getElementById("model-drawer")?.offsetWidth,
+        models: [
+          ...document.querySelectorAll<HTMLElement>(".library-model-content .library-virtual-row"),
+        ].map((row) => [row.clientWidth, row.style.gridTemplateColumns]),
+      }));
+    const openingLayout = await readLayout();
+    await drawer.evaluate(
+      (element) =>
+        new Promise<void>((resolve) => {
+          for (const animation of element.getAnimations()) animation.finish();
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
+    expect(await readLayout()).toEqual(openingLayout);
+    const beforeClosingDetails = await animations();
+    await details.click();
+    await expect(drawer).toBeHidden();
+    await expect.poll(animations).toBeGreaterThan(beforeClosingDetails);
+
+    const beforeClosingSidebar = await animations();
+    await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+    await page.waitForFunction(() => !document.documentElement.hasAttribute("data-pane-moving"));
+    expect(await animations()).toBe(beforeClosingSidebar);
+    await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "true");
+    await page.waitForFunction(() => !document.documentElement.hasAttribute("data-pane-moving"));
+    expect(await animations()).toBe(beforeClosingSidebar);
+    expect(await page.evaluate(() => window.paneCardsCrossingCells)).toEqual([]);
   });
 
   test("returns from the explicit full page to the same inspector", async ({ page }) => {
@@ -315,6 +357,45 @@ test.describe("Library inline inspector", () => {
       ]),
     );
     expect(problems).toEqual([]);
+  });
+
+  test("returns Escape focus to the model card after a pointer opening", async ({ page }) => {
+    await page.goto("/?c=maraio&type=all");
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+    await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+    const card = page
+      .getByRole("main")
+      .getByRole("link", { name: "skadis_kitchen-roll_screw", exact: true });
+    await card.click();
+    const drawer = page.locator("#model-drawer");
+    await expect(drawer).toBeVisible();
+
+    await page.keyboard.press("Escape");
+
+    await expect(drawer).toBeHidden();
+    await expect(card).toBeFocused();
+  });
+
+  test("returns Escape focus to the inspected card when details opened from the workspace", async ({
+    page,
+  }) => {
+    await page.goto("/?c=maraio&type=all");
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+    await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+    const main = page.getByRole("main");
+    const card = main.getByRole("link", { name: "skadis_kitchen-roll_screw", exact: true });
+    await expect(card).toBeVisible();
+    await main.focus();
+    await page.keyboard.press("Control+Alt+b");
+    const drawer = page.locator("#model-drawer");
+    await expect(drawer).toBeVisible();
+
+    await page.keyboard.press("Escape");
+
+    await expect(drawer).toBeHidden();
+    await expect(card).toBeFocused();
   });
 
   test("cancels failure before closing details before clearing selection", async ({ page }) => {

@@ -1454,7 +1454,26 @@ describe("PrinterDetailPage", () => {
     });
   });
 
+  it("shows the printer's status beside its name", async () => {
+    renderPrinter({ printer: aPrinter({ id: 4, name: "Voron", status: "printing" }) });
+
+    const heading = await screen.findByRole("heading", { name: "Voron", level: 1 });
+    expect(within(heading.parentElement!).getByText(/^printing$/i)).toBeVisible();
+  });
+
   describe("the printer's settings", () => {
+    it("links to the printer catalog when no presets exist", async () => {
+      const user = userEvent.setup();
+      renderPrinter({ routes: { "GET /api/v1/printer-profiles": json([]) } });
+      await user.click(await screen.findByRole("tab", { name: "Settings" }));
+
+      expect(await screen.findByText("Create a printer profile to assign it here.")).toBeVisible();
+      expect(screen.getByRole("link", { name: "Manage profiles" })).toHaveAttribute(
+        "href",
+        "/profiles?tab=printers",
+      );
+    });
+
     /** Open the Settings tab, which only an admin is shown. */
     async function openSettings(user: ReturnType<typeof userEvent.setup>) {
       await screen.findByText("Voron");
@@ -1462,9 +1481,56 @@ describe("PrinterDetailPage", () => {
       await screen.findByLabelText("Name");
     }
 
-    it("uses the local 3D printer artwork in Settings before model artwork is enabled", async () => {
+    it.each([
+      ["Provider material sync", "provider_material_sync_enabled"],
+      ["Require operator release", "operator_release_required"],
+    ])("saves %s only when the operator submits settings", async (label, key) => {
+      const user = userEvent.setup();
+      const before = aPrinter({
+        id: 4,
+        provider_material_sync_enabled: false,
+        operator_release_required: false,
+      });
+      const { requestsWithMethod } = renderPrinter({
+        printer: before,
+        routes: { "PATCH /api/v1/printers/4": json({ ...before, [key]: true }) },
+      });
+      await openSettings(user);
+      const toggle = screen.getByRole("switch", { name: label });
+
+      await user.click(toggle);
+      expect(toggle).toBeChecked();
+      expect(requestsWithMethod("PATCH")).toHaveLength(0);
+
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await waitFor(() =>
+        expect(JSON.parse(requestsWithMethod("PATCH").at(-1)?.body ?? "{}")).toMatchObject({
+          [key]: true,
+        }),
+      );
+    });
+
+    it("marks unsaved settings in both navigation surfaces", async () => {
+      const user = userEvent.setup();
+      renderPrinter();
+      await openSettings(user);
+      const nav = within(screen.getByRole("navigation", { name: "Settings sections" }));
+      expect(nav.queryByRole("img", { name: "Unsaved changes" })).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("switch", { name: "Require operator release" }));
+
+      expect(
+        within(nav.getByRole("button", { name: /Scheduling & release/ })).getByRole("img", {
+          name: "Unsaved changes",
+        }),
+      ).toBeVisible();
+      expect(screen.getAllByRole("status").some((el) => el.textContent === "Unsaved changes")).toBe(
+        true,
+      );
+    });
+
+    it("uses the local 3D printer artwork in the Machine panel before model artwork is enabled", async () => {
       renderPrinter({
-        at: "/?tab=settings",
         printer: aPrinter({ id: 4, provider: "bambu_lan", model_name: "Bambu Lab P1S" }),
       });
       const machine = await screen.findByRole("region", { name: "Machine" });
@@ -1474,23 +1540,22 @@ describe("PrinterDetailPage", () => {
       );
     });
 
-    it("hides the Settings portrait when artwork is turned off", async () => {
-      renderPrinter({ at: "/?tab=settings" });
+    it("hides the Machine portrait when artwork is turned off", async () => {
+      renderPrinter();
       const machine = await screen.findByRole("region", { name: "Machine" });
       act(() => writePrinterCardImagePreference(false));
       expect(machine.querySelector("img")).not.toBeInTheDocument();
     });
 
-    it("falls back to local artwork when the opt-in Settings portrait fails", async () => {
+    it("falls back to local artwork when the opt-in Machine portrait fails", async () => {
       writePrinterCardImagePreference(true);
       renderPrinter({
-        at: "/?tab=settings",
         printer: aPrinter({ id: 4, provider: "bambu_lan", model_name: "Bambu Lab P1S" }),
       });
       const machine = await screen.findByRole("region", { name: "Machine" });
       const image = machine.querySelector("img");
       expect(image).toHaveAttribute("src", expect.stringContaining("Bambu%20Lab%20P1S_cover.png"));
-      if (!image) throw new Error("No Settings portrait");
+      if (!image) throw new Error("No Machine portrait");
       fireEvent.error(image);
       expect(image).toHaveAttribute("src", "/images/printers/generic-fdm.png");
     });

@@ -1,3 +1,5 @@
+import { CircleAlert, CircleCheck } from "lucide-react";
+import { StatePill } from "@/components/state-pill";
 import { Button } from "@/components/ui/button";
 import { currentLocale, knownUiText, uiText } from "@/lib/locale";
 import { providerLabel } from "@/lib/printer-providers";
@@ -84,10 +86,9 @@ export function PrinterDiagnosticsPanel({
             role="status"
             className="flex flex-wrap items-baseline justify-between gap-2 text-sm"
           >
-            <strong
-              className={
-                result?.ok && !error ? "text-success" : error || result ? "text-warning" : undefined
-              }
+            <StatePill
+              icon={result?.ok && !error ? CircleCheck : error || result ? CircleAlert : undefined}
+              destructive={Boolean(error)}
             >
               {running
                 ? uiText("Running checks…")
@@ -96,7 +97,7 @@ export function PrinterDiagnosticsPanel({
                   : result
                     ? uiText(result.ok ? "Provider reachable" : "Needs attention")
                     : uiText("Diagnostics have not loaded yet.")}
-            </strong>
+            </StatePill>
             {checkedAt > 0 && (
               <time
                 className="text-xs text-muted-foreground"
@@ -131,8 +132,13 @@ export function PrinterDiagnosticsPanel({
                 {result.checks.map((check) => (
                   <tr key={check.name}>
                     <th scope="row">{checkLabel(check.name)}</th>
-                    <td className={check.ok ? "text-success" : "text-destructive"}>
-                      {uiText(check.ok ? "Passed" : "Failed")}
+                    <td>
+                      <StatePill
+                        icon={check.ok ? CircleCheck : CircleAlert}
+                        destructive={!check.ok}
+                      >
+                        {uiText(check.ok ? "Passed" : "Failed")}
+                      </StatePill>
                     </td>
                     {showDetail && (
                       <td>

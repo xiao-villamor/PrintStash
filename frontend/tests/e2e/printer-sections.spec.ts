@@ -102,6 +102,13 @@ test.describe("Bambu workspace", () => {
         .getByRole("button", { name: "Schedule window" }),
     ).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("bambu-materials-maintenance-dark.png") });
+    await page
+      .getByRole("region", { name: "Maintenance", exact: true })
+      .getByRole("button", { name: "Log service", exact: true })
+      .click();
+    await expect(page.getByRole("dialog", { name: "Log printer service" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Log printer service" })).toHaveCount(0);
 
     await page.getByRole("tab", { name: "Settings", exact: true }).click();
     const secret = page.getByLabel("LAN access code", { exact: false });

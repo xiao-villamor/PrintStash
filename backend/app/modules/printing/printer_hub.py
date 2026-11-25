@@ -11,6 +11,7 @@ The hub is intentionally simple — Stage 4 will likely replace it with Redis pu
 from __future__ import annotations
 
 import asyncio
+import math
 import tempfile
 import threading
 import time
@@ -47,7 +48,7 @@ from app.modules.administration.runtime_config import auto_mark_known_good_enabl
 from app.modules.ingestion import ingestion
 from app.modules.notifications import notifications
 from app.modules.printing import filament as filament_svc
-from app.modules.printing import print_results
+from app.modules.printing import print_results, production_costing
 from app.modules.printing.printer_provider import (
     PrinterProviderClient,
     ProviderError,
@@ -151,6 +152,52 @@ def _reported_float(value: Any) -> float | None:
         return float(value) if value is not None and value != "" else None
     except TypeError, ValueError:
         return None
+
+
+def _capture_job_measurements(
+    session: Session,
+    job: PrintJob,
+    print_stats: Dict[str, Any],
+    *,
+    preserve_started_measurements: bool,
+) -> bool:
+    duration = _reported_float(print_stats.get("total_duration"))
+    if duration is None:
+        duration = _reported_float(print_stats.get("print_duration"))
+    used_mm = _reported_float(print_stats.get("filament_used"))
+    changed = False
+    if duration is not None and math.isfinite(duration) and duration >= 0:
+        seconds = int(duration)
+        if preserve_started_measurements and job.actual_duration_s is not None:
+            seconds = max(seconds, job.actual_duration_s)
+        if seconds != job.actual_duration_s:
+            job.actual_duration_s = seconds
+            changed = True
+    if used_mm is not None and math.isfinite(used_mm) and used_mm >= 0:
+        if preserve_started_measurements and job.filament_used_mm is not None:
+            used_mm = max(used_mm, job.filament_used_mm)
+        if used_mm != job.filament_used_mm:
+            job.filament_used_mm = used_mm
+            material = print_results.material_type_for_file(session, job.file_id)
+            linked = print_results.linked_profile_for_spool(
+                session, job.spool_filament_id
+            )
+            job.filament_used_g = (
+                0.0
+                if used_mm == 0
+                else filament_svc.mm_to_grams(
+                    used_mm,
+                    material,
+                    diameter_mm=(
+                        linked.diameter_mm
+                        if linked and linked.diameter_mm
+                        else filament_svc.DEFAULT_DIAMETER_MM
+                    ),
+                    density_g_cm3=linked.density_g_cm3 if linked else None,
+                )
+            )
+            changed = True
+    return changed
 
 
 _BAMBU_ID_FIELDS = (
@@ -872,6 +919,7 @@ class PrinterHub:
                         active_job.error = "provider_job_disappeared"
                         active_job.finished_at = now
                         active_job.updated_at = now
+                        production_costing.finish_job_cost(active_job)
                         session.add(active_job)
                         notifications.enqueue_for_event(
                             session,
@@ -1199,6 +1247,12 @@ class PrinterHub:
             if new_state != job.state:
                 job.state = new_state
                 changed = True
+            if (
+                job.production_rates is not None
+                and new_state in (PrintJobState.FAILED, PrintJobState.CANCELLED)
+                and not 0 < progress < 1
+            ):
+                progress = job.progress
             if abs(progress - job.progress) > 1e-3:
                 job.progress = progress
                 changed = True
@@ -1218,33 +1272,15 @@ class PrinterHub:
                 job.finished_at = utcnow()
                 changed = True
                 just_finished = True
-                # Capture the measured outcome once, on the finishing tick.
-                duration = print_stats.get("total_duration") or print_stats.get(
-                    "print_duration"
+            if just_finished or job.production_rates is not None:
+                changed |= _capture_job_measurements(
+                    session,
+                    job,
+                    print_stats,
+                    preserve_started_measurements=job.production_rates is not None,
                 )
-                if duration:
-                    job.actual_duration_s = int(duration)
-                used_mm = print_stats.get("filament_used")
-                if used_mm:
-                    job.filament_used_mm = float(used_mm)
-                    material = print_results.material_type_for_file(
-                        session, job.file_id
-                    )
-                    # When a synced spool was selected, prefer its real
-                    # diameter/density over the static per-material table.
-                    linked = print_results.linked_profile_for_spool(
-                        session, job.spool_filament_id
-                    )
-                    job.filament_used_g = filament_svc.mm_to_grams(
-                        float(used_mm),
-                        material,
-                        diameter_mm=(
-                            linked.diameter_mm
-                            if linked and linked.diameter_mm
-                            else filament_svc.DEFAULT_DIAMETER_MM
-                        ),
-                        density_g_cm3=linked.density_g_cm3 if linked else None,
-                    )
+            if just_finished:
+                production_costing.finish_job_cost(job)
                 if new_state == PrintJobState.COMPLETED:
                     (
                         job.filament_g_effective,

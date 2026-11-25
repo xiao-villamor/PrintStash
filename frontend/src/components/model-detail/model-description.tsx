@@ -11,7 +11,7 @@ export function ModelDescription({ description }: { description: string }) {
     <div className="min-w-0 overflow-x-auto">
       <MarkdownView
         source={description}
-        className="wrap-anywhere prose-p:whitespace-pre-line prose-p:text-base"
+        className="wrap-anywhere prose-p:whitespace-pre-line prose-p:text-sm prose-headings:mb-1 prose-headings:mt-0 prose-headings:text-sm prose-headings:font-medium prose-headings:text-muted-foreground"
       />
     </div>
   );

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { formatPlateEstimate } from "./format-plate-estimate";
-import type { GcodePlateMetadata } from "@/lib/api/plates";
+import type { GcodePlateEstimateMetric } from "@/lib/api/plates";
 import { useFilePlates, useGcodePlates } from "@/lib/queries/file-plates";
 import { HashValue } from "./file-hashes";
 import { Button } from "@/components/ui/button";
@@ -238,7 +238,7 @@ export function RevisionCompare({
   const rightSliced = useGcodePlates(selectedRight.model_id, slicedId(selectedRight));
   function estimate(
     file: FileRead,
-    metric: keyof GcodePlateMetadata,
+    metric: GcodePlateEstimateMetric,
     format: (value: number) => string,
   ): Value {
     const data = file.id === selectedLeft.id ? leftSliced : rightSliced;
@@ -386,8 +386,16 @@ export function RevisionCompare({
               row("Bed temperature", (file) =>
                 numeric(file.metadata?.bed_temperature_c, formatTemperature),
               ),
-              row("Estimated time", (file) => estimate(file, "estimated_time_s", formatDuration)),
-              row("Filament weight", (file) => estimate(file, "filament_weight_g", formatGrams)),
+              row("Estimated time", (file) =>
+                estimate(file, "estimated_time_s", (value) =>
+                  formatPlateEstimate("estimated_time_s", value),
+                ),
+              ),
+              row("Filament weight", (file) =>
+                estimate(file, "filament_weight_g", (value) =>
+                  formatPlateEstimate("filament_weight_g", value),
+                ),
+              ),
               row("Filament cost", (file) => estimate(file, "filament_cost", formatCost)),
               row("LAYERS", (file) => numeric(file.metadata?.layer_count, formatNumber)),
               ...(selectedLeft.file_type === "resin" || selectedRight.file_type === "resin"

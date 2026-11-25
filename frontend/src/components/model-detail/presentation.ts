@@ -19,55 +19,73 @@ export type TabKey =
   | "overview"
   | "source"
   | "settings"
+  | "costing"
   | "revisions"
   | "files"
+  | "documentation"
   | "history"
   | "similar";
 
-export const TABS: { key: TabKey; label: string }[] = [
-  {
-    key: "overview",
-    get label() {
+// URLs keep their existing tab keys. Secondary destinations live within their parent tab.
+export const DETAIL_SECTIONS = [
+  "overview",
+  "files",
+  "documentation",
+  "revisions",
+  "settings",
+  "costing",
+  "history",
+  "source",
+  "similar",
+] as const satisfies readonly TabKey[];
+
+export function modelDetailSectionLabel(section: TabKey) {
+  switch (section) {
+    case "overview":
       return uiText("Overview");
-    },
-  },
-  {
-    key: "source",
-    get label() {
-      return uiText("Source info");
-    },
-  },
-  {
-    key: "settings",
-    get label() {
-      return uiText("Print settings");
-    },
-  },
-  {
-    key: "revisions",
-    get label() {
-      return uiText("Revisions");
-    },
-  },
-  {
-    key: "files",
-    get label() {
+    case "files":
       return uiText("Files");
-    },
-  },
-  {
-    key: "history",
-    get label() {
-      return uiText("History");
-    },
-  },
-  {
-    key: "similar",
-    get label() {
+    case "documentation":
+      return uiText("modelDetail.documentation");
+    case "revisions":
+      return uiText("modelDetail.print");
+    case "history":
+      return uiText("modelDetail.activity");
+    case "settings":
+      return uiText("Print settings");
+    case "costing":
+      return uiText("Costing");
+    case "source":
+      return uiText("Source and license");
+    case "similar":
       return uiText("similarity.tab");
-    },
-  },
-];
+  }
+}
+
+export function modelDetailParent(section: TabKey) {
+  switch (section) {
+    case "settings":
+    case "costing":
+      return "revisions";
+    case "source":
+    case "similar":
+      return "overview";
+    default:
+      return section;
+  }
+}
+
+const PROVIDER_NAMES = new Map([
+  ["makerworld", "MakerWorld"],
+  ["printables", "Printables"],
+  ["thingiverse", "Thingiverse"],
+  ["thangs", "Thangs"],
+  ["cults3d", "Cults3D"],
+]);
+
+export function sourceProviderName(provider: string) {
+  return PROVIDER_NAMES.get(provider) ?? provider;
+}
 
 export function normalizeRecommendedGcodeFiles<
   T extends Pick<FileRead, "id" | "file_type" | "version" | "is_recommended">,

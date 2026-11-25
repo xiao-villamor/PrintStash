@@ -1,5 +1,6 @@
 "use client";
 
+import { Check } from "lucide-react";
 import { forwardRef } from "react";
 
 import { cn } from "../lib/utils";
@@ -30,14 +31,12 @@ export const Checkbox = forwardRef<
         onChange(!checked);
       }}
       className={cn(
-        "flex h-5 w-5 items-center justify-center rounded border transition-[color,background-color,border-color,transform] duration-press active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-50",
-        checked
-          ? "border-primary bg-card text-primary"
-          : "border-input bg-card text-transparent hover:border-primary",
+        "flex h-5 w-5 items-center justify-center rounded border border-input transition-[background-color,border-color,transform] duration-press hover:border-ring active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-card disabled:pointer-events-none disabled:opacity-50 motion-reduce:transition-none motion-reduce:active:scale-100",
+        checked ? "bg-accent text-accent-foreground" : "bg-card",
         className,
       )}
     >
-      <span aria-hidden className="h-2.5 w-2.5 bg-current" />
+      {checked && <Check size={14} strokeWidth={2.5} aria-hidden />}
     </button>
   );
 });

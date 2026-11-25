@@ -1,13 +1,13 @@
 "use client";
 
 import { SETTINGS_BUTTON, SETTINGS_BUTTON_PRIMARY } from "@/components/settings-controls";
-import { SettingsGroupHead } from "@/components/settings-card";
+import { SettingsCard } from "@/components/settings-card";
 import { knownUiText, uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { providerFormError } from "@/lib/storage-provider-form";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AlertTriangle, Folder } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { vaultConfigOptions, useVaultConfigCommand } from "@/lib/queries/settings-config";
 import { storageProvidersOptions, storageReadDenied } from "@/lib/queries/settings-storage";
@@ -246,17 +246,11 @@ export function StorageConfigCard({
   if (loading) {
     return (
       <Localized>
-        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-          <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border">
-            <h3 className="text-sm font-semibold text-foreground">
-              {t("settings.currentStorage")}
-            </h3>
-          </div>
-          <div
-            role="status"
-            aria-label={t("settings.currentStorage")}
-            className="space-y-4 p-4 sm:p-5 lg:p-6"
-          >
+        <SettingsCard
+          title={t("settings.currentStorage")}
+          description={t("Where PrintStash keeps your Vault files.")}
+        >
+          <div role="status" aria-label={t("settings.currentStorage")} className="space-y-4 py-4">
             <Skeleton className="h-5 w-48" />
             <Skeleton className="h-4 w-3/4" />
             <div className="grid gap-3 sm:grid-cols-2">
@@ -265,7 +259,7 @@ export function StorageConfigCard({
             </div>
             <span className="sr-only">{uiText("Loading...")}</span>
           </div>
-        </div>
+        </SettingsCard>
       </Localized>
     );
   }
@@ -323,16 +317,11 @@ export function StorageConfigCard({
 
   return (
     <Localized>
-      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-        <SettingsGroupHead
-          icon={Folder}
-          level={3}
-          title={t("settings.currentStorage")}
-          description={t("Where PrintStash keeps your Vault files.")}
-          className="settings-card-head--flush"
-        />
-
-        <div className="space-y-5 px-4 pb-4 sm:pl-16 sm:pr-5">
+      <SettingsCard
+        title={t("settings.currentStorage")}
+        description={t("Where PrintStash keeps your Vault files.")}
+      >
+        <div className="space-y-4 py-2">
           {readError && enabled && (
             <div role="alert" className="space-y-2 text-sm text-destructive">
               <p>{t("settings.storageReadFailed")}</p>
@@ -624,6 +613,7 @@ export function StorageConfigCard({
           )}
         </div>
         <ConfirmModal
+          variant="default"
           open={enrollment !== null && !denied}
           onClose={() => {
             if (!enrolling) setEnrollment(null);
@@ -639,7 +629,7 @@ export function StorageConfigCard({
           })}
           confirmLabel={t("settings.storageEnrollConfirmAction")}
         />
-      </div>
+      </SettingsCard>
     </Localized>
   );
 }

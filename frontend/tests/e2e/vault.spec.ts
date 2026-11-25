@@ -457,7 +457,6 @@ test.describe("vault route", () => {
       page.getByRole("main").getByRole("link", { name: "skadis_kitchen-roll_screw", exact: true }),
     ).toBeVisible();
 
-    await page.getByRole("button", { name: "Sort models" }).click();
     await Promise.all([
       page.waitForRequest((request) => {
         const url = new URL(request.url());
@@ -466,7 +465,7 @@ test.describe("vault route", () => {
           url.searchParams.get("sort") === "success-desc"
         );
       }),
-      page.getByRole("menuitemradio", { name: "Best success rate" }).click(),
+      page.getByRole("combobox", { name: "Sort models" }).selectOption("success-desc"),
     ]);
     await expect(
       page.getByRole("main").getByRole("link", { name: "skadis_kitchen-roll_screw", exact: true }),
@@ -572,7 +571,7 @@ test.describe("vault route on a phone-width viewport", () => {
   test("keeps the three bar controls on one row of equal height", async ({ page }) => {
     await gotoMobileVault(page);
     const filters = page.getByRole("button", { name: "Filters", exact: true });
-    const sort = page.getByRole("button", { name: "Sort models", exact: true });
+    const sort = page.getByRole("combobox", { name: "Sort models", exact: true });
     const more = mobileMore(page);
 
     await expectTouchTarget(filters);
@@ -608,17 +607,16 @@ test.describe("vault route on a phone-width viewport", () => {
     await gotoMobileVault(page);
 
     await expect(page.getByRole("button", { name: "Filters", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Sort models", exact: true })).toBeVisible();
+    await expect(page.getByRole("combobox", { name: "Sort models", exact: true })).toBeVisible();
   });
 
   test("reports the sort it applied from the toolbar", async ({ page }) => {
     await gotoMobileVault(page);
-    const sort = page.getByRole("button", { name: "Sort models", exact: true });
+    const sort = page.getByRole("combobox", { name: "Sort models", exact: true });
 
-    await sort.click();
-    await page.getByRole("menuitemradio", { name: "Best success rate" }).click();
+    await sort.selectOption("success-desc");
 
-    await expect(sort).toContainText("Best success rate");
+    await expect(sort).toHaveValue("success-desc");
   });
 
   test("keeps remaining secondary actions in the More menu", async ({ page }) => {

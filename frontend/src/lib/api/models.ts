@@ -119,6 +119,13 @@ export function starModel(id: number): Promise<ModelStarRead> {
   return sendJson<ModelStarRead>(`/api/v1/models/${id}/star`, "PUT", {});
 }
 
+/** Recreate a Model's multi-angle views; the producers do the work later. */
+export function regenerateModelPreviews(id: number): Promise<{ queued: number }> {
+  return requestApi<{ queued: number }>(`/api/v1/models/${id}/previews/regenerate`, {
+    method: "POST",
+  });
+}
+
 export async function unstarModel(id: number): Promise<ModelStarRead> {
   const path = `/api/v1/models/${id}/star`;
   return requestApi<ModelStarRead>(path, { method: "DELETE" });

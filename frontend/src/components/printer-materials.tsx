@@ -7,6 +7,7 @@ import { useUiLocale } from "@/lib/i18n";
 import { useId, useState } from "react";
 import { createPortal } from "react-dom";
 import { Modal } from "@/components/ui/modal";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import "./printer-detail-content.css";
 
 import { usePrinterMaterials } from "@/features/printers/materials";
@@ -566,31 +567,20 @@ function MaterialEditor({
           </div>
         )}
       </Modal>
-      <Modal
+      <ConfirmModal
         open={loadedTarget !== null}
-        onClose={() => {
-          if (!busy) setLoadedTarget(null);
+        onClose={() => setLoadedTarget(null)}
+        onConfirm={() => {
+          if (loadedTarget) persistSlot(loadedTarget);
         }}
+        variant="default"
+        busy={busy}
+        confirmDisabled={disabled}
         title={uiText("Set {value1} as loaded?", { value1: loadedTarget?.label ?? "" })}
         description={uiText(
           "This updates manually recorded material state. It does not change material physically loaded in the printer.",
         )}
-        footer={
-          <>
-            <Button variant="outline" disabled={busy} onClick={() => setLoadedTarget(null)}>
-              {uiText("Cancel")}
-            </Button>
-            <Button
-              loading={busy}
-              disabled={disabled}
-              onClick={() => {
-                if (loadedTarget) persistSlot(loadedTarget);
-              }}
-            >
-              {uiText("Confirm loaded feed")}
-            </Button>
-          </>
-        }
+        confirmLabel={uiText("Confirm loaded feed")}
       >
         {reviewContent}
         <dl className="printer-reference-facts">
@@ -607,7 +597,7 @@ function MaterialEditor({
             <dd>{loadedTarget?.material_type || uiText("Unknown")}</dd>
           </div>
         </dl>
-      </Modal>
+      </ConfirmModal>
     </div>
   );
 }

@@ -116,7 +116,12 @@ function renderHistory(
 
 /** Open the add-a-print form. */
 async function openForm(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole("button", { name: "Add record" }));
+  await user.click(await screen.findByRole("button", { name: "Record result" }));
+}
+
+async function chooseVoron(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole("button", { name: /^Printer$/ }));
+  await user.click(await screen.findByRole("option", { name: /^Voron$/ }));
 }
 
 beforeEach(() => {
@@ -128,17 +133,41 @@ afterEach(() => {
 });
 
 describe("PrintHistorySection", () => {
+  it("labels a partial stopped-run cost in its original currency", async () => {
+    renderHistory({
+      jobs: [
+        aPrintJob({
+          state: "cancelled",
+          production_cost: {
+            currency: "EUR",
+            total: 0.25,
+            material: null,
+            machine: 0.25,
+            estimated: true,
+          },
+        }),
+      ],
+    });
+
+    expect(await screen.findByText("Estimated partial cost · €0.25")).toBeVisible();
+    expect(screen.getByText("Machine · €0.25")).toBeVisible();
+  });
+
   describe("listing prints", () => {
     it("lists the prints already recorded", async () => {
       renderHistory();
 
       expect(await screen.findAllByText(/Voron/)).not.toHaveLength(0);
+      expect(screen.getByRole("heading", { name: /Print history · 1/ })).toBeVisible();
+      expect(screen.getByText("Success")).toBeVisible();
     });
 
     it("says so when nothing has been printed", async () => {
       renderHistory({ jobs: [] });
 
-      await waitFor(() => expect(screen.queryByText(/3600/)).toBeNull());
+      expect(await screen.findByText("No print history yet.")).toBeVisible();
+      expect(screen.getByText(/Record a result after each print/)).toBeVisible();
+      expect(screen.getByRole("heading", { name: /Print history · 0/ })).toBeVisible();
     });
   });
 
@@ -149,7 +178,7 @@ describe("PrintHistorySection", () => {
 
       await openForm(user);
 
-      expect(screen.getByRole("dialog", { name: "Add print record" })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: "Record result" })).toBeInTheDocument();
     });
 
     it("offers importing from a printer instead", async () => {
@@ -168,7 +197,8 @@ describe("PrintHistorySection", () => {
         routes: { "POST /api/v1/models/1/print-jobs": json(aPrintJob({ id: 31 })) },
       });
       await openForm(user);
-      await user.click(screen.getByRole("radio", { name: "Voron" }));
+      await user.click(screen.getByRole("radio", { name: "Success" }));
+      await chooseVoron(user);
 
       await user.click(screen.getByRole("button", { name: "Save record" }));
 
@@ -179,6 +209,45 @@ describe("PrintHistorySection", () => {
       );
     });
 
+    it("validates the next required result field before saving", async () => {
+      const user = userEvent.setup();
+      renderHistory();
+      await openForm(user);
+      const save = screen.getByRole("button", { name: "Save record" });
+
+      expect(save).toBeDisabled();
+      expect(screen.getByText("Choose the observed outcome.")).toBeVisible();
+      expect(save).toHaveAccessibleDescription("Choose the observed outcome.");
+
+      await user.click(screen.getByRole("radio", { name: "Failed" }));
+      expect(screen.getByText("Choose the printer that ran it.")).toBeVisible();
+      expect(save).toBeDisabled();
+
+      await chooseVoron(user);
+      expect(save).toBeEnabled();
+      expect(screen.queryByText("Choose the printer that ran it.")).toBeNull();
+    });
+
+    it("submits the chosen print result", async () => {
+      const user = userEvent.setup();
+      const view = renderHistory({
+        routes: { "POST /api/v1/models/1/print-jobs": json(aPrintJob({ id: 31 })) },
+      });
+      await openForm(user);
+      await user.click(screen.getByRole("radio", { name: "Cancelled" }));
+      await chooseVoron(user);
+      await user.type(screen.getByRole("textbox", { name: "What went wrong" }), "Out of filament");
+      await user.click(screen.getByRole("button", { name: "Save record" }));
+
+      await waitFor(() => expect(view.requestsWithMethod("POST")).toHaveLength(1));
+      expect(JSON.parse(view.requestsWithMethod("POST")[0].body ?? "{}")).toMatchObject({
+        printer_id: 4,
+        file_id: 20,
+        state: "cancelled",
+        error: "Out of filament",
+      });
+    });
+
     it("tells the page about the print it recorded", async () => {
       // The list above is the caller's state, so a job the section keeps to
       // itself is one the user cannot see until a reload.
@@ -187,7 +256,8 @@ describe("PrintHistorySection", () => {
         routes: { "POST /api/v1/models/1/print-jobs": json(aPrintJob({ id: 31 })) },
       });
       await openForm(user);
-      await user.click(screen.getByRole("radio", { name: "Voron" }));
+      await user.click(screen.getByRole("radio", { name: "Success" }));
+      await chooseVoron(user);
 
       await user.click(screen.getByRole("button", { name: "Save record" }));
 
@@ -199,7 +269,7 @@ describe("PrintHistorySection", () => {
     it("focuses the failure note from a revision shortcut", async () => {
       renderHistory({ initialEntry: { fileId: 20, state: "failed" } });
 
-      expect(await screen.findByRole("textbox", { name: "Error (opt.)" })).toHaveFocus();
+      expect(await screen.findByRole("textbox", { name: "What went wrong" })).toHaveFocus();
       expect(screen.getByRole("radio", { name: "Failed" })).toBeChecked();
     });
 
@@ -213,8 +283,8 @@ describe("PrintHistorySection", () => {
           ),
         },
       });
-      await user.click(await screen.findByRole("radio", { name: "Voron" }));
-      await user.type(screen.getByRole("textbox", { name: "Error (opt.)" }), "Corner lifted");
+      await chooseVoron(user);
+      await user.type(screen.getByRole("textbox", { name: "What went wrong" }), "Corner lifted");
 
       await user.keyboard("{Control>}{Enter}{/Control}");
 
@@ -231,14 +301,14 @@ describe("PrintHistorySection", () => {
       const user = userEvent.setup();
       const view = renderHistory({ initialEntry: { fileId: 20, state: "failed" } });
       await user.type(
-        await screen.findByRole("textbox", { name: "Error (opt.)" }),
+        await screen.findByRole("textbox", { name: "What went wrong" }),
         "Corner lifted",
       );
 
       await user.keyboard("{Control>}{Enter}{/Control}");
 
       expect(view.requestsWithMethod("POST")).toEqual([]);
-      expect(screen.getByRole("textbox", { name: "Error (opt.)" })).toHaveValue("Corner lifted");
+      expect(screen.getByRole("textbox", { name: "What went wrong" })).toHaveValue("Corner lifted");
       expect(screen.getByRole("button", { name: "Save record" })).toBeDisabled();
     });
   });
@@ -254,7 +324,7 @@ describe("PrintHistorySection", () => {
         },
       });
       await user.click(screen.getByRole("button", { name: "Import from printer" }));
-      await user.click(await screen.findByRole("radio", { name: "Voron" }));
+      await chooseVoron(user);
 
       await user.click(screen.getByRole("button", { name: /Fetch & Import/i }));
 
@@ -273,7 +343,7 @@ describe("PrintHistorySection", () => {
       });
       await user.click(screen.getByRole("button", { name: "Import from printer" }));
       await user.click(await screen.findByRole("button", { name: "Add record manually" }));
-      expect(screen.getByRole("dialog", { name: "Add print record" })).toBeVisible();
+      expect(screen.getByRole("dialog", { name: "Record result" })).toBeVisible();
     });
     it("cannot import until a printer is chosen", async () => {
       // The import is scoped to one machine, so "which printer?" has no default.
@@ -292,7 +362,7 @@ describe("PrintHistorySection", () => {
         routes: { "POST /api/v1/models/1/print-jobs/import-printer/4": json([]) },
       });
       await user.click(screen.getByRole("button", { name: "Import from printer" }));
-      await user.click(await screen.findByRole("radio", { name: "Voron" }));
+      await chooseVoron(user);
 
       await user.click(screen.getByRole("button", { name: /Fetch & Import/i }));
 

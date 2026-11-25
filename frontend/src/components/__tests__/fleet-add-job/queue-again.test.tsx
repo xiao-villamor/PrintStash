@@ -88,7 +88,7 @@ describe("Queue again", () => {
     const app = setup();
     await waitFor(() => expect(screen.getByRole("button", { name: "Queue again" })).toBeEnabled());
     await userEvent.click(screen.getByRole("button", { name: "Queue again" }));
-    const save = await screen.findByRole("button", { name: "Save job" });
+    const save = await screen.findByRole("button", { name: "Add to queue" });
     await waitFor(() => expect(save).toBeEnabled());
     await userEvent.click(save);
 
@@ -189,7 +189,7 @@ describe("Queue again", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Queue again" })).toBeEnabled());
     await userEvent.click(screen.getByRole("button", { name: "Queue again" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("This Revision cannot be queued");
-    expect(screen.getByRole("button", { name: "Save job" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add to queue" })).toBeDisabled();
   });
 
   it("keeps Save disabled if the Model grant is revoked while the dialog opens", async () => {
@@ -204,11 +204,11 @@ describe("Queue again", () => {
     });
     await waitFor(() => expect(screen.getByRole("button", { name: "Queue again" })).toBeEnabled());
     await userEvent.click(screen.getByRole("button", { name: "Queue again" }));
-    expect(screen.getByRole("button", { name: "Save job" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add to queue" })).toBeDisabled();
 
     await act(async () => pending.resolve(json(aModel({ ...model, effective_role: "view" }))));
     expect(await screen.findByRole("alert")).toHaveTextContent("This Revision cannot be queued");
-    expect(screen.getByRole("button", { name: "Save job" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add to queue" })).toBeDisabled();
     expect(app.requestsWithMethod("POST")).toHaveLength(0);
   });
 
@@ -217,7 +217,7 @@ describe("Queue again", () => {
     const app = setup(completed, { "POST /api/v1/fleet/compatibility": () => pending.promise });
     await waitFor(() => expect(screen.getByRole("button", { name: "Queue again" })).toBeEnabled());
     await userEvent.click(screen.getByRole("button", { name: "Queue again" }));
-    const save = await screen.findByRole("button", { name: "Save job" });
+    const save = await screen.findByRole("button", { name: "Add to queue" });
     await waitFor(() => expect(save).toBeEnabled());
     await userEvent.click(save);
     await act(async () => clearLogin());

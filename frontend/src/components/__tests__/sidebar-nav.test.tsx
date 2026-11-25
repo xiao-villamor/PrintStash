@@ -163,10 +163,12 @@ describe("SidebarNav", () => {
   });
 
   describe("what a member may reach", () => {
-    it("offers printers to an admin", () => {
+    it("shows the 3D printer icon on the admin's Printers link", () => {
       renderNav({ auth: adminSession() });
 
-      expect(screen.getByRole("link", { name: /Printers/i })).toBeInTheDocument();
+      const link = screen.getByRole("link", { name: "Printers" });
+      expect(link).toHaveAttribute("href", "/printers");
+      expect(link.querySelector("svg")).toHaveClass("lucide-printer-3d");
     });
 
     it("leaves printers out for a member", () => {

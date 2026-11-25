@@ -70,11 +70,15 @@ export interface ModalProps {
   closeLabel: string;
   title?: string;
   labelledBy?: string;
-  children: ReactNode;
+  children?: ReactNode;
   className?: string;
   description?: ReactNode;
+  /** Controls shown in the header row, between the title and the close button. */
+  headerExtra?: ReactNode;
   footer?: ReactNode;
   bodyClassName?: string;
+  variant?: "default" | "confirmation";
+  dismissible?: boolean;
 }
 
 export function Modal({
@@ -86,16 +90,24 @@ export function Modal({
   children,
   className,
   description,
+  headerExtra,
   footer,
   bodyClassName,
+  variant = "default",
+  dismissible = true,
 }: ModalProps) {
   const titleId = useId();
   const descriptionId = useId();
+  const confirmation = variant === "confirmation";
+  function dismiss() {
+    if (dismissible) onClose();
+  }
   const closeButton = (
     <button
       type="button"
-      onClick={onClose}
-      className="-mr-1.5 -mt-1 flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={dismiss}
+      disabled={!dismissible}
+      className="-mr-1.5 -mt-1 flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
       aria-label={closeLabel}
     >
       <X className="h-4 w-4" />
@@ -104,37 +116,69 @@ export function Modal({
   return (
     <ModalShell
       open={open}
-      onClose={onClose}
+      onClose={dismiss}
       labelledBy={labelledBy ?? (title ? titleId : undefined)}
       describedBy={description ? descriptionId : undefined}
       className={cn(
-        "flex max-h-[calc(100dvh-32px)] w-full max-w-160 flex-col overflow-hidden rounded-lg border border-border-strong bg-card text-card-foreground shadow-dialog",
+        "flex max-h-[calc(100dvh-32px)] w-full flex-col overflow-hidden rounded-lg border border-border-strong bg-card text-card-foreground shadow-dialog",
+        confirmation ? "max-w-120" : "max-w-160",
         className,
       )}
     >
       {title ? (
-        <div className="flex shrink-0 items-start gap-4 border-b border-border px-6 pb-5 pt-6">
+        <div
+          className={cn(
+            "flex items-start gap-4 px-6",
+            confirmation
+              ? "min-h-0 overflow-y-auto py-4"
+              : "shrink-0 border-b border-border pb-5 pt-6",
+          )}
+        >
           <div className="min-w-0 flex-1">
-            <h2 id={titleId} className="text-lg font-semibold leading-snug tracking-tight">
+            <h2
+              id={titleId}
+              className="wrap-anywhere text-lg font-semibold leading-snug tracking-tight"
+            >
               {title}
             </h2>
             {description && (
               <div
                 id={descriptionId}
-                className="mt-1.5 max-w-[65ch] text-[13px] leading-normal text-muted-foreground"
+                className={cn(
+                  "max-w-[65ch] wrap-anywhere",
+                  confirmation
+                    ? "mt-2 text-sm leading-relaxed text-card-foreground"
+                    : "mt-1.5 text-[13px] leading-normal text-muted-foreground",
+                )}
               >
                 {description}
               </div>
             )}
           </div>
+          {headerExtra}
           {closeButton}
         </div>
       ) : (
         <div className="absolute right-4 top-4">{closeButton}</div>
       )}
-      <div className={cn("min-h-0 overflow-y-auto p-6", bodyClassName)}>{children}</div>
+      {(!confirmation || children != null) && (
+        <div
+          className={cn(
+            "min-h-0 overflow-y-auto",
+            confirmation ? "px-6 pb-5" : "p-6",
+            bodyClassName,
+          )}
+        >
+          {children}
+        </div>
+      )}
       {footer && (
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border bg-plate px-6 py-4">
+        <div
+          className={cn(
+            "flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border px-6",
+            confirmation ? "bg-card py-3" : "bg-plate py-4",
+          )}
+        >
           {footer}
         </div>
       )}

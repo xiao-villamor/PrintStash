@@ -21,15 +21,27 @@ from fastapi.responses import (
 from sqlmodel import Session, select
 
 from app.api.artifact_responses import delivery_request, render_delivery
+from app.api.edit_preconditions import edit_precondition
 from app.core.config import settings
+from app.core.errors import ErrorKind, OperationError
 from app.core.http import get_or_404
 from app.core.logging import get_logger
 from app.core.security import get_current_user, require_auth, require_user
-from app.db.models import CollectionRole, DerivativeKind, File, FileType, Model, User
+from app.db.models import (
+    ArtifactMaterialRequirement,
+    CollectionRole,
+    DerivativeKind,
+    File,
+    FileType,
+    Model,
+    User,
+)
 from app.db.scopes import live
 from app.db.session import get_session
+from app.modules.administration import runtime_config
 from app.modules.derivatives.sliced_reads import meshless_archives
 from app.modules.identity import auth, rbac
+from app.modules.library import edit_preconditions
 from app.modules.library.model_views.thumbnails import thumbnail_version
 from app.modules.media import thumbnail
 from app.modules.media.preview_contracts import PreviewImageKind
@@ -40,6 +52,7 @@ from app.modules.media.three_mf_preview import (
     list_embedded_gcode_plates,
     read_embedded_gcode_path,
 )
+from app.modules.printing.production_costing import piece_costs
 from app.modules.storage.artifact_content import (
     ArtifactContentError,
     ArtifactContentMissingError,
@@ -53,8 +66,14 @@ from app.modules.storage.artifact_delivery import (
 )
 from app.modules.storage.delivery_contracts import content_disposition
 from app.modules.storage.storage_backend.runtime import get_backend
+from app.schemas.editing import EditPrecondition
 from app.schemas.jobs import DerivativeRead
 from app.schemas.plates import FilePlatesRead, GcodePlateIdentityRead, GcodePlatesRead
+from app.schemas.production_costing import (
+    ArtifactCostingRead,
+    ArtifactCostingUpdate,
+    ProductionEstimate,
+)
 from app.schemas.project_profiles import FileProjectProfileRead
 
 logger = get_logger(__name__)
@@ -311,6 +330,109 @@ def archive_image(
         media_type=media_type,
         headers=headers,
     )
+
+
+def _costing_file(session: Session, file_id: int, user: User) -> tuple[File, Model]:
+    row = session.exec(
+        select(File, Model)
+        .join(Model, Model.id == File.model_id)
+        .where(File.id == file_id, live(File), live(Model))
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="file_not_found")
+    artifact, model = row
+    rbac.require_model_collection_role(
+        session, user, model.collection_id, CollectionRole.VIEW
+    )
+    if artifact.file_type not in {FileType.STL, FileType.GCODE}:
+        raise OperationError("artifact_costing_unsupported", kind=ErrorKind.INVALID)
+    return artifact, model
+
+
+def _costing_read(
+    session: Session, artifact: File, model: Model, currency: str
+) -> ArtifactCostingRead:
+    estimate = (
+        ProductionEstimate.model_validate(artifact.production_estimate)
+        if artifact.production_estimate is not None
+        else None
+    )
+    metadata = (
+        artifact.file_metadata
+        if estimate is None and artifact.file_type == FileType.GCODE
+        else None
+    )
+    tools = (
+        session.exec(
+            select(ArtifactMaterialRequirement.tool_index)
+            .where(ArtifactMaterialRequirement.file_id == artifact.id)
+            .limit(2)
+        ).all()
+        if metadata is not None
+        else []
+    )
+    return ArtifactCostingRead(
+        slicer_filament_cost=metadata.filament_cost if metadata is not None else None,
+        multiple_filaments=len(tools) > 1,
+        currency=currency,
+        estimate=estimate,
+        costs=piece_costs(estimate) if estimate is not None else None,
+        edit_epoch=model.edit_epoch,
+        edit_version=model.edit_version,
+    )
+
+
+@router.get(
+    "/{file_id}/production-cost", summary="Read a per-piece production estimate"
+)
+def get_production_cost(
+    file_id: int,
+    user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> ArtifactCostingRead:
+    artifact, model = _costing_file(session, file_id, user)
+    return _costing_read(session, artifact, model, runtime_config.currency(session))
+
+
+@router.put(
+    "/{file_id}/production-cost",
+    summary="Save a per-piece production estimate",
+    dependencies=[Depends(require_auth)],
+)
+def put_production_cost(
+    file_id: int,
+    payload: ArtifactCostingUpdate,
+    user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+    precondition: EditPrecondition = Depends(edit_precondition),
+) -> ArtifactCostingRead:
+    artifact, model = _costing_file(session, file_id, user)
+    if precondition.if_match is None:
+        raise OperationError(
+            "edit_precondition_required", kind=ErrorKind.PRECONDITION_REQUIRED
+        )
+    edit_preconditions.claim(session, user, model, precondition)
+    session.refresh(artifact)
+    if artifact.deleted_at is not None or artifact.model_id != model.id:
+        raise OperationError("edit_conflict", kind=ErrorKind.PRECONDITION_FAILED)
+    vault_currency = runtime_config.currency(session)
+    if payload.estimate is None:
+        artifact.production_estimate = None
+    else:
+        currency = (
+            ProductionEstimate.model_validate(artifact.production_estimate).currency
+            if artifact.production_estimate is not None
+            else vault_currency
+        )
+        artifact.production_estimate = ProductionEstimate(
+            **payload.estimate.model_dump(), currency=currency
+        ).model_dump(mode="json")
+    session.add(artifact)
+    session.flush()
+    session.refresh(model)
+    receipt = _costing_read(session, artifact, model, vault_currency)
+    session.commit()
+    return receipt
 
 
 @router.get(

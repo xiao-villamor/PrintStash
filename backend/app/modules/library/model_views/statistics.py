@@ -29,7 +29,11 @@ from app.schemas.models import (
     CollectionStatRead,
     FilamentStatRead,
     ModelStatRead,
+    PrintDataCoverageRead,
+    PrinterFailuresRead,
+    PrinterFilamentStatRead,
     PrinterStatRead,
+    PrintOutcomesRead,
     PrintStatisticsRead,
     StorageUsageRead,
     TimeBucketRead,
@@ -147,7 +151,7 @@ _STATS_PERIODS: dict[str, Optional[int]] = {
 
 
 def print_statistics(session: Session, period: str) -> PrintStatisticsRead:
-    """Aggregate *completed* print jobs over a preset time window.
+    """Aggregate print outcomes and completed-job costs over a preset time window.
 
     Reads the cost and effective filament grams that were resolved and
     frozen once, at completion time (see
@@ -167,21 +171,25 @@ def print_statistics(session: Session, period: str) -> PrintStatisticsRead:
     # Manually-logged jobs may not set finished_at; fall back to created_at so
     # they still land in the right window.
     anchor = func.coalesce(PrintJob.finished_at, PrintJob.created_at)
+    printer_label = func.coalesce(Printer.name, PrintJob.printer_name)
 
     query = (
         select(
             PrintJob.cost,
             PrintJob.filament_g_effective,
+            PrintJob.filament_used_g,
             PrintJob.actual_duration_s,
             PrintJob.finished_at,
             PrintJob.created_at,
             Model.collection_id,
             Model.id,
             Model.name,
+            Model.hash,
             Collection.name,
             Collection.path,
             Printer.id,
             Printer.name,
+            printer_label,
             Metadata.material_type,
             Metadata.material_brand,
             Metadata.estimated_time_s,
@@ -201,6 +209,55 @@ def print_statistics(session: Session, period: str) -> PrintStatisticsRead:
 
     rows = session.exec(query).all()
 
+    terminal = select(PrintJob.state, func.count()).where(
+        live(PrintJob),
+        PrintJob.state.in_((PrintJobState.FAILED, PrintJobState.CANCELLED)),  # type: ignore[attr-defined]
+    )
+    if start_at is not None:
+        terminal = terminal.where(anchor >= start_at)  # type: ignore[operator]
+    terminal_counts = dict(session.exec(terminal.group_by(PrintJob.state)).all())
+    failed = terminal_counts.get(PrintJobState.FAILED, 0)
+
+    printer_failures: list[PrinterFailuresRead] = []
+    if failed:
+        failure_count = func.sum(
+            case((PrintJob.state == PrintJobState.FAILED, 1), else_=0)
+        )
+        completion_count = func.sum(
+            case((PrintJob.state == PrintJobState.COMPLETED, 1), else_=0)
+        )
+        failures = (
+            select(PrintJob.printer_id, printer_label, failure_count, completion_count)
+            .outerjoin(Printer, Printer.id == PrintJob.printer_id)
+            .where(
+                live(PrintJob),
+                PrintJob.state.in_((PrintJobState.FAILED, PrintJobState.COMPLETED)),  # type: ignore[attr-defined]
+            )
+            .group_by(PrintJob.printer_id, printer_label)
+            .having(failure_count > 0)
+            .order_by(
+                failure_count.desc(),
+                func.coalesce(PrintJob.printer_id, 0),
+                printer_label,
+            )
+            .limit(10)
+        )
+        if start_at is not None:
+            failures = failures.where(anchor >= start_at)  # type: ignore[operator]
+        printer_failures = [
+            PrinterFailuresRead(
+                printer_id=printer_id,
+                name=name,
+                failed=failure_count,
+                completed=completion_count,
+            )
+            for printer_id, name, failure_count, completion_count in session.exec(
+                failures
+            )
+        ]
+
+    recorded_time = slicer_time = recorded_filament = slicer_filament = known_cost = 0
+
     total_cost = 0.0
     has_cost = False
     total_filament_g = 0.0
@@ -213,6 +270,7 @@ def print_statistics(session: Session, period: str) -> PrintStatisticsRead:
 
     collection_acc: dict[Optional[int], dict] = {}
     filament_acc: dict[tuple, dict] = {}
+    printer_filament_acc: dict[tuple, dict] = {}
     model_acc: dict[int, dict] = {}
     printer_acc: dict[Optional[int], dict] = {}
     time_acc: dict[str, dict] = {}
@@ -220,23 +278,34 @@ def print_statistics(session: Session, period: str) -> PrintStatisticsRead:
     for (
         cost,
         grams,
+        measured_grams,
         duration,
         finished_at,
         created_at,
         cid,
         model_id,
         model_name,
+        model_hash,
         cname,
         cpath,
         printer_id,
+        registered_printer_name,
         printer_name,
         mtype,
         mbrand,
         estimated_time_s,
     ) in rows:
-        if duration is None:
+        if duration is not None:
+            recorded_time += 1
+        elif estimated_time_s is not None:
+            slicer_time += 1
             duration = estimated_time_s
+        if measured_grams is not None:
+            recorded_filament += 1
+        elif grams is not None:
+            slicer_filament += 1
         if cost is not None:
+            known_cost += 1
             total_cost += cost
             has_cost = True
         if grams is not None:
@@ -263,19 +332,20 @@ def print_statistics(session: Session, period: str) -> PrintStatisticsRead:
             c["total_cost"] += cost
             c["has_cost"] = True
 
-        model_stat = model_acc.setdefault(
-            model_id,
-            {"name": model_name, "print_count": 0, "total_g": 0.0, "has_g": False},
-        )
-        model_stat["print_count"] += 1
-        if grams is not None:
-            model_stat["total_g"] += grams
-            model_stat["has_g"] = True
+        if model_hash != SENTINEL_MODEL_HASH:
+            model_stat = model_acc.setdefault(
+                model_id,
+                {"name": model_name, "print_count": 0, "total_g": 0.0, "has_g": False},
+            )
+            model_stat["print_count"] += 1
+            if grams is not None:
+                model_stat["total_g"] += grams
+                model_stat["has_g"] = True
 
         printer_stat = printer_acc.setdefault(
             printer_id,
             {
-                "name": printer_name or "Unassigned / manual",
+                "name": registered_printer_name or "Unassigned / manual",
                 "print_count": 0,
                 "print_time_s": 0,
             },
@@ -304,6 +374,17 @@ def print_statistics(session: Session, period: str) -> PrintStatisticsRead:
         if cost is not None:
             f["total_cost"] += cost
             f["has_cost"] = True
+
+        if grams is not None:
+            usage = printer_filament_acc.setdefault(
+                (printer_id, printer_name, mtype, mbrand),
+                {
+                    "total_g": 0.0,
+                    "print_count": 0,
+                },
+            )
+            usage["total_g"] += grams
+            usage["print_count"] += 1
 
         # Cost-over-time buckets keyed by day (≤90d) or month (longer/all).
         when = ensure_utc(finished_at or created_at)
@@ -400,4 +481,30 @@ def print_statistics(session: Session, period: str) -> PrintStatisticsRead:
         top_models=top_models,
         top_printers=top_printers,
         cost_over_time=cost_over_time,
+        outcomes=PrintOutcomesRead(
+            failed=failed, cancelled=terminal_counts.get(PrintJobState.CANCELLED, 0)
+        ),
+        printer_failures=printer_failures,
+        printer_filaments=[
+            PrinterFilamentStatRead(
+                printer_id=printer_id,
+                printer_name=printer_name,
+                material_type=material,
+                material_brand=brand,
+                print_count=usage["print_count"],
+                total_g=round(usage["total_g"], 2),
+            )
+            for (printer_id, printer_name, material, brand), usage in sorted(
+                printer_filament_acc.items(),
+                key=lambda pair: pair[1]["total_g"],
+                reverse=True,
+            )[:10]
+        ],
+        data_coverage=PrintDataCoverageRead(
+            recorded_time=recorded_time,
+            slicer_time=slicer_time,
+            recorded_filament=recorded_filament,
+            slicer_filament=slicer_filament,
+            known_cost=known_cost,
+        ),
     )

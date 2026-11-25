@@ -48,10 +48,14 @@
 .keyboard-help {
   box-shadow: 0 24px 60px var(--dialog-shadow);
 }
+/* Groups flow down the columns, so a short group never leaves a gap beside it. */
 .keyboard-help-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  column-width: 240px;
+  column-count: 2;
   column-gap: 28px;
+}
+.keyboard-help-grid > section {
+  break-inside: avoid;
 }
 .shell-route-viewport {
   padding-bottom: calc(64px + env(safe-area-inset-bottom));

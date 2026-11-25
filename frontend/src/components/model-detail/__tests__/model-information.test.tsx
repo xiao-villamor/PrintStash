@@ -2,25 +2,19 @@
  * stays zero, and untrusted legacy source URLs never become executable links. */
 import { renderApp, json } from "@/test-support/render";
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ModelGeometry, ModelInformation } from "../model-information";
-import { aMetadata, aModel, aRevision } from "@/test-support/factories";
-import type { FileRead } from "@/types";
+import { ModelInformation } from "../model-information";
+import userEvent from "@testing-library/user-event";
+import { aModel, aTag } from "@/test-support/factories";
 
-function show(
-  sourceUrl: string | null = null,
-  canEdit = false,
-  description: string | null = null,
-  recommendedRevision: React.ComponentProps<typeof ModelInformation>["recommendedRevision"] = null,
-) {
+function show(sourceUrl: string | null = null, canEdit = false, description: string | null = null) {
   return renderApp(
     <ModelInformation
       model={aModel({ source_url: sourceUrl, description })}
       canEdit={canEdit}
-      recommendedRevision={recommendedRevision}
-      onEdit={() => {}}
-      onTags={() => {}}
+      tagSuggestions={[]}
+      onTagsSaved={() => {}}
     />,
     {
       routes: {
@@ -35,28 +29,7 @@ function show(
   );
 }
 
-function showGeometry(sourceFile: FileRead | null) {
-  return renderApp(<ModelGeometry modelId={1} sourceFile={sourceFile} />, {
-    routes: { "GET /api/v1/files/1/derivatives": json([]) },
-  });
-}
-
 describe("ModelInformation", () => {
-  it("opens the named recommended revision", () => {
-    const open = vi.fn<() => void>();
-    show(null, false, null, {
-      file: aRevision({ gcode_revision_number: 2, revision_label: "Wall mount" }),
-      open,
-    });
-    fireEvent.click(
-      screen.getByRole("button", { name: /Recommended revision.*Rev 2.*Wall mount/ }),
-    );
-    expect(open).toHaveBeenCalledOnce();
-  });
-  it("omits the shortcut without a recommended revision", () => {
-    show();
-    expect(screen.queryByRole("button", { name: /Recommended revision/ })).toBeNull();
-  });
   it("renders a Markdown model description", () => {
     show(
       null,
@@ -89,57 +62,58 @@ describe("ModelInformation", () => {
     show(null, false, "Print upright with supports.");
     expect(screen.getByText("Print upright with supports.")).toBeInTheDocument();
   });
-  it("normalizes safe source links", () => {
-    show("HTTPS://EXAMPLE.TEST/cube");
-    expect(screen.getByRole("link", { name: "Source model" })).toHaveAttribute(
-      "href",
-      "https://example.test/cube",
-    );
-  });
-  it.each(["javascript:alert(1)", "https://user:secret@example.test/cube", "data:text/html,hello"])(
-    "does not link unsafe source %s",
-    (source) => {
-      show(source);
-      expect(screen.queryByRole("link", { name: "Source model" })).not.toBeInTheDocument();
-    },
-  );
-  it("only offers editing to permitted users", () => {
+  it("only offers tag editing to permitted users", () => {
     const view = show();
-    expect(screen.queryByRole("button", { name: "Edit details" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Add tags to / })).not.toBeInTheDocument();
     view.unmount();
     show(null, true);
-    expect(screen.getByRole("button", { name: "Edit details" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Add tags to / })).toBeInTheDocument();
   });
-});
 
-describe("ModelGeometry", () => {
-  it("labels the mesh geometry as the whole source", () => {
-    showGeometry(aRevision({ file_type: "stl" }));
-    expect(screen.getByRole("heading", { name: "Whole source geometry" })).toBeInTheDocument();
-  });
-  it("explains unavailable mesh measurements", () => {
-    showGeometry(aRevision({ file_type: "stl" }));
-    expect(screen.getByText("Measurement unavailable")).toBeVisible();
-  });
-  it("hides geometry when there is no mesh", () => {
-    showGeometry(null);
-    expect(screen.queryByRole("heading", { name: "Whole source geometry" })).toBeNull();
-  });
-  it("does not discard recorded zero geometry", () => {
-    showGeometry(
-      aRevision({
-        file_type: "stl",
-        metadata: aMetadata({
-          bbox_x_mm: 0,
-          bbox_y_mm: 12,
-          bbox_z_mm: 30,
-          volume_mm3: 0,
-          triangle_count: 0,
-        }),
-      }),
+  it("displays the confirmed tag immediately", async () => {
+    const user = userEvent.setup();
+    const model = aModel();
+    const onTagsSaved =
+      vi.fn<(tags: string[], base: { edit_epoch: string; edit_version: number }) => void>();
+    const savedVersion = { edit_epoch: model.edit_epoch, edit_version: model.edit_version + 1 };
+    renderApp(
+      <ModelInformation
+        model={model}
+        canEdit
+        tagSuggestions={[aTag()]}
+        onTagsSaved={onTagsSaved}
+      />,
+      {
+        routes: {
+          "POST /api/v1/models/batch/tags": json({
+            succeeded_count: 1,
+            succeeded_ids: [model.id],
+            succeeded_versions: { [model.id]: savedVersion },
+            failed: [],
+          }),
+        },
+      },
     );
-    expect(screen.getByText("0 × 12 × 30 mm")).toBeInTheDocument();
-    expect(screen.getByText("0 cm³")).toBeInTheDocument();
-    expect(screen.queryByText("Not recorded")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Add tags to / }));
+    await user.click(screen.getByRole("option", { name: /functional.*3/ }));
+    expect(await screen.findByText("Saved", { exact: true })).toBeVisible();
+    expect(onTagsSaved).toHaveBeenCalledExactlyOnceWith(["functional"], savedVersion);
+    expect(screen.getByRole("option", { name: /functional.*3/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("places the compact tag editor beside the assigned tags", () => {
+    renderApp(
+      <ModelInformation
+        model={aModel({ tags: ["PLA"] })}
+        canEdit
+        tagSuggestions={[]}
+        onTagsSaved={() => {}}
+      />,
+    );
+    expect(screen.getByText("PLA")).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Edit tags for / })).toHaveTextContent(/^$/);
   });
 });

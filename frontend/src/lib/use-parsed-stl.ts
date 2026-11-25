@@ -5,7 +5,13 @@ import { parseStl, type StlWorkerFactory } from "./stl-parser";
 
 export type ParsedStl =
   | { state: "loading" }
-  | { state: "ready"; url: string; geometry: BufferGeometry; triangles: TriangleArrays }
+  | {
+      state: "ready";
+      url: string;
+      geometry: BufferGeometry;
+      triangles: TriangleArrays;
+      color?: string;
+    }
   | { state: "failed"; url: string; error: Error };
 
 export function useParsedStl(url: string | null, createWorker?: StlWorkerFactory): ParsedStl {
@@ -24,6 +30,7 @@ export function useParsedStl(url: string | null, createWorker?: StlWorkerFactory
           state: "ready",
           url,
           geometry,
+          color: parsed.color,
           triangles: { positions: parsed.positions, normals: parsed.normals },
         });
       })

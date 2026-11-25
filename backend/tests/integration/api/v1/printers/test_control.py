@@ -108,6 +108,15 @@ class TestPrinterControl:
             printer_id=p.id,
             remote_filename="cube.gcode",
             state=PrintJobState.PRINTING,
+            actual_duration_s=900,
+            filament_used_g=25,
+            production_rates={
+                "currency": "USD",
+                "machine_per_hour": 2,
+                "material_per_kg": 20,
+                "slicer_seconds": 7200,
+                "slicer_grams": 200,
+            },
         )
 
         with patch(
@@ -121,6 +130,13 @@ class TestPrinterControl:
         db_session.refresh(job)
         assert job.state == PrintJobState.CANCELLED
         assert job.finished_at is not None
+        assert job.production_cost == {
+            "currency": "USD",
+            "material": 0.5,
+            "machine": 0.5,
+            "total": 1.0,
+            "estimated": False,
+        }
 
     def test_set_temperature_builds_gcode(
         self, client: TestClient, auth_headers, db_session: Session

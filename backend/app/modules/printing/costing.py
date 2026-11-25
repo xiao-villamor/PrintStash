@@ -12,6 +12,7 @@ from app.db.models import (
     Metadata,
 )
 from app.db.scopes import live
+from app.schemas.plates import GcodePlateMetadata
 
 
 def _normalise_profile_key(value: str | None) -> str | None:
@@ -59,14 +60,26 @@ def filament_cost_for_job(
     When a Spoolman spool was selected, its synced FilamentProfile gives the
     exact cost; otherwise fall back to the fuzzy metadata match.
     """
-    if grams is not None and spool_filament_id is not None:
+    if grams is None:
+        return None
+    rate = filament_rate_for_job(profiles, metadata, spool_filament_id)
+    return round(grams * rate / 1000, 4) if rate is not None else None
+
+
+def filament_rate_for_job(
+    profiles: list[FilamentProfile],
+    metadata: Metadata | GcodePlateMetadata | None,
+    spool_filament_id: int | None,
+) -> float | None:
+    if spool_filament_id is not None:
         for profile in profiles:
             if (
                 profile.spoolman_filament_id == spool_filament_id
                 and profile.cost_per_kg is not None
             ):
-                return round(grams * profile.cost_per_kg / 1000, 4)
-    return filament_cost_for_grams(profiles, metadata, grams)
+                return profile.cost_per_kg
+    profile = match_cost_profile(profiles, metadata) if metadata is not None else None
+    return profile.cost_per_kg if profile is not None else None
 
 
 def _matching_filament_profile_by_fields(
@@ -103,7 +116,7 @@ def _matching_filament_profile_by_fields(
 
 def match_cost_profile(
     profiles: list[FilamentProfile],
-    metadata: Metadata,
+    metadata: Metadata | GcodePlateMetadata,
 ) -> FilamentProfile | None:
     return _matching_filament_profile_by_fields(
         profiles, metadata.material_brand, metadata.material_type

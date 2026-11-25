@@ -10,12 +10,12 @@ import {
   SlidersHorizontal,
   LogIn,
   LogOut,
-  Printer,
   Settings,
   User,
   X,
   type LucideIcon,
 } from "lucide-react";
+import { Printer3D } from "@/components/ui/printer-3d";
 import { useAuth } from "@/lib/auth-context";
 import { BrandMark } from "@/components/brand-mark";
 import { Drawer } from "@/components/ui/drawer";
@@ -35,7 +35,7 @@ type NavItem = {
 
 const mainItems: NavItem[] = [
   { href: "/", labelKey: "nav.vault", icon: Box },
-  { href: "/printers", labelKey: "nav.printers", icon: Printer, adminOnly: true },
+  { href: "/printers", labelKey: "nav.printers", icon: Printer3D, adminOnly: true },
   { href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
 ];
 

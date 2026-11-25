@@ -117,7 +117,8 @@ describe("FilesTab", () => {
       },
     );
 
-    await userEvent.click(await screen.findByRole("button", { name: "Edit tags" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Actions for / }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: /^(Edit|Add) tags$/ }));
     await userEvent.click(await screen.findByRole("button", { name: "Workshop" }));
     await userEvent.click(screen.getByRole("button", { name: "Save tags" }));
 
@@ -226,7 +227,8 @@ describe("FilesTab", () => {
       },
     );
 
-    await userEvent.click(await screen.findByRole("button", { name: "Edit tags" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Actions for / }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: /^(Edit|Add) tags$/ }));
     await userEvent.click(screen.getByRole("button", { name: "Save tags" }));
 
     await waitFor(() => expect(view.requestsWithMethod("PUT")).toHaveLength(1));
@@ -259,7 +261,7 @@ describe("FilesTab", () => {
       },
     );
 
-    await userEvent.click(screen.getByTitle("Download"));
+    await userEvent.click(screen.getByRole("button", { name: "Download" }));
 
     await waitFor(() =>
       expect(
@@ -274,7 +276,7 @@ describe("FilesTab", () => {
 });
 
 describe("FilesTab recorded identity", () => {
-  it("copies the source hash from the owning file menu", async () => {
+  it("copies the full source hash from the file facts", async () => {
     const user = userEvent.setup();
     renderApp(
       <FilesTab
@@ -287,8 +289,7 @@ describe("FilesTab recorded identity", () => {
 
     const file = within(screen.getByRole("article", { name: "bracket.stl" }));
     expect(file.queryByTitle(artifact.sha256)).not.toBeInTheDocument();
-    await user.click(file.getByRole("button", { name: "Actions for bracket.stl" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Copy SHA-256" }));
+    await user.click(file.getByRole("button", { name: "Copy SHA-256" }));
     expect(await navigator.clipboard.readText()).toBe(artifact.sha256);
   });
   it("offers comparison through the existing owner callback", async () => {
@@ -296,7 +297,7 @@ describe("FilesTab recorded identity", () => {
     renderApp(
       <FilesTab
         modelId={1}
-        sourceFiles={[artifact]}
+        sourceFiles={[artifact, { ...artifact, id: 2 }]}
         canEdit={false}
         onModel={() => {}}
         onCompare={() => {
@@ -305,7 +306,7 @@ describe("FilesTab recorded identity", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Compare" }));
+    await userEvent.click(screen.getByRole("button", { name: "Compare source files" }));
 
     expect(comparing).toBe(true);
   });

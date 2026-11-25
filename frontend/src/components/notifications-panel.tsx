@@ -1,17 +1,15 @@
 "use client";
 
-import { SettingsGroupHead } from "@/components/settings-card";
-import {
-  SETTINGS_BUTTON,
-  SETTINGS_BUTTON_PRIMARY,
-  SETTINGS_FIELD,
-} from "@/components/settings-controls";
+import { SettingsCard, SettingsEmptyRow, SettingsSwitch } from "@/components/settings-card";
+import { SETTINGS_FIELD } from "@/components/settings-controls";
+import { cn } from "@/lib/utils";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Bell, Loader2, Send, Trash2, Pencil } from "lucide-react";
+import { Loader2, Plus, Send, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import {
   createNotificationChannel,
   deleteNotificationChannel,
@@ -30,8 +28,8 @@ import type {
 } from "@/types";
 import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Modal } from "@/components/ui/modal";
-import { cn } from "@/lib/utils";
 import { Localized } from "@/components/ui/localized";
 
 import { useQuery } from "@tanstack/react-query";
@@ -48,10 +46,7 @@ import { captureEditingBase } from "@/lib/api/editing";
 import type { EditingBase } from "@/types/editing";
 import type { NotificationsSettings, NotificationChannelUpdate } from "@/types";
 
-const CARD = "overflow-hidden rounded-lg border border-border bg-card shadow-sm";
 const INPUT = SETTINGS_FIELD;
-const BTN_PRIMARY = SETTINGS_BUTTON_PRIMARY;
-const BTN_SECONDARY = SETTINGS_BUTTON;
 const LABEL = "mb-1 block text-sm font-medium";
 
 const TARGETS: { value: NotificationTarget; label: string }[] = [
@@ -362,6 +357,8 @@ export function NotificationsPanel({
   deps?: NotificationsPanelDeps;
 }) {
   useUiLocale();
+  const channelFormId = useId();
+  const masterDescriptionId = useId();
   const [draft, setDraft] = useState<DraftState | null>(null);
   const [busy, setBusy] = useState<number | "save" | "switch" | "review" | null>(null);
   const [channelReview, setChannelReview] = useState<ChannelReview>({ phase: "idle" });
@@ -511,6 +508,18 @@ export function NotificationsPanel({
     }
   }
 
+  const channelFormDisabled = busy !== null || Boolean(settingsQuery.error);
+  const invalidChannelScope =
+    draft?.printerIds != null &&
+    (!printersQuery.data || printersQuery.isError || draft.printerIds.length === 0);
+
+  function closeChannelForm() {
+    if (busy === "save") return;
+    setDraft(null);
+    setChannelReview({ phase: "idle" });
+    setError(null);
+  }
+
   async function saveDraft(revised = false) {
     if (!draft || busy !== null || (draft.printerIds !== null && draft.printerIds.length === 0))
       return;
@@ -623,58 +632,26 @@ export function NotificationsPanel({
           </p>
         )}
         <fieldset className="min-w-0" disabled={busy !== null || Boolean(settingsQuery.error)}>
-          {/* Master switch */}
-          <SettingsGroupHead
-            icon={Bell}
-            level={3}
-            title={uiText("Channels")}
-            description={uiText(
-              "Send webhook, Discord, Telegram, or ntfy alerts on print and printer events.",
-            )}
-            action={
-              canEdit ? (
-                <Button size="sm" disabled={draft !== null} onClick={() => setDraft(emptyDraft())}>
-                  {uiText("Add channel")}
-                </Button>
-              ) : undefined
-            }
-            className="settings-card-head--flush"
-          />
-          <div className="px-4 sm:pl-16 sm:pr-5">
-            <label className="settings-preference-row">
+          <SettingsCard hideHeader title={uiText("Notifications")}>
+            <div className="settings-preference-row">
               <span>
                 <span className="block">{uiText("Notifications")}</span>
-                <span className="mt-1 block text-xs font-normal text-muted-foreground">
+                <span
+                  id={masterDescriptionId}
+                  className="mt-1 block text-sm font-normal text-muted-foreground"
+                >
                   {uiText("Turn every channel on or off at once. Channels keep their settings.")}
                 </span>
               </span>
-              <span className="inline-flex items-center gap-2">
-                <span className="relative inline-flex h-5 w-9 shrink-0 items-center">
-                  <input
-                    type="checkbox"
-                    checked={enabled}
-                    disabled={!canEdit || busy === "switch" || switchReview !== null}
-                    onChange={(e) => toggleEnabled(e.target.checked)}
-                    className="peer sr-only"
-                  />
-                  <span
-                    aria-hidden
-                    className="absolute inset-0 border border-input bg-muted peer-checked:border-primary peer-checked:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:opacity-50"
-                  >
-                    <span
-                      className={cn(
-                        "absolute left-0 top-0 h-4 w-4 bg-primary-foreground transition-transform",
-                        enabled && "translate-x-4",
-                      )}
-                    />
-                  </span>
-                </span>
-                <span className="text-xs text-foreground">
-                  {enabled ? uiText("On") : uiText("Off")}
-                </span>
-              </span>
-            </label>
-          </div>
+              <SettingsSwitch
+                checked={enabled}
+                onChange={toggleEnabled}
+                label={uiText("Notifications")}
+                descriptionId={masterDescriptionId}
+                disabled={!canEdit || busy === "switch" || switchReview !== null}
+              />
+            </div>
+          </SettingsCard>
 
           {switchReview && (
             <div role="status" className="space-y-2 text-sm">
@@ -723,95 +700,104 @@ export function NotificationsPanel({
 
           {/* Channel list */}
           {canEdit && (
-            <div className="px-4 sm:pl-16 sm:pr-5">
-              {channels.length === 0 && !draft && (
-                <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center">
-                  <Bell className="h-7 w-7 text-muted-foreground/50" />
-                  <p className="text-sm font-medium text-foreground">
+            <SettingsCard
+              title={uiText("Channels")}
+              description={uiText(
+                "Send webhook, Discord, Telegram, or ntfy alerts on print and printer events.",
+              )}
+              action={
+                canEdit ? (
+                  <Button size="sm" onClick={() => setDraft(emptyDraft())}>
+                    <Plus className="size-3.5" aria-hidden />
+                    {uiText("Add channel")}
+                  </Button>
+                ) : undefined
+              }
+            >
+              {channels.length === 0 && (
+                <div className={cn(!enabled && "opacity-50")}>
+                  <SettingsEmptyRow>
                     {uiText("No notification channels yet")}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
+                    {". "}
                     {uiText("Add a channel to start receiving print and printer alerts.")}
-                  </p>
+                  </SettingsEmptyRow>
                 </div>
               )}
               {channels.map((ch) => {
                 const badge = statusBadge(ch.last_status);
                 return (
-                  <div key={ch.id} className="border-b border-border py-4 last:border-b-0">
-                    <div className="flex items-center justify-between gap-3 flex-wrap">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-foreground truncate">
-                            {ch.name}
-                          </span>
-                          <span className="settings-status">{ch.target}</span>
-                          {!ch.enabled &&
-                            (ch.consecutive_failures > 0 ? (
-                              <span
-                                className="settings-status"
-                                data-tone="warning"
-                                title={ch.last_error ?? undefined}
-                              >
-                                {uiText("Auto-disabled")}
-                              </span>
-                            ) : (
-                              <span className="settings-status">{uiText("disabled")}</span>
-                            ))}
-                        </div>
-                        <p className="text-2xs text-muted-foreground mt-0.5 truncate">
-                          {ch.events
-                            .map((e) => EVENTS.find((x) => x.value === e)?.label ?? e)
-                            .join(", ")}
-                          {ch.printer_ids?.length
-                            ? uiText(" · {value1} printer(s)", {
-                                value1: String(ch.printer_ids.length),
-                              })
-                            : uiText(" · all printers")}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <span
-                          className="settings-status"
-                          data-tone={badge.tone}
-                          title={ch.last_error ?? undefined}
-                        >
-                          {badge.text}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => sendTest(ch.id)}
-                          disabled={busy === ch.id}
-                          className={BTN_SECONDARY}
-                          title={uiText("Send a test notification")}
-                        >
-                          {busy === ch.id ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <div key={ch.id} className="settings-list-row">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="settings-list-title wrap-anywhere">{ch.name}</span>
+                        <Badge variant="secondary">{ch.target}</Badge>
+                        {!ch.enabled &&
+                          (ch.consecutive_failures > 0 ? (
+                            <span
+                              className="settings-status"
+                              data-tone="warning"
+                              title={ch.last_error ?? undefined}
+                            >
+                              {uiText("Auto-disabled")}
+                            </span>
                           ) : (
-                            <Send className="h-3.5 w-3.5" />
-                          )}
-                          {uiText("Send a test notification")}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => startEdit(ch)}
-                          className={BTN_SECONDARY}
-                          title={uiText("Edit channel")}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                          {uiText("Edit channel")}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => removeChannel(ch.id)}
-                          disabled={busy === ch.id}
-                          className={BTN_SECONDARY}
-                          title={uiText("Delete channel")}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          {uiText("Delete channel")}
-                        </button>
+                            <span className="settings-status">{uiText("disabled")}</span>
+                          ))}
                       </div>
+                      <p className="settings-list-meta">
+                        {ch.events
+                          .map((e) => EVENTS.find((x) => x.value === e)?.label ?? e)
+                          .join(", ")}
+                        {ch.printer_ids?.length
+                          ? uiText(" · {value1} printer(s)", {
+                              value1: String(ch.printer_ids.length),
+                            })
+                          : uiText(" · all printers")}
+                      </p>
+                    </div>
+                    <div>
+                      <span
+                        className="settings-status"
+                        data-tone={badge.tone}
+                        title={ch.last_error ?? undefined}
+                      >
+                        {badge.text}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        title={uiText("Edit channel")}
+                        onClick={() => startEdit(ch)}
+                      >
+                        {uiText("Edit channel")}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        disabled={busy === ch.id}
+                        onClick={() => void sendTest(ch.id)}
+                        title={uiText("Send a test notification")}
+                        aria-label={uiText("Send a test notification")}
+                      >
+                        {busy === ch.id ? (
+                          <Loader2 className="size-4 animate-spin" aria-hidden />
+                        ) : (
+                          <Send className="size-4" aria-hidden />
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-destructive"
+                        disabled={busy === ch.id}
+                        onClick={() => void removeChannel(ch.id)}
+                        title={uiText("Delete channel")}
+                        aria-label={uiText("Delete channel")}
+                      >
+                        <Trash2 className="size-4" aria-hidden />
+                      </Button>
                     </div>
                   </div>
                 );
@@ -822,38 +808,50 @@ export function NotificationsPanel({
                 <Modal
                   open
                   title={uiText(draft.id ? "Edit channel" : "Add channel")}
-                  onClose={() => {
-                    if (busy !== "save") {
-                      setDraft(null);
-                      setChannelReview({ phase: "idle" });
-                      setError(null);
-                    }
-                  }}
-                  className="max-w-3xl"
+                  onClose={closeChannelForm}
+                  dismissible={busy !== "save"}
+                  className="settings-dialog max-w-3xl"
+                  footer={
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={channelFormDisabled}
+                        onClick={closeChannelForm}
+                      >
+                        {uiText("Cancel")}
+                      </Button>
+                      <Button
+                        type="submit"
+                        form={channelFormId}
+                        loading={busy === "save"}
+                        disabled={
+                          channelFormDisabled ||
+                          channelReview.phase !== "idle" ||
+                          invalidChannelScope
+                        }
+                      >
+                        {uiText(draft.id === null ? "Create channel" : "Save changes")}
+                      </Button>
+                    </>
+                  }
                 >
-                  <fieldset
-                    disabled={busy !== null || Boolean(settingsQuery.error)}
-                    className="space-y-4"
-                  >
+                  <fieldset disabled={channelFormDisabled} className="space-y-4">
                     {error && (
                       <p role="alert" className="text-sm text-destructive">
                         {error}
                       </p>
                     )}
                     <ChannelForm
+                      formId={channelFormId}
                       draft={draft}
                       setDraft={setDraft}
                       printers={printersQuery.data}
                       printersError={printersQuery.error}
                       retryPrinters={() => void printersQuery.refetch()}
-                      onSave={() => void saveDraft()}
-                      onCancel={() => {
-                        setDraft(null);
-                        setChannelReview({ phase: "idle" });
-                        setError(null);
+                      onSave={() => {
+                        if (!channelFormDisabled && !invalidChannelScope) void saveDraft();
                       }}
-                      reviewRequired={channelReview.phase !== "idle"}
-                      saving={busy === "save"}
                     />
                     {channelReview.phase !== "idle" && (
                       <div role="status" className="space-y-2 text-sm">
@@ -897,7 +895,7 @@ export function NotificationsPanel({
                   </fieldset>
                 </Modal>
               ) : null}
-            </div>
+            </SettingsCard>
           )}
 
           {/* Recent deliveries */}
@@ -912,29 +910,22 @@ export function NotificationsPanel({
         )}
         {deliveriesQuery.isPending && <p role="status">{uiText("Loading delivery history…")}</p>}
         {canEdit && !deliveriesQuery.error && deliveries && (
-          <div className="border-t border-border">
-            <div className="px-4 py-4 sm:px-5">
-              <h4 className="text-sm font-semibold text-foreground">
-                {uiText("Recent deliveries")}
-              </h4>
-            </div>
+          <SettingsCard
+            title={uiText("Recent deliveries")}
+            description={uiText("The last delivery attempts and the response from each channel.")}
+          >
             {deliveries.length === 0 && (
-              <p className="px-4 pb-4 text-sm text-muted-foreground sm:pl-16">
-                {uiText("No notification deliveries yet.")}
-              </p>
+              <SettingsEmptyRow>{uiText("No notification deliveries yet.")}</SettingsEmptyRow>
             )}
             <div className="divide-y divide-border">
               {deliveries.map((d) => {
                 const badge = statusBadge(d.status);
                 return (
-                  <div
-                    key={d.id}
-                    className="px-4 py-2 flex items-center justify-between gap-3 text-xs"
-                  >
-                    <span className="font-mono text-muted-foreground truncate">
+                  <div key={d.id} className="settings-list-row text-sm">
+                    <span className="text-muted-foreground wrap-anywhere">
                       {EVENTS.find((e) => e.value === d.event_type)?.label ?? d.event_type}
                     </span>
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div>
                       {d.attempts > 1 && (
                         <span className="text-muted-foreground">×{d.attempts}</span>
                       )}
@@ -953,7 +944,7 @@ export function NotificationsPanel({
                 );
               })}
             </div>
-          </div>
+          </SettingsCard>
         )}
       </div>
     </Localized>
@@ -961,35 +952,31 @@ export function NotificationsPanel({
 }
 
 function ChannelForm({
+  formId,
   draft,
   setDraft,
   printers,
   onSave,
-  onCancel,
-  saving,
   printersError,
   retryPrinters,
-  reviewRequired,
 }: {
+  formId: string;
   draft: DraftState;
   setDraft: (d: DraftState) => void;
   printers: PrinterRead[] | undefined;
   printersError: Error | null;
   retryPrinters: () => void;
   onSave: () => void;
-  onCancel: () => void;
-  saving: boolean;
-  reviewRequired: boolean;
 }) {
   useUiLocale();
-  const formId = useId();
   const fields: TargetField[] = TARGET_FIELDS[draft.target];
   const scoped = draft.printerIds !== null;
 
   return (
     <Localized>
       <form
-        className={`${CARD} p-4 space-y-3`}
+        id={formId}
+        className="space-y-3"
         onSubmit={(e) => {
           e.preventDefault();
           onSave();
@@ -1058,20 +1045,19 @@ function ChannelForm({
             {EVENTS.map((ev) => (
               <label
                 key={ev.value}
-                className="inline-flex items-center gap-1.5 text-xs text-foreground"
+                className="inline-flex items-center gap-1.5 text-sm text-foreground"
               >
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={draft.events.includes(ev.value)}
-                  onChange={(e) =>
+                  onChange={(checked) =>
                     setDraft({
                       ...draft,
-                      events: e.target.checked
+                      events: checked
                         ? [...draft.events, ev.value]
                         : draft.events.filter((x) => x !== ev.value),
                     })
                   }
-                  className="h-3.5 w-3.5 accent-primary"
+                  className="shrink-0"
                 />
                 {ev.label}
               </label>
@@ -1081,12 +1067,11 @@ function ChannelForm({
 
         <fieldset>
           <legend className={LABEL}>{uiText("Printers")}</legend>
-          <label className="inline-flex items-center gap-1.5 text-xs text-foreground mb-2">
-            <input
-              type="checkbox"
+          <label className="inline-flex items-center gap-1.5 text-sm text-foreground mb-2">
+            <Checkbox
               checked={!scoped}
-              onChange={(e) => setDraft({ ...draft, printerIds: e.target.checked ? null : [] })}
-              className="h-3.5 w-3.5 accent-primary"
+              onChange={(checked) => setDraft({ ...draft, printerIds: checked ? null : [] })}
+              className="shrink-0"
             />
             {uiText("All printers")}
           </label>
@@ -1116,20 +1101,19 @@ function ChannelForm({
                 printers?.map((p) => (
                   <label
                     key={p.id}
-                    className="inline-flex items-center gap-1.5 text-xs text-foreground"
+                    className="inline-flex items-center gap-1.5 text-sm text-foreground"
                   >
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={(draft.printerIds ?? []).includes(p.id)}
-                      onChange={(e) =>
+                      onChange={(checked) =>
                         setDraft({
                           ...draft,
-                          printerIds: e.target.checked
+                          printerIds: checked
                             ? [...(draft.printerIds ?? []), p.id]
                             : (draft.printerIds ?? []).filter((x) => x !== p.id),
                         })
                       }
-                      className="h-3.5 w-3.5 accent-primary"
+                      className="shrink-0"
                     />
                     {p.name}
                   </label>
@@ -1138,33 +1122,14 @@ function ChannelForm({
           )}
         </fieldset>
 
-        <label className="inline-flex items-center gap-1.5 text-xs text-foreground">
-          <input
-            type="checkbox"
+        <label className="inline-flex items-center gap-1.5 text-sm text-foreground">
+          <Checkbox
             checked={draft.enabled}
-            onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
-            className="h-3.5 w-3.5 accent-primary"
+            onChange={(checked) => setDraft({ ...draft, enabled: checked })}
+            className="shrink-0"
           />
           {uiText("Enabled")}
         </label>
-
-        <div className="flex items-center gap-2 pt-1">
-          <button
-            type="submit"
-            disabled={
-              saving ||
-              reviewRequired ||
-              (scoped && (!printers || Boolean(printersError) || draft.printerIds?.length === 0))
-            }
-            className={BTN_PRIMARY}
-          >
-            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-            {draft.id === null ? uiText("Create channel") : uiText("Save changes")}
-          </button>
-          <button type="button" onClick={onCancel} disabled={saving} className={BTN_SECONDARY}>
-            {uiText("Cancel")}
-          </button>
-        </div>
       </form>
     </Localized>
   );

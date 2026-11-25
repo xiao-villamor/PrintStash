@@ -249,6 +249,9 @@ class File(SQLModel, table=True):
     revision_label: Optional[str] = Field(default=None, max_length=128)
     revision_status: Optional[FileRevisionStatus] = Field(default=None, index=True)
     revision_notes: Optional[str] = None
+    production_estimate: Optional[dict[str, Any]] = Field(
+        default=None, sa_column=Column(JSON(none_as_null=True), nullable=True)
+    )
     is_recommended: bool = Field(default=False, index=True)
 
     # External libraries (NAS folder mirroring). When ``is_external`` is true the

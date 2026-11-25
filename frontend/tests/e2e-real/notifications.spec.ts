@@ -76,13 +76,13 @@ test.describe("Notification editing", () => {
         (response) =>
           response.url().endsWith("/api/v1/notifications") && response.request().method() === "PUT",
       );
-      await second.getByRole("checkbox").click();
+      await second.getByRole("switch", { name: "Notifications" }).click();
       await held.promise;
       const switchAccepted = page.waitForResponse(
         (response) =>
           response.url().endsWith("/api/v1/notifications") && response.request().method() === "PUT",
       );
-      await page.getByRole("checkbox").click();
+      await page.getByRole("switch", { name: "Notifications" }).click();
       expect((await switchAccepted).status()).toBe(200);
       release.resolve();
       expect((await switchConflict).status()).toBe(412);
@@ -93,7 +93,7 @@ test.describe("Notification editing", () => {
       );
       await second.getByRole("button", { name: "Save revised changes" }).click();
       expect((await switchRevised).status()).toBe(200);
-      await expect(second.getByRole("checkbox")).toBeChecked();
+      await expect(second.getByRole("switch", { name: "Notifications" })).toBeChecked();
     } finally {
       release.resolve();
       await second.close();

@@ -1,16 +1,13 @@
 import { SearchSettingsSnapshot } from "@/components/search-settings-snapshot";
-import { SettingsGroupHead } from "@/components/settings-card";
+import { SettingsCard, SettingsNotice } from "@/components/settings-card";
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Settings2 } from "lucide-react";
 
 import { AiSearchSetup } from "@/components/ai-search-setup";
 import { InferenceEndpointForm } from "@/components/inference-endpoint-form";
 import { SearchGenerationControls } from "@/components/search-generation-controls";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import {
@@ -465,9 +462,11 @@ export function AiSearchSettings() {
     void settings.refetch();
   };
   return (
-    <Card className="overflow-hidden">
+    <div className="settings-grouped">
       {settings.isError && (
-        <EmptyState
+        <SettingsNotice
+          role="alert"
+          tone="danger"
           title={t("aiSearch.settingsLoadError")}
           action={
             <Button size="sm" onClick={refresh}>
@@ -482,14 +481,16 @@ export function AiSearchSettings() {
         </p>
       ) : (
         <>
-          <fieldset disabled={settings.isError} className="min-w-0">
-            <AiSearchSetup
-              settings={settings.data}
-              catalog={catalog}
-              changing={false}
-              onChangingChange={setChanging}
-            />
-          </fieldset>
+          <SettingsCard hideHeader title={t("AI Search setup")}>
+            <fieldset disabled={settings.isError} className="min-w-0">
+              <AiSearchSetup
+                settings={settings.data}
+                catalog={catalog}
+                changing={false}
+                onChangingChange={setChanging}
+              />
+            </fieldset>
+          </SettingsCard>
           <Modal
             open={changing}
             onClose={() => setChanging(false)}
@@ -506,78 +507,72 @@ export function AiSearchSettings() {
               />
             </fieldset>
           </Modal>
-          <section className="border-t border-border">
-            <SettingsGroupHead
-              icon={Settings2}
-              level={2}
-              title={t("Setup and options")}
-              description={t("Search types, AI servers and technical limits.")}
-              className="settings-card-head--flush"
-            />
-            <div className="divide-y divide-border px-4 pb-4 sm:pl-16 sm:pr-5">
-              <div className="flex flex-wrap items-center justify-between gap-3 py-3">
-                <div>
-                  <p className="text-sm font-medium">{t("Guided setup")}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {t("Choose this machine or another server; prepare the Library.")}
-                  </p>
-                </div>
+          <SettingsCard
+            title={t("Setup and options")}
+            description={t("Search types, AI servers and technical limits.")}
+          >
+            <div className="settings-list-row">
+              <div>
+                <p className="settings-list-title">{t("Guided setup")}</p>
+                <p className="settings-list-meta">
+                  {t("Choose this machine or another server; prepare the Library.")}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={settings.isError}
+                onClick={() => setChanging(true)}
+              >
+                {t(settings.data.settings.enabled ? "Change setup" : "Start setup")}
+              </Button>
+            </div>
+            <div className="settings-list-row">
+              <div>
+                <p className="settings-list-title">{t("aiSearch.navIndexes")}</p>
+                <p className="settings-list-meta">
+                  {t("Text, thumbnail, multiple views and optional point-cloud geometry")}
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setSection("indexes")}>
+                {t("Manage indexes")}
+              </Button>
+            </div>
+            <div className="settings-list-row">
+              <div>
+                <p className="settings-list-title">{t("aiSearch.navServers")}</p>
+                <p className="settings-list-meta">
+                  {t("Embedding or chat endpoints with explicit data permissions")}
+                </p>
+              </div>
+              <div>
+                <Button variant="outline" size="sm" onClick={() => setSection("servers")}>
+                  {t("Manage servers")}
+                </Button>
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
-                  disabled={settings.isError}
-                  onClick={() => setChanging(true)}
+                  onClick={() => {
+                    setEditing("new");
+                    setSection("servers");
+                  }}
                 >
-                  {t(settings.data.settings.enabled ? "Change setup" : "Start setup")}
-                </Button>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-3 py-3">
-                <div>
-                  <p className="text-sm font-medium">{t("aiSearch.navIndexes")}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {t("Text, thumbnail, multiple views and optional point-cloud geometry")}
-                  </p>
-                </div>
-                <Button variant="outline" size="sm" onClick={() => setSection("indexes")}>
-                  {t("Manage indexes")}
-                </Button>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-3 py-3">
-                <div>
-                  <p className="text-sm font-medium">{t("aiSearch.navServers")}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {t("Embedding or chat endpoints with explicit data permissions")}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setEditing("new");
-                      setSection("servers");
-                    }}
-                  >
-                    {t("aiSearch.newEndpoint")}
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => setSection("servers")}>
-                    {t("Manage servers")}
-                  </Button>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-3 py-3">
-                <div>
-                  <p className="text-sm font-medium">{t("Technical options")}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {t("Permissions, expansion, limits, retention and timeout")}
-                  </p>
-                </div>
-                <Button variant="outline" size="sm" onClick={() => setSection("technical")}>
-                  {t("Technical settings")}
+                  {t("aiSearch.newEndpoint")}
                 </Button>
               </div>
             </div>
-          </section>
+            <div className="settings-list-row">
+              <div>
+                <p className="settings-list-title">{t("Technical options")}</p>
+                <p className="settings-list-meta">
+                  {t("Permissions, expansion, limits, retention and timeout")}
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setSection("technical")}>
+                {t("Technical settings")}
+              </Button>
+            </div>
+          </SettingsCard>
           <Modal
             open={section !== "setup"}
             onClose={() => {
@@ -696,6 +691,6 @@ export function AiSearchSettings() {
           </Modal>
         </>
       )}
-    </Card>
+    </div>
   );
 }

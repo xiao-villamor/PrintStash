@@ -291,6 +291,16 @@ describe("disabled derivatives", () => {
     expect(screen.queryByText(/failed/)).not.toBeInTheDocument();
   });
 
+  it("links the file's disabled 3D preview to processing settings", async () => {
+    const api = stubApi([aDerivative({ kind: "viewer_stl", state: "disabled" })]);
+    renderApp(<DerivativeStatus modelId={3} fileId={7} canRetry showReady api={api} />);
+    expect(await screen.findByText("3D preview processing is disabled")).toBeVisible();
+    expect(screen.getByRole("link", { name: /Processing settings/ })).toHaveAttribute(
+      "href",
+      "/settings?section=work",
+    );
+  });
+
   it.each(["derivative_policy", "resync"])("refreshes on %s", async (type) => {
     const api = stubApi([aDerivative({ state: "disabled" })]);
     renderStatus(api);

@@ -1,4 +1,5 @@
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
+import { embeddedStlColor } from "@/lib/embedded-stl-color";
 import type { StlParseReply } from "@/lib/stl-parser-types";
 
 // This module is bundled as a dedicated Worker; it never runs on Window.
@@ -16,7 +17,12 @@ self.onmessage = (event: MessageEvent<ArrayBuffer>) => {
     ) {
       throw new Error("stl_geometry_invalid");
     }
-    const reply: StlParseReply = { state: "parsed", positions, normals };
+    const reply: StlParseReply = {
+      state: "parsed",
+      positions,
+      normals,
+      color: embeddedStlColor(event.data),
+    };
     self.postMessage(reply, { transfer: [positions.buffer, normals.buffer] });
   } finally {
     geometry.dispose();

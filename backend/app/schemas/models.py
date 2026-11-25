@@ -19,6 +19,7 @@ from app.schemas.printers import (
     PrintJobReportedMetadataRead,
     PrintJobReproducibilityRead,
 )
+from app.schemas.production_costing import JobProductionCost, PrinterExpenses
 
 
 class MetadataRead(BaseModel):
@@ -237,6 +238,7 @@ class ModelPrintJobRead(BaseModel):
     filament_used_g: Optional[float] = None
     actual_duration_s: Optional[int] = None
     filament_cost: Optional[float] = None
+    production_cost: JobProductionCost | None = None
     spool_id: Optional[int] = None
     spool_name: Optional[str] = None
     started_at: Optional[datetime] = None
@@ -562,6 +564,35 @@ class PrinterStatRead(BaseModel):
     print_time_s: int = 0
 
 
+class PrintOutcomesRead(BaseModel):
+    failed: int
+    cancelled: int
+
+
+class PrinterFailuresRead(BaseModel):
+    printer_id: int | None
+    name: str | None
+    failed: int
+    completed: int
+
+
+class PrintDataCoverageRead(BaseModel):
+    recorded_time: int
+    slicer_time: int
+    recorded_filament: int
+    slicer_filament: int
+    known_cost: int
+
+
+class PrinterFilamentStatRead(BaseModel):
+    printer_id: int | None
+    printer_name: str | None
+    material_type: str | None
+    material_brand: str | None
+    print_count: int
+    total_g: float
+
+
 class PrintStatisticsRead(BaseModel):
     period: str
     start_at: Optional[datetime] = None
@@ -576,6 +607,10 @@ class PrintStatisticsRead(BaseModel):
     top_models: List[ModelStatRead] = []
     top_printers: List[PrinterStatRead] = []
     cost_over_time: List[TimeBucketRead] = []
+    outcomes: PrintOutcomesRead
+    printer_failures: list[PrinterFailuresRead]
+    data_coverage: PrintDataCoverageRead
+    printer_filaments: list[PrinterFilamentStatRead]
 
 
 class ModelCoverSource(BaseModel):
@@ -789,6 +824,7 @@ class PrinterProfileBase(BaseModel):
     slicer_name: Optional[str] = Field(default=None, max_length=64)
     nozzle_diameter_mm: Optional[float] = Field(default=None, ge=0)
     notes: Optional[str] = Field(default=None, max_length=4096)
+    expenses: PrinterExpenses | None = None
 
 
 class PrinterProfileCreate(PrinterProfileBase):
@@ -803,6 +839,7 @@ class PrinterProfileUpdate(BaseModel):
     slicer_name: Optional[str] = Field(default=None, max_length=64)
     nozzle_diameter_mm: Optional[float] = Field(default=None, ge=0)
     notes: Optional[str] = Field(default=None, max_length=4096)
+    expenses: PrinterExpenses | None = None
 
 
 class PrinterProfileRead(PrinterProfileBase, EditingBase):

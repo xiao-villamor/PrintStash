@@ -133,9 +133,10 @@
 }
 .library-status-filters {
   gap: 2px;
-  padding: 2px;
+  padding: 3px;
   border: 1px solid var(--border);
-  background: var(--muted);
+  border-radius: var(--radius-popover);
+  background: var(--card);
 }
 .library-status-filters > button {
   height: 28px;
@@ -143,7 +144,10 @@
   gap: 6px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--secondary);
+  color: var(--muted-foreground);
+}
+.library-status-filters > button:hover {
+  color: var(--foreground);
 }
 .library-status-filters > button[aria-checked="true"] {
   background: var(--accent);
@@ -161,8 +165,22 @@
   font-size: 12px;
   font-weight: 400;
 }
+.library-status-filters > button[aria-checked="true"] > span.font-mono {
+  color: inherit;
+  opacity: 0.7;
+}
+/* Dots stay neutral like the badge; only a failure is coloured. */
+.library-status-ready {
+  background: var(--muted-foreground);
+}
 .library-status-test {
-  background: var(--status-test-dot);
+  background: var(--muted-foreground);
+}
+.library-status-failed {
+  background: var(--destructive);
+}
+.library-status-filters > button > span.rounded-full {
+  margin-inline: 2px 1px;
 }
 .library-status-none {
   background: var(--border-strong);
@@ -205,18 +223,6 @@
 .library-display-controls {
   width: max-content;
 }
-.library-model-toolbar [aria-label="Sort models"] {
-  justify-content: flex-start;
-  font-weight: 500;
-  color: var(--secondary);
-}
-.library-model-toolbar [aria-label="Sort models"] > span {
-  text-align: left;
-}
-.library-model-toolbar select {
-  appearance: none;
-}
-
 .library-collection-title {
   position: relative;
   min-height: 30px;
@@ -235,7 +241,7 @@
   margin: 0;
   padding: 0 8px;
   border: 1px dashed var(--border-strong);
-  border-radius: 0;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--foreground);
   font-size: 20px;
@@ -380,11 +386,7 @@
       flex: 1 1 160px;
     }
     [data-inspector-open] .library-model-toolbar .library-toolbar-printer {
-      width: 32px;
-      padding-inline: 0;
-    }
-    [data-inspector-open] .library-model-toolbar .library-toolbar-printer > :not(:first-child) {
-      display: none;
+      width: 96px;
     }
     [data-inspector-open] .library-model-toolbar .library-status-filters > button {
       padding-inline: 6px;
@@ -408,12 +410,7 @@
   }
   @container library (720px <= width < 960px) {
     [data-inspector-open] .library-model-toolbar .library-toolbar-sort {
-      width: 32px;
-      justify-content: center;
-      padding-inline: 0;
-    }
-    [data-inspector-open] .library-model-toolbar .library-toolbar-sort > :not(:first-child) {
-      display: none;
+      width: 96px;
     }
   }
 }

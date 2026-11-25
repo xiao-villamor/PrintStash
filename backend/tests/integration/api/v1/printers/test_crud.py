@@ -20,7 +20,7 @@ from sqlmodel import Session
 from app.db.models import (
     PrinterStatus,
 )
-from tests.factories import build_printer
+from tests.factories import build_printer, build_printer_profile
 
 
 @pytest.fixture(autouse=True)
@@ -453,3 +453,51 @@ class TestGroupFilter:
         )
         assert resp.status_code == 200
         assert resp.json()["group"] == "workshop"
+
+
+class TestPrinterCostProfile:
+    def test_saves_the_cost_profile_on_a_connected_printer(
+        self, client, auth_headers, db_session
+    ):
+        profile = build_printer_profile(db_session)
+        printer = build_printer(db_session)
+        url = f"/api/v1/printers/{printer.id}"
+        response = client.patch(
+            url, headers=auth_headers, json={"cost_profile_id": profile.id}
+        )
+        assert response.status_code == 200, response.text
+        assert (
+            client.get(url, headers=auth_headers).json()["cost_profile_id"]
+            == profile.id
+        )
+
+    def test_clears_cost_profile_assignment(self, client, auth_headers, db_session):
+        profile = build_printer_profile(db_session)
+        printer = build_printer(db_session, cost_profile_id=profile.id)
+        url = f"/api/v1/printers/{printer.id}"
+        response = client.patch(
+            url, headers=auth_headers, json={"cost_profile_id": None}
+        )
+        assert response.status_code == 200, response.text
+        assert client.get(url, headers=auth_headers).json()["cost_profile_id"] is None
+
+    def test_rejects_a_missing_cost_profile(self, client, auth_headers, db_session):
+        printer = build_printer(db_session)
+        response = client.patch(
+            f"/api/v1/printers/{printer.id}",
+            headers=auth_headers,
+            json={"cost_profile_id": 12354},
+        )
+        assert response.status_code == 404, response.text
+
+    def test_deleting_a_profile_unlinks_its_printers(
+        self, client, auth_headers, db_session
+    ):
+        profile = build_printer_profile(db_session)
+        printer = build_printer(db_session, cost_profile_id=profile.id)
+        response = client.delete(
+            f"/api/v1/printer-profiles/{profile.id}", headers=auth_headers
+        )
+        assert response.status_code == 204, response.text
+        db_session.refresh(printer)
+        assert printer.cost_profile_id is None

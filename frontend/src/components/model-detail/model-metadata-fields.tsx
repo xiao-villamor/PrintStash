@@ -166,7 +166,7 @@ export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
                 <div
                   id={tagNav.listboxId}
                   role="listbox"
-                  className="mt-1 max-h-40 overflow-y-auto rounded border border-border bg-surface-container-lowest py-1"
+                  className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-border bg-surface-container-lowest py-1"
                 >
                   {tagShown.map((t, i) => (
                     <div

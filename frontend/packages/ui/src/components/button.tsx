@@ -12,7 +12,8 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: "bg-primary text-primary-foreground hover:bg-primary-hover",
-        destructive: "bg-destructive text-destructive-foreground hover:opacity-90",
+        destructive:
+          "border border-destructive bg-destructive-action text-destructive-action-foreground hover:bg-destructive-action-hover",
         /** An irreversible action offered beside ordinary ones: the neutral
          *  outline of `outline` with only the label in the destructive token. */
         danger: "border border-border bg-card text-destructive hover:bg-muted",
@@ -23,11 +24,11 @@ const buttonVariants = cva(
       },
       size: {
         default: "h-9 px-3.5 py-2",
-        xs: "h-8 rounded px-3 text-xs",
-        sm: "h-[34px] rounded-md px-3",
-        lg: "h-11 rounded-md px-8",
+        xs: "h-8 px-3 text-xs",
+        sm: "h-[34px] px-3",
+        lg: "h-11 px-8",
         icon: "h-10 w-10",
-        "icon-sm": "h-9 w-9 rounded",
+        "icon-sm": "h-9 w-9",
       },
     },
     defaultVariants: {

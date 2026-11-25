@@ -44,7 +44,8 @@ theme swap so colors remain consistent throughout the application.
 | `muted` / `muted-foreground` | Recessed fills, secondary text |
 | `primary` / `primary-foreground` | Primary action only. `primary-hover` for hover, `primary-soft` for focus/selection rings |
 | `accent` / `accent-foreground` | Neutral hover/selected controls; use together without a colored border or ring |
-| `destructive` / `destructive-foreground` | Delete and other irreversible actions |
+| `destructive` / `destructive-foreground` | Error text, danger outlines and status badges |
+| `destructive-action` / `destructive-action-foreground` | Filled destructive confirmation with a deep red background and white text |
 | `success`, `warning` | Status only — never as decoration |
 | `border`, `input`, `ring` | Edges and focus rings |
 | `surface-*`, `on-surface*`, `outline*` | The elevation scale, for multi-layer panels |
@@ -72,16 +73,49 @@ Primary actions and selected controls are deliberately different:
 - Do not add a colored border or ring to a filled selected control. Its neutral
   fill is the state indicator; outlines are reserved for keyboard focus via
   `focus-visible:ring-ring`.
+- Use the shared `RadioOption` for visible single-choice groups in print
+  forms. It provides a visible circular indicator and native arrow-key
+  navigation.
+- Use `OptionPicker` for data-driven lists that can grow, such as printers
+  and revisions. Keep the search and scrollable choices inside the menu.
 - Orange belongs to `warning` or explicitly tertiary/status content. It is not
   an action or selection color.
 
+### Action hierarchy
+
+The model detail inspector uses these action rules with the shared `Button`,
+`DropdownMenu`, and toast primitives.
+
+- One filled primary per surface, chosen by the next step rather than by
+  position. In the model detail Print block, `Prepare print` is primary until
+  a print is sent; after `Send now` or `Add to queue`, `Record result` becomes
+  primary and `Prepare print` becomes outline. Both keep the same size, so the
+  swap does not move the layout.
+- An object shows at most two outline actions. The rest go in a `DropdownMenu`
+  behind a `⋮` icon button labelled "More actions for …". A destructive item
+  comes last, after a separator, with its label in `destructive`.
+- Trailing glyphs carry meaning: a down chevron opens a menu, the external icon
+  leaves PrintStash, and a right chevron navigates within the page.
+- A disabled primary keeps its color at reduced opacity and states its reason
+  as text beside it.
+- A confirmation toast offers the next step as its action: `Record result ›`
+  after sending, `View activity ›` after recording.
+
 ### Radius, type, elevation
 
-- Standard control and panel radii derive from `--radius` (zero):
-  `rounded-sm|md|DEFAULT|lg`. Circular avatars, status dots and count badges
-  remain circular where their shape communicates their role.
+- `--radius` gives buttons, inputs, selects, and segmented controls 6px corners
+  through the default, small, and medium radius utilities. `--radius-popover`
+  gives menus, floating lists, toasts, and dialogs 8px corners through the
+  large radius utility. Library cards, panels and the groups inside the model
+  inspector use that same 8px radius. Circular avatars, status dots, and count
+  badges retain their shape.
 - Type ramp adds `text-2xs` (0.6875rem) and `text-3xs` (0.625rem) for the mono
   label style. No `text-[11px]`.
+- Text a person reads to decide something — field labels, values, status words,
+  estimate sources, empty-state guidance — is at least `text-sm`, including
+  in inspectors and detail panels. `text-muted-foreground` is for that secondary
+  layer at `text-sm` or larger; reserve `text-xs` muted for counts, timestamps
+  beside a larger value and keyboard hints. Check both themes at 1920×1080.
 - Layering uses the named scale: `z-dropdown` (50) for menus and popovers,
   `z-overlay` (100) for modals and drawers. No arbitrary `z-[60]`.
 
@@ -130,6 +164,10 @@ title carries inline metadata (printer detail's provider/beta badges, model
 detail) render their own `<h1>` instead of composing `PageHeader`; that is the
 only sanctioned exception, and it does not license a third heading style.
 
+Fleet cards show printer status, work, and connection details. The Manage
+printers tab groups connection settings and removal next to the device name,
+address, and status. Removal opens the shared confirmation for that device.
+
 ### Framed work surfaces
 
 Primary settings sections and the current state needed to use them stay visible.
@@ -140,11 +178,10 @@ information; when several technical views need separation, use the existing
 for a small set of related status values instead of a row of decorative badges.
 For current storage, lead with the provider and one active safety state. Keep
 paths readable but secondary; explain migration in its workflow, not in the
-status card. Similar candidates belong in each Model's Similar tab. The library-wide Similar
+status card. Model similarity is opened from the Model actions menu. The library-wide Similar
 models page, New collection and Select actions stay visible beside Filters in
 the library toolbar. On narrow panes, the actions wrap within the same toolbar.
-Keep these actions out of the sidebar and global header. Keep Model detail
-tabs in one row, with horizontal scrolling only when their labels cannot fit.
+Keep these actions out of the sidebar and global header. Keep Overview, Files, Print, and Activity in one row, with horizontal scrolling only when their labels cannot fit. Show print settings and costing within Print. Keep the first applicable print action with its state in Overview.
 Async settings cards keep their header and reserve the shape of their content
 with skeletons until initial reads settle. Do not expose a partial form whose
 provider fields appear later. Remote storage uses the same visible category and
@@ -159,8 +196,8 @@ only where a small file's exact size helps a technical task.
 Format stored durations as hours and minutes in filter summaries; keep the input
 unit explicit wherever users enter a number.
 
-Dense document workflows such as Profiles, Settings, and Pending Imports use a
-shared visual grammar: **one framed work surface**, not a collection of loose
+Dense document workflows such as Profiles and Pending Imports use a
+shared visual grammar (Settings has its own, described under Settings below): **one framed work surface**, not a collection of loose
 status cards. The frame keeps controls, context, rows, loading, and empty states
 visually attached to the same task.
 
@@ -191,6 +228,42 @@ status and selection use their semantic tokens. On narrow screens, rows stack
 into a readable content band and a separate action band. Text gets `min-w-0`
 and may wrap; actions must remain reachable without horizontal scrolling.
 
+### Model detail inspector
+
+The model detail inspector is a tool panel, not a document. Its Overview never
+renders as loose `h2` headings followed by paragraphs; that reads as a Markdown
+file. Compose it from these blocks, in this order, using the shared parts in
+`components/model-detail/inspector-section.tsx`:
+
+1. **Current revision** — a full-width `InspectorSection`. The first row
+   holds the revision link, its outline status badge with a dot, and the muted
+   word `Recommended` when applicable. A `PropertyList` shows the last print,
+   material, estimate and its source, a link to multi-plate estimates, and the
+   upload date. The equal-width footer actions are `Record result` and
+   `Prepare print`. Print's section row places `Prepare print` at the right edge.
+2. **Model details** and **Source and license** — stacked at the default
+   inspector width and side-by-side from the `@2xl` container width. Each
+   body is a `PropertyList`: rows of a fixed label column and a value column,
+   separated by `divide-y divide-border`. Edit details is in the section header.
+   Source details is a navigation row. A missing value keeps its row and shows
+   the action that fills it (`Add description`, `Add source link`) instead of
+   removing the row.
+
+Inspector rules:
+
+- Labels in inspectors are `text-sm text-muted-foreground` Inter; values are
+  `text-sm` foreground. Mono uppercase micro-labels stay in technical tables.
+- A Model description renders at body size inside its row. Markdown headings
+  inside it never exceed `text-sm font-semibold`, and a description equal to
+  the Model name is not shown.
+- An external link always shows its destination name and the external icon; an
+  internal navigation is a button in the header bar. Never place the two side
+  by side with the same styling.
+- Use intentional section headers, never `details` disclosure triangles, for
+  print setup, file facts or per-file details.
+- Status words are text badges. A star means "favorite Model" only; the
+  recommended revision is the word `Recommended`.
+
 ## Cursors
 
 Ordinary web actions and unavailable controls use the arrow cursor.
@@ -214,6 +287,7 @@ ordinary action cursors from drifting between components.
 ```css
 --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);     /* the house curve */
 --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);   /* on-screen movement only */
+--ease-dock:   cubic-bezier(0.333333, 0, 0.666667, 1); /* dock and card reflow */
 --duration-press: 150ms;
 --duration-fast:  200ms;
 --duration-slow:  300ms;
@@ -314,25 +388,26 @@ only for missing or failed assets. Counts update in place without motion.
 
 The Library model inspector is a solid, non-modal surface docked to the right.
 It enters from beyond that edge and returns along the same path, including on
-mobile. It moves on the same dock curve and slow timing as the Collections pane,
-sampled into compositor keyframes so preview initialization does not drive its
-frame loop; reversing open/close preserves its current displacement and velocity.
-Hide only when the motion reaches the closed position, never on a fixed exit timer. When the docked
-inspector reserves or releases its column, the Library grid reflows exactly as
-it does for the Collections pane: it commits its resting columns once and carries
-each card from its painted position along the inspector's own progress, so cards
-and panel share one timeline, and cards move identically beside either panel. A card that wraps to the next or
-previous row never crosses the grid: it rides its new row like a conveyor,
-entering from the grid edge right behind the neighbour it follows, so no cell
-empties mid-motion. Cards entering view fade in on the same progress; reduced motion keeps the reflow immediate. Switching Models
-keeps the panel stationary. Closed panels become inert immediately. Reduced motion
-uses immediate visibility changes and retains the existing focus handoff.
+mobile. It uses the shared dock curve over the fast timing, sampled into
+compositor keyframes so preview initialization does not drive its frame loop.
+Reversing open/close preserves its current displacement and velocity.
+Hide only when the motion reaches the closed position. Switching Models keeps the
+panel stationary. Closed panels become inert immediately. Closing details returns
+focus to the opener, the inspected Model card if it was remounted, or the Details button.
 
-The left Collections pane uses a smooth cubic ease into rest over the slow timing,
-with zero starting/ending velocity at rest and inherited velocity on interruption.
-It has no spring response or oscillation. Its shell column releases and restores space continuously; the inner outliner keeps its intrinsic width,
-clipped and anchored to the moving right boundary. This deliberately animates one
-layout width so the sidebar and workspace cannot drift onto separate timelines.
+Model details captures visible card positions before the dock changes layout.
+The grid and dock agree on their fitted width before the slide. Finishing
+the slide enables editing and the preview without refitting the grid.
+Nearby cards on the same row ease into place. On close, cards that wrap or move
+farther slide a short distance into their destination cells. Cards entering the
+viewport also slide and fade in, even when the column count stays the same.
+These movements run alongside the departing pane.
+
+The Collections sidebar uses a workspace slide. Its shell edge and the
+workspace move together, with card tracks held for the duration of the slide.
+The grid fits the final workspace width once the sidebar settles.
+The collapsed Collections strip limits cards to its current column count.
+The inner outliner keeps its intrinsic width, clipped and anchored to the moving edge.
 Retain the outliner DOM, filter, expansion and scroll state while closed; make it
 inert immediately and hide its contents only at rest. Drag resizing remains 1:1,
 initial page layout does not replay entry, and reduced motion settles immediately.
@@ -374,13 +449,18 @@ The decorative sign-in build-plate print is the duration exception. It plays
 once over 18.95 seconds, is non-interactive, and shows the filled layers,
 top infill, and parked nozzle under
 reduced motion.
+The Printers routing graph is the second exception: while a printer is printing, the
+edges leading to it flow (`stroke-dashoffset`, 0.9 s linear loop) and its station
+pulses a success-colored outline (`opacity`, 2.4 s loop). Both are non-interactive,
+run only for printing printers, and under reduced motion the edge turns solid and the
+outline stays static.
 
 ### Rules
 
 1. **Animate `transform` and `opacity` only.** Animating `width`, `height`,
    `top`, or `margin` triggers layout on every frame. Progress bars use
-   `transform: scaleX()`, not `width`. The docked sidebar is an explicit exception:
-   one width animation keeps its boundary and the workspace on the same timeline.
+   `transform: scaleX()`, not `width`. The Collections shell is an explicit exception:
+   its width animation moves the workspace edge while the Library's card tracks stay fixed.
    Child-collection disclosure uses a bounded clip-path for the row and a
    compositor translation for the Model content, with one layout commit. The
    sign-in build-plate print updates the active SVG path geometry so the tip
@@ -476,8 +556,13 @@ these calls at zero.
 | `Drawer` | The above, sliding from an edge, interruptible mid-flight |
 | `DropdownMenu` | Origin-aware scale/fade, outside-`pointerdown` dismiss, Escape refocuses trigger, arrow-key roving |
 | `TabBar` | ARIA `tablist`, arrow-key nav, sliding indicator |
-| `Switch` | The one binary toggle: square 36×20 track, On/Off written as text |
-| `Input`, `Checkbox`, `Badge`, `Spinner`, `EmptyState`, `Card`, `Skeleton` | Token-correct defaults |
+| `Switch` | Settings toggle with a pill 38×22 track and written On/Off states |
+| `Checkbox` | Form options and selection with an outlined square, a checkmark on a neutral fill when selected, and a visible keyboard ring |
+| `Input`, `Badge`, `Spinner`, `EmptyState`, `Card`, `Skeleton` | Token-correct defaults |
+
+Use the shared `Checkbox` for form options in dialogs. Include the visible
+text in its label so the full row is clickable. Verify the box, checkmark, and
+keyboard focus in both themes.
 
 `Button` variants: `default` is the one filled primary action of a group,
 `outline` every other action, and `danger` an irreversible action offered
@@ -486,15 +571,48 @@ beside ordinary ones (neutral outline, label in `destructive`). The filled
 dialog. Buttons carry text, not decorative leading icons, and are never
 uppercase.
 
+Use `ConfirmModal` for a warning that asks the user to approve an action. The
+compact dialog puts the consequence below its question, with Cancel followed by
+the named action in the footer. Cancel receives keyboard focus and the dialog
+stays open while a submitted action is pending. Use the filled destructive
+button for removal, loss of work, or an explicit safety override. Use the
+primary button for confirmations that enable, enroll, restart, or review.
+Check the label, border and focus indicator in both themes. The filled
+destructive action keeps its white label when hovered, and Cancel uses the
+same visible border token as a field.
+Confirmations that need a field use the same dialog with the standard inputs.
+Warnings with multiple outcomes use the confirmation variant of `Modal` with
+their actions in the footer.
+
 **Settings** composes one more layer from `frontend/src/components/`:
 `settings-card.tsx` (`SettingsCard`, `SettingsGroupHead`, `SettingsSwitch`,
-`SettingsNotice`, `SettingsStatus`) and `settings-controls.ts`
-(`SETTINGS_BUTTON_PRIMARY`, `SETTINGS_BUTTON`, `SETTINGS_BUTTON_DANGER`,
-`SETTINGS_FIELD`). A Settings panel uses these instead of its own header,
-toggle, callout, status chip or button classes: every button is 34px/13px,
-statuses are aligned text, and notices are neutral panels whose tone is only a
-small icon. Rows place label and help on the left and the control on the
-right (`settings-preference-row`); lists use `settings-list-row`.
+`SettingsSegmented`, `SettingsChoiceCards`, `SettingsRowMenu`, `SettingsScope`,
+`SettingsEmptyRow`, `SettingsNotice`, `SettingsStatus`), `settings-nav.tsx`,
+`settings-toc.tsx` and `settings-controls.ts` (`SETTINGS_BUTTON_PRIMARY`,
+`SETTINGS_BUTTON`, `SETTINGS_BUTTON_DANGER`, `SETTINGS_FIELD`). A Settings panel
+uses these instead of its own header, toggle, callout, status or button classes.
+
+Settings is the exception to the single framed surface: it is a stack of groups.
+A group is a `SettingsGroupHead` (title, one line of description, actions) above
+a light `rounded-lg` box that holds only rows, so the box has no header rule and
+no icon tile. Rows place label and help on the left and the control on the right
+(`settings-preference-row`); lists use `settings-list-row` or a table with a
+header row. Per row there is at most one visible outline action; the rest go in
+a `SettingsRowMenu` (`⋯`), destructive last. An empty list is one
+`SettingsEmptyRow`, not a dashed illustration. Irreversible actions sit in their
+own group titled "Danger zone" (`tone="danger"`). Dependent controls dim when
+their master switch is off.
+
+Navigation is one grouped list (Vault, Library, Integrations, This browser,
+System) rendered by `SettingsNav`: in the workbench sidebar when it shows
+Settings, otherwise as an in-page rail with a way back to the Library, the
+account and a filter over section names. Phones keep the tab bar. A section with
+three or more groups also shows `SettingsToc` ("On this page") on wide screens.
+Where a setting applies is a `SettingsScope` badge: "This browser" or "Whole
+Vault". Choices that are visible and few use `SettingsSegmented` (short labels)
+or `SettingsChoiceCards` (a line of detail each); Theme uses the pictured tiles.
+Controls are 6px (`--radius`), body text is `text-sm`, statuses are a dot plus
+plain text, and badges are neutral pills.
 
 **Single-choice dropdowns are native `<select>`.** `globals.css` gives every
 `<select>` without `multiple`/`size` the customizable-select menu (`appearance:

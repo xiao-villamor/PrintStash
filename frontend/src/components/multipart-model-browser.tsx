@@ -658,7 +658,7 @@ function PartEditorRow({
   const { t } = useI18n();
   return (
     <fieldset
-      className="min-w-0 overflow-hidden rounded-lg border border-border bg-card"
+      className="min-w-0 overflow-hidden rounded-none border border-border bg-card"
       aria-labelledby={`multipart-part-${part.id}`}
     >
       <legend className="sr-only">{part.name}</legend>
@@ -1446,7 +1446,7 @@ function MultipartDetail({ id }: { id: number }) {
               </div>
             </section>
             <aside className="grid min-w-0 gap-5 lg:grid-cols-2">
-              <section className="space-y-3 rounded-lg border border-border bg-card p-4">
+              <section className="space-y-3 rounded-none border border-border bg-card p-4">
                 <div>
                   <h2 className="font-semibold">{t("multipart.detailsHeading")}</h2>
                   <p className="mt-1 text-xs text-muted-foreground">
@@ -1611,7 +1611,7 @@ function MultipartDetail({ id }: { id: number }) {
                   </div>
                 </div>
               </section>
-              <section className="space-y-3 rounded-lg border border-border bg-card p-4">
+              <section className="space-y-3 rounded-none border border-border bg-card p-4">
                 <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <h2 className="font-semibold">{t("multipart.guidesHeading")}</h2>

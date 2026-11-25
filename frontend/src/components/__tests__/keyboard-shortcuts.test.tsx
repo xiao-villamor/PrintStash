@@ -76,11 +76,16 @@ describe("KeyboardShortcuts", () => {
     renderShortcuts();
     await userEvent.keyboard("?");
     const dialog = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
-    for (const name of ["Find and move around", "Models", "Print results"])
+    for (const name of ["Find and move around", "In the find bar", "Models", "Print results"])
       expect(within(dialog).getByRole("heading", { name })).toBeVisible();
     for (const name of [
       "Search panel",
+      "Find in collection",
       "Collections panel",
+      "Next match",
+      "Previous match",
+      "Close the find bar",
+      "Open the actions menu",
       "Show or hide the sidebar",
       "Show or hide details",
       "Move in the collection tree",

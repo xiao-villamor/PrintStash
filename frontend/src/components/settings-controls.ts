@@ -14,4 +14,4 @@ export const SETTINGS_BUTTON = buttonVariants({ variant: "outline", size: "sm" }
 /** Irreversible actions beside ordinary ones (Delete, Remove…, Revoke…). */
 export const SETTINGS_BUTTON_DANGER = buttonVariants({ variant: "danger", size: "sm" });
 /** Text fields and selects. */
-export const SETTINGS_FIELD = cn(inputClasses, "h-[34px] rounded-none px-2.5 py-1.5 text-[13px]");
+export const SETTINGS_FIELD = cn(inputClasses, "h-9 rounded-md px-3 py-1.5 text-sm");
