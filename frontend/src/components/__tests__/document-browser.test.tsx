@@ -154,7 +154,7 @@ describe("DocumentBrowser", () => {
 
     await screen.findByText("Guide 0");
     expect(screen.queryByText("Guide 100")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Attach file" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add attachment" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete document" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^Next$/ }));
     expect(await screen.findByText("Guide 100")).toBeInTheDocument();

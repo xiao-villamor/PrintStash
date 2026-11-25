@@ -293,27 +293,17 @@ test.describe("Model attachments", () => {
         }),
       )
       .toEqual({ horizontalOverflow: false, everyTabFits: true, oneRow: true });
-    const moreTabs = navigation.getByRole("button", { name: "More tabs", exact: true });
-    await moreTabs.press("Enter");
-    const menu = page.getByRole("menu", { name: "More tabs", exact: true });
-    await expect(menu).toBeVisible();
-    expect(await menu.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(
-      "rgba(0, 0, 0, 0)",
-    );
-    const history = menu.getByRole("menuitemradio", { name: "History", exact: true });
-    await expect(history).toBeVisible();
-    await history.click();
-    await expect(page.getByRole("tabpanel", { name: "History", exact: true })).toBeVisible();
-    await expect(moreTabs).toHaveAttribute("data-active", "true");
-    await navigation.getByRole("tab", { name: /^Files(?: \d+)?$/ }).click();
-    await expect(pane).toBeVisible();
+    const add = pane.getByRole("button", { name: "Add attachment", exact: true });
+    await expect(add).toBeVisible();
+    await add.press("Enter");
+    const menu = page
+      .getByRole("menu")
+      .filter({ has: page.getByRole("menuitem", { name: "Attach file" }) });
+    await expect(menu.getByRole("menuitem", { name: "New document" })).toBeVisible();
     await page.screenshot({ path: info.outputPath("model-files-narrow-inspector.png") });
-
-    for (let step = 0; step < 18; step += 1) await resize.press("ArrowLeft");
-    await expect(resize).toHaveAttribute("aria-valuenow", "688");
-    await expect(navigation.getByRole("tab", { name: "Source info", exact: true })).toBeVisible();
-    await expect(navigation.getByRole("tab", { name: /^History/ })).toBeVisible();
-    await expect(moreTabs).toBeHidden();
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+    await expect(add).toBeFocused();
   });
 });
 

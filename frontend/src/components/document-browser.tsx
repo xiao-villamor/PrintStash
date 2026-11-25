@@ -155,6 +155,7 @@ export function DocumentBrowser({
                       size="xs"
                       disabled={busy}
                       loading={busy}
+                      data-menu-trigger
                       aria-haspopup="menu"
                       aria-expanded={addOpen}
                       onClick={() => setAddOpen(!addOpen)}
