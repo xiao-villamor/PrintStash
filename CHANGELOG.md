@@ -8,6 +8,8 @@
 
 ### Changed
 
+- The Collections sidebar opens and closes in 200 ms.
+
 - The Trash page uses rounded surfaces and icons on its actions, shows how many days each deleted item has left (the last three days in the destructive tone), and has an illustrated empty state.
 
 - An empty collection now shows an illustration, one Upload files action and a drop hint, instead of also offering Import from URL and Connect folder or NAS, which add to the library rather than to that collection.

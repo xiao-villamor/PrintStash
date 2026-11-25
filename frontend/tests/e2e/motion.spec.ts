@@ -444,11 +444,38 @@ test.describe("motion and layering", () => {
       if (reducedMotion === "no-preference") {
         expect(motions[0].widths[0]).toBe(0);
         expect(motions[0].widths.at(-1)).toBeGreaterThan(0);
-        expect(motions[0].duration).toBeLessThanOrEqual(300);
+        expect(motions[0].duration).toBe(200);
         expect(
           motions[0].widths.every(
             (width, index, widths) => index === 0 || width >= widths[index - 1],
           ),
+        ).toBe(true);
+      }
+    });
+  }
+
+  for (const reducedMotion of ["no-preference", "reduce"] as const) {
+    test(`closing the collections pane respects ${reducedMotion}`, async ({ page }) => {
+      await page.emulateMedia({ reducedMotion });
+      await recordPanelMotion(page, "collections-pane");
+      await page.goto("/");
+      const toggle = page
+        .locator("header")
+        .getByRole("button", { name: "Toggle sidebar", exact: true });
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+      await toggle.press("Enter");
+      await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      await expect(page.locator("#collections-pane")).toHaveCSS("width", "0px");
+
+      const motions = await page.evaluate(() => window.panelMotions);
+      expect(motions).toHaveLength(reducedMotion === "reduce" ? 0 : 1);
+      if (reducedMotion === "no-preference") {
+        const [motion] = motions;
+        expect(motion.duration).toBe(200);
+        expect(motion.widths[0]).toBeGreaterThan(0);
+        expect(motion.widths.at(-1)).toBe(0);
+        expect(
+          motion.widths.every((width, index, widths) => index === 0 || width <= widths[index - 1]),
         ).toBe(true);
       }
     });
@@ -491,7 +518,7 @@ test.describe("motion and layering", () => {
       expect(motions.length > 0).toBe(moves);
       if (moves) {
         expect(motions[0].transforms[0]).not.toBe(motions[0].transforms.at(-1));
-        expect(motions[0].duration).toBeLessThanOrEqual(300);
+        expect(motions[0].duration).toBe(300);
       }
     });
   }

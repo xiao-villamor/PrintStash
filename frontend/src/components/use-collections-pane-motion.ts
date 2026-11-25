@@ -99,7 +99,7 @@ export function useCollectionsPaneMotion(open: boolean) {
       initialized.current = true;
       finish();
     } else {
-      const duration = durationToken(shell, "--duration-slow");
+      const duration = durationToken(shell, "--duration-fast");
       const motion = dockMotion(
         fromWidth / fullWidth,
         velocity.current / fullWidth,

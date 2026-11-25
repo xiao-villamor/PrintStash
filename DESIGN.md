@@ -387,21 +387,21 @@ only for missing or failed assets. Counts update in place without motion.
 
 The Library model inspector is a solid, non-modal surface docked to the right.
 It enters from beyond that edge and returns along the same path, including on
-mobile. It moves on the same dock curve and slow timing as the Collections pane,
-sampled into compositor keyframes so preview initialization does not drive its
-frame loop; reversing open/close preserves its current displacement and velocity.
+mobile. It uses the shared dock curve over the slow timing, sampled into
+compositor keyframes so preview initialization does not drive its frame loop.
+Reversing open/close preserves its current displacement and velocity.
 Hide only when the motion reaches the closed position, never on a fixed exit timer. When the docked
 inspector reserves or releases its column, the Library grid reflows exactly as
 it does for the Collections pane: it commits its resting columns once and carries
-each card from its painted position along the inspector's own progress, so cards
-and panel share one timeline, and cards move identically beside either panel. A card that wraps to the next or
+each card from its painted position along the inspector's own progress, so the
+cards follow the timeline of their panel. A card that wraps to the next or
 previous row never crosses the grid: it rides its new row like a conveyor,
 entering from the grid edge right behind the neighbour it follows, so no cell
 empties mid-motion. Cards entering view fade in on the same progress; reduced motion keeps the reflow immediate. Switching Models
 keeps the panel stationary. Closed panels become inert immediately. Reduced motion
 uses immediate visibility changes and retains the existing focus handoff.
 
-The left Collections pane uses a smooth cubic ease into rest over the slow timing,
+The left Collections pane uses a smooth cubic ease into rest over the fast timing (200 ms),
 with zero starting/ending velocity at rest and inherited velocity on interruption.
 It has no spring response or oscillation. Its shell column releases and restores space continuously; the inner outliner keeps its intrinsic width,
 clipped and anchored to the moving right boundary. This deliberately animates one
