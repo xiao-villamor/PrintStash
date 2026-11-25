@@ -881,7 +881,7 @@ function PrinterDetailView({
               <>
                 {providerLabel(printer)} · {connectionLabel}
                 {printer.capabilities.support_level === "beta" && (
-                  <span className="ml-2 inline-flex border border-border bg-muted px-1.5 py-0.5 text-2xs font-medium text-foreground">
+                  <span className="ml-2 inline-flex rounded-full bg-foreground/10 px-2 py-0.5 text-2xs font-medium text-foreground/80">
                     {uiText("Beta")}
                   </span>
                 )}
@@ -936,7 +936,7 @@ function PrinterDetailView({
             </div>
           )}
 
-          <div className="border-b border-border">
+          <div>
             <TabBar
               tabs={[
                 {
@@ -996,9 +996,10 @@ function PrinterDetailView({
               ]}
               active={activeTab === "maintenance" ? "materials" : activeTab}
               onChange={setActiveTab}
-              className="gap-1 overflow-x-auto -mb-px"
-              tabClassName="px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              activeTabClassName="bg-transparent font-semibold text-foreground hover:bg-transparent"
+              showIndicator={false}
+              className="w-fit max-w-full gap-0.5 overflow-x-auto rounded-lg border border-border bg-card p-0.75"
+              tabClassName="h-7.5 shrink-0 rounded-md px-3 text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              activeTabClassName="bg-foreground/12 text-foreground"
             />
           </div>
 

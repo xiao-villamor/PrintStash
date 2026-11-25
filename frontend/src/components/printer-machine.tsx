@@ -183,7 +183,7 @@ export function MachineMaterials({
                   .map(({ tray, slot }) => (
                     <li
                       key={slot.slot_key}
-                      className="min-w-0 border border-border bg-muted/30 p-2"
+                      className="min-w-0 rounded-md border border-border bg-muted/30 p-2"
                     >
                       <MaterialSlot slot={slot} label={uiText("Tray {value1}", { value1: tray })} />
                     </li>

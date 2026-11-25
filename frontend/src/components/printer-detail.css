@@ -2,6 +2,8 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   border: 1px solid var(--border);
+  border-radius: var(--radius-popover);
+  overflow: hidden;
   background: var(--card);
 }
 
@@ -48,6 +50,7 @@
   height: 88px;
   padding: 6px;
   border: 1px solid var(--border);
+  border-radius: var(--radius);
   background: var(--preview-image-matte);
 }
 
@@ -77,12 +80,16 @@
   align-items: start;
   gap: 14px;
   border: 0;
+  border-radius: 0;
+  overflow: visible;
   background: transparent;
 }
 
 .printer-settings-desk > aside,
 .printer-settings-desk > form {
   border: 1px solid var(--border);
+  border-radius: var(--radius-popover);
+  overflow: hidden;
   background: var(--card);
 }
 
@@ -191,6 +198,8 @@
   gap: 9px;
   padding: 12px 16px;
   border: 1px solid var(--border);
+  border-radius: var(--radius-popover);
+  overflow: hidden;
   background: var(--card);
 }
 
