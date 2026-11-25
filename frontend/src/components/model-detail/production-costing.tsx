@@ -720,7 +720,10 @@ function EstimateForm({
                     {line.name || uiText("Filament")}
                     {line.grams && ` · ${formatGrams(Number(line.grams))}`}
                     {line.rate &&
-                      ` · ${formatNumber(Number(line.rate), { maximumFractionDigits: 4 })} ${currency}/kg`}
+                      ` · ${uiText("{value1} {value2}/kg", {
+                        value1: formatNumber(Number(line.rate), { maximumFractionDigits: 4 }),
+                        value2: currency,
+                      })}`}
                   </p>
                   {rateOrigins[line.key] ? (
                     <p className="text-sm text-muted-foreground">{rateOrigins[line.key].label}</p>

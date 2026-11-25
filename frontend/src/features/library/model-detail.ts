@@ -134,4 +134,9 @@ export function useModelPrintJobs(id: number, enabled: boolean) {
 // Cover edits share the Model detail publication and editing authority.
 export { useModelCoverEditing } from "./model-covers";
 
-export { productionCostOptions, useProductionCostCommands } from "./production-costing";
+export {
+  pricingTemplatesOptions,
+  productionCostOptions,
+  usePricingTemplateCommands,
+  useProductionCostCommands,
+} from "./production-costing";

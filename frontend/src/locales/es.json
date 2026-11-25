@@ -6037,6 +6037,7 @@
   "Filament preset or spool": "Preajuste de filamento o bobina",
   "Printer costs in Profiles": "Costes de impresora en Perfiles",
   "Filament costs in Profiles": "Costes de filamento en Perfiles",
+  "{value1} {value2}/kg": "{value1} {value2}/kg",
   "Choose saved rates or complete the missing estimate inputs below.": "Elige tarifas guardadas o completa los datos que faltan en los ajustes de la estimación.",
   "Adjust estimate inputs": "Ajustar datos de la estimación",
   "Cost estimate": "Estimación de costes",

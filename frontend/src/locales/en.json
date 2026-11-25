@@ -6037,6 +6037,7 @@
   "Filament preset or spool": "Filament preset or spool",
   "Printer costs in Profiles": "Printer costs in Profiles",
   "Filament costs in Profiles": "Filament costs in Profiles",
+  "{value1} {value2}/kg": "{value1} {value2}/kg",
   "Choose saved rates or complete the missing estimate inputs below.": "Choose saved rates or complete the missing estimate inputs below.",
   "Adjust estimate inputs": "Adjust estimate inputs",
   "Cost estimate": "Cost estimate",

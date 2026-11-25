@@ -9,7 +9,7 @@ import { Input, inputClasses } from "@/components/ui/input";
 import {
   pricingTemplatesOptions,
   usePricingTemplateCommands,
-} from "@/features/library/production-costing";
+} from "@/features/library/model-detail";
 import { pricingPageSize } from "@/lib/api/production-costing";
 import { formatPercent } from "@/lib/format";
 import { Link } from "@/lib/link";

@@ -261,9 +261,7 @@ test.describe("settings route", () => {
     await expect.poll(() => probes).toBe(answered + 1);
   });
   for (const theme of ["light", "dark"] as const) {
-    test(`uses consistent text and dropdown fields in ${theme} mode`, async ({
-      page,
-    }, testInfo) => {
+    test(`keeps field surfaces consistent in ${theme} mode`, async ({ page }, testInfo) => {
       await page.addInitScript((value) => localStorage.setItem("printstash.theme", value), theme);
       await page.goto("/settings?section=design");
       await collapseNavigationSidebar(page);
