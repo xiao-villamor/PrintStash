@@ -7,8 +7,8 @@ import { useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("search clarity", () => {
-  test("keeps search actions inside the focused field border", async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 800 });
+  test("keeps labeled search actions in the focused field", async ({ page }, testInfo) => {
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
     await page.route("**/api/v1/search/status", (route) =>
       route.fulfill({
         json: searchStatus({
@@ -21,6 +21,17 @@ test.describe("search clarity", () => {
     await page.goto("/search");
     const input = page.getByRole("searchbox", { name: "Search library" });
     await input.fill("crimpA");
+    const form = page.getByRole("search").filter({ has: input });
+    await form.screenshot({ path: testInfo.outputPath("search-field.png") });
+    const focusedBorder = await form.evaluate((element) => ({
+      actual: getComputedStyle(element).borderTopColor,
+      neutral: getComputedStyle(element.querySelector("svg")!).color,
+    }));
+    expect(focusedBorder.actual).toBe(focusedBorder.neutral);
+    await expect(page.getByRole("button", { name: "AI Search", exact: true })).toHaveText(
+      "AI Search",
+      { timeout: 1000 },
+    );
     const field = await input.boundingBox();
     expect(field).not.toBeNull();
     for (const name of ["AI Search", "Clear search"]) {
@@ -116,7 +127,7 @@ test.describe("search clarity", () => {
     await expect(page.getByText("30 results shown")).toBeVisible();
     await expect(page.getByRole("group", { name: "Result types" })).toBeVisible();
     const ai = page.getByRole("button", { name: "AI Search", exact: true });
-    await expect(ai).toHaveText("");
+    await expect(ai).toHaveText("AI Search");
     await expect(ai).toHaveAttribute("aria-pressed", "true");
     const results = page.getByRole("list", { name: "Search results" });
     await expect(results.getByRole("listitem")).toHaveCount(30);

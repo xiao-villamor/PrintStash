@@ -4297,7 +4297,6 @@
   "aiSearch.health.verified": "Last check",
   "aiSearch.health.verifiedValue": "Passed {time}",
   "aiSearch.health.notVerified": "Not checked yet",
-  "aiSearch.health.help": "A healthy index has every entry indexed and none waiting for a retry. Shortened entries are still searchable; only text past the model’s length limit is left out.",
   "aiSearch.cursorExpired": "The search index changed. Restart to see the current results.",
   "aiSearch.restartSearch": "Restart search",
   "aiSearch.lexicalBackend": "Keyword search backend",

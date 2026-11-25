@@ -481,16 +481,14 @@ export function AiSearchSettings() {
         </p>
       ) : (
         <>
-          <SettingsCard hideHeader title={t("AI Search setup")}>
-            <fieldset disabled={settings.isError} className="min-w-0">
-              <AiSearchSetup
-                settings={settings.data}
-                catalog={catalog}
-                changing={false}
-                onChangingChange={setChanging}
-              />
-            </fieldset>
-          </SettingsCard>
+          <fieldset disabled={settings.isError} className="min-w-0">
+            <AiSearchSetup
+              settings={settings.data}
+              catalog={catalog}
+              changing={false}
+              onChangingChange={setChanging}
+            />
+          </fieldset>
           <Modal
             open={changing}
             onClose={() => setChanging(false)}

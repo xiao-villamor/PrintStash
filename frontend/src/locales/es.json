@@ -4297,7 +4297,6 @@
   "aiSearch.health.verified": "Última comprobación",
   "aiSearch.health.verifiedValue": "Superada {time}",
   "aiSearch.health.notVerified": "Aún sin comprobar",
-  "aiSearch.health.help": "Un índice sano tiene todas las entradas indexadas y ninguna pendiente de reintento. Las entradas recortadas siguen siendo buscables; solo se omite el texto que supera el límite del modelo.",
   "aiSearch.cursorExpired": "El índice de búsqueda ha cambiado. Reinicia para ver los resultados actuales.",
   "aiSearch.restartSearch": "Reiniciar búsqueda",
   "aiSearch.lexicalBackend": "Motor de búsqueda por palabras",

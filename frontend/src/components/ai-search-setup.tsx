@@ -4,10 +4,12 @@ import { captureEditingBase } from "@/lib/api/editing";
 import type { EditingBase } from "@/types/editing";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Check, HardDrive, Search, Server, ArrowRight } from "lucide-react";
+import { Check, HardDrive, Server, ArrowRight } from "lucide-react";
 import { Link } from "@/lib/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { SettingsCard, SettingsNotice } from "@/components/settings-card";
+import { SETTINGS_FIELD } from "@/components/settings-controls";
 import { InferenceEndpointForm } from "@/components/inference-endpoint-form";
 import {
   SearchIndexHealth,
@@ -274,8 +276,46 @@ export function AiSearchSetup({
       </div>
     );
   const ready =
-    settings.settings.enabled && active && availability.data?.semantic_ready && !changing;
-  const step = ready ? 3 : enabled && path ? 2 : 1;
+    settingsReview === null &&
+    settings.settings.enabled &&
+    active &&
+    availability.data?.semantic_ready &&
+    !changing;
+  if (ready) {
+    return (
+      <SettingsCard
+        title={t("AI Search is ready")}
+        description={t("Describe what you want to print. Try “a holder for my tools”.")}
+        action={
+          <>
+            <Badge variant="secondary">{t("Ready")}</Badge>
+            <Button variant="outline" size="sm" onClick={() => setChanging(true)}>
+              {t("Change setup")}
+            </Button>
+            <Button size="sm" asChild>
+              <Link href="/search?q=a%20holder%20for%20my%20tools">
+                {t("Try AI Search")}
+                <ArrowRight className="ml-2 h-4 w-4" aria-hidden />
+              </Link>
+            </Button>
+          </>
+        }
+      >
+        {active.quarantined > 0 && (
+          <SettingsNotice
+            className="mt-2"
+            role="status"
+            tone="warning"
+            title={t(
+              "Some files could not be prepared. You can search the available files and review the rest in Advanced AI controls.",
+            )}
+          />
+        )}
+        <SearchIndexHealth generation={active} />
+      </SettingsCard>
+    );
+  }
+  const step = enabled && path ? 2 : 1;
   const locations = [
     {
       id: "local",
@@ -346,7 +386,7 @@ export function AiSearchSetup({
                 {t(path === "local" ? "AI model" : "aiSearch.modelOrServer")}
               </span>
               <select
-                className="flex h-11 w-full min-w-0 items-center border border-input bg-field-surface px-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className={`${SETTINGS_FIELD} flex w-full items-center`}
                 value={path === "local" ? (local?.id ?? "") : String(remote?.id ?? "")}
                 disabled={!!building || !!downloading}
                 onChange={(event) => {
@@ -516,8 +556,8 @@ export function AiSearchSetup({
       </fieldset>
     );
   }
-  return (
-    <div>
+  const body = (
+    <>
       {settingsReview && (
         <section
           aria-label={t("library.latestVersion")}
@@ -564,28 +604,24 @@ export function AiSearchSetup({
         </section>
       )}
       <fieldset disabled={settingsReview !== null} className="min-w-0">
-        {!ready && (
-          <ol
-            aria-label={t("AI setup progress")}
-            className="grid grid-cols-3 gap-2 border-b bg-muted/30 px-4 py-4 text-xs sm:px-5"
-          >
-            {[t("Choose location"), t("Prepare search"), t("Start searching")].map(
-              (label, index) => (
-                <li
-                  key={label}
-                  aria-current={step === index + 1 ? "step" : undefined}
-                  className={`flex items-center gap-2 ${step === index + 1 ? "font-semibold text-foreground" : "text-muted-foreground"}`}
-                >
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border">
-                    {step > index + 1 ? <Check className="h-3 w-3" aria-hidden /> : index + 1}
-                  </span>
-                  {label}
-                </li>
-              ),
-            )}
-          </ol>
-        )}
-        <div className={ready ? "" : "space-y-4 p-4 sm:p-5"}>
+        <ol
+          aria-label={t("AI setup progress")}
+          className="grid grid-cols-3 gap-2 border-b border-border py-3 text-xs"
+        >
+          {[t("Choose location"), t("Prepare search"), t("Start searching")].map((label, index) => (
+            <li
+              key={label}
+              aria-current={step === index + 1 ? "step" : undefined}
+              className={`flex items-center gap-2 ${step === index + 1 ? "font-semibold text-foreground" : "text-muted-foreground"}`}
+            >
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border">
+                {step > index + 1 ? <Check className="h-3 w-3" aria-hidden /> : index + 1}
+              </span>
+              {label}
+            </li>
+          ))}
+        </ol>
+        <div className="space-y-4 py-4">
           {message && (
             <p role="alert" className="text-sm text-destructive">
               {message}
@@ -601,51 +637,14 @@ export function AiSearchSetup({
                 )}
               </p>
             )}
-          {!ready && !building && failedPreparation && (
+          {!building && failedPreparation && (
             <p role="status" className="text-sm text-warning">
               {t(
                 "Preparation stopped before search was ready. Try again, or open Advanced AI controls for details.",
               )}
             </p>
           )}
-          {ready && active.quarantined > 0 && (
-            <p role="status" className="text-sm text-warning">
-              {t(
-                "Some files could not be prepared. You can search the available files and review the rest in Advanced AI controls.",
-              )}
-            </p>
-          )}
-          {ready ? (
-            <>
-              <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-5">
-                <div className="flex min-w-0 flex-1 basis-64 items-center gap-3">
-                  <Search
-                    className="size-8 shrink-0 rounded-md bg-muted p-2 text-muted-foreground"
-                    aria-hidden
-                  />
-                  <div className="min-w-0">
-                    <h3 className="text-sm font-semibold">{t("AI Search is ready")}</h3>
-                    <p className="mt-0.5 max-w-prose text-xs text-muted-foreground">
-                      {t("Describe what you want to print. Try “a holder for my tools”.")}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="secondary">{t("Ready")}</Badge>
-                  <Button variant="outline" size="sm" onClick={() => setChanging(true)}>
-                    {t("Change setup")}
-                  </Button>
-                  <Button size="sm" asChild>
-                    <Link href="/search?q=a%20holder%20for%20my%20tools">
-                      {t("Try AI Search")}
-                      <ArrowRight className="ml-2 h-4 w-4" aria-hidden />
-                    </Link>
-                  </Button>
-                </div>
-              </div>
-              <SearchIndexHealth generation={active} />
-            </>
-          ) : building ? (
+          {building ? (
             <>
               <h3 className="text-base font-semibold">
                 {t(
@@ -963,6 +962,7 @@ export function AiSearchSetup({
           )}
         </div>
       </fieldset>
-    </div>
+    </>
   );
+  return changing ? body : <SettingsCard title={t("AI Search setup")}>{body}</SettingsCard>;
 }

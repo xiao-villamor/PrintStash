@@ -82,6 +82,13 @@ test.describe("AI Search preparation", () => {
     const badge = (await ready.boundingBox())!;
     const action = (await trySearch.boundingBox())!;
     expect(badge.y + badge.height / 2).toBeCloseTo(action.y + action.height / 2, 0);
+    const group = page.getByRole("group", { name: "AI Search is ready" });
+    const heading = group.getByRole("heading", { name: "AI Search is ready" });
+    const panel = group.getByRole("region", { name: "Index check" });
+    await expect(panel).toBeVisible({ timeout: 1000 });
+    const title = (await heading.boundingBox())!;
+    const rows = (await panel.boundingBox())!;
+    expect(title.y + title.height).toBeLessThan(rows.y);
   });
 
   test("shows both processing locations in the setup form", async ({ page }, testInfo) => {
