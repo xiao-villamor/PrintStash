@@ -19,6 +19,7 @@ import { durationToken } from "@/lib/css-time";
 import {
   clampInspectorWidth,
   INSPECTOR_WILL_MOVE_EVENT,
+  InspectorWillMoveEvent,
   LIBRARY_INSPECTOR_MAX_WIDTH,
   LIBRARY_INSPECTOR_MIN_WIDTH,
 } from "./use-inspector-motion";
@@ -47,6 +48,7 @@ function fittedTrack(width: number, preferredWidth: number, gap: number) {
 }
 
 interface PaneCardSnapshot {
+  closing: boolean;
   columns: number;
   track: number;
   width: number;
@@ -55,8 +57,15 @@ interface PaneCardSnapshot {
   viewport: DOMRect;
 }
 
-function cardIsVisible(bounds: DOMRect, viewport: DOMRect) {
-  return bounds.top < viewport.bottom && bounds.bottom > viewport.top;
+function cardIsVisible(bounds: DOMRect, viewport: DOMRect, right = viewport.right) {
+  return (
+    bounds.width > 0 &&
+    bounds.height > 0 &&
+    bounds.left < right &&
+    bounds.right > viewport.left &&
+    bounds.top < viewport.bottom &&
+    bounds.bottom > viewport.top
+  );
 }
 
 export interface LibraryInspectorDock {
@@ -372,10 +381,19 @@ export function LibraryItems<T>({
     });
     observer.observe(node);
     observer.observe(scroll);
-    const movingInspector = () => {
-      if ("paneMoving" in document.documentElement.dataset) return;
+    const movingInspector = (event: Event) => {
+      if (
+        !(event instanceof InspectorWillMoveEvent) ||
+        "paneMoving" in document.documentElement.dataset
+      )
+        return;
       if (layout === "grid" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
         const viewport = scroll.getBoundingClientRect();
+        const closing = event.direction === "closing";
+        const drawer = closing
+          ? document.querySelector("#model-drawer:not([hidden])")?.getBoundingClientRect()
+          : undefined;
+        const right = drawer?.width ? Math.min(viewport.right, drawer.left) : viewport.right;
         const { columns, track, width, keys } = paintedGrid.current;
         const rows = new Map(keys.map((key, index) => [key, Math.floor(index / columns)]));
         const cards: PaneCardSnapshot["cards"] = new Map();
@@ -383,9 +401,18 @@ export function LibraryItems<T>({
           const key = card.dataset.libraryKey!;
           const row = rows.get(key);
           const bounds = card.getBoundingClientRect();
-          if (row !== undefined && cardIsVisible(bounds, viewport)) cards.set(key, { bounds, row });
+          if (row !== undefined && cardIsVisible(bounds, viewport, right))
+            cards.set(key, { bounds, row });
         }
-        paneCards.current = { columns, track, width, cards, viewport, scrollTop: scroll.scrollTop };
+        paneCards.current = {
+          closing,
+          columns,
+          track,
+          width,
+          cards,
+          viewport,
+          scrollTop: scroll.scrollTop,
+        };
         if (snapshotExpiry.current !== null) cancelAnimationFrame(snapshotExpiry.current);
         // The projection is committed before paint. A dock that leaves the
         // grid unchanged must not carry this snapshot into a later resize.
@@ -467,30 +494,46 @@ export function LibraryItems<T>({
     const scrollTop = scroll.scrollTop;
     const visible = [...node.querySelectorAll<HTMLElement>("[data-library-key]")]
       .map((card) => ({ card, bounds: card.getBoundingClientRect() }))
-      .filter(
-        ({ bounds }) => bounds.width > 0 && bounds.height > 0 && cardIsVisible(bounds, viewport),
-      );
+      .filter(({ bounds }) => cardIsVisible(bounds, viewport));
     if (visible.length === 0) return;
     const duration = durationToken(node, "--duration-fast") * 1000;
     const easing = getComputedStyle(node).getPropertyValue("--ease-dock").trim();
+    const timing = { duration, easing };
+    const arrival = [
+      { opacity: 0.4, transform: `translateY(${gap}px)` },
+      { opacity: 1, transform: "none" },
+    ];
+    const fade = [{ opacity: 0.9 }, { opacity: 1 }];
     const rows = new Map(keys.map((key, index) => [key, Math.floor(index / columns)]));
     for (const { card, bounds } of visible) {
       const key = card.dataset.libraryKey!;
       const origin = before.cards.get(key);
       if (!origin) {
-        if (before.columns !== columns)
-          cardAnimations.current.push(
-            card.animate([{ opacity: 0.9 }, { opacity: 1 }], { duration, easing }),
-          );
+        // A close can reveal cards even when only the track width changes.
+        if (before.closing || before.columns !== columns)
+          cardAnimations.current.push(card.animate(before.closing ? arrival : fade, timing));
         continue;
       }
       const x = origin.bounds.left - before.viewport.left - (bounds.left - viewport.left);
       const y = origin.bounds.top + before.scrollTop - (bounds.top + scrollTop);
-      // Keep motion local to the card's neighbors. Larger changes would move it
-      // over an unrelated thumbnail before it reaches the new cell.
-      if (origin.row !== rows.get(key) || Math.abs(x) > before.track + gap || Math.abs(y) > gap) {
+      const changedRow = origin.row !== rows.get(key);
+      // A long move enters from the gap nearest its origin. That gives each
+      // reflowing row movement without passing over other cards.
+      if (changedRow || Math.abs(x) > before.track + gap || Math.abs(y) > gap) {
+        const offset =
+          changedRow || Math.abs(y) > gap
+            ? `translateY(${Math.sign(y) * gap}px)`
+            : `translateX(${Math.sign(x) * gap}px)`;
         cardAnimations.current.push(
-          card.animate([{ opacity: 0.9 }, { opacity: 1 }], { duration, easing }),
+          card.animate(
+            before.closing
+              ? [
+                  { opacity: 0.65, transform: offset },
+                  { opacity: 1, transform: "none" },
+                ]
+              : fade,
+            timing,
+          ),
         );
         continue;
       }
@@ -512,7 +555,7 @@ export function LibraryItems<T>({
             },
             { transformOrigin: "top left", transform: "none" },
           ],
-          { duration, easing },
+          timing,
         ),
       );
     }

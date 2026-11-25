@@ -33,7 +33,7 @@ import {
 } from "@/features/library/reading-position";
 import { LibraryItems, type LibraryInspectorDock } from "@/components/library-items";
 import {
-  INSPECTOR_WILL_MOVE_EVENT,
+  InspectorWillMoveEvent,
   LIBRARY_INSPECTOR_MAX_WIDTH,
   LIBRARY_INSPECTOR_MIN_WIDTH,
 } from "@/components/use-inspector-motion";
@@ -335,7 +335,7 @@ function CollectionStrip({
   total: number;
   overview: boolean;
   resetKey: string;
-  children: (limit: number | null, onColumns: (columns: number) => void) => ReactNode;
+  children: (singleRow: boolean, onColumns: (columns: number) => void) => ReactNode;
 }) {
   useUiLocale();
   const [expandedFor, setExpandedFor] = useState<string | null>(null);
@@ -370,7 +370,7 @@ function CollectionStrip({
           </Button>
         </div>
       )}
-      {children(overview || expanded ? null : rowSize, setRowSize)}
+      {children(!overview && !expanded, setRowSize)}
     </>
   );
 }
@@ -2361,7 +2361,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const setInspector = useCallback(
     (intent: InspectorIntent) => {
       if (intent.open !== (libraryInspectorIntents.get(inspectorScope)?.open ?? false))
-        window.dispatchEvent(new Event(INSPECTOR_WILL_MOVE_EVENT));
+        window.dispatchEvent(new InspectorWillMoveEvent(intent.open ? "opening" : "closing"));
       libraryInspectorIntents.set(inspectorScope, intent);
       while (libraryInspectorIntents.size > 20)
         libraryInspectorIntents.delete(libraryInspectorIntents.keys().next().value!);
@@ -4009,12 +4009,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       overview={false}
                       resetKey={selectedCollection ?? ""}
                     >
-                      {(limit, onColumns) => (
+                      {(singleRow, onColumns) => (
                         <LibraryItems
-                          items={Array.from(
-                            { length: Math.min(reservedCollections, limit ?? reservedCollections) },
-                            (_, index) => index,
-                          )}
+                          items={Array.from({ length: reservedCollections }, (_, index) => index)}
                           itemKey={(index) => `collection-placeholder:${index}`}
                           renderItem={() => <div className="library-collection-placeholder" />}
                           scrollRef={startupContent}
@@ -4027,7 +4024,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           keepCollectionCardWidth
                           minCardWidth={300}
                           virtualize={false}
-                          singleRow={limit !== null}
+                          singleRow={singleRow}
                           onColumnsChange={onColumns}
                         />
                       )}
@@ -4045,12 +4042,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       overview={collectionOverview}
                       resetKey={displayedPath ?? ""}
                     >
-                      {(limit, onColumns) => (
+                      {(singleRow, onColumns) => (
                         <LibraryItems
                           key={`collections:${displayedPath ?? ""}`}
-                          items={
-                            limit === null ? visibleCollections : visibleCollections.slice(0, limit)
-                          }
+                          items={visibleCollections}
                           itemKey={(collection) => `collection:${collection.id}`}
                           renderItem={(collection) => (
                             <LibraryCardFill
@@ -4125,7 +4120,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           estimateSize={collectionOverview ? 266 : COMPACT_COLLECTION_HEIGHT}
                           keepCollectionCardWidth={!collectionOverview}
                           minCardWidth={collectionOverview ? undefined : 300}
-                          singleRow={limit !== null}
+                          singleRow={singleRow}
                           onColumnsChange={onColumns}
                         />
                       )}

@@ -5,6 +5,12 @@ import { dockMotion } from "@/components/use-collections-pane-motion";
 /** Capture the grid before Details changes the workspace width. */
 export const INSPECTOR_WILL_MOVE_EVENT = "printstash:inspector-will-move";
 
+export class InspectorWillMoveEvent extends Event {
+  constructor(readonly direction: "opening" | "closing") {
+    super(INSPECTOR_WILL_MOVE_EVENT);
+  }
+}
+
 export const LIBRARY_INSPECTOR_MIN_WIDTH = 320;
 export const LIBRARY_INSPECTOR_MAX_WIDTH = 800;
 

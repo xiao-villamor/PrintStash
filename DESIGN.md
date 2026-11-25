@@ -398,8 +398,10 @@ focus to the opener, the inspected Model card if it was remounted, or the Detail
 Model details captures visible card positions before the dock changes layout.
 The grid and dock agree on their fitted width before the slide. Finishing
 the slide enables editing and the preview without refitting the grid.
-Nearby cards on the same row ease into place. Cards that wrap or move farther
-briefly fade into their destination cells. The selected model stays visually anchored.
+Nearby cards on the same row ease into place. On close, cards that wrap or move
+farther slide a short distance into their destination cells. Cards entering the
+viewport also slide and fade in, even when the column count stays the same.
+These movements run alongside the departing pane.
 
 The Collections sidebar uses a workspace slide. Its shell edge and the
 workspace move together, with card tracks held for the duration of the slide.

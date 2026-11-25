@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useMemo, useRef, useState } from "react";
 import { LibraryItems } from "@/components/library-items";
 import { PANE_SETTLED_EVENT } from "@/components/use-collections-pane-motion";
+import { InspectorWillMoveEvent } from "@/components/use-inspector-motion";
 import type { LibraryReadingRenderer } from "@/features/library/reading-position";
 
 let width = 1000;
@@ -50,6 +51,18 @@ const flights = new Map<string, Keyframe[]>();
 const animate = HTMLElement.prototype.animate;
 
 const grid = () => document.querySelector<HTMLElement>(".library-virtual-row")!;
+
+function enableCardMotion() {
+  const matchMedia = window.matchMedia;
+  vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+    ...matchMedia(query),
+    matches: false,
+  }));
+  const root = grid().parentElement!;
+  root.style.setProperty("--duration-fast", "200ms");
+  root.style.setProperty("--ease-dock", "ease-out");
+  return root.parentElement!;
+}
 
 beforeEach(() => {
   width = 1000;
@@ -144,6 +157,57 @@ describe("LibraryItems", () => {
 
     expect(grid().style.gridTemplateColumns).toBe("repeat(3, 322px)");
     expect(screen.queryByRole("link", { name: "Card 3" })).toBeNull();
+  });
+
+  it("fades a newly visible card on close within the same column count", () => {
+    render(
+      <>
+        <aside id="model-drawer" />
+        <Grid />
+      </>,
+    );
+    const scroller = enableCardMotion();
+    const card = screen.getByText("Card 2").closest("[data-library-key]")!;
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1100, 500));
+    vi.spyOn(document.getElementById("model-drawer")!, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(660, 0, 440, 500),
+    );
+    vi.spyOn(card, "getBoundingClientRect").mockImplementation(() =>
+      width === 1000 ? new DOMRect(676, 0, 322, 200) : new DOMRect(706, 0, 337, 200),
+    );
+
+    act(() => {
+      window.dispatchEvent(new InspectorWillMoveEvent("closing"));
+      width = 1045;
+      window.dispatchEvent(new Event(PANE_SETTLED_EVENT));
+    });
+
+    expect(grid().style.gridTemplateColumns).toBe("repeat(3, 337px)");
+    expect(flights.get("item:2")).toEqual([
+      { opacity: 0.4, transform: "translateY(16px)" },
+      { opacity: 1, transform: "none" },
+    ]);
+  });
+
+  it("slides a card that wraps to the previous row on close", () => {
+    render(<Grid />);
+    const scroller = enableCardMotion();
+    const card = screen.getByText("Card 3").closest("[data-library-key]")!;
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1250, 500));
+    vi.spyOn(card, "getBoundingClientRect").mockImplementation(() =>
+      width === 1000 ? new DOMRect(0, 216, 322, 200) : new DOMRect(951, 0, 300, 200),
+    );
+
+    act(() => {
+      window.dispatchEvent(new InspectorWillMoveEvent("closing"));
+      width = 1250;
+      window.dispatchEvent(new Event(PANE_SETTLED_EVENT));
+    });
+
+    expect(flights.get("item:3")).toEqual([
+      { opacity: 0.65, transform: "translateY(16px)" },
+      { opacity: 1, transform: "none" },
+    ]);
   });
 
   it("preserves collection card width when the sidebar changes how many columns fit", () => {
