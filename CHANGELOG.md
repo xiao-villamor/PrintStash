@@ -25,6 +25,7 @@
 - Storage shows verification badges and a compact control for measurement details. Imports puts browser pairing beside extension setup and keeps upload capacity checks in the upload flow.
 - Model screenshots offer resolution in the viewer. Generated Model images have three additional colour choices, and Settings is available from the workspace menu.
 - Saved views actions open beside the sidebar's three-dot button. An empty list offers the action to save the current view.
+- Fleet cards use the latest print status automatically. The routing map animates active prints alongside queued routes.
 
 ### Performance
 
@@ -45,7 +46,7 @@
 
 ### Added
 
-- Fleet can show printer cards under their configured groups. The browser remembers the layout.
+- Fleet can show printer cards inside dotted frames labelled by their configured groups. The browser remembers the layout.
 - Model guides and attachments have their own Documentation tab.
 - Model attachments accept file drops and clicks on the empty upload area, and the Markdown editor shows a live preview beside the draft.
 - Model attachments open in an in-app reader. Write Markdown directly on a model and export it using the browser’s Save as PDF dialog.

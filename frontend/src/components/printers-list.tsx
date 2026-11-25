@@ -17,7 +17,7 @@ import {
   type PrinterCreate,
   type PrinterStatus,
 } from "@/types";
-import { usePrinterCatalogCommands } from "@/features/printers/queries";
+import { FLEET_LIVE_REFRESH_MS, usePrinterCatalogCommands } from "@/features/printers/queries";
 import { useFleetSummary, usePrinters } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { useAuth } from "@/lib/auth-context";
@@ -127,13 +127,7 @@ export function PrintersPage() {
   // Shared printers cache: catalog commands invalidate
   // queryKeys.printers, so this list refetches itself after add/delete.
   const printersQuery = usePrinters({ refetchInterval: 15_000 });
-  const summaryQuery = useFleetSummary({ refetchInterval: 5_000 });
   const printers = useMemo(() => printersQuery.data ?? [], [printersQuery.data]);
-  const summary = summaryQuery.data;
-  const fleetRows = useMemo(
-    () => new Map(summary?.printers.map((row) => [row.printer_id, row])),
-    [summary],
-  );
   const loading = printersQuery.isLoading;
   const error = printersQuery.error instanceof Error ? printersQuery.error.message : null;
   const [addOpen, setAddOpen] = useState(false);
@@ -165,6 +159,14 @@ export function PrintersPage() {
   const manageablePrinters = printers.filter((printer) => printer.access.can_admin);
   const canManagePrinters = Boolean(user?.is_superuser || manageablePrinters.length);
   const activeView = requestedView;
+  const summaryQuery = useFleetSummary({
+    refetchInterval: activeView === "fleet" ? FLEET_LIVE_REFRESH_MS : undefined,
+  });
+  const summary = summaryQuery.data;
+  const fleetRows = useMemo(
+    () => new Map(summary?.printers.map((row) => [row.printer_id, row])),
+    [summary],
+  );
   const visiblePrinters = useMemo(
     () =>
       printers
@@ -179,7 +181,8 @@ export function PrintersPage() {
         })
         .sort(
           (a, b) =>
-            STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status] || a.name.localeCompare(b.name),
+            STATUS_PRIORITY[liveStatus(a, fleetRows.get(a.id))] -
+              STATUS_PRIORITY[liveStatus(b, fleetRows.get(b.id))] || a.name.localeCompare(b.name),
         ),
     [printers, fleetRows, selectedGroup, healthFilter],
   );
@@ -457,19 +460,21 @@ export function PrintersPage() {
                       className="rounded-lg border border-border bg-card"
                     />
                   ) : grouped ? (
-                    <div className="space-y-4">
+                    <div className="flex flex-wrap items-start gap-5 pt-2">
                       {visibleGroups.map(([name, members]) => {
                         const label = name ?? uiText("Ungrouped");
                         return (
                           <section
                             key={groupOptionValue(name)}
                             aria-label={label}
-                            className="w-fit max-w-full space-y-3 rounded-xl border border-dotted border-border-strong bg-card/35 p-3 sm:p-4"
+                            className="relative w-fit max-w-full rounded-xl border-2 border-dotted border-border-strong bg-card/35 p-3 sm:p-4"
                           >
-                            <h2 className="flex items-baseline gap-2 text-sm font-medium">
-                              {label}
-                              <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">
-                                {formatNumber(members.length)}
+                            <h2 className="absolute inset-x-3 top-0 -translate-y-1/2 text-xs font-medium">
+                              <span className="inline-flex max-w-full items-center gap-1.5 rounded-sm bg-background px-1.5">
+                                <span className="min-w-0 truncate">{label}</span>
+                                <span className="shrink-0 tabular-nums text-muted-foreground">
+                                  {formatNumber(members.length)}
+                                </span>
                               </span>
                             </h2>
                             <div className="flex min-w-0 flex-wrap gap-4">
@@ -552,6 +557,14 @@ export function PrintersPage() {
 
 type FleetPrinterRow = FleetSummary["printers"][number];
 
+function isPrinterStatus(value: string | undefined): value is PrinterStatus {
+  return value !== undefined && Object.hasOwn(STATUS_PRIORITY, value);
+}
+
+function liveStatus(printer: PrinterRead, row: FleetPrinterRow | undefined): PrinterStatus {
+  return isPrinterStatus(row?.status) ? row.status : printer.status;
+}
+
 function routingHold(printer: PrinterRead, row: FleetPrinterRow | undefined) {
   if (row?.maintenance) return uiText("Maintenance");
   if (row?.pending_operator_release) return uiText("Operator release required");
@@ -561,15 +574,18 @@ function routingHold(printer: PrinterRead, row: FleetPrinterRow | undefined) {
 
 function isReady(printer: PrinterRead, row: FleetPrinterRow | undefined) {
   return (
-    printer.status === "ready" && row?.current_job_id == null && routingHold(printer, row) === null
+    liveStatus(printer, row) === "ready" &&
+    row?.current_job_id == null &&
+    routingHold(printer, row) === null
   );
 }
 
 function needsAttention(printer: PrinterRead, row: FleetPrinterRow | undefined) {
+  const status = liveStatus(printer, row);
   return (
-    printer.status === "error" ||
-    printer.status === "offline" ||
-    printer.status === "unknown" ||
+    status === "error" ||
+    status === "offline" ||
+    status === "unknown" ||
     routingHold(printer, row) !== null
   );
 }
@@ -639,6 +655,7 @@ function FleetPrinterCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(null);
   const menuOpener = useRef<HTMLAnchorElement | null>(null);
+  const status = liveStatus(printer, row);
   const hold = routingHold(printer, row);
   const progress = row?.progress == null ? null : row.progress * 100;
   // Older servers publish only the display label for each loaded slot.
@@ -714,7 +731,7 @@ function FleetPrinterCard({
                     {!grouped && printer.group ? ` · ${printer.group}` : ""}
                   </p>
                 </div>
-                <PrinterStatusBadge status={printer.status} />
+                <PrinterStatusBadge status={status} />
               </div>
               <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
                 <div className="min-w-0 flex-1 basis-28 space-y-1.5">
@@ -732,7 +749,7 @@ function FleetPrinterCard({
                   >
                     {row?.current_job_name ??
                       (row?.current_job_id != null
-                        ? knownUiText(printer.status)
+                        ? knownUiText(status)
                         : row
                           ? uiText("No active print")
                           : "—")}

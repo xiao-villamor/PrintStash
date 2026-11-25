@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { refreshFleet } from "@/features/printers/queries";
+import { FLEET_LIVE_REFRESH_MS, refreshFleet } from "@/features/printers/queries";
 import { knownUiText } from "@/lib/locale";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
@@ -292,8 +292,8 @@ export function FleetQueuePanel({
   const [groupFilter, setGroupFilter] = useState("all");
   const [historyLimit, setHistoryLimit] = useState(20);
   const commandClient = useQueryClient();
-  const queueQuery = useFleetQueue({ refetchInterval: 5_000, historyLimit });
-  const summaryQuery = useFleetSummary({ refetchInterval: 5_000 });
+  const queueQuery = useFleetQueue({ refetchInterval: FLEET_LIVE_REFRESH_MS, historyLimit });
+  const summaryQuery = useFleetSummary({ refetchInterval: FLEET_LIVE_REFRESH_MS });
   const [deleteTarget, setDeleteTarget] = useState<PrintJobRead | null>(null);
   const [editTarget, setEditTarget] = useState<PrintJobRead | null>(null);
   const [resolveTarget, setResolveTarget] = useState<PrintJobRead | null>(null);

@@ -46,12 +46,20 @@ test.describe("printer routes", () => {
     await expect(demo.getByRole("link", { name: "Demo printer" })).toBeVisible();
     await expect(ungrouped.getByRole("link", { name: "Standalone printer" })).toBeVisible();
     await expect(lab).toHaveCSS("border-top-style", "dotted");
+    await expect(lab).toHaveCSS("border-top-width", "2px");
     const frame = await lab.boundingBox();
+    const nextFrame = await demo.boundingBox();
     const lastCard = await lab.getByRole("article").last().boundingBox();
-    if (!frame || !lastCard) throw new Error("The group frame or card was not visible");
+    const label = await lab.getByRole("heading", { name: "Lab 2" }).boundingBox();
+    if (!frame || !nextFrame || !lastCard || !label)
+      throw new Error("The group frame, label or card was missing");
     const inset = frame.x + frame.width - (lastCard.x + lastCard.width);
     expect(inset).toBeGreaterThan(8);
     expect(inset).toBeLessThan(24);
+    expect(Math.abs(label.y + label.height / 2 - frame.y)).toBeLessThanOrEqual(2);
+    expect(lastCard.y - frame.y).toBeLessThan(24);
+    expect(nextFrame.y).toBe(frame.y);
+    expect(nextFrame.x).toBeGreaterThan(frame.x + frame.width);
     await page.screenshot({ path: testInfo.outputPath("grouped-printer-fleet.png") });
 
     await page.getByRole("combobox", { name: "Group", exact: true }).selectOption({ label: "Lab" });
@@ -426,6 +434,98 @@ test.describe("printer routes", () => {
       return color;
     });
     await expect(error).toHaveCSS("color", destructive);
+  });
+
+  test("updates the Fleet card when a print starts without manual refresh", async ({ page }) => {
+    let printing = false;
+    await page.route("**/api/v1/fleet/summary", async (route) => {
+      const response = await route.fetch();
+      const summary = await response.json();
+      await route.fulfill({
+        response,
+        json: {
+          ...summary,
+          printers: [
+            {
+              printer_id: 3,
+              name: "ender",
+              status: printing ? "printing" : "ready",
+              current_job_name: printing ? "live-print.gcode" : null,
+              progress: printing ? 0.35 : null,
+              loaded_slots: [],
+            },
+          ],
+        },
+      });
+    });
+    await page.goto("/printers");
+    await collapseNavigationSidebar(page);
+    const card = page.getByRole("article").filter({
+      has: page.getByRole("link", { name: "ender", exact: true }),
+    });
+    await expect(card.getByText("No active print")).toBeVisible();
+    printing = true;
+    await expect(card.getByText("live-print.gcode", { exact: true })).toBeVisible();
+    await expect(card.getByText("printing", { exact: true })).toBeVisible();
+    await expect(card.getByText("35%", { exact: true })).toBeVisible();
+    printing = false;
+    await expect(card.getByText("ready", { exact: true })).toBeVisible();
+    await expect(card.getByText("No active print")).toBeVisible();
+  });
+
+  test("animates the live farm route beside waiting jobs", async ({ page }, testInfo) => {
+    let printing = false;
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
+    await page.route("**/api/v1/fleet/summary", async (route) => {
+      const response = await route.fetch();
+      const summary = await response.json();
+      await route.fulfill({
+        response,
+        json: {
+          ...summary,
+          printers: [
+            {
+              printer_id: 3,
+              name: "ender",
+              status: printing ? "printing" : "ready",
+              current_job_name: printing ? "live-print.gcode" : null,
+              progress: printing ? 0.35 : null,
+            },
+          ],
+        },
+      });
+    });
+    await page.route("**/api/v1/fleet/queue?**", async (route) => {
+      const response = await route.fetch();
+      const [job] = await response.json();
+      await route.fulfill({
+        response,
+        json: [{ ...job, state: "queued", remote_filename: "waiting.gcode" }],
+      });
+    });
+    await page.goto("/printers?tab=queue");
+    await collapseNavigationSidebar(page);
+    const waiting = page.locator('.react-flow__node[data-id="job-156"]');
+    const activeRoute = page.locator(".routing-link-printing .react-flow__edge-path").last();
+    await expect(waiting).toBeVisible();
+    await expect(page.getByRole("button", { name: /Ready ender/ })).toBeVisible();
+    await expect(activeRoute).toHaveCount(0);
+
+    printing = true;
+    await expect(page.getByRole("button", { name: /Printing ender/ })).toBeVisible();
+    await expect(waiting).toBeVisible();
+    await expect(activeRoute).toHaveCSS("animation-name", "routing-flow");
+    await expect
+      .poll(() =>
+        waiting.evaluate((node) => {
+          const map = node.closest(".react-flow");
+          return !!map && node.getBoundingClientRect().bottom <= map.getBoundingClientRect().bottom;
+        }),
+      )
+      .toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("live-farm-routing.png") });
+    printing = false;
+    await expect(activeRoute).toHaveCount(0);
   });
 
   test("colors the fleet counts that need an operator’s attention", async ({ page }) => {

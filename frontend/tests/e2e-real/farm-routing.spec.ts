@@ -3,6 +3,8 @@ import { expect, test } from "./helpers";
 import { collapseNavigationSidebar, gcodeFor } from "./util";
 import type { PrinterRead, PrintJobRead } from "@/types";
 
+const emulatorOrigin = `http://127.0.0.1:${process.env.PLAYWRIGHT_MOCK_PRINTER_PORT ?? "7530"}`;
+
 test.describe("farm routing canvas", () => {
   test("reroutes a queued Revision by connecting its port to a printer", async ({ page }) => {
     const name = "Route map " + Date.now();
@@ -30,8 +32,7 @@ test.describe("farm routing canvas", () => {
           data: {
             name: name + " " + suffix,
             provider: "moonraker",
-            moonraker_url:
-              "http://127.0.0.1:" + (process.env.PLAYWRIGHT_MOCK_PRINTER_PORT ?? "7530"),
+            moonraker_url: emulatorOrigin,
           },
         });
         expect(registered.status()).toBe(201);
@@ -89,6 +90,18 @@ test.describe("farm routing canvas", () => {
           '.react-flow__edge[data-id="rule-' + queuedJob.id + ":printer-" + destination.id + '"]',
         ),
       ).toBeVisible();
+
+      const route = page.locator(
+        `.routing-link-printing[data-id="dispatcher:printer-${destination.id}"] .react-flow__edge-path`,
+      );
+      await expect(route).toHaveCount(0);
+      const started = await page.request.post(`${emulatorOrigin}/printer/print/start`, {
+        params: { filename: "demo.gcode" },
+      });
+      expect(started.ok()).toBeTruthy();
+      await expect(route).toHaveCSS("animation-name", "routing-flow");
+      await expect(jobNode).toBeVisible();
+      await expect(route).toHaveCount(0);
     } finally {
       if (job) await page.request.delete("/api/v1/fleet/queue/" + job.id);
       for (const p of printers) await page.request.delete("/api/v1/printers/" + p.id);
