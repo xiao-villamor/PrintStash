@@ -211,71 +211,71 @@ export function LibraryModelInspector({
       style={style}
     >
       {widthHandle("panel")}
-      <div ref={scroll} className="library-inspector-scroll">
-        <header className="library-inspector-header">
-          <h2 ref={title} tabIndex={-1} title={name}>
-            {name ? displayModelName(name) : uiText("Model details")}
-          </h2>
-          {recommended?.revision_status && (
-            <RevisionStatusBadge
-              status={recommended.revision_status}
-              label={recommended.revision_label}
-            />
-          )}
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={uiText("Download")}
-            title={uiText("Download")}
-            disabled={!downloadFile}
-            loading={downloading}
-            onClick={async () => {
-              if (!downloadFile || downloading) return;
-              setDownloading(true);
-              try {
-                await downloadAuthenticatedFile(
-                  `/api/v1/files/${downloadFile.id}/download`,
-                  downloadFile.original_filename,
-                );
-              } catch (error) {
-                toast.error(userMessage(error));
-              } finally {
-                setDownloading(false);
-              }
+      <header className="library-inspector-header">
+        <h2 ref={title} tabIndex={-1} title={name}>
+          {name ? displayModelName(name) : uiText("Model details")}
+        </h2>
+        {recommended?.revision_status && (
+          <RevisionStatusBadge
+            status={recommended.revision_status}
+            label={recommended.revision_label}
+          />
+        )}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={uiText("Download")}
+          title={uiText("Download")}
+          disabled={!downloadFile}
+          loading={downloading}
+          onClick={async () => {
+            if (!downloadFile || downloading) return;
+            setDownloading(true);
+            try {
+              await downloadAuthenticatedFile(
+                `/api/v1/files/${downloadFile.id}/download`,
+                downloadFile.original_filename,
+              );
+            } catch (error) {
+              toast.error(userMessage(error));
+            } finally {
+              setDownloading(false);
+            }
+          }}
+        >
+          <Download className="h-4 w-4" aria-hidden />
+        </Button>
+        <Button variant="ghost" size="icon-sm" asChild>
+          <LibraryItemLink
+            origin={origin}
+            href={`/models/${id}`}
+            aria-label={uiText("Open page")}
+            onClick={(event) => {
+              if (
+                !event.defaultPrevented &&
+                event.button === 0 &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !event.altKey &&
+                !event.shiftKey
+              )
+                onOpenPage?.();
             }}
+            title={uiText("Open the full model page")}
           >
-            <Download className="h-4 w-4" aria-hidden />
-          </Button>
-          <Button variant="ghost" size="icon-sm" asChild>
-            <LibraryItemLink
-              origin={origin}
-              href={`/models/${id}`}
-              aria-label={uiText("Open page")}
-              onClick={(event) => {
-                if (
-                  !event.defaultPrevented &&
-                  event.button === 0 &&
-                  !event.ctrlKey &&
-                  !event.metaKey &&
-                  !event.altKey &&
-                  !event.shiftKey
-                )
-                  onOpenPage?.();
-              }}
-              title={uiText("Open the full model page")}
-            >
-              <Maximize2 className="h-4 w-4" aria-hidden />
-            </LibraryItemLink>
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={uiText("Close details")}
-            onClick={onClose}
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </header>
+            <Maximize2 className="h-4 w-4" aria-hidden />
+          </LibraryItemLink>
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={uiText("Close details")}
+          onClick={onClose}
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      </header>
+      <div ref={scroll} className="library-inspector-scroll">
         {detail.isError || !detail.active ? (
           <div className="library-inspector-body" role="alert">
             <p>{detail.error ? userMessage(detail.error) : uiText("Sign in to view this model")}</p>

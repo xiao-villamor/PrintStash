@@ -515,7 +515,16 @@ function gcPlan() {
     quarantine_until: planState === "quarantined" ? "2099-06-11T00:24:22Z" : null,
     backup_id: planState === "quarantined" ? "backup-verified" : null,
     last_error: null,
-    items: [],
+    items: [
+      {
+        id: 1,
+        resource_kind: "model",
+        resource_id: 91,
+        key_count: 4,
+        size_bytes: 1572864,
+        deleted_at_snapshot: now,
+      },
+    ],
   };
 }
 

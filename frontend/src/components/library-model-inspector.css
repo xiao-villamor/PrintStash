@@ -13,23 +13,24 @@
   font-size: 13px;
   line-height: 1.4;
 }
+.library-model-inspector:not([hidden]) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
 .library-inspector-scroll {
-  height: 100%;
-  border-radius: inherit;
+  border-end-start-radius: inherit;
+  border-end-end-radius: inherit;
   overflow-y: auto;
   overflow-anchor: none;
+  overscroll-behavior-y: contain;
 }
 .library-inspector-header {
-  position: sticky;
-  top: 0;
-  z-index: 2;
   display: flex;
   align-items: center;
   gap: 8px;
   min-height: 52px;
   padding: 8px 12px 8px 16px;
   border-bottom: 1px solid var(--border);
-  background: var(--card);
 }
 .library-inspector-header h2 {
   flex: 1;
@@ -84,18 +85,15 @@
   gap: 4px;
   margin: 8px 0;
 }
-.library-inspector-tabs button,
-.library-inspector-preview [role="radio"] {
+.library-inspector-tabs button {
   padding-inline: 10px;
   color: var(--muted-foreground);
   transition: none;
 }
-.library-inspector-tabs button:active,
-.library-inspector-preview [role="radio"]:active {
+.library-inspector-tabs button:active {
   scale: none;
 }
-.library-inspector-tabs button[aria-selected="true"],
-.library-inspector-preview [aria-checked="true"] {
+.library-inspector-tabs button[aria-selected="true"] {
   background: var(--muted);
   color: var(--foreground);
 }
@@ -256,39 +254,11 @@
   overflow: hidden;
   border: 1px solid var(--border);
 }
-.library-inspector-preview > div:not([role="radiogroup"]) {
+.library-inspector-preview > div {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-}
-/* The compact toolpath layout stays inside the resizable preview frame. */
-.library-inspector-preview > div.toolpath-layout {
-  padding-top: 2.75rem;
-}
-.library-inspector-preview .toolpath-workspace {
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) minmax(0, 42%);
-  height: 100%;
-  min-height: 0;
-}
-.library-inspector-preview .toolpath-viewport {
-  min-height: 0;
-}
-.library-inspector-preview .toolpath-sidebar {
-  contain: size;
-  overflow-y: auto;
-  border-left: 0;
-  border-top: 1px solid var(--border);
-}
-.library-inspector-preview > [role="radiogroup"] {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 1;
-  display: flex;
-  gap: 2px;
-  background: var(--card);
 }
 .library-inspector-section summary {
   list-style: none;
@@ -515,26 +485,6 @@ details.library-inspector-section > summary {
 }
 .library-inspector-workspace .library-inspector-delivery button {
   white-space: nowrap;
-}
-
-/* Preview mode switch: the same segmented control as the rest of the panel. */
-.library-inspector-preview > [role="radiogroup"] {
-  top: 10px;
-  left: 10px;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-popover);
-  background: var(--card);
-}
-.library-inspector-preview [role="radio"] {
-  height: 26px;
-  border-radius: var(--radius);
-  font-size: 0.8125rem;
-  font-weight: 500;
-}
-.library-inspector-preview [role="radio"][aria-checked="true"] {
-  background: var(--accent);
-  color: var(--accent-foreground);
 }
 
 /* Selects in the print block are filled, not outlined. */

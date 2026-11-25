@@ -241,15 +241,39 @@ test.describe("settings route", () => {
     await expect(page.getByText("Archiving 4 of 10 files · continues in background")).toBeVisible();
   });
 
-  test("settings sections are deep-linkable and preserve navigation state", async ({ page }) => {
-    await page.goto("/settings?section=trash");
-    await expect(page.getByRole("heading", { name: "Trash retention" })).toBeVisible();
+  test("Trash has one workspace with an aligned selection header", async ({ page }, testInfo) => {
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
+    await page.goto("/settings?section=about");
+    await expect(page.getByRole("heading", { name: "Latest changes" })).toBeVisible();
+    const duplicate = page.getByRole("button", { name: "Trash", exact: true });
+    const duplicates = await duplicate.count();
+
+    await page.goto("/settings?section=trash&view=settings");
+    await collapseNavigationSidebar(page);
     await expect(page.getByText("Known model storage: 1.5 MB")).toBeVisible();
     await expect(page.getByText("1 deleted item")).toBeVisible();
-    await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: "About" }).click();
-    await expect(page).toHaveURL(/\/settings\?section=about$/);
-    await expect(page.getByRole("heading", { name: "Latest changes" })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("trash.png") });
+    expect(duplicates).toBe(0);
+    await expect(page.getByRole("button", { name: "Open Trash", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Trash", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await expect(page.getByLabel("Keep deleted items for")).toBeVisible();
+
+    const panel = page.getByRole("region", { name: "Deleted models and multipart sets" });
+    const toolbar = panel.getByRole("group", { name: "Trash selection" });
+    const selectAll = toolbar.getByRole("checkbox", { name: "Select all deleted items" });
+    const selectRow = panel.getByRole("checkbox", { name: /Select deleted model/ });
+    await expect(selectRow).toBeVisible();
+    const frame = await panel.boundingBox();
+    const bar = await toolbar.boundingBox();
+    const header = await selectAll.boundingBox();
+    const row = await selectRow.boundingBox();
+    if (!frame || !bar || !header || !row) throw new Error("Trash selection geometry is missing");
+    expect(bar.x - frame.x).toBe(1);
+    expect(bar.y - frame.y).toBe(1);
+    expect(header.x).toBe(row.x);
   });
 
   test("discovers an exact legacy S3 source for adoption", async ({ page }) => {
@@ -318,14 +342,17 @@ test.describe("settings route", () => {
     expect(narrowOverflow).toBeLessThanOrEqual(0);
   });
 
-  test("expired trash requires a durable preview before approval", async ({ page }) => {
+  test("expired trash requires a durable preview before approval", async ({ page }, testInfo) => {
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
     await page.goto("/settings?section=trash");
+    await collapseNavigationSidebar(page);
+    const trash = page.getByRole("region", { name: "Deleted models and multipart sets" });
+    await expect(trash.getByText("Expired", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Review expired" }).click();
 
-    const dialog = page.getByRole("dialog", { name: "Create a safe GC preview?" });
-    await expect(dialog).toContainText(
-      "This only records a bounded candidate plan. It does not delete catalog rows or storage bytes.",
-    );
+    const dialog = page.getByRole("dialog", { name: "Review expired items?" });
+    await expect(dialog).toContainText("Their expiry dates stay the same.");
+    await page.screenshot({ path: testInfo.outputPath("trash-review-dialog.png") });
     const previewRequest = page.waitForRequest((candidate) => {
       const url = new URL(candidate.url());
       return candidate.method() === "POST" && url.pathname === "/api/v1/admin/gc";
@@ -333,12 +360,18 @@ test.describe("settings route", () => {
     await dialog.getByRole("button", { name: "Create preview" }).click();
     await previewRequest;
 
-    await expect(page.getByText("GC plan #7 · preview")).toBeVisible();
-    await expect(page.getByText("no backup bound")).toBeVisible();
+    const cleanup = page.getByRole("region", { name: "Trash cleanup" });
+    await expect(cleanup.getByText("Preview ready")).toBeVisible();
+    await expect(
+      cleanup.getByRole("list", { name: "Items in this cleanup preview" }),
+    ).toContainText("Retired bracket");
+    await expect(trash.getByText("Expired", { exact: true })).toBeVisible();
+    await expect(cleanup.getByText("Awaiting backup verification")).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("trash-cleanup-preview.png") });
     await expect(page.getByText("Nothing was deleted.")).toBeVisible();
     const approve = page.getByRole("button", { name: "Verify backup and quarantine" });
     await expect(approve).toBeDisabled();
-    await page.getByLabel("Confirm GC plan digest").fill("a".repeat(64));
+    await page.getByLabel("Cleanup approval code").fill("a".repeat(64));
 
     const approvalRequest = page.waitForRequest((candidate) => {
       const url = new URL(candidate.url());
@@ -346,7 +379,7 @@ test.describe("settings route", () => {
     });
     await approve.click();
     await approvalRequest;
-    await expect(page.getByText("GC plan #7 · quarantined")).toBeVisible();
+    await expect(cleanup.getByText("Recovery period", { exact: true })).toBeVisible();
     await expect(page.getByText("backup verified", { exact: true })).toBeVisible();
   });
 

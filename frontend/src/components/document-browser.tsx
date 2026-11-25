@@ -11,6 +11,7 @@ import {
   FileType2,
   Loader2,
   Paperclip,
+  Trash2,
   Upload,
 } from "lucide-react";
 
@@ -176,7 +177,7 @@ export function DocumentBrowser({
         }
       >
         {modelId !== undefined ? (
-          <div className="flex min-h-7 items-center justify-between gap-3 px-1 pb-2">
+          <div className="mb-4 flex min-h-8 flex-wrap items-center justify-between gap-x-4 gap-y-2">
             <h2 id={headingId} className="text-sm font-medium text-muted-foreground">
               {uiText("Attachments")} · {docs.length}
               {hasNextPage ? "+" : ""}
@@ -389,7 +390,14 @@ export function DocumentBrowser({
           ) : (
             <div className="divide-y divide-border">
               {docs.map((doc) => (
-                <div key={doc.id} className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
+                <div
+                  key={doc.id}
+                  className={
+                    modelId === undefined
+                      ? "flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5"
+                      : "flex min-h-18 items-center justify-between gap-4 px-4 py-3.5"
+                  }
+                >
                   <Link
                     href={`/documents/${doc.id}`}
                     onClick={(event) => {
@@ -407,14 +415,21 @@ export function DocumentBrowser({
                     }}
                     className="flex min-w-0 flex-1 basis-48 items-center gap-3 hover:text-primary"
                   >
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center bg-muted/70">
+                    <span
+                      className={
+                        modelId === undefined
+                          ? "flex size-7 shrink-0 items-center justify-center bg-muted/70"
+                          : "flex size-9 shrink-0 items-center justify-center rounded-md bg-muted"
+                      }
+                      aria-hidden="true"
+                    >
                       <KindIcon kind={doc.kind} />
                     </span>
                     <div className="min-w-0">
                       <div className="break-words text-sm font-medium text-foreground">
                         {doc.name}
                       </div>
-                      <div className="mt-0.5 break-words text-xs text-muted-foreground">
+                      <div className="mt-1 break-words text-xs text-muted-foreground">
                         {(modelId !== undefined && doc.filename) || doc.kind}
                         {" · "}
                         {timeAgoShort(doc.updated_at)}
@@ -427,17 +442,29 @@ export function DocumentBrowser({
                         <Link href={`/documents/${doc.id}`}>{uiText("Open")}</Link>
                       </Button>
                     )}
-                    {canEditItem(doc) && (
-                      <Button
-                        variant="outline"
-                        size="xs"
-                        onClick={() => remove(doc)}
-                        title={uiText("Delete document")}
-                        className="text-destructive"
-                      >
-                        {uiText("Delete document")}
-                      </Button>
-                    )}
+                    {canEditItem(doc) &&
+                      (modelId === undefined ? (
+                        <Button
+                          variant="outline"
+                          size="xs"
+                          onClick={() => remove(doc)}
+                          title={uiText("Delete document")}
+                          className="text-destructive"
+                        >
+                          {uiText("Delete document")}
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => remove(doc)}
+                          title={uiText("Delete document")}
+                          aria-label={uiText("Delete {value1}", { value1: doc.name })}
+                          className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        >
+                          <Trash2 className="size-4" aria-hidden />
+                        </Button>
+                      ))}
                   </div>
                 </div>
               ))}

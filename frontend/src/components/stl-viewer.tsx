@@ -126,6 +126,14 @@ function Mesh({
 }) {
   useUiLocale();
   const meshRef = useRef<THREE.Mesh>(null);
+  const filamentColor = useMemo(() => {
+    if (!color) return undefined;
+    const material = new THREE.Color(color);
+    // Filament black still reflects light. Lift very dark display colors without
+    // changing the source color or washing out the rest of the palette.
+    const luminance = 0.2126 * material.r + 0.7152 * material.g + 0.0722 * material.b;
+    return material.addScalar(Math.max(0, 0.1 - luminance));
+  }, [color]);
   const geometrySizeRef = useRef(onGeometrySize);
   useEffect(() => {
     geometrySizeRef.current = onGeometrySize;
@@ -174,9 +182,9 @@ function Mesh({
           opacity={0.42}
           depthWrite={false}
         />
-      ) : color ? (
+      ) : filamentColor ? (
         <meshStandardMaterial
-          color={color}
+          color={filamentColor}
           roughness={0.75}
           wireframe={displayMode === "wireframe"}
           transparent={displayMode === "xray"}
@@ -465,9 +473,9 @@ function Scene({
     <>
       <PerspectiveCamera ref={cameraRef} makeDefault position={DEFAULT_CAMERA_POSITION} />
       <ambientLight intensity={0.5} />
-      <hemisphereLight args={["#d4e8ff", "#1a1a2e", 0.4]} />
+      <hemisphereLight args={["#eef3ff", "#7d8798", 0.65]} />
       <directionalLight position={[8, 12, 6]} intensity={1.2} castShadow />
-      <directionalLight position={[-6, -4, -8]} intensity={0.25} />
+      <directionalLight position={[-6, 3, -8]} intensity={0.5} />
       <directionalLight position={[0, -8, 0]} intensity={0.15} color="#8899bb" />
       <>
         <Mesh

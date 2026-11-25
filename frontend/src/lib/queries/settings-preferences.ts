@@ -7,6 +7,7 @@ import { parseApiError } from "@/lib/errors";
 import { queryKeys } from "@/lib/query-client";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { useVaultConfigCommand, vaultConfigOptions } from "./settings-config";
+import { settingsTrashKeys } from "./settings-trash";
 import type { EditingBase } from "@/types/editing";
 import type { VaultConfigRead, VaultConfigUpdate } from "@/types";
 
@@ -109,6 +110,10 @@ export function useSettingsPreferenceCommand() {
         base: captured,
       });
       assertCurrent();
+      if (intent.kind === "trash-retention") {
+        await client.invalidateQueries({ queryKey: settingsTrashKeys.rows, exact: true });
+        assertCurrent();
+      }
       setState({ phase: "idle" });
       return receipt;
     } catch (error) {

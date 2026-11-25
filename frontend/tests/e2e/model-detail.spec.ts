@@ -21,6 +21,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 
 import { collectPageProblems, useMockApi } from "./_setup";
+import { collapseNavigationSidebar } from "../e2e-real/util";
 import type { ModelRead } from "../../src/types/models";
 import {
   aDerivative,
@@ -49,6 +50,73 @@ async function openToolpath(page: Page) {
 }
 
 test.describe("model detail route", () => {
+  test("aligns Print navigation with its revision actions", async ({ page }, testInfo) => {
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto("/models/1");
+    await collapseNavigationSidebar(page);
+    const sidebar = page.getByTestId("model-detail-sidebar");
+    await sidebar.getByRole("tab", { name: /^Print\b/ }).click();
+    await sidebar.getByRole("button", { name: "Revisions", exact: true }).click();
+    const tabs = (await sidebar.getByRole("tablist").boundingBox())!;
+    const prepare = (await sidebar.getByRole("button", { name: "Prepare print" }).boundingBox())!;
+    const add = (await sidebar.getByRole("button", { name: "Add revision" }).boundingBox())!;
+    const rows = (await sidebar
+      .getByRole("list", { name: "Revisions", exact: true })
+      .locator("..")
+      .boundingBox())!;
+    const sections = (await sidebar.locator(".model-detail-print-tabs nav").boundingBox())!;
+    expect(tabs.x).toBeCloseTo(rows.x, 0);
+    expect(sections.x).toBeCloseTo(rows.x, 0);
+    expect(prepare.x + prepare.width).toBeCloseTo(tabs.x + tabs.width, 0);
+    expect(add.x + add.width).toBeCloseTo(tabs.x + tabs.width, 0);
+    expect(tabs.height).toBeLessThan(48);
+    await sidebar.screenshot({ path: testInfo.outputPath("aligned-print-controls.png") });
+  });
+
+  test("keeps model attachments readable beside their actions", async ({ page }, testInfo) => {
+    const attachment = {
+      id: 3,
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      edit_version: 1,
+      name: "Assembly guide",
+      kind: "markdown",
+      collection: "maraio",
+      collection_id: 1,
+      multipart_model_id: null,
+      model_id: 1,
+      filename: null,
+      effective_role: "admin",
+      updated_at: "2026-11-01T00:00:00Z",
+    };
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.route("**/api/v1/documents?**", (route) =>
+      route.fulfill({
+        json: [
+          attachment,
+          { ...attachment, id: 4, name: "Datasheet", kind: "pdf", filename: "datasheet.pdf" },
+        ],
+      }),
+    );
+    await page.goto("/models/1");
+    await collapseNavigationSidebar(page);
+    const sidebar = page.getByTestId("model-detail-sidebar");
+    await sidebar.getByRole("tab", { name: "Documentation", exact: true }).click();
+    const documents = sidebar.getByRole("region", { name: "Attachments · 2" });
+    const header = (await documents.getByRole("button", { name: "Add attachment" }).boundingBox())!;
+    const link = documents.getByRole("link", { name: /Assembly guide/ });
+    const row = (await link.locator("..").boundingBox())!;
+    const remove = documents.getByRole("button", { name: "Delete Assembly guide" });
+    const action = (await remove.boundingBox())!;
+    expect(row.y - header.y - header.height).toBeGreaterThanOrEqual(16);
+    expect(row.height).toBeGreaterThanOrEqual(72);
+    expect(action.x + action.width).toBeLessThanOrEqual(row.x + row.width - 16);
+    await sidebar.screenshot({ path: testInfo.outputPath("model-attachments.png") });
+    await remove.click();
+    await expect(page.getByRole("dialog", { name: "Delete document?" })).toContainText(
+      "Assembly guide",
+    );
+  });
+
   test("keeps tag suggestions reachable in a short details editor", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 650 });
     await page.route("**/api/v1/tags", (route) =>
@@ -1019,7 +1087,7 @@ test.describe("model detail route", () => {
     });
   }
 
-  test("floats the screenshot icon inside the preview canvas", async ({ page }) => {
+  test("keeps the preview toolbar above the canvas", async ({ page }) => {
     await page.goto("/models/1");
     const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
     if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
@@ -1033,8 +1101,46 @@ test.describe("model detail route", () => {
 
     const viewport = (await panel.locator(".detail-preview-canvas").boundingBox())!;
     const controls = (await panel.locator(".detail-viewer-commandbar").boundingBox())!;
-    expect(controls.y).toBeGreaterThanOrEqual(viewport.y);
-    expect(controls.y + controls.height).toBeLessThan(viewport.y + viewport.height);
+    expect(controls.y + controls.height).toBeLessThanOrEqual(viewport.y + 1);
+  });
+
+  test("keeps long toolpath filenames on one line", async ({ page }, testInfo) => {
+    const filename = `Shoe-Rack-${"Shelf-with-wall-mount-".repeat(7)}.gcode`;
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.route("**/api/v1/models/1", (route) =>
+      route.fulfill({
+        json: aModel({
+          files: [
+            aRevision({ id: 1, file_type: "stl", original_filename: "shoe-rack.stl" }),
+            aRevision({
+              id: 2,
+              file_type: "gcode",
+              original_filename: filename,
+              is_recommended: true,
+            }),
+            aRevision({ id: 3, file_type: "gcode", original_filename: "shoe-rack-alt.gcode" }),
+          ],
+        }),
+      }),
+    );
+    const preview = await openToolpath(page);
+    await collapseNavigationSidebar(page);
+    const sidebar = preview.getByRole("complementary", { name: "Toolpath controls" });
+    const picker = sidebar.getByRole("combobox", { name: "G-code file" });
+    await expect(picker).toHaveAttribute("title", filename);
+    await expect(picker).toHaveCSS("height", "36px");
+    await expect(picker).toHaveCSS("white-space", "nowrap");
+    const filenameLabel = picker.locator("..").locator(".truncate");
+    expect(
+      await filenameLabel.evaluate((element) => element.scrollWidth > element.clientWidth),
+    ).toBe(true);
+    expect(await sidebar.evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(
+      await sidebar.evaluate((element) => element.clientWidth + 1),
+    );
+    await expect(sidebar.getByRole("region", { name: "Features" })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("full-toolpath-sidebar.png") });
+    await picker.selectOption("3");
+    await expect(picker).toHaveAttribute("title", "shoe-rack-alt.gcode");
   });
 
   test("shows mesh overlays only for a ready 3D preview", async ({ page }) => {

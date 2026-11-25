@@ -20,7 +20,7 @@ import { GettingStartedReminder } from "@/components/getting-started-reminder";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 
 import { knownUiText } from "@/lib/locale";
-import { formatNumber } from "@/lib/format";
+import { formatNumber, parseApiInstant } from "@/lib/format";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { setThemeMode, useThemeMode } from "@/lib/theme";
@@ -111,7 +111,6 @@ import {
   ShieldCheck,
   RotateCcw,
   Save,
-  Settings as SettingsIcon,
   Trash2,
   Search,
   Server,
@@ -257,7 +256,6 @@ const SETTINGS_SECTIONS: {
   { id: "design", labelKey: SETTINGS_SECTION_LABELS["design"], icon: Palette },
   { id: "previews", labelKey: SETTINGS_SECTION_LABELS["previews"], icon: Images },
   { id: "gpu", labelKey: SETTINGS_SECTION_LABELS["gpu"], icon: Gpu },
-  { id: "trash", labelKey: SETTINGS_SECTION_LABELS["trash"], icon: Trash2 },
   { id: "about", labelKey: SETTINGS_SECTION_LABELS["about"], icon: Info },
 ];
 
@@ -266,7 +264,7 @@ const SETTINGS_GROUPS: { labelKey: MessageKey; ids: SettingsSection[] }[] = [
     labelKey: "Vault",
     ids: ["overview", "access", "storage", "backup", "remote-storage", "maintenance"],
   },
-  { labelKey: "Library", ids: ["imports", "libraries", "previews", "ai-search", "trash"] },
+  { labelKey: "Library", ids: ["imports", "libraries", "previews", "ai-search"] },
   { labelKey: "Integrations", ids: ["spoolman", "notifications", "sso"] },
   { labelKey: "This browser", ids: ["design", "gpu"] },
   { labelKey: "System", ids: ["work", "about"] },
@@ -364,14 +362,14 @@ function formatDate(value: string | null | undefined): string {
     month: "short",
     day: "numeric",
     year: "numeric",
-  }).format(new Date(value));
+  }).format(parseApiInstant(value) ?? new Date(value));
 }
 
 function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat(currentLocale(), {
     dateStyle: "medium",
     timeStyle: "short",
-  }).format(new Date(value));
+  }).format(parseApiInstant(value) ?? new Date(value));
 }
 
 interface RetentionDraft {
@@ -462,10 +460,11 @@ function useDeadlineReached(deadline: string | null): boolean {
   const [reachedDeadline, setReachedDeadline] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!deadline) return;
+    const instant = parseApiInstant(deadline);
+    if (!deadline || !instant) return;
     let timer: number;
     const poll = () => {
-      const remaining = Date.parse(deadline) - Date.now();
+      const remaining = instant.getTime() - Date.now();
       if (remaining <= 0) {
         setReachedDeadline(deadline);
         return;
@@ -479,13 +478,32 @@ function useDeadlineReached(deadline: string | null): boolean {
   return deadline !== null && reachedDeadline === deadline;
 }
 
+function gcCandidateName(kind: string, id: number): string {
+  switch (kind) {
+    case "model":
+      return uiText("Model #{value1}", { value1: String(id) });
+    case "multipart_model":
+      return uiText("Multipart Model #{value1}", { value1: String(id) });
+    case "file":
+      return uiText("File #{value1}", { value1: String(id) });
+    case "document":
+      return uiText("Document #{value1}", { value1: String(id) });
+    case "collection":
+      return uiText("Collection #{value1}", { value1: String(id) });
+    case "printer":
+      return uiText("Printer #{value1}", { value1: String(id) });
+    default:
+      return uiText("Item #{value1}", { value1: String(id) });
+  }
+}
+
 /** How long a trashed item has left; the last days take the destructive tone. */
 function TrashExpiry({ expiresAt }: { expiresAt: string | null | undefined }) {
   useUiLocale();
   const [now] = useState(Date.now);
-  if (!expiresAt) return null;
-  const days = Math.ceil((Date.parse(expiresAt) - now) / 86_400_000);
-  if (Number.isNaN(days)) return null;
+  const expiry = parseApiInstant(expiresAt);
+  if (!expiry) return null;
+  const days = Math.ceil((expiry.getTime() - now) / 86_400_000);
   return (
     <span
       className={cn(
@@ -494,7 +512,11 @@ function TrashExpiry({ expiresAt }: { expiresAt: string | null | undefined }) {
       )}
     >
       <Clock className="size-3" aria-hidden="true" />
-      {days <= 0 ? uiText("Expires today") : uiText("{value1} days left", { value1: String(days) })}
+      {days <= 0
+        ? uiText("Expired")
+        : days === 1
+          ? uiText("1 day left")
+          : uiText("{value1} days left", { value1: formatNumber(days) })}
     </span>
   );
 }
@@ -518,8 +540,7 @@ export function SettingsPanel() {
   // deep link, back button, and replace.
   const activeSection = settingsSection(searchParams.get("section"));
   const sectionMotion = useContentReveal<HTMLElement>(activeSection);
-  const settingsTrash = activeSection === "trash" && searchParams.get("view") === "settings";
-  const trashPage = activeSection === "trash" && !settingsTrash;
+  const trashPage = activeSection === "trash";
   const mobileTabsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -886,8 +907,7 @@ export function SettingsPanel() {
     const params = new URLSearchParams(searchParams.toString());
     if (section === "overview") params.delete("section");
     else params.set("section", section);
-    if (section === "trash") params.set("view", "settings");
-    else params.delete("view");
+    params.delete("view");
     const query = params.toString();
     router.replace(query ? `/settings?${query}` : "/settings");
   }
@@ -1888,12 +1908,14 @@ export function SettingsPanel() {
       if (!accountCurrent(session)) return;
       if (receipt.kind !== "plan") throw new Error("Expected a GC plan receipt");
       setGcDigestConfirmation("");
-      toast.success(
-        uiText("gc.previewCreated", {
-          value1: String(receipt.plan.resource_count),
-          count: receipt.plan.resource_count,
-        }),
-      );
+      if (receipt.plan.resource_count > 0) {
+        toast.success(
+          uiText("gc.previewCreated", {
+            value1: String(receipt.plan.resource_count),
+            count: receipt.plan.resource_count,
+          }),
+        );
+      }
     } catch (error) {
       if (accountCurrent(session)) toast.error(error);
     } finally {
@@ -1902,7 +1924,7 @@ export function SettingsPanel() {
   }
 
   async function approveExpiredGcPlan() {
-    if (!gcPlan || gcRead.isError || trashBusy !== null) return;
+    if (!gcPlan || gcPlan.resource_count === 0 || gcRead.isError || trashBusy !== null) return;
     const session = getSessionVersion();
     setTrashBusy("gc");
     try {
@@ -1930,7 +1952,7 @@ export function SettingsPanel() {
       await trashCommand.run({ kind: "abort", plan: gcPlan, session });
       if (!accountCurrent(session)) return;
       setGcDigestConfirmation("");
-      toast.success(uiText("GC plan aborted. Every candidate remains in the trash."));
+      toast.success(uiText("Cleanup review dismissed. Items remain in Trash."));
     } catch (error) {
       if (accountCurrent(session)) toast.error(error);
     } finally {
@@ -2086,6 +2108,7 @@ export function SettingsPanel() {
       disabled={
         !user?.is_superuser ||
         trashBusy === "gc" ||
+        trashRetentionBusy ||
         parsedTrashRetentionDays === null ||
         trashRetentionDays < 0 ||
         gcRead.isError ||
@@ -2098,130 +2121,180 @@ export function SettingsPanel() {
     </Button>
   );
 
-  const trashCleanupDetails =
-    activeSection === "trash" ? (
-      <>
-        {trashPurgeResult && (
-          <div
-            role="status"
-            aria-live="polite"
-            className={cn(
-              "border-t border-border px-4 py-3 text-xs sm:px-5",
-              (trashPurgeResult.storage_cleanup_status ?? "completed") === "completed"
-                ? "text-foreground"
-                : "settings-status text-xs",
-            )}
-          >
-            {cleanupStatusMessage(t, trashPurgeResult)}
-          </div>
-        )}
-        {gcPlan && (
-          <div className="border-t border-border px-4 py-4 sm:px-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold text-foreground">
-                  {uiText("GC plan #{value1} · {value2}", {
-                    value1: String(gcPlan.id ?? ""),
-                    value2: String(gcPlan.state ?? ""),
+  const cleanupStates = {
+    preview: "Preview ready",
+    quarantined: "Recovery period",
+    finalizing: "Cleanup in progress",
+    completed: "Cleanup complete",
+    aborted: "Review dismissed",
+    blocked: "Cleanup blocked",
+  } as const satisfies Record<NonNullable<typeof gcPlan>["state"], MessageKey>;
+
+  const trashCleanupDetails = trashPage ? (
+    <>
+      {trashPurgeResult && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={cn(
+            "border-t border-border px-4 py-3 text-xs sm:px-5",
+            (trashPurgeResult.storage_cleanup_status ?? "completed") === "completed"
+              ? "text-foreground"
+              : "settings-status text-xs",
+          )}
+        >
+          {cleanupStatusMessage(t, trashPurgeResult)}
+        </div>
+      )}
+      {gcPlan && (
+        <section
+          aria-label={uiText("Trash cleanup")}
+          className="rounded-lg border border-border bg-card px-4 py-4 sm:px-5"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <h2 className="text-sm font-semibold">{uiText("Trash cleanup")}</h2>
+              <p role="status" className="text-sm text-muted-foreground">
+                {gcPlan.state === "preview" && gcPlan.resource_count === 0
+                  ? uiText(
+                      gcPlan.candidate_pool_count === 0
+                        ? "No expired items were found."
+                        : "No expired items fit within the cleanup limits.",
+                    )
+                  : uiText(cleanupStates[gcPlan.state])}
+              </p>
+              {gcPlan.resource_count > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  {uiText("{value1} of {value2} expired items in this batch · {value3}", {
+                    value1: formatNumber(gcPlan.resource_count),
+                    value2: formatNumber(gcPlan.candidate_pool_count),
+                    value3: String(formatBytes(gcPlan.size_bytes)),
                   })}
                 </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {uiText(
-                    "{value1} of {value2} expired resources · {value3} storage keys · {value4}",
-                    {
-                      value1: String(gcPlan.resource_count ?? ""),
-                      value2: String(gcPlan.candidate_pool_count ?? ""),
-                      value3: String(gcPlan.key_count ?? ""),
-                      value4: String(formatBytes(gcPlan.size_bytes) ?? ""),
-                    },
-                  )}
-                </p>
-              </div>
-              <span className="settings-status">
-                {gcPlan.backup_id ? uiText("backup verified") : uiText("no backup bound")}
-              </span>
+              )}
             </div>
-            <p className="mt-3 text-2xs text-muted-foreground">{uiText("Exact plan digest")}</p>
-            <code className="mt-1 block break-all rounded border border-border bg-background px-2 py-2 text-3xs text-foreground">
-              {gcPlan.digest}
-            </code>
-            {gcPlan.state === "preview" && (
-              <div className="mt-3 space-y-3">
-                <p className="text-xs text-muted-foreground">
+            {gcPlan.resource_count > 0 && (
+              <span className="settings-status">
+                {gcPlan.backup_id
+                  ? uiText("backup verified")
+                  : uiText("Awaiting backup verification")}
+              </span>
+            )}
+          </div>
+          {gcPlan.state === "preview" && gcPlan.resource_count > 0 && (
+            <div className="mt-4 space-y-3">
+              {gcPlan.items.length > 0 && (
+                <ul
+                  aria-label={uiText("Items in this cleanup preview")}
+                  className="max-h-48 divide-y divide-border overflow-auto rounded-md border border-border"
+                >
+                  {gcPlan.items.map((candidate) => {
+                    const row = trashItems.find(
+                      (item) =>
+                        item.id === candidate.resource_id &&
+                        (item.kind === "multipart" ? "multipart_model" : "model") ===
+                          candidate.resource_kind,
+                    );
+                    return (
+                      <li
+                        key={candidate.id}
+                        className="flex justify-between gap-3 px-3 py-2 text-sm"
+                      >
+                        <span className="min-w-0 break-words">
+                          {row?.name ??
+                            gcCandidateName(candidate.resource_kind, candidate.resource_id)}
+                        </span>
+                        <span className="shrink-0 text-muted-foreground">
+                          {formatBytes(candidate.size_bytes)}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <div className="space-y-1.5">
+                <label htmlFor="cleanup-approval-code" className="block text-sm font-medium">
+                  {uiText("Cleanup approval code")}
+                </label>
+                <code className="block break-all rounded-md border border-border bg-field-surface px-3 py-2 text-xs">
+                  {gcPlan.digest}
+                </code>
+                <p className="text-sm text-muted-foreground">
                   {uiText(
-                    "Approval is fail-closed: paste the exact digest below. The server will also require verified storage and a recent backup on an independent S3 provider before starting the quarantine.",
+                    "Paste this code to approve the exact list above. PrintStash checks storage and a recent independent S3 backup before starting the recovery period.",
                   )}
                 </p>
                 <input
                   className={INPUT}
-                  aria-label={uiText("Confirm GC plan digest")}
-                  placeholder={uiText("Paste the 64-character digest")}
+                  id="cleanup-approval-code"
+                  placeholder={uiText("Paste the approval code")}
                   value={gcDigestConfirmation}
                   disabled={gcRead.isError || gcRead.isPending || trashBusy === "gc"}
                   onChange={(event) => setGcDigestConfirmation(event.target.value.trim())}
                 />
               </div>
-            )}
-            {gcPlan.state === "quarantined" && gcPlan.quarantine_until && (
-              <p className="mt-3 text-xs text-muted-foreground">
-                {uiText(
-                  "Recovery quarantine ends {value1}. The plan and backup are reverified before final deletion.",
-                  { value1: String(formatDateTime(gcPlan.quarantine_until) ?? "") },
-                )}
-              </p>
-            )}
-            {gcPlan.last_error && (
-              <p className="mt-3 text-xs text-destructive">{gcPlan.last_error}</p>
-            )}
-            <div className="mt-3 flex flex-wrap justify-end gap-2">
-              {gcPlan.state === "preview" && (
-                <button
-                  type="button"
-                  className={BTN_PRIMARY}
-                  disabled={
-                    gcRead.isError ||
-                    gcRead.isPending ||
-                    trashBusy === "gc" ||
-                    gcDigestConfirmation !== gcPlan.digest
-                  }
-                  onClick={approveExpiredGcPlan}
-                >
-                  <ShieldCheck className="h-3.5 w-3.5" />
-                  {uiText("Verify backup and quarantine")}
-                </button>
-              )}
-              {gcPlan.state === "quarantined" && (
-                <button
-                  type="button"
-                  className={BTN_PRIMARY}
-                  disabled={
-                    gcRead.isError ||
-                    gcRead.isPending ||
-                    trashBusy === "gc" ||
-                    !gcPlan.quarantine_until ||
-                    !gcQuarantineReady
-                  }
-                  onClick={finalizeExpiredGcPlan}
-                >
-                  <Eraser className="h-3.5 w-3.5" />
-                  {uiText("Reverify and finalize")}
-                </button>
-              )}
-              {["preview", "quarantined"].includes(gcPlan.state) && (
-                <button
-                  type="button"
-                  className={BTN_SECONDARY}
-                  disabled={gcRead.isError || gcRead.isPending || trashBusy === "gc"}
-                  onClick={abortExpiredGcPlan}
-                >
-                  {uiText("Abort plan")}
-                </button>
-              )}
             </div>
+          )}
+          {gcPlan.state === "quarantined" && gcPlan.quarantine_until && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              {uiText(
+                "Recovery quarantine ends {value1}. The plan and backup are reverified before final deletion.",
+                { value1: String(formatDateTime(gcPlan.quarantine_until) ?? "") },
+              )}
+            </p>
+          )}
+          {gcPlan.last_error && (
+            <p className="mt-3 text-xs text-destructive">{gcPlan.last_error}</p>
+          )}
+          <div className="mt-3 flex flex-wrap justify-end gap-2">
+            {gcPlan.state === "preview" && gcPlan.resource_count > 0 && (
+              <button
+                type="button"
+                className={BTN_PRIMARY}
+                disabled={
+                  gcRead.isError ||
+                  gcRead.isPending ||
+                  trashBusy === "gc" ||
+                  gcDigestConfirmation !== gcPlan.digest
+                }
+                onClick={approveExpiredGcPlan}
+              >
+                <ShieldCheck className="h-3.5 w-3.5" />
+                {uiText("Verify backup and quarantine")}
+              </button>
+            )}
+            {gcPlan.state === "quarantined" && (
+              <button
+                type="button"
+                className={BTN_PRIMARY}
+                disabled={
+                  gcRead.isError ||
+                  gcRead.isPending ||
+                  trashBusy === "gc" ||
+                  !gcPlan.quarantine_until ||
+                  !gcQuarantineReady
+                }
+                onClick={finalizeExpiredGcPlan}
+              >
+                <Eraser className="h-3.5 w-3.5" />
+                {uiText("Reverify and finalize")}
+              </button>
+            )}
+            {["preview", "quarantined"].includes(gcPlan.state) && (
+              <button
+                type="button"
+                className={BTN_SECONDARY}
+                disabled={gcRead.isError || gcRead.isPending || trashBusy === "gc"}
+                onClick={abortExpiredGcPlan}
+              >
+                {uiText(gcPlan.resource_count === 0 ? "Dismiss review" : "Abort plan")}
+              </button>
+            )}
           </div>
-        )}
-      </>
-    ) : null;
+        </section>
+      )}
+    </>
+  ) : null;
 
   const saveTrashRetentionDisabled =
     !user?.is_superuser ||
@@ -2237,7 +2310,7 @@ export function SettingsPanel() {
     activeSection === "trash" ? (
       <form
         aria-label={uiText("Trash retention")}
-        className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3.5 text-[13px] sm:px-5"
+        className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border bg-card px-4 py-3.5 text-sm sm:px-5"
         onSubmit={(event) => {
           event.preventDefault();
           if (!saveTrashRetentionDisabled) saveTrashRetention();
@@ -2252,7 +2325,7 @@ export function SettingsPanel() {
         <input
           id="trash-retention-days"
           type="number"
-          min={0}
+          min={-1}
           inputMode="numeric"
           aria-describedby="trash-retention-hint"
           aria-invalid={parsedTrashRetentionDays === null}
@@ -2272,7 +2345,9 @@ export function SettingsPanel() {
         />
         <span className="text-foreground">{uiText("days")}</span>
         <span id="trash-retention-hint" className="text-xs text-muted-foreground">
-          {uiText("Soft-deleted models stay restorable until the retention window expires.")}
+          {uiText(
+            "Items become eligible for cleanup after this many days. Use -1 to keep them indefinitely.",
+          )}
         </span>
         <span className="ml-auto flex gap-2">
           {trashRetentionDraft !== null && (
@@ -2303,72 +2378,18 @@ export function SettingsPanel() {
       </form>
     ) : null;
 
-  const trashRetentionCard =
-    activeSection === "trash" ? (
-      <SettingsCard
-        className="border-0"
-        title={uiText("Trash retention")}
-        description={uiText(
-          "Soft-deleted models stay restorable until the retention window expires.",
-        )}
-        action={settingsTrash ? reviewExpiredButton : undefined}
-        footer={
-          <button
-            type="button"
-            onClick={saveTrashRetention}
-            disabled={
-              !user?.is_superuser ||
-              !remoteConfigData ||
-              remoteConfig.isError ||
-              preferenceCommand.blocked ||
-              backupPolicy.isPending ||
-              parsedTrashRetentionDays === null
-            }
-            className={BTN_PRIMARY}
-          >
-            {trashRetentionBusy ? uiText("Saving") : uiText("Save retention")}
-          </button>
-        }
-      >
-        <div className="settings-preference-fields">
-          <label className="settings-preference-row">
-            <span>{uiText("Days")}</span>
-            <input
-              type="number"
-              min={-1}
-              value={trashRetentionText}
-              onChange={(event) => {
-                const text = event.target.value;
-                if (remoteConfigData)
-                  setTrashRetentionDraft((previous) => ({
-                    text,
-                    base: previous?.base ?? captureEditingBase(remoteConfigData),
-                  }));
-              }}
-              disabled={
-                !user?.is_superuser ||
-                !remoteConfigData ||
-                remoteConfig.isError ||
-                trashRetentionBusy
-              }
-              className={INPUT}
-            />
-          </label>
-        </div>
-        {trashCleanupDetails}
-      </SettingsCard>
-    ) : null;
-
   const trashItemsCard =
     activeSection === "trash" ? (
-      <SettingsCard
-        hideHeader={trashPage}
-        className="border-0"
-        title={uiText("trash.itemsTitle")}
-        description={uiText("multipart.trashHelp")}
+      <section
+        aria-label={uiText("trash.itemsTitle")}
+        className="overflow-hidden rounded-lg border border-border bg-card"
       >
         {trashItems.length > 0 && (
-          <div className="flex flex-wrap items-center gap-3 border-b border-border bg-foreground/[0.03] px-4 py-3 text-xs text-muted-foreground sm:px-5">
+          <div
+            role="group"
+            aria-label={uiText("Trash selection")}
+            className="flex flex-wrap items-center gap-3 border-b border-border bg-muted px-4 py-3 text-sm text-muted-foreground sm:px-5"
+          >
             <span className="flex items-center gap-3 font-medium text-foreground">
               <Checkbox
                 checked={selectedTrash.length === trashItems.length}
@@ -2412,7 +2433,7 @@ export function SettingsPanel() {
               </span>
             )}
             {trashItems.some((item) => item.kind === "model") && (
-              <span className="ml-auto rounded-full bg-foreground/10 px-2.5 py-1 font-mono tabular-nums text-foreground/80">
+              <span className="ml-auto text-xs tabular-nums">
                 {t("Known model storage: {size}", {
                   size: formatBytes(
                     trashItems.reduce(
@@ -2437,7 +2458,7 @@ export function SettingsPanel() {
               {uiText("settings.trashLoadFailed")}
             </p>
           ) : trashItems.length === 0 ? (
-            <SettingsEmptyRow className={trashPage ? "px-5" : undefined}>
+            <SettingsEmptyRow className="px-5">
               <strong className="font-medium text-foreground">{uiText("Trash is empty.")}</strong>{" "}
               {uiText("Deleted models wait here until the retention window ends.")}
             </SettingsEmptyRow>
@@ -2445,12 +2466,7 @@ export function SettingsPanel() {
             trashItems.map((item) => (
               <div
                 key={trashRowKey(item)}
-                className={cn(
-                  "grid gap-3 p-4 sm:p-5 lg:items-center",
-                  trashPage
-                    ? "grid-cols-[auto_auto_minmax(0,1fr)] lg:grid-cols-[auto_auto_minmax(0,1fr)_auto]"
-                    : "grid-cols-[auto_minmax(0,1fr)] lg:grid-cols-[auto_minmax(0,1fr)_auto]",
-                )}
+                className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-3 p-4 sm:p-5 lg:grid-cols-[auto_auto_minmax(0,1fr)_auto]"
               >
                 <Checkbox
                   checked={trashSelection.has(trashRowKey(item))}
@@ -2465,39 +2481,36 @@ export function SettingsPanel() {
                     },
                   )}
                 />
-                {trashPage && (
-                  <ProtectedThumbnail
-                    path={item.kind === "model" ? item.thumbnail_url : null}
-                    alt=""
-                    className="flex size-12 items-center justify-center overflow-hidden rounded-md border border-border bg-muted text-muted-foreground"
-                    imageClassName="h-full w-full object-cover"
-                    placeholder={<Boxes className="h-5 w-5" aria-hidden />}
-                  />
-                )}
+                <ProtectedThumbnail
+                  path={item.kind === "model" ? item.thumbnail_url : null}
+                  alt=""
+                  className="flex size-12 items-center justify-center overflow-hidden rounded-md border border-border bg-muted text-muted-foreground"
+                  imageClassName="h-full w-full object-cover"
+                  placeholder={<Boxes className="h-5 w-5" aria-hidden />}
+                />
                 <div className="min-w-0">
                   <p className="settings-list-title break-words">{item.name}</p>
                   <p className="settings-list-meta">
                     {[
                       item.kind === "multipart"
                         ? uiText("multipart.trashLabel")
-                        : uiText("{value1} files", { value1: String(item.file_count) }),
+                        : uiText("counts.files", { count: item.file_count }),
                       item.kind === "multipart"
                         ? uiText("multipart.partsCount", { count: item.part_count })
                         : formatBytes(item.size_bytes),
-                      uiText("Deleted {value1} · Expires {value2}", {
-                        value1: String(formatDate(item.deleted_at) ?? ""),
-                        value2: String(formatDate(item.expires_at) ?? ""),
-                      }),
+                      item.expires_at
+                        ? uiText("Deleted {value1} · Expires {value2}", {
+                            value1: String(formatDate(item.deleted_at)),
+                            value2: String(formatDate(item.expires_at)),
+                          })
+                        : uiText("Deleted {value1} · No expiry", {
+                            value1: String(formatDate(item.deleted_at)),
+                          }),
                     ].join(" · ")}
                   </p>
                   <TrashExpiry expiresAt={item.expires_at} />
                 </div>
-                <div
-                  className={cn(
-                    "flex flex-wrap gap-2 lg:col-start-auto lg:justify-end",
-                    trashPage ? "col-start-3" : "col-start-2",
-                  )}
-                >
+                <div className="col-start-3 flex flex-wrap gap-2 lg:col-start-auto lg:justify-end">
                   <button
                     type="button"
                     onClick={() => restoreTrashItem(trashRowKey(item))}
@@ -2521,7 +2534,7 @@ export function SettingsPanel() {
             ))
           )}
         </div>
-      </SettingsCard>
+      </section>
     ) : null;
 
   return (
@@ -2598,9 +2611,9 @@ export function SettingsPanel() {
           onClose={() => setPurgeExpiredOpen(false)}
           onConfirm={createExpiredGcPreview}
           busy={trashBusy === "gc"}
-          title={uiText("Create a safe GC preview?")}
+          title={uiText("Review expired items?")}
           description={uiText(
-            "This only records a bounded candidate plan. It does not delete catalog rows or storage bytes. Approval later requires the exact digest, verified storage, and a recent independent backup.",
+            "Create a list of items whose retention period has ended. Their expiry dates stay the same. Permanent deletion requires separate approval and a verified backup.",
           )}
           confirmLabel={uiText("Create preview")}
         />
@@ -2732,20 +2745,8 @@ export function SettingsPanel() {
                   />
                   {t("Refresh")}
                 </Button>
-                {reviewExpiredButton}
-                <Button size="sm" variant="outline" onClick={() => changeSection("overview")}>
-                  <SettingsIcon className="size-3.5" aria-hidden="true" />
-                  {t("settings.title")}
-                </Button>
+                {user?.is_superuser && reviewExpiredButton}
               </>
-            ) : settingsTrash ? (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => router.push("/settings?section=trash")}
-              >
-                {t("Open Trash")}
-              </Button>
             ) : activeSection === "spoolman" ? (
               <div ref={setSpoolmanActionHost} className="flex flex-wrap items-center gap-2" />
             ) : undefined
@@ -5755,28 +5756,9 @@ export function SettingsPanel() {
                     </Button>
                   </div>
                 )}
-                {trashPage ? (
-                  <>
-                    <div
-                      data-trash-page
-                      className="overflow-hidden rounded-lg border border-border bg-card"
-                    >
-                      {trashRetentionBar}
-                      {trashCleanupDetails}
-                    </div>
-                    <div
-                      data-trash-page
-                      className="overflow-hidden rounded-lg border border-border bg-card"
-                    >
-                      {trashItemsCard}
-                    </div>
-                  </>
-                ) : (
-                  <div className="settings-grouped">
-                    {trashRetentionCard}
-                    {trashItemsCard}
-                  </div>
-                )}
+                {trashRetentionBar}
+                {trashCleanupDetails}
+                {trashItemsCard}
               </div>
             )}
 

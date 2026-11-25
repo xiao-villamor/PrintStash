@@ -366,11 +366,15 @@ export function InspectorPreviewImages({
         )}
         loadingPlaceholder={<LibraryPreviewPlaceholder />}
       />
-      {state.preview.navigationViews.length >= 2 && <PreviewArrows state={state} size="gallery" />}
-      <ViewIndicator
-        state={state}
-        className="absolute bottom-2 left-1/2 max-w-full -translate-x-1/2 border border-border"
-      />
+      {state.preview.navigationViews.length >= 2 && (
+        <>
+          <PreviewArrows state={state} size="gallery" />
+          <ViewIndicator
+            state={state}
+            className="absolute bottom-2 left-1/2 max-w-full -translate-x-1/2 border border-border"
+          />
+        </>
+      )}
       {state.preview.failed && (
         <Button
           variant="outline"

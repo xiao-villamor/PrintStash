@@ -298,8 +298,7 @@ test.describe("collections", () => {
     await sidebar.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(parentRow).toHaveCount(0);
 
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Trash" }).click();
+    await page.goto("/settings?section=trash");
     await expect(page.getByText(model)).toBeVisible();
     await page
       .getByRole("checkbox", { name: `Select deleted model ${model}`, exact: true })
@@ -334,8 +333,7 @@ test.describe("collections", () => {
     await expect(sidebar.getByRole("treeitem", { name: col, exact: true })).toHaveCount(0);
 
     // The contained model landed in the trash (recycle bin), not hard-deleted.
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Trash" }).click();
+    await page.goto("/settings?section=trash");
     await expect(page.getByText(model)).toBeVisible();
 
     // Clean up: purge it forever so the shared DB doesn't accumulate trash.

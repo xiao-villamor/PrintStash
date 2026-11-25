@@ -1030,6 +1030,28 @@ test.describe("settings", () => {
     await expect(first).toHaveAccessibleDescription("PLA");
   });
 
+  test("dismisses an empty expired-items preview", async ({ page }, testInfo) => {
+    await page.goto("/settings?section=trash");
+    await collapseNavigationSidebar(page);
+    await page.getByRole("button", { name: "Review expired" }).click();
+    const dialog = page.getByRole("dialog", { name: "Review expired items?" });
+    await dialog.getByRole("button", { name: "Create preview" }).click();
+
+    const review = page.getByRole("region", { name: "Trash cleanup" });
+    await expect(review.getByRole("status")).toHaveText("No expired items were found.");
+    await expect(review.getByLabel("Cleanup approval code")).toHaveCount(0);
+    await expect(review.getByRole("button", { name: "Verify backup and quarantine" })).toHaveCount(
+      0,
+    );
+    await page.screenshot({ path: testInfo.outputPath("empty-trash-review.png") });
+    await page.reload();
+    await expect(review.getByRole("status")).toHaveText("No expired items were found.");
+    await review.getByRole("button", { name: "Dismiss review" }).click();
+    await expect(page.getByRole("button", { name: "Review expired" })).toBeEnabled();
+    await page.reload();
+    await expect(review).toHaveCount(0);
+  });
+
   test("change display currency persists", async ({ page }) => {
     await page.goto("/settings");
     await page.getByRole("button", { name: "Appearance" }).click();
@@ -1526,8 +1548,7 @@ test.describe("settings", () => {
       await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
     }
 
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Trash" }).click();
+    await page.goto("/settings?section=trash");
     for (const name of names) {
       await page.getByRole("checkbox", { name: `Select deleted model ${name}` }).click();
     }
@@ -1539,7 +1560,7 @@ test.describe("settings", () => {
 
     for (const name of names) await expect(page.getByText(name)).toHaveCount(0);
     await page.reload();
-    await page.getByRole("button", { name: "Trash", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Trash", exact: true })).toBeVisible();
     for (const name of names) await expect(page.getByText(name)).toHaveCount(0);
   });
 
@@ -1550,23 +1571,34 @@ test.describe("settings", () => {
     await clickModelAction(page, "Delete model");
     await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
 
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Trash" }).click();
-    await expect(page.getByText(name)).toBeVisible();
+    await page.goto("/settings?section=trash");
+    const item = page
+      .getByRole("region", { name: "Deleted models and multipart sets" })
+      .getByText(name, { exact: true });
+    await expect(item).toBeVisible();
 
     // Retention 0 means everything already in trash is past expiry.
     await page.getByRole("spinbutton").fill("0");
     await page.getByRole("button", { name: "Save retention" }).click();
+    await expect(page.getByRole("button", { name: "Save retention" })).toBeDisabled();
+    await expect(item.locator("..").getByText("Expired", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Review expired" }).click();
-    const dialog = page.getByRole("dialog", { name: "Create a safe GC preview?" });
-    await expect(dialog).toContainText("It does not delete catalog rows or storage bytes.");
+    const dialog = page.getByRole("dialog", { name: "Review expired items?" });
+    await expect(dialog).toContainText("Their expiry dates stay the same.");
     await dialog.getByRole("button", { name: "Create preview" }).click();
 
-    await expect(page.getByText(/GC plan #\d+ · preview/)).toBeVisible();
-    await expect(page.getByText(name)).toBeVisible();
+    await expect(page.getByText("Preview ready", { exact: true })).toBeVisible();
+    await expect(
+      page
+        .getByRole("list", { name: "Items in this cleanup preview" })
+        .getByText(name, { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "Deleted models and multipart sets" }).getByText(name),
+    ).toBeVisible();
     const digest = await page.getByText(/^[0-9a-f]{64}$/).textContent();
     expect(digest).not.toBeNull();
-    await page.getByLabel("Confirm GC plan digest").fill(digest!);
+    await page.getByLabel("Cleanup approval code").fill(digest!);
 
     const refused = page.waitForResponse(
       (response) =>
@@ -1576,10 +1608,12 @@ test.describe("settings", () => {
     );
     await page.getByRole("button", { name: "Verify backup and quarantine" }).click();
     expect((await refused).status()).toBe(409);
-    await expect(page.getByText(name)).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "Deleted models and multipart sets" }).getByText(name),
+    ).toBeVisible();
 
     await page.getByRole("button", { name: "Abort plan" }).click();
-    await expect(page.getByText(/GC plan #\d+ · aborted/)).toBeVisible();
+    await expect(page.getByText("Review dismissed", { exact: true })).toBeVisible();
 
     // Restore the default so later runs aren't affected.
     await page.getByRole("spinbutton").fill("30");

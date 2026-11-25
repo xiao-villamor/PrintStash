@@ -85,8 +85,7 @@ export function WorkspaceMenu({
       </div>
       {items.map((item) => {
         const target = new URL(item.href, window.location.origin);
-        const dedicatedTrash =
-          searchParams.get("section") === "trash" && searchParams.get("view") !== "settings";
+        const dedicatedTrash = searchParams.get("section") === "trash";
         const active =
           pathname === target.pathname &&
           (target.search

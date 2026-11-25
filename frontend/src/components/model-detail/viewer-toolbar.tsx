@@ -65,9 +65,13 @@ export function ViewerToolbar({
   return (
     <div className="detail-viewer-controls" data-viewer-mode={viewerMode}>
       <div className="detail-preview-heading">
-        <div className="min-w-0 flex flex-wrap items-baseline gap-3">
+        <div className="flex min-w-0 flex-1 items-baseline gap-3">
           <h2>{uiText("Model preview")}</h2>
-          {filename && <span className="break-all text-xs text-muted-foreground">{filename}</span>}
+          {filename && (
+            <span className="min-w-0 truncate text-xs text-muted-foreground" title={filename}>
+              {filename}
+            </span>
+          )}
         </div>
       </div>
       <div
@@ -85,7 +89,11 @@ export function ViewerToolbar({
           availability={availability}
           gcodeOnly={gcodeOnly}
         />
-        <div className="detail-viewer-control-group" role="group" aria-label={uiText("Overlays")}>
+        <div
+          className="detail-viewer-control-group detail-viewer-overlays"
+          role="group"
+          aria-label={uiText("Overlays")}
+        >
           <Button
             size="sm"
             variant="ghost"
@@ -117,7 +125,7 @@ export function ViewerToolbar({
             <select
               aria-label={uiText("Screenshot resolution")}
               title={uiText("Screenshot resolution")}
-              className="h-9 rounded-md border border-border bg-field-surface px-2 text-xs text-foreground"
+              className="h-8 rounded-md border border-border bg-field-surface px-2 text-xs text-foreground"
               value={screenshotScale}
               disabled={!viewerReady}
               onChange={(event) => {

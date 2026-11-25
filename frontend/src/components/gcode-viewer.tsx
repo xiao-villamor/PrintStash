@@ -651,78 +651,80 @@ export function GcodeViewer({
         </CanvasRenderer>
       </GcodeErrorBoundary>
     </div>,
-    <section className="toolpath-section" aria-label={uiText("Layers")}>
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="toolpath-section-title">{uiText("Layers")}</h3>
-        <span className="font-mono text-xs text-muted-foreground">
-          {uiText("{value1} mm", {
-            value1: formatNumber(data.layerRanges[currentLayer]?.z ?? 0, {
-              maximumFractionDigits: 2,
-            }),
+    <>
+      <section className="toolpath-section" aria-label={uiText("Layers")}>
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="toolpath-section-title">{uiText("Layers")}</h3>
+          <span className="rounded-md bg-muted px-2 py-1 font-mono text-xs text-muted-foreground">
+            {uiText("{value1} mm", {
+              value1: formatNumber(data.layerRanges[currentLayer]?.z ?? 0, {
+                maximumFractionDigits: 2,
+              }),
+            })}
+          </span>
+        </div>
+        <div className="toolpath-layer-entry">
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label={uiText("Previous layer")}
+            disabled={currentLayer <= 0}
+            onClick={() => selectLayer(currentLayer - 1)}
+          >
+            <ChevronLeft className="h-4 w-4" aria-hidden />
+          </Button>
+          <Input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={data.totalLayers}
+            step={1}
+            aria-label={uiText("Layer number")}
+            value={layerEntry ?? currentLayer + 1}
+            onChange={(event) => setLayerEntry(event.target.value)}
+            onBlur={commitLayer}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                commitLayer();
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setLayerEntry(null);
+              }
+            }}
+            className="min-w-0 font-mono text-center"
+          />
+          <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">
+            / {data.totalLayers}
+          </span>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label={uiText("Next layer")}
+            disabled={currentLayer >= data.totalLayers - 1}
+            onClick={() => selectLayer(currentLayer + 1)}
+          >
+            <ChevronRight className="h-4 w-4" aria-hidden />
+          </Button>
+        </div>
+        <input
+          aria-label={viewerCopy(i18n, "viewer.currentLayer")}
+          aria-valuetext={viewerCopy(i18n, "viewer.layer", {
+            current: String(currentLayer + 1),
+            total: String(data.totalLayers),
           })}
-        </span>
-      </div>
-      <div className="toolpath-layer-entry">
-        <Button
-          variant="outline"
-          size="icon-sm"
-          aria-label={uiText("Previous layer")}
-          disabled={currentLayer <= 0}
-          onClick={() => selectLayer(currentLayer - 1)}
-        >
-          <ChevronLeft className="h-4 w-4" aria-hidden />
-        </Button>
-        <Input
-          type="number"
-          inputMode="numeric"
-          min={1}
-          max={data.totalLayers}
-          step={1}
-          aria-label={uiText("Layer number")}
-          value={layerEntry ?? currentLayer + 1}
-          onChange={(event) => setLayerEntry(event.target.value)}
-          onBlur={commitLayer}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              commitLayer();
-            }
-            if (event.key === "Escape") {
-              event.preventDefault();
-              setLayerEntry(null);
-            }
-          }}
-          className="min-w-0 font-mono text-center"
+          type="range"
+          min={0}
+          max={data.totalLayers - 1}
+          value={currentLayer}
+          onChange={(event) => selectLayer(Number(event.target.value))}
+          className="toolpath-layer-slider"
         />
-        <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">
-          / {data.totalLayers}
-        </span>
-        <Button
-          variant="outline"
-          size="icon-sm"
-          aria-label={uiText("Next layer")}
-          disabled={currentLayer >= data.totalLayers - 1}
-          onClick={() => selectLayer(currentLayer + 1)}
-        >
-          <ChevronRight className="h-4 w-4" aria-hidden />
-        </Button>
-      </div>
-      <input
-        aria-label={viewerCopy(i18n, "viewer.currentLayer")}
-        aria-valuetext={viewerCopy(i18n, "viewer.layer", {
-          current: String(currentLayer + 1),
-          total: String(data.totalLayers),
-        })}
-        type="range"
-        min={0}
-        max={data.totalLayers - 1}
-        value={currentLayer}
-        onChange={(event) => selectLayer(Number(event.target.value))}
-        className="toolpath-layer-slider"
-      />
-      {toggle(uiText("This layer"), onlyCurrentLayer, setOnlyCurrentLayer)}
+        {toggle(uiText("This layer"), onlyCurrentLayer, setOnlyCurrentLayer)}
+      </section>
       {data.features.length > 0 && (
-        <section className="toolpath-features" aria-label={uiText("Features")}>
+        <section className="toolpath-section" aria-label={uiText("Features")}>
           <div className="flex items-center justify-between gap-2">
             <h3 className="toolpath-section-title">{uiText("Features")}</h3>
             {hiddenFeatures.size > 0 && (
@@ -767,7 +769,7 @@ export function GcodeViewer({
           </ul>
         </section>
       )}
-    </section>,
+    </>,
     <>
       {!sharedControls && (
         <section className="toolpath-section" aria-label={uiText("Camera view")}>

@@ -21,7 +21,7 @@ export function InspectorSection({
   const headingId = useId();
   return (
     <section aria-labelledby={headingId} className="min-w-0 space-y-1.5">
-      <div className="flex min-h-7 items-center justify-between gap-3 px-1">
+      <div className="flex min-h-7 items-center justify-between gap-3 ps-1">
         <h2 id={headingId} className="text-sm font-medium text-muted-foreground">
           {title}
         </h2>

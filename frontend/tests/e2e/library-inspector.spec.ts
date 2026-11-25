@@ -2,6 +2,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { apiPort, collectPageProblems, useMockApi } from "./_setup";
 import { aModelListItem } from "../../src/test-support/factories";
+import { collapseNavigationSidebar } from "../e2e-real/util";
 
 useMockApi();
 
@@ -20,7 +21,7 @@ async function inspect(page: Page) {
   await card.click();
   const drawer = page.locator("#model-drawer");
   await expect(drawer).toBeVisible();
-  await expect(drawer.getByRole("button", { name: "OK", exact: true })).toBeEnabled();
+  await expect(drawer.getByRole("region", { name: "Preview", exact: true })).toBeVisible();
   return { card, drawer };
 }
 
@@ -54,6 +55,54 @@ async function records(page: Page) {
 }
 
 test.describe("Library inline inspector", () => {
+  test("keeps the header clear when the preview controls scroll out of view", async ({
+    page,
+  }, testInfo) => {
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.route("**/api/v1/models/1", async (route) => {
+      const response = await route.fetch();
+      const model = await response.json();
+      await route.fulfill({
+        response,
+        json: { ...model, previews: { ...model.previews, cover_image_kind: "photo" } },
+      });
+    });
+    const { drawer } = await inspect(page);
+    await collapseNavigationSidebar(page);
+    const header = drawer.locator(".library-inspector-header");
+    const scroll = drawer.locator(".library-inspector-scroll");
+    const preview = drawer.getByRole("region", { name: "Preview", exact: true });
+    const modes = preview.getByRole("tablist");
+    const images = modes.getByRole("tab", { name: "Images" });
+    await images.click();
+    await expect(preview.getByRole("tab", { name: "G-code", exact: true })).toHaveCount(0);
+    await expect(preview.getByText("Cover", { exact: true })).toHaveCount(0);
+
+    const headerBounds = (await header.boundingBox())!;
+    const modeBounds = (await modes.boundingBox())!;
+    const mediaBounds = (await preview.locator(".library-inspector-preview").boundingBox())!;
+    expect(modeBounds.y + modeBounds.height).toBeLessThan(mediaBounds.y);
+    const offset = Math.round(mediaBounds.y - headerBounds.y - headerBounds.height + 8);
+    await page.mouse.move(modeBounds.x + 12, modeBounds.y + modeBounds.height + 30);
+    await page.mouse.wheel(0, offset);
+    await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBe(offset);
+    expect(await header.boundingBox()).toEqual(headerBounds);
+    const scrollBounds = (await scroll.boundingBox())!;
+    expect(scrollBounds.y).toBeCloseTo(headerBounds.y + headerBounds.height, 0);
+    await expect(modes).not.toBeInViewport();
+    await expect(drawer.getByRole("button", { name: "Close details" })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("inspector-mid-scroll.png") });
+
+    await page.mouse.wheel(0, -offset);
+    await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBe(0);
+    await expect(modes).toBeInViewport({ ratio: 1 });
+    await expect(images).toHaveAttribute("aria-selected", "true");
+    await page.screenshot({ path: testInfo.outputPath("inspector-at-top.png") });
+    await images.focus();
+    await images.press("ArrowRight");
+    await expect(modes.getByRole("tab", { name: "3D model", exact: true })).toBeFocused();
+  });
+
   for (const details of ["closed", "open"] as const) {
     test(`keeps the ${details} inspector stable during background refresh`, async ({
       page,

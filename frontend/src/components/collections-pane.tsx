@@ -70,9 +70,7 @@ export function CollectionsPaneProvider({ children }: { children: ReactNode }) {
   const [preference, setPreference] = useState(() => storedPreference(storageKey));
   const [host, attach] = useState<HTMLDivElement | null>(null);
   const [breadcrumbHost, attachBreadcrumbs] = useState<HTMLDivElement | null>(null);
-  const settings =
-    pathname === "/settings" &&
-    (searchParams.get("section") !== "trash" || searchParams.get("view") === "settings");
+  const settings = pathname === "/settings" && searchParams.get("section") !== "trash";
   const routeScope = `${pathname}:${settings}`;
   const [requestedMode, setRequestedMode] = useState<{
     scope: string;

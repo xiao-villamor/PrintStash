@@ -56,16 +56,19 @@ async function previewExpiredTrashWithoutApproval(page: Page, modelName: string)
   await expect(page.getByText(modelName)).toBeVisible();
   await page.getByRole("spinbutton").fill("0");
   await page.getByRole("button", { name: "Save retention" }).click();
+  await expect(page.getByRole("button", { name: "Save retention" })).toBeDisabled();
   await page.getByRole("button", { name: "Review expired" }).click();
-  const dialog = page.getByRole("dialog", { name: "Create a safe GC preview?" });
-  await expect(dialog).toContainText("It does not delete catalog rows or storage bytes.");
+  const dialog = page.getByRole("dialog", { name: "Review expired items?" });
+  await expect(dialog).toContainText("Their expiry dates stay the same.");
   await dialog.getByRole("button", { name: "Create preview" }).click();
 
-  await expect(page.getByText(/GC plan #\d+ · preview/)).toBeVisible();
-  await expect(page.getByText(modelName)).toBeVisible();
+  await expect(page.getByText("Preview ready", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Deleted models and multipart sets" }).getByText(modelName),
+  ).toBeVisible();
   const digest = await page.getByText(/^[0-9a-f]{64}$/).textContent();
   expect(digest).not.toBeNull();
-  await page.getByLabel("Confirm GC plan digest").fill(digest!);
+  await page.getByLabel("Cleanup approval code").fill(digest!);
 
   const refused = page.waitForResponse(
     (response) =>
@@ -75,10 +78,12 @@ async function previewExpiredTrashWithoutApproval(page: Page, modelName: string)
   );
   await page.getByRole("button", { name: "Verify backup and quarantine" }).click();
   expect((await refused).status()).toBe(409);
-  await expect(page.getByText(modelName)).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Deleted models and multipart sets" }).getByText(modelName),
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "Abort plan" }).click();
-  await expect(page.getByText(/GC plan #\d+ · aborted/)).toBeVisible();
+  await expect(page.getByText("Review dismissed", { exact: true })).toBeVisible();
 }
 
 test.describe("storage provider setup", () => {

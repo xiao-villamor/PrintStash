@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Open Trash from one workspace with an aligned selection header and a clearer review of expired items.
+- Keep the Model details title and actions clear while scrolling past the image preview. Show G-code in the full Model page and give its toolbar and layer controls dedicated space.
+- Give the multi-plate tray its own row and keep the selected plate visible when switching views. Improve lighting on dark filament.
+- Align the model's Print actions and add space to attachment rows.
+
 - Bambu LAN connects on Python 3.14 with bundled Bambu CA certificates that lack the Key Usage extension.
 
 - PostgreSQL library browsing works when none of the requested Models have an automatic thumbnail.

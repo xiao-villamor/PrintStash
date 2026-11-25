@@ -147,8 +147,7 @@ test.describe("model detail", () => {
     // ── Remove the Model and its Artifacts from the shared test database ──
     await clickModelAction(page, "Delete model");
     await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Trash", exact: true }).click();
+    await page.goto("/settings?section=trash");
     await page
       .getByRole("checkbox", { name: `Select deleted model ${renamed}`, exact: true })
       .locator("..")

@@ -124,11 +124,7 @@ export function SidebarNav() {
       case "profiles":
         return pathname.startsWith("/profiles");
       case "trash":
-        return (
-          pathname === "/settings" &&
-          params.get("section") === "trash" &&
-          params.get("view") !== "settings"
-        );
+        return pathname === "/settings" && params.get("section") === "trash";
     }
   }
 
