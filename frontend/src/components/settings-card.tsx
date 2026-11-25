@@ -1,5 +1,6 @@
-import { AlertCircle, AlertTriangle, CheckCircle2, Info } from "lucide-react";
-import type * as React from "react";
+import { AlertCircle, AlertTriangle, CheckCircle2, Info, MoreHorizontal } from "lucide-react";
+import * as React from "react";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { useUiLocale } from "@/lib/i18n";
 import { uiText } from "@/lib/locale";
 import { cn } from "@/lib/utils";
@@ -9,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 // its actions sit above a light bordered box that holds only rows (the Linear
 // and Cursor settings pattern). A `danger` card is the Danger zone.
 export function SettingsCard({
+  id,
   title,
   description,
   action,
@@ -19,6 +21,8 @@ export function SettingsCard({
   hideHeader = false,
   tone = "default",
 }: {
+  /** Anchor for the "On this page" list. */
+  id?: string;
   title: string;
   description?: React.ReactNode;
   action?: React.ReactNode;
@@ -31,7 +35,12 @@ export function SettingsCard({
 }) {
   useUiLocale();
   return (
-    <section role="group" aria-label={title} className={cn("settings-card", className)}>
+    <section
+      id={id}
+      role="group"
+      aria-label={title}
+      className={cn("settings-card scroll-mt-4", className)}
+    >
       {!hideHeader && (
         <SettingsGroupHead
           placement="outside"
@@ -238,5 +247,169 @@ export function SettingsScope({ scope }: { scope: "browser" | "vault" }) {
     <span className="settings-scope" data-scope={scope}>
       {scope === "browser" ? uiText("This browser") : uiText("Whole Vault")}
     </span>
+  );
+}
+
+/** The `⋯` menu at the end of a row: everything beyond the one visible action. */
+export function SettingsRowMenu({
+  label,
+  items,
+  disabled = false,
+}: {
+  label: string;
+  items: { label: string; onSelect: () => void; danger?: boolean; disabled?: boolean }[];
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <DropdownMenu
+      open={open}
+      onOpenChange={setOpen}
+      align="end"
+      role="menu"
+      portal
+      contentClassName="min-w-44 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+      trigger={
+        <button
+          type="button"
+          data-menu-trigger
+          aria-label={label}
+          title={label}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          disabled={disabled}
+          onClick={() => setOpen((value) => !value)}
+          className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-[color,background-color] duration-press hover:bg-popover-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+        >
+          <MoreHorizontal className="size-4" aria-hidden />
+        </button>
+      }
+    >
+      {items.map((item) => (
+        <button
+          key={item.label}
+          type="button"
+          role="menuitem"
+          disabled={item.disabled}
+          onClick={() => {
+            setOpen(false);
+            item.onSelect();
+          }}
+          className={cn(
+            "flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-sm transition-colors duration-press hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+            item.danger ? "text-destructive" : "text-foreground",
+          )}
+        >
+          {item.label}
+        </button>
+      ))}
+    </DropdownMenu>
+  );
+}
+
+/** A visible single-choice group written as a segmented control (neutral active fill). */
+export function SettingsSegmented<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  disabled = false,
+}: {
+  label: string;
+  value: T;
+  options: readonly { value: T; label: string }[];
+  onChange: (value: T) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={label}
+      className="inline-flex gap-0.5 rounded-lg border border-border bg-card p-0.75"
+    >
+      {options.map((option) => {
+        const selected = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            disabled={disabled}
+            onClick={() => onChange(option.value)}
+            className={cn(
+              "h-7.5 rounded-md px-3 text-sm font-medium transition-[color,background-color] duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+              selected
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Single choice written as selectable cards: label, one line of detail and an optional badge. */
+export function SettingsChoiceCards<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  disabled = false,
+}: {
+  label: string;
+  value: T;
+  options: readonly { value: T; label: string; detail?: string; badge?: string }[];
+  onChange: (value: T) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="grid gap-2.5 py-4">
+      {options.map((option) => {
+        const selected = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            disabled={disabled}
+            onClick={() => onChange(option.value)}
+            className={cn(
+              "flex items-start gap-3 rounded-lg border p-3.5 text-left transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+              selected
+                ? "border-primary bg-primary/10"
+                : "border-border bg-muted/30 hover:bg-popover-hover",
+            )}
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border",
+                selected ? "border-primary" : "border-border",
+              )}
+            >
+              {selected && <span className="size-2 rounded-full bg-primary" />}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                {option.label}
+                {option.badge && (
+                  <span className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs font-medium text-foreground/80">
+                    {option.badge}
+                  </span>
+                )}
+              </span>
+              {option.detail && (
+                <span className="mt-0.5 block text-sm text-muted-foreground">{option.detail}</span>
+              )}
+            </span>
+          </button>
+        );
+      })}
+    </div>
   );
 }

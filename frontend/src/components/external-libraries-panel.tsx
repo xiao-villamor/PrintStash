@@ -24,7 +24,7 @@ import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { FolderSync, Plus, RefreshCw } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Modal } from "@/components/ui/modal";
 import { useQuery } from "@tanstack/react-query";
@@ -626,8 +626,9 @@ function AdminLibrarySourcesPanel({
   return (
     <Localized>
       <SettingsCard
-          title={uiText("Scanning")}
-          description={uiText("Applies to every Library source.")}>
+        title={uiText("Scanning")}
+        description={uiText("Applies to every Library source.")}
+      >
         <div className="settings-section-body">
           <div className="settings-preference-row">
             <span>{uiText("Library sources enabled")}</span>
@@ -784,24 +785,24 @@ function AdminLibrarySourcesPanel({
             </div>
           </section>
         )}
-        </SettingsCard>
-        <SettingsCard
-          title={uiText("Sources")}
-          description={uiText(
-            "PrintStash stores catalog metadata and thumbnails only; source files stay in their original location.",
-          )}
-          action={
-            <Button
-              size="sm"
-              disabled={!enabled || !commandsAllowed}
-              onClick={() => setAddOpen(true)}
-            >
-              {uiText("Add source")}
-            </Button>
-          }
-        >
-          {enabled ? (
-            <div className="space-y-4 py-3">
+      </SettingsCard>
+      <SettingsCard
+        title={uiText("Sources")}
+        description={uiText(
+          "PrintStash stores catalog metadata and thumbnails only; source files stay in their original location.",
+        )}
+        action={
+          <Button
+            size="sm"
+            disabled={!enabled || !commandsAllowed}
+            onClick={() => setAddOpen(true)}
+          >
+            {uiText("Add source")}
+          </Button>
+        }
+      >
+        {enabled ? (
+          <div className="space-y-4 py-3">
             {(sources.isError || sources.data?.kind === "disabled") && (
               <div role="alert">
                 <p>{t("librarySources.sourcesFailed")}</p>
@@ -817,7 +818,11 @@ function AdminLibrarySourcesPanel({
             sources.data?.kind === "enabled" &&
             libraries.length === 0 ? (
               <SettingsEmptyRow>
-                {uiText("No library sources yet")}{". "}{uiText("Add a mounted folder or connect remote storage to index existing models without copying them into the Vault.")}
+                {uiText("No library sources yet")}
+                {". "}
+                {uiText(
+                  "Add a mounted folder or connect remote storage to index existing models without copying them into the Vault.",
+                )}
               </SettingsEmptyRow>
             ) : (
               <ul>
@@ -1214,64 +1219,62 @@ function AdminLibrarySourcesPanel({
               </div>
             </Modal>
           </div>
-          ) : (
-            <div className="opacity-50">
-              <SettingsEmptyRow>{uiText("Turn on Library sources to add one.")}</SettingsEmptyRow>
-            </div>
-          )}
-        </SettingsCard>
+        ) : (
+          <div className="opacity-50">
+            <SettingsEmptyRow>{uiText("Turn on Library sources to add one.")}</SettingsEmptyRow>
+          </div>
+        )}
+      </SettingsCard>
 
-
-        {commandsAllowed && (
-          <ConfirmModal
-            open={deleteTarget !== null && deleteTarget.readVersion === sources.dataUpdatedAt}
-            onClose={() => setDeleteTarget(null)}
-            title={uiText("Remove library source?")}
-            description={
-              (deleteTarget
-                ? uiText(
-                    '"{value1}" will be removed and its indexed models moved to trash. Source files remain untouched in their mounted folder or remote storage.',
-                    { value1: String(deleteTarget.source.name) },
-                  )
-                : "") + (command.error ? `\n\n${userMessage(command.error)}` : "")
-            }
-            confirmLabel={uiText("Remove")}
-            busy={deleteTarget !== null && busyId === deleteTarget.source.id}
-            onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
-          />
-        )}
-        {commandsAllowed && (
-          <ConfirmModal
-            open={enrollTarget !== null && enrollTarget.readVersion === sources.dataUpdatedAt}
-            onClose={() => {
-              if (busyId === null) setEnrollTarget(null);
-            }}
-            variant="default"
-            title={uiText("Enroll mounted source root?")}
-            description={
-              (enrollTarget
-                ? uiText(
-                    "Verify that this exact mounted path belongs to this PrintStash installation before enrolling it: {value1}. This re-enables safe scans, watching, and writeback.",
-                    { value1: String(enrollTarget.source.root_path) },
-                  )
-                : "") + (command.error ? `\n\n${userMessage(command.error)}` : "")
-            }
-            confirmLabel={uiText("Enroll root")}
-            busy={enrollTarget !== null && busyId === enrollTarget.source.id}
-            onConfirm={() => enrollTarget && handleEnroll(enrollTarget)}
-          />
-        )}
-        {editTarget && (
-          <EditLibrarySourceModal
-            key={editTarget.id}
-            source={editTarget}
-            location={describeSourceLocation({ ...editTarget, source_prefix: "" }, connections)}
-            disabled={!commandsAllowed || command.blocked || busyId !== null}
-            onSave={(payload) => void handleUpdate(editTarget, payload)}
-            onClose={() => setEditTarget(null)}
-          />
-        )}
-      
+      {commandsAllowed && (
+        <ConfirmModal
+          open={deleteTarget !== null && deleteTarget.readVersion === sources.dataUpdatedAt}
+          onClose={() => setDeleteTarget(null)}
+          title={uiText("Remove library source?")}
+          description={
+            (deleteTarget
+              ? uiText(
+                  '"{value1}" will be removed and its indexed models moved to trash. Source files remain untouched in their mounted folder or remote storage.',
+                  { value1: String(deleteTarget.source.name) },
+                )
+              : "") + (command.error ? `\n\n${userMessage(command.error)}` : "")
+          }
+          confirmLabel={uiText("Remove")}
+          busy={deleteTarget !== null && busyId === deleteTarget.source.id}
+          onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
+        />
+      )}
+      {commandsAllowed && (
+        <ConfirmModal
+          open={enrollTarget !== null && enrollTarget.readVersion === sources.dataUpdatedAt}
+          onClose={() => {
+            if (busyId === null) setEnrollTarget(null);
+          }}
+          variant="default"
+          title={uiText("Enroll mounted source root?")}
+          description={
+            (enrollTarget
+              ? uiText(
+                  "Verify that this exact mounted path belongs to this PrintStash installation before enrolling it: {value1}. This re-enables safe scans, watching, and writeback.",
+                  { value1: String(enrollTarget.source.root_path) },
+                )
+              : "") + (command.error ? `\n\n${userMessage(command.error)}` : "")
+          }
+          confirmLabel={uiText("Enroll root")}
+          busy={enrollTarget !== null && busyId === enrollTarget.source.id}
+          onConfirm={() => enrollTarget && handleEnroll(enrollTarget)}
+        />
+      )}
+      {editTarget && (
+        <EditLibrarySourceModal
+          key={editTarget.id}
+          source={editTarget}
+          location={describeSourceLocation({ ...editTarget, source_prefix: "" }, connections)}
+          disabled={!commandsAllowed || command.blocked || busyId !== null}
+          onSave={(payload) => void handleUpdate(editTarget, payload)}
+          onClose={() => setEditTarget(null)}
+        />
+      )}
     </Localized>
   );
 }

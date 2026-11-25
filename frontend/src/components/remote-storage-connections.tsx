@@ -1,5 +1,5 @@
 import { captureEditingBase } from "@/lib/api/editing";
-import { SettingsGroupHead, SettingsCard } from "@/components/settings-card";
+import { SettingsCard, SettingsEmptyRow } from "@/components/settings-card";
 import { StorageConnectionReview } from "@/components/storage-connection-review";
 import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
@@ -447,23 +447,23 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
   return (
     <Localized>
       <SettingsCard
-          title={uiText("Connections")}
-          description={uiText(
-            "Pausing a connection stops new backup copies and library scans without forgetting its credentials.",
-          )}
-          action={
-            <Button
-              size="sm"
-              disabled={unavailable || busy !== null}
-              onClick={() => {
-                resetForm();
-                setFormOpen(true);
-              }}
-            >
-              {uiText("Add remote connection")}
-            </Button>
-          }>
-
+        title={uiText("Connections")}
+        description={uiText(
+          "Pausing a connection stops new backup copies and library scans without forgetting its credentials.",
+        )}
+        action={
+          <Button
+            size="sm"
+            disabled={unavailable || busy !== null}
+            onClick={() => {
+              resetForm();
+              setFormOpen(true);
+            }}
+          >
+            {uiText("Add remote connection")}
+          </Button>
+        }
+      >
         {!formOpen && connectionReview}
         {connectionsFailed && connections.length > 0 && (
           <div role="alert" className="flex items-center gap-2 px-4 py-3 text-sm sm:px-5">
@@ -518,11 +518,9 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
               </Button>
             </div>
           ) : connections.length === 0 ? (
-            <p className="mx-4 mb-4 rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground sm:mx-5">
-              {uiText("No remote storage connected yet.")}
-            </p>
+            <SettingsEmptyRow>{uiText("No remote storage connected yet.")}</SettingsEmptyRow>
           ) : (
-            <ul className="divide-y divide-border border-t border-border">
+            <ul className="divide-y divide-border">
               {connections.map((connection) => {
                 const failure = probeFailures[connection.id];
                 const currentFailure =

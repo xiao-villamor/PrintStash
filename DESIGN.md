@@ -196,8 +196,8 @@ only where a small file's exact size helps a technical task.
 Format stored durations as hours and minutes in filter summaries; keep the input
 unit explicit wherever users enter a number.
 
-Dense document workflows such as Profiles, Settings, and Pending Imports use a
-shared visual grammar: **one framed work surface**, not a collection of loose
+Dense document workflows such as Profiles and Pending Imports use a
+shared visual grammar (Settings has its own, described under Settings below): **one framed work surface**, not a collection of loose
 status cards. The frame keeps controls, context, rows, loading, and empty states
 visually attached to the same task.
 
@@ -586,13 +586,33 @@ their actions in the footer.
 
 **Settings** composes one more layer from `frontend/src/components/`:
 `settings-card.tsx` (`SettingsCard`, `SettingsGroupHead`, `SettingsSwitch`,
-`SettingsNotice`, `SettingsStatus`) and `settings-controls.ts`
-(`SETTINGS_BUTTON_PRIMARY`, `SETTINGS_BUTTON`, `SETTINGS_BUTTON_DANGER`,
-`SETTINGS_FIELD`). A Settings panel uses these instead of its own header,
-toggle, callout, status chip or button classes: every button is 34px/13px,
-statuses are aligned text, and notices are neutral panels whose tone is only a
-small icon. Rows place label and help on the left and the control on the
-right (`settings-preference-row`); lists use `settings-list-row`.
+`SettingsSegmented`, `SettingsChoiceCards`, `SettingsRowMenu`, `SettingsScope`,
+`SettingsEmptyRow`, `SettingsNotice`, `SettingsStatus`), `settings-nav.tsx`,
+`settings-toc.tsx` and `settings-controls.ts` (`SETTINGS_BUTTON_PRIMARY`,
+`SETTINGS_BUTTON`, `SETTINGS_BUTTON_DANGER`, `SETTINGS_FIELD`). A Settings panel
+uses these instead of its own header, toggle, callout, status or button classes.
+
+Settings is the exception to the single framed surface: it is a stack of groups.
+A group is a `SettingsGroupHead` (title, one line of description, actions) above
+a light `rounded-lg` box that holds only rows, so the box has no header rule and
+no icon tile. Rows place label and help on the left and the control on the right
+(`settings-preference-row`); lists use `settings-list-row` or a table with a
+header row. Per row there is at most one visible outline action; the rest go in
+a `SettingsRowMenu` (`⋯`), destructive last. An empty list is one
+`SettingsEmptyRow`, not a dashed illustration. Irreversible actions sit in their
+own group titled "Danger zone" (`tone="danger"`). Dependent controls dim when
+their master switch is off.
+
+Navigation is one grouped list (Vault, Library, Integrations, This browser,
+System) rendered by `SettingsNav`: in the workbench sidebar when it shows
+Settings, otherwise as an in-page rail with a way back to the Library, the
+account and a filter over section names. Phones keep the tab bar. A section with
+three or more groups also shows `SettingsToc` ("On this page") on wide screens.
+Where a setting applies is a `SettingsScope` badge: "This browser" or "Whole
+Vault". Choices that are visible and few use `SettingsSegmented` (short labels)
+or `SettingsChoiceCards` (a line of detail each); Theme uses the pictured tiles.
+Controls are 6px (`--radius`), body text is `text-sm`, statuses are a dot plus
+plain text, and badges are neutral pills.
 
 **Single-choice dropdowns are native `<select>`.** `globals.css` gives every
 `<select>` without `multiple`/`size` the customizable-select menu (`appearance:

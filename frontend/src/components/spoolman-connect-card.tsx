@@ -229,7 +229,7 @@ export function SpoolmanConnectCard({
 
   return (
     <Localized>
-      <div className="overflow-hidden border border-border bg-card">
+      <div className="overflow-hidden rounded-lg border border-border bg-card">
         {actionHost && actions ? createPortal(actions, actionHost) : null}
         <div className="space-y-1 p-4 sm:p-5">
           {!canEdit ? (

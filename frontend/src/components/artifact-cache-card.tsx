@@ -515,7 +515,7 @@ export function ArtifactCacheCard({ api = artifactCacheApi }: { api?: typeof art
                 <Button
                   size="sm"
                   type="button"
-                  variant="outline"
+                  variant="danger"
                   disabled={busy}
                   onClick={() => void perform("clear")}
                 >

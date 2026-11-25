@@ -1,11 +1,7 @@
 "use client";
 
 import { SettingsCard, SettingsEmptyRow, SettingsSwitch } from "@/components/settings-card";
-import {
-  SETTINGS_BUTTON,
-  SETTINGS_BUTTON_PRIMARY,
-  SETTINGS_FIELD,
-} from "@/components/settings-controls";
+import { SETTINGS_BUTTON, SETTINGS_FIELD } from "@/components/settings-controls";
 import { cn } from "@/lib/utils";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
@@ -711,10 +707,7 @@ export function NotificationsPanel({
               )}
               action={
                 canEdit ? (
-                  <Button
-                    size="sm"
-                    onClick={() => setDraft(emptyDraft())}
-                  >
+                  <Button size="sm" onClick={() => setDraft(emptyDraft())}>
                     <Plus className="size-3.5" aria-hidden />
                     {uiText("Add channel")}
                   </Button>
@@ -919,7 +912,7 @@ export function NotificationsPanel({
         )}
         {deliveriesQuery.isPending && <p role="status">{uiText("Loading delivery history…")}</p>}
         {canEdit && !deliveriesQuery.error && deliveries && (
-<SettingsCard
+          <SettingsCard
             title={uiText("Recent deliveries")}
             description={uiText("The last delivery attempts and the response from each channel.")}
           >
@@ -956,7 +949,6 @@ export function NotificationsPanel({
                 );
               })}
             </div>
-          
           </SettingsCard>
         )}
       </div>

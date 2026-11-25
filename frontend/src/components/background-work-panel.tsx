@@ -8,22 +8,13 @@
  */
 import type * as React from "react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import {
-  Activity,
-  AlertTriangle,
-  ChevronDown,
-  Cpu,
-  Images,
-  Info,
-  Layers,
-  Server,
-  SlidersHorizontal,
-} from "lucide-react";
+import { Activity, AlertTriangle, ChevronDown, Cpu, Layers, Server } from "lucide-react";
 import { Link } from "@/lib/link";
 
+import { SettingsCard, SettingsEmptyRow, SettingsSwitch } from "@/components/settings-card";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import {} from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -288,6 +279,15 @@ function BackgroundWorkView({
     }
   }
 
+  function setAllPolicies(value: boolean) {
+    if (!overview) return;
+    for (const definition of overview.definitions) {
+      if (definition.name in POLICY_SETTINGS && definition.enabled !== value) {
+        savePolicy(definition, value);
+      }
+    }
+  }
+
   function savePolicy(definition: WorkDefinition, value: boolean | null) {
     if (!(definition.name in POLICY_SETTINGS)) return;
     // SAFETY: the membership guard restricts the key to derivative policy fields.
@@ -333,7 +333,7 @@ function BackgroundWorkView({
   }
 
   return (
-    <Card className="overflow-hidden">
+    <div className="settings-grouped">
       {error && (
         <div className="flex items-center justify-between gap-3 border-b px-4 py-3 text-sm sm:px-5">
           <div role="alert" className="flex items-center gap-2">
@@ -362,13 +362,13 @@ function BackgroundWorkView({
         </div>
       ) : overview ? (
         <>
-          <div className="grid grid-cols-1 gap-3 border-b border-border px-4 py-4 sm:grid-cols-3 sm:px-5">
+          <div className="grid grid-cols-1 gap-3 rounded-lg border border-border bg-card px-4 py-4 sm:grid-cols-3 sm:px-5">
             {[
               { label: uiText("Running now"), value: running, icon: Activity },
               { label: uiText("Waiting to start"), value: waiting, icon: Layers },
               {
                 label: uiText("Recent failures"),
-                value: overview.failed_jobs.length,
+                value: overview.failed_derivatives,
                 icon: AlertTriangle,
               },
             ].map(({ label, value, icon: Icon }) => (
@@ -384,62 +384,66 @@ function BackgroundWorkView({
               </div>
             ))}
           </div>
-          <SectionHeader
-            icon={Images}
+          <SettingsCard
             action={
-              <Button size="sm" variant="outline" onClick={() => void refresh()}>
-                {uiText("Refresh")}
-              </Button>
+              <>
+                <Button size="sm" variant="outline" onClick={() => setAllPolicies(true)}>
+                  {uiText("Enable all")}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setAllPolicies(false)}>
+                  {uiText("Disable all")}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => void refresh()}>
+                  {uiText("Refresh")}
+                </Button>
+              </>
             }
             title={uiText("Preview and metadata processing")}
             description={uiText(
               "Disabling keeps existing previews and lets current processing finish. Re-enabling may start a backfill.",
             )}
-          />
-          <ul className="settings-section-body">
-            {overview.definitions
-              .filter((definition) => definition.name in POLICY_SETTINGS)
-              .map((definition) => (
-                <li key={definition.name} className="settings-list-row">
-                  <div className="min-w-0">
-                    <span className="settings-list-title">{policyPurpose(definition.name)}</span>
-                    <span className="settings-list-meta block">
-                      {definition.enabled ? uiText("Enabled") : uiText("Processing disabled")}
-                      {" · "}
-                      {uiText("Deployment default: {value}", {
-                        value: definition.default_enabled ? uiText("Enabled") : uiText("Disabled"),
-                      })}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="settings-status">
-                      {uiText(definition.enabled ? "On" : "Off")}
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={busy.has(`policy:${definition.name}`)}
-                      onClick={() => savePolicy(definition, !definition.enabled)}
-                      aria-label={`${uiText(definition.enabled ? "Turn off" : "Turn on")} ${policyPurpose(definition.name)}`}
-                    >
-                      {uiText(definition.enabled ? "Turn off" : "Turn on")}
-                    </Button>
-                    {definition.overridden && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
+          >
+            <ul>
+              {overview.definitions
+                .filter((definition) => definition.name in POLICY_SETTINGS)
+                .map((definition) => (
+                  <li key={definition.name} className="settings-list-row">
+                    <div className="min-w-0">
+                      <span className="settings-list-title">{policyPurpose(definition.name)}</span>
+                      <span className="settings-list-meta block">
+                        {uiText("Deployment default: {value}", {
+                          value: definition.default_enabled
+                            ? uiText("Enabled")
+                            : uiText("Disabled"),
+                        })}
+                      </span>
+                    </div>
+                    <div>
+                      {definition.overridden && (
+                        <Badge variant="secondary">{uiText("Overrides default")}</Badge>
+                      )}
+                      {definition.overridden && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy.has(`policy:${definition.name}`)}
+                          onClick={() => savePolicy(definition, null)}
+                        >
+                          {uiText("Use deployment default")}
+                        </Button>
+                      )}
+                      <SettingsSwitch
+                        checked={definition.enabled}
                         disabled={busy.has(`policy:${definition.name}`)}
-                        onClick={() => savePolicy(definition, null)}
-                      >
-                        {uiText("Use deployment default")}
-                      </Button>
-                    )}
-                  </div>
-                </li>
-              ))}
-          </ul>
-          <SectionHeader
-            icon={Info}
+                        onChange={(next) => savePolicy(definition, next)}
+                        label={policyPurpose(definition.name)}
+                      />
+                    </div>
+                  </li>
+                ))}
+            </ul>
+          </SettingsCard>
+          <SettingsCard
             title={uiText("Checking a model's preview?")}
             description={uiText("This page shows totals for the whole vault.")}
             action={
@@ -447,17 +451,18 @@ function BackgroundWorkView({
                 {uiText("Browse models")}
               </Link>
             }
-          />
-          <div className="settings-section-body max-w-[80ch] space-y-2 text-sm">
-            <p>
-              {uiText(
-                "Open the model and look in Files. Preparing or failed previews appear beside the file, with a retry option when available.",
-              )}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {uiText("Uploads and imports also appear in the Tasks menu.")}
-            </p>
-          </div>
+          >
+            <div className="max-w-[80ch] space-y-2 py-3 text-sm">
+              <p>
+                {uiText(
+                  "Open the model and look in Files. Preparing or failed previews appear beside the file, with a retry option when available.",
+                )}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {uiText("Uploads and imports also appear in the Tasks menu.")}
+              </p>
+            </div>
+          </SettingsCard>
 
           <ActiveWorkJobs
             jobsState={jobsState}
@@ -484,100 +489,102 @@ function BackgroundWorkView({
             </div>
           ) : null}
 
-          <SectionHeader
-            icon={AlertTriangle}
+          <SettingsCard
             title={uiText("Recent failures")}
             description={uiText(
               "Preview or metadata failures across the library: {count}. Review and retry recent work here.",
               { count: overview.failed_derivatives },
             )}
-          />
-          {overview.failed_jobs.length === 0 ? (
-            <p className="border-b px-4 py-4 text-sm text-muted-foreground sm:px-5">
-              {uiText("No recent failures.")}
-            </p>
-          ) : (
-            <div className="border-b">
-              <ul className="divide-y divide-border">
-                {(showAllFailures
-                  ? overview.failed_jobs
-                  : overview.failed_jobs.slice(0, COLLAPSED_FAILURE_COUNT)
-                ).map((job) => {
-                  const definition = overview.definitions.find((entry) => entry.name === job.kind);
-                  const jobName = knownUiText(job.label ?? definition?.label ?? job.kind);
-                  const retryName = job.artifact
-                    ? `${job.artifact.model_name} · ${job.artifact.filename}`
-                    : (job.current_item ?? jobName);
-                  const failedAt = job.finished_at ?? job.updated_at;
-                  return (
-                    <li
-                      key={job.job_id}
-                      className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:px-5"
-                    >
-                      <div className="min-w-0 flex-1">
-                        {job.artifact ? (
-                          <>
-                            <Link
-                              href={`/models/${job.artifact.model_id}?tab=files`}
-                              className="break-words text-sm font-medium hover:underline"
-                            >
-                              {job.artifact.model_name}
-                            </Link>
-                            <p className="break-words text-xs text-muted-foreground">
-                              {job.artifact.filename}
+          >
+            {overview.failed_jobs.length === 0 ? (
+              <p className="border-b px-4 py-4 text-sm text-muted-foreground sm:px-5">
+                {uiText("No recent failures.")}
+              </p>
+            ) : (
+              <div className="border-b">
+                <ul className="divide-y divide-border">
+                  {(showAllFailures
+                    ? overview.failed_jobs
+                    : overview.failed_jobs.slice(0, COLLAPSED_FAILURE_COUNT)
+                  ).map((job) => {
+                    const definition = overview.definitions.find(
+                      (entry) => entry.name === job.kind,
+                    );
+                    const jobName = knownUiText(job.label ?? definition?.label ?? job.kind);
+                    const retryName = job.artifact
+                      ? `${job.artifact.model_name} · ${job.artifact.filename}`
+                      : (job.current_item ?? jobName);
+                    const failedAt = job.finished_at ?? job.updated_at;
+                    return (
+                      <li
+                        key={job.job_id}
+                        className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:px-5"
+                      >
+                        <div className="min-w-0 flex-1">
+                          {job.artifact ? (
+                            <>
+                              <Link
+                                href={`/models/${job.artifact.model_id}?tab=files`}
+                                className="break-words text-sm font-medium hover:underline"
+                              >
+                                {job.artifact.model_name}
+                              </Link>
+                              <p className="break-words text-xs text-muted-foreground">
+                                {job.artifact.filename}
+                              </p>
+                            </>
+                          ) : (
+                            <p className="break-words text-sm font-medium">
+                              {job.current_item ?? jobName}
                             </p>
-                          </>
-                        ) : (
-                          <p className="break-words text-sm font-medium">
-                            {job.current_item ?? jobName}
+                          )}
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {getErrorMessage(job.error ?? "unknown")}
                           </p>
+                          <time dateTime={failedAt} className="text-xs text-muted-foreground">
+                            {uiText("Failed {when}", { when: formatDateTime(failedAt) })}
+                          </time>
+                          <details className="mt-1 text-xs text-muted-foreground">
+                            <summary className="cursor-action">{uiText("Work type")}</summary>
+                            <p className="mt-1 font-mono">{job.kind}</p>
+                          </details>
+                        </div>
+                        {job.retryable && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            aria-label={uiText("Retry {name}", { name: retryName })}
+                            loading={busy.has(`retry:${job.job_id}`)}
+                            onClick={() => retry(job)}
+                          >
+                            {uiText("Retry")}
+                          </Button>
                         )}
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {getErrorMessage(job.error ?? "unknown")}
-                        </p>
-                        <time dateTime={failedAt} className="text-xs text-muted-foreground">
-                          {uiText("Failed {when}", { when: formatDateTime(failedAt) })}
-                        </time>
-                        <details className="mt-1 text-xs text-muted-foreground">
-                          <summary className="cursor-action">{uiText("Work type")}</summary>
-                          <p className="mt-1 font-mono">{job.kind}</p>
-                        </details>
-                      </div>
-                      {job.retryable && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          aria-label={uiText("Retry {name}", { name: retryName })}
-                          loading={busy.has(`retry:${job.job_id}`)}
-                          onClick={() => retry(job)}
-                        >
-                          {uiText("Retry")}
-                        </Button>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-              {overview.failed_jobs.length > COLLAPSED_FAILURE_COUNT && (
-                <div className="px-4 py-2 sm:px-5">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    aria-expanded={showAllFailures}
-                    onClick={() => setShowAllFailures((shown) => !shown)}
-                  >
-                    {uiText(showAllFailures ? "Show fewer failures" : "Show more failures")}
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
+                      </li>
+                    );
+                  })}
+                </ul>
+                {overview.failed_jobs.length > COLLAPSED_FAILURE_COUNT && (
+                  <div className="px-4 py-2 sm:px-5">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      aria-expanded={showAllFailures}
+                      onClick={() => setShowAllFailures((shown) => !shown)}
+                    >
+                      {uiText(showAllFailures ? "Show fewer failures" : "Show more failures")}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+          </SettingsCard>
 
-          <details ref={advancedRef} className="group">
+          <details
+            ref={advancedRef}
+            className="group overflow-hidden rounded-lg border border-border bg-card"
+          >
             <summary className="flex cursor-action list-none items-start gap-3 px-4 py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-5">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
-                <SlidersHorizontal className="h-4 w-4 text-muted-foreground" aria-hidden />
-              </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-semibold">{uiText("Advanced controls")}</span>
                 <span className="block text-xs text-muted-foreground">
@@ -788,7 +795,7 @@ function BackgroundWorkView({
               : uiText("Regenerate")
         }
       />
-    </Card>
+    </div>
   );
 }
 
@@ -800,15 +807,13 @@ function ActiveWorkJobs({
   onCancel: (job: JobStatus) => void;
 }) {
   return (
-    <>
-      <SectionHeader
-        icon={Activity}
-        title={uiText("In progress")}
-        description={uiText("Work that is running or waiting to start.")}
-      />
+    <SettingsCard
+      title={uiText("In progress")}
+      description={uiText("Work that is running or waiting to start.")}
+    >
       {jobsState.status !== "ready" && (
         <p
-          className="settings-section-body text-sm text-muted-foreground"
+          className="py-3.5 text-sm text-muted-foreground"
           aria-busy={jobsState.status === "loading"}
         >
           {jobsState.status === "loading"
@@ -817,7 +822,7 @@ function ActiveWorkJobs({
         </p>
       )}
       {jobsState.status === "ready" && jobsState.jobs.length > 0 && (
-        <ul className="settings-section-body">
+        <ul>
           {jobsState.jobs.map((job) => (
             <li key={job.job_id} className="settings-list-row">
               <div className="min-w-0 flex-1">
@@ -881,10 +886,8 @@ function ActiveWorkJobs({
         </ul>
       )}
       {jobsState.status === "ready" && jobsState.jobs.length === 0 && (
-        <p className="settings-section-body text-sm text-muted-foreground">
-          {uiText("Nothing is running or waiting right now.")}
-        </p>
+        <SettingsEmptyRow>{uiText("Nothing is running or waiting right now.")}</SettingsEmptyRow>
       )}
-    </>
+    </SettingsCard>
   );
 }

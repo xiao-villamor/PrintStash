@@ -39,7 +39,11 @@ export function ImportReadiness({
       value: connected || uiText("None"),
       tone: connected ? "ok" : "idle",
     },
-    { label: uiText("Marketplace session and download"), value: uiText("Not checked"), tone: "idle" },
+    {
+      label: uiText("Marketplace session and download"),
+      value: uiText("Not checked"),
+      tone: "idle",
+    },
     {
       label: uiText("Staging capacity"),
       hint: uiText("Checked when reserving an upload"),

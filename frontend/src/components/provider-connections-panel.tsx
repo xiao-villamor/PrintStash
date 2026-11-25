@@ -2,7 +2,7 @@
 
 import { ImportReadiness } from "./import-readiness";
 
-import { SettingsGroupHead, SettingsCard } from "@/components/settings-card";
+import { SettingsCard } from "@/components/settings-card";
 import { currentLocale } from "@/lib/locale";
 
 import { useEffect, useRef, useState } from "react";
@@ -243,8 +243,9 @@ export function ProviderConnectionsPanel({
       />
       <fieldset disabled={busy !== null || Boolean(loadError)} className="min-w-0">
         <SettingsCard
-            title={t("settings.providerConnections.title")}
-            description={t("settings.providerConnections.description")}>
+          title={t("settings.providerConnections.title")}
+          description={t("settings.providerConnections.description")}
+        >
           <div className="space-y-0 px-4 pb-4 sm:px-5">
             {error && (
               <p role="alert" className="text-sm text-destructive">
@@ -356,18 +357,19 @@ export function ProviderConnectionsPanel({
         </SettingsCard>
 
         <SettingsCard
-            title={t("settings.pairedBrowsers.title")}
-            description={t("settings.pairedBrowsers.description")}
-            action={
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void createPairing()}
-                loading={busy === "pairing"}
-              >
-                {t("settings.pairedBrowsers.createCode")}
-              </Button>
-            }>
+          title={t("settings.pairedBrowsers.title")}
+          description={t("settings.pairedBrowsers.description")}
+          action={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void createPairing()}
+              loading={busy === "pairing"}
+            >
+              {t("settings.pairedBrowsers.createCode")}
+            </Button>
+          }
+        >
           <div className="space-y-4 px-4 pb-4 sm:px-5">
             {pairing && (
               <div className="border border-border bg-card p-3" role="status">

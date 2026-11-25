@@ -1,7 +1,7 @@
 "use client";
 
 import { SETTINGS_BUTTON, SETTINGS_BUTTON_PRIMARY } from "@/components/settings-controls";
-import { SettingsGroupHead, SettingsCard } from "@/components/settings-card";
+import { SettingsCard } from "@/components/settings-card";
 import { knownUiText, uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
@@ -246,7 +246,7 @@ export function StorageConfigCard({
   if (loading) {
     return (
       <Localized>
-        <div className="overflow-hidden rounded-none border border-border bg-card shadow-sm">
+        <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
           <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border">
             <h3 className="text-sm font-semibold text-foreground">
               {t("settings.currentStorage")}
@@ -324,9 +324,9 @@ export function StorageConfigCard({
   return (
     <Localized>
       <SettingsCard
-          title={t("settings.currentStorage")}
-          description={t("Where PrintStash keeps your Vault files.")}>
-
+        title={t("settings.currentStorage")}
+        description={t("Where PrintStash keeps your Vault files.")}
+      >
         <div className="space-y-5 px-4 pb-4 sm:px-5">
           {readError && enabled && (
             <div role="alert" className="space-y-2 text-sm text-destructive">

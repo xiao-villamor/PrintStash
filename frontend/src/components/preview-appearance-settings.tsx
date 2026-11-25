@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {} from "lucide-react";
 import { PreviewAppearance } from "@/components/preview-appearance";
-import { SettingsCard } from "@/components/settings-card";
+import { SettingsCard, SettingsScope } from "@/components/settings-card";
 import { Button } from "@/components/ui/button";
 import { captureEditingBase } from "@/lib/api/editing";
 import { getPreviewActivity } from "@/lib/api/work";
@@ -60,6 +59,7 @@ export function PreviewAppearanceSettings({
     <SettingsCard
       className="settings-preview-look"
       title={t("Preview look")}
+      action={<SettingsScope scope="vault" />}
       description={t(
         "Colour and floor of generated Model images. Try a look in the preview; applying it re-renders existing images in the background.",
       )}

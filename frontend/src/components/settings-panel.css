@@ -83,10 +83,40 @@
   border-bottom: 0;
 }
 
-.settings-access-fields .settings-access-submit {
+.settings-access-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 9rem auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.settings-access-fields .settings-preference-row {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+}
+
+.settings-access-fields .settings-preference-row > :first-child {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-access-fields .settings-preference-row > :not(:first-child) {
+  justify-self: stretch;
+}
+
+.settings-access-fields .settings-access-submit {
+  display: inline-flex;
   width: fit-content;
-  margin: 12px 0 0 auto;
+}
+
+@media (max-width: 1100px) {
+  .settings-access-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .settings-storage-summary > div {
@@ -425,4 +455,55 @@
 
 .settings-main {
   transform-origin: center top;
+}
+
+/* Theme tiles show each theme regardless of the one in use. */
+.settings-theme-swatch {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-theme-swatch[data-theme="light"] {
+  background: #f6f7f9;
+  color: #0c0f14;
+}
+
+.settings-theme-swatch[data-theme="dark"] {
+  background: #0c0f14;
+  color: #edf1f7;
+}
+
+.settings-theme-swatch[data-theme="system"] {
+  background: linear-gradient(90deg, #f6f7f9 50%, #0c0f14 50%);
+  color: #7f8a9d;
+}
+
+.settings-theme-bar {
+  display: block;
+  height: 8px;
+  width: 40%;
+  border-radius: 3px;
+  background: currentColor;
+  opacity: 0.8;
+}
+
+.settings-theme-cells {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+}
+
+.settings-theme-cells > span {
+  flex: 1;
+  border-radius: 4px;
+  background: currentColor;
+  opacity: 0.16;
+}
+
+.settings-preference-row.settings-preference-row--stack {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
 }
