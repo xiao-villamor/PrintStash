@@ -270,7 +270,7 @@ export function PrintersPage() {
             }
           />
 
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+          <div className="flex flex-col items-stretch gap-5">
             <TabBar
               tabs={[
                 { key: "fleet", label: translateUiText(locale, "Fleet") },
@@ -290,14 +290,14 @@ export function PrintersPage() {
               active={activeView}
               onChange={setActiveView}
               showIndicator={false}
-              className="shrink-0 gap-0.5 rounded-lg border border-border bg-card p-0.75"
+              className="shrink-0 gap-0.5 self-start rounded-lg border border-border bg-card p-0.75"
               tabClassName="h-7.5 rounded-md px-3 text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               activeTabClassName="bg-foreground/12 text-foreground"
             />
             {activeView === "fleet" && printers.length > 0 && (
               <section
                 aria-label={uiText("Fleet summary")}
-                className="flex flex-wrap items-center gap-3"
+                className="flex flex-wrap items-center justify-between gap-3"
               >
                 <div className="flex divide-x divide-border overflow-hidden rounded-lg border border-border bg-card">
                 <FleetMetric
@@ -323,12 +323,12 @@ export function PrintersPage() {
                   onClick={() => setHealthFilter(healthFilter === "attention" ? null : "attention")}
                 />
                 </div>
-                <label className="flex min-w-0 max-w-full items-center gap-2 text-xs text-muted-foreground">
+                <label className="flex min-w-0 max-w-full items-center gap-3 text-sm text-muted-foreground">
                   {uiText("Group")}
                   <select
                     value={selectedGroup ?? ""}
                     onChange={(event) => setSelectedGroup(event.target.value || null)}
-                    className="h-8 min-w-0 rounded-md border border-input bg-card px-2 text-xs text-foreground"
+                    className="h-8 w-37.5 min-w-0 rounded-md border border-input bg-card px-2.5 text-sm text-foreground"
                   >
                     <option value="">{uiText("All groups")}</option>
                     {printerGroups.map((group) => (
@@ -513,13 +513,13 @@ function FleetMetric({
 }) {
   const contents = (
     <>
-      <span className="font-mono text-lg font-semibold leading-none tabular-nums">
+      <span className="font-mono text-xl font-semibold leading-none tabular-nums">
         {value === undefined ? "—" : formatNumber(value)}
       </span>
       <span className="text-xs text-muted-foreground">{label}</span>
     </>
   );
-  const classes = "flex min-w-24 flex-col items-start gap-1 px-4 py-2.5 text-left";
+  const classes = "flex min-w-26 flex-col items-start gap-0.5 px-4 py-2.5 text-left";
   return onClick ? (
     <button
       type="button"
