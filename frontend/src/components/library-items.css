@@ -376,11 +376,26 @@
 /* Preview shape and type stay consistent as the shared track grows. */
 .collection-card-collage {
   aspect-ratio: 2 / 1;
+  border-start-start-radius: calc(var(--radius-popover) - 1px);
+  border-start-end-radius: calc(var(--radius-popover) - 1px);
 }
 [data-compact] .collection-card-collage {
   width: 72px;
   height: 44px;
   aspect-ratio: auto;
+  border-radius: var(--radius);
+}
+
+/* A collection card answers the pointer like a model card does, in rounded rings. */
+.library-collection-card:not(:has(> button:disabled)):hover {
+  border-color: color-mix(in srgb, var(--primary) 80%, var(--border-strong));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent),
+    0 12px 28px -12px rgb(0 0 0 / 0.6);
+}
+.library-collection-card:has(> button:focus-visible) {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 1px var(--ring);
 }
 .collection-card-name {
   font-size: 1rem;
@@ -394,6 +409,7 @@
 .library-collection-placeholder {
   height: 60px;
   border: 1px solid var(--border);
+  border-radius: var(--radius-popover);
   background: var(--card);
 }
 

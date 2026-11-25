@@ -93,8 +93,8 @@ export function CollectionOverviewCard({
             }
           : undefined
       }
-      className={`${arriving ? "animate-card-arrive" : ""} group group/selection-card relative min-w-0 overflow-hidden border bg-card transition-[border-color,scale] duration-press ease-out ${renaming ? "" : "active:scale-[0.99] motion-reduce:active:scale-100"} ${
-        selected || dragOver ? "border-primary" : "border-border hover:border-border-strong"
+      className={`${arriving ? "animate-card-arrive" : ""} library-collection-card group group/selection-card relative min-w-0 overflow-hidden rounded-lg border bg-card transition-[border-color,box-shadow,scale] duration-press ease-out ${renaming ? "" : "active:scale-[0.99] motion-reduce:active:scale-100"} ${
+        selected || dragOver ? "border-primary" : "border-border"
       }`}
     >
       <button
@@ -123,7 +123,7 @@ export function CollectionOverviewCard({
           selectable ? onToggleSelect?.(collection.id) : onSelect(collection.path, collection.id)
         }
         title={collection.name}
-        className="absolute inset-0 z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        className="absolute inset-0 z-10 focus-visible:outline-none"
       />
       <div className={compact ? "flex items-center gap-3 px-2 py-[7px]" : "block"}>
         <CollectionCoverArtwork
