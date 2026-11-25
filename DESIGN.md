@@ -455,7 +455,7 @@ the user is watching. **Nothing in the app may exceed 300ms.**
 The decorative sign-in build-plate print is the duration exception. It plays
 once over 18.95 seconds, is non-interactive, and shows the filled layers,
 top infill, and parked nozzle under reduced motion. First-run setup shows the
-finished print. The plate uses the same monogram geometry as the navigation mark.
+finished print.
 The Printers routing graph is the second exception: while a printer is printing, the
 edges leading to it flow (`stroke-dashoffset`, 0.9 s linear loop) and its station
 pulses a success-colored outline (`opacity`, 2.4 s loop). Both are non-interactive,

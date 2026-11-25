@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
-import { brandMarkPath } from "../../src/components/auth-print-geometry";
+import { brandMarkStrokes } from "../../src/components/auth-print-geometry";
 
 const root = resolve(import.meta.dirname, "../..");
 
@@ -27,8 +27,8 @@ describe("faviconFor", () => {
     expect(darkIcon).toContain("#0E48F0");
     expect(darkIcon).not.toMatch(/#fb923c|#ea580c/i);
     expect(html).toContain("/theme-bootstrap.js");
-    expect(bootstrap).toContain("/icon-dark.svg?v=3");
-    expect(theme).toContain("/icon-dark.svg?v=3");
+    expect(bootstrap).toContain("/icon-dark.svg?v=4");
+    expect(theme).toContain("/icon-dark.svg?v=4");
   });
 });
 
@@ -41,8 +41,7 @@ describe("PrintStash monogram", () => {
     "../browser-extension/icon.svg",
   ])("uses the same shape in %s", (path) => {
     const asset = readFileSync(resolve(root, path), "utf8");
-    expect(asset).toContain(`d="${brandMarkPath}"`);
-    expect(asset).toContain('fill-rule="evenodd"');
+    for (const stroke of brandMarkStrokes) expect(asset).toContain(`d="${stroke.d}"`);
   });
 
   it.each([16, 32, 48, 128])("exports a square %i px extension icon", (size) => {

@@ -1,10 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="32" height="32">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="268 118 426 426" width="32" height="32" fill="none">
   <defs>
-    <linearGradient id="ink" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#2767FF"/>
+    <linearGradient id="ps-extension-icon" x1="272" y1="118" x2="690" y2="544" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2767FF"/>
       <stop offset="1" stop-color="#0E48F0"/>
     </linearGradient>
   </defs>
-  <rect width="64" height="64" rx="14" fill="url(#ink)"/>
-  <path d="M16 10H34C44.5 10 51 16 51 25S44.5 39 34 39H26L21 47L16 42V10ZM25 19V30H34C39 30 42 28 42 25S39 19 34 19H25ZM14 51H47L43 55H14V51Z" fill="#fff" fill-rule="evenodd"/>
+  <rect x="272" y="118" width="418" height="426" rx="69" fill="url(#ps-extension-icon)"/>
+  <g stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M397 350 V165 H485 A80 80 0 0 1 485 325 H397" stroke-width="56"/>
+    <path d="M397 450 C397 470 381 480 363 480 C345 480 335 490 335 502 C335 514 347 520 361 520 H492" stroke-width="30"/>
+  </g>
+  <rect x="335" y="330" width="124" height="48" rx="14" fill="#fff"/>
+  <rect x="375" y="382" width="44" height="22" rx="6" fill="#fff"/>
+  <path d="M367 404 H427 L409 432 L397 442 L385 432 Z" fill="#fff"/>
 </svg>

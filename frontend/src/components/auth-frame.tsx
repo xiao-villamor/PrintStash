@@ -33,9 +33,7 @@ export function AuthFrame({
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-6 sm:h-16">
           <div className="flex min-w-0 items-center gap-2.5 text-foreground">
-            <span className="size-8 shrink-0 rounded-brand bg-primary text-primary-foreground">
-              <BrandMark className="size-full" />
-            </span>
+            <BrandMark className="size-6 shrink-0" />
             <span className="text-base font-semibold tracking-tight">PrintStash</span>
           </div>
           <div className="flex shrink-0 items-center gap-1">

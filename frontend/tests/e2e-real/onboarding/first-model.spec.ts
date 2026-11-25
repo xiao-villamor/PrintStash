@@ -6,9 +6,7 @@ import { gcodeFor } from "../util";
 const loseResponse = process.env.PLAYWRIGHT_ONBOARDING_LOST_RESPONSE === "1";
 
 test.describe("Browser onboarding", () => {
-  test("keeps the localized setup progress and action visible on desktop", async ({
-    page,
-  }, testInfo) => {
+  test("keeps the localized setup steps visible on desktop", async ({ page }, testInfo) => {
     await page.addInitScript(() => {
       localStorage.setItem("printstash.locale", "es");
       localStorage.setItem("printstash.theme", "dark");
