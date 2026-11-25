@@ -317,7 +317,10 @@ test.describe("Model attachments", () => {
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Revised parts" })).toBeVisible();
     await page.getByRole("link", { name: "Back to model", exact: true }).click();
+    await expect(page).toHaveURL(modelUrl);
+    await expect(pane.getByRole("link", { name: /Assembly notes/ })).toBeVisible();
     await page.reload();
+    await expect(pane.getByRole("link", { name: /Assembly notes/ })).toBeVisible();
     await pane.getByRole("link", { name: /Assembly notes/ }).click();
     await expect(reader.getByRole("heading", { name: "Revised parts" })).toBeVisible();
     await reader.getByRole("button", { name: "Close", exact: true }).click();
