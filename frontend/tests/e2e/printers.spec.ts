@@ -14,10 +14,57 @@ import type { PrinterSnapshot } from "@/types";
 import { aPrinter } from "../../src/test-support/factories";
 
 import { collectPageProblems, useMockApi } from "./_setup";
+import { collapseNavigationSidebar } from "../e2e-real/util";
 
 useMockApi();
 
 test.describe("printer routes", () => {
+  test("remembers the grouped Fleet layout", async ({ page }, testInfo) => {
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
+    await page.route("**/api/v1/printers", (route) =>
+      route.fulfill({
+        json: [
+          aPrinter({ id: 1, name: "Lab Voron", group: "Lab", status: "error" }),
+          aPrinter({ id: 2, name: "Lab P1S", group: "Lab", status: "ready" }),
+          aPrinter({ id: 3, name: "Demo printer", group: "Routing demo", status: "ready" }),
+          aPrinter({ id: 4, name: "Standalone printer", group: null, status: "ready" }),
+        ],
+      }),
+    );
+    await page.goto("/printers");
+    await collapseNavigationSidebar(page);
+    const toggle = page.getByRole("button", { name: "Group printers", exact: true });
+    const lab = page.getByRole("region", { name: "Lab", exact: true });
+    const demo = page.getByRole("region", { name: "Routing demo", exact: true });
+    const ungrouped = page.getByRole("region", { name: "Ungrouped", exact: true });
+
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(lab).toHaveCount(0);
+    await toggle.click();
+    await expect(lab.getByRole("link", { name: "Lab Voron" })).toBeVisible();
+    await expect(lab.getByRole("link", { name: "Lab P1S" })).toBeVisible();
+    await expect(demo.getByRole("link", { name: "Demo printer" })).toBeVisible();
+    await expect(ungrouped.getByRole("link", { name: "Standalone printer" })).toBeVisible();
+    await expect(lab).toHaveCSS("border-top-style", "dotted");
+    const frame = await lab.boundingBox();
+    const lastCard = await lab.getByRole("article").last().boundingBox();
+    if (!frame || !lastCard) throw new Error("The group frame or card was not visible");
+    const inset = frame.x + frame.width - (lastCard.x + lastCard.width);
+    expect(inset).toBeGreaterThan(8);
+    expect(inset).toBeLessThan(24);
+    await page.screenshot({ path: testInfo.outputPath("grouped-printer-fleet.png") });
+
+    await page.getByRole("combobox", { name: "Group", exact: true }).selectOption({ label: "Lab" });
+    await expect(lab.getByRole("link", { name: "Lab Voron" })).toBeVisible();
+    await expect(demo).toHaveCount(0);
+    await page.reload();
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(ungrouped.getByRole("link", { name: "Standalone printer" })).toBeVisible();
+    await toggle.click();
+    await expect(ungrouped).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Standalone printer" })).toBeVisible();
+  });
+
   test("preserves destination usability across send modes", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.route("**/api/v1/printers", async (route) => {

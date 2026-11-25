@@ -45,6 +45,7 @@
 
 ### Added
 
+- Fleet can show printer cards under their configured groups. The browser remembers the layout.
 - Model guides and attachments have their own Documentation tab.
 - Model attachments accept file drops and clicks on the empty upload area, and the Markdown editor shows a live preview beside the draft.
 - Model attachments open in an in-app reader. Write Markdown directly on a model and export it using the browser’s Save as PDF dialog.

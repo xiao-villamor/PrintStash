@@ -345,9 +345,37 @@ describe("PrinterCard", () => {
 
     expect(screen.getByLabelText("Fleet summary")).toHaveTextContent("1");
     // DOM implementations differ on whether adjacent text nodes insert a space.
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Group" }), "Workshop");
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Group" }),
+      screen.getByRole("option", { name: "Workshop" }),
+    );
     expect(screen.getByRole("link", { name: "Workshop Voron" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Garage Prusa" })).not.toBeInTheDocument();
+  });
+
+  it("groups the printers that match the fleet health filter", async () => {
+    renderPrintersPage({
+      printers: [
+        makePrinter({ id: 1, name: "Lab Voron", group: "Lab", status: "error" }),
+        makePrinter({ id: 2, name: "Workshop Prusa", group: "Workshop", status: "ready" }),
+        makePrinter({ id: 3, name: "Standalone printer", group: " ", status: "offline" }),
+      ],
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Group printers" }));
+    expect(
+      within(screen.getByRole("region", { name: "Ungrouped" })).getByRole("link", {
+        name: "Standalone printer",
+      }),
+    ).toBeVisible();
+
+    await userEvent.click(screen.getByRole("button", { name: /Needs attention/ }));
+    expect(
+      within(screen.getByRole("region", { name: "Lab" })).getByRole("link", {
+        name: "Lab Voron",
+      }),
+    ).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Workshop" })).not.toBeInTheDocument();
   });
 
   it("presents the scoped fleet workload in each printer card", () => {

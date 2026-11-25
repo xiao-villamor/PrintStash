@@ -1064,6 +1064,7 @@
   "All groups": "Todos los grupos",
   "Fleet summary": "Resumen del parque",
   "Filter printers by group": "Filtrar impresoras por grupo",
+  "Group printers": "Agrupar impresoras",
   "Connected printer endpoints": "Endpoints de impresoras conectadas",
   "No printers configured yet.": "Aún no hay impresoras configuradas.",
   "No printer models match your search.": "Ningún modelo de impresora coincide con la búsqueda.",
