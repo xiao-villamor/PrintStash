@@ -18,6 +18,8 @@
 
 ### Added
 
+- Model attachments open in an in-app reader. Write Markdown directly on a model and export it using the browser’s Save as PDF dialog.
+
 - The 3D viewer uses the saved material color of single-color 3MF projects when the file provides one.
 
 - Press Ctrl+F (⌘F on Mac) in a collection to open an editor-style find bar. It counts the matching models, steps through them with Enter and Shift+Enter, rings the current one, and closes with Esc.

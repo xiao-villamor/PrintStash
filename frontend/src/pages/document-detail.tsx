@@ -16,8 +16,9 @@ import {
   useState,
 } from "react";
 import { useParams } from "@tanstack/react-router";
-import { ArrowLeft, Download, Eye, Loader2, Pencil, Save } from "lucide-react";
+import { ArrowLeft, Download, Eye, Loader2, Pencil, Printer, Save } from "lucide-react";
 
+import { printMarkdown } from "@/lib/print-markdown";
 import { MarkdownView } from "@/components/markdown-view";
 import { getAuthenticatedBlob, uploadDocumentImage } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -65,11 +66,15 @@ function canEditDoc(doc: DocumentRead | NewDocument | null, isSuper: boolean): b
 
 export default function DocumentDetailPage({
   pdfViewer: PdfViewer = DefaultPdfViewer,
+  embeddedDocumentId,
 }: {
   pdfViewer?: ComponentType<{ file: Blob }>;
+  embeddedDocumentId?: number;
 } = {}) {
   const locale = useUiLocale();
-  const { id } = useParams({ strict: false });
+  const routeParams = useParams({ strict: false });
+  const embedded = embeddedDocumentId !== undefined;
+  const id = embedded ? String(embeddedDocumentId) : routeParams.id;
   const isNew = id === "new";
   const docId = Number(id);
   const { user } = useAuth();
@@ -78,6 +83,9 @@ export default function DocumentDetailPage({
   const collectionParam = searchParams.get("c");
   const cidParam = searchParams.get("cid");
   const collectionId = cidParam ? Number(cidParam) : null;
+  const modelParam = searchParams.get("modelId");
+  const attachmentModelId = modelParam && /^[1-9]\d*$/.test(modelParam) ? Number(modelParam) : null;
+  const startEditing = !embedded && searchParams.get("edit") === "1";
 
   const invalidId = !isNew && (!id || Number.isNaN(docId));
 
@@ -90,7 +98,7 @@ export default function DocumentDetailPage({
       collection: collectionParam,
       collection_id: collectionId,
       multipart_model_id: null,
-      model_id: null,
+      model_id: attachmentModelId,
       filename: null,
       effective_role: "edit",
       updated_at: "",
@@ -98,7 +106,7 @@ export default function DocumentDetailPage({
       edit_version: null,
       body: "",
     }),
-    [collectionParam, collectionId, locale],
+    [attachmentModelId, collectionParam, collectionId, locale],
   );
 
   const documentQuery = useDocument(isNew || invalidId ? null : docId);
@@ -114,6 +122,8 @@ export default function DocumentDetailPage({
   const [uploadingKey, setUploadingKey] = useState<number | null>(null);
   const [binaryPreview, setBinaryPreview] = useState<BinaryPreview | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const printableRef = useRef<HTMLDivElement>(null);
+  const [printing, setPrinting] = useState(false);
 
   // Tagging the fetch results with their document id makes every derived value
   // below reset itself when the route moves to another document, so nothing from
@@ -136,7 +146,7 @@ export default function DocumentDetailPage({
   // A new document opens in the editor; anything else opens in preview until the
   // reader asks for one or the other.
   const mode: ViewMode =
-    modeChoice?.docId === docKey ? modeChoice.mode : isNew ? "edit" : "preview";
+    modeChoice?.docId === docKey ? modeChoice.mode : isNew || startEditing ? "edit" : "preview";
   const activeRecovery = recovery?.docId === docKey ? recovery : null;
   const accessDenied =
     activeRecovery?.kind === "access" ||
@@ -284,7 +294,8 @@ export default function DocumentDetailPage({
           session,
           payload: {
             name: draftName.trim() || uiText("Untitled document"),
-            collection_id: collectionId,
+            collection_id: doc.model_id === null ? collectionId : null,
+            model_id: doc.model_id ?? undefined,
             body: draftBody,
           },
         });
@@ -319,6 +330,18 @@ export default function DocumentDetailPage({
       }
     } finally {
       if (getSessionVersion() === session && routeRef.current === route) setSavingKey(null);
+    }
+  }
+
+  async function exportPdf() {
+    if (!doc || !printableRef.current) return;
+    setPrinting(true);
+    try {
+      await printMarkdown(draftName.trim() || doc.name, printableRef.current);
+    } catch (error) {
+      toast.error(error);
+    } finally {
+      setPrinting(false);
     }
   }
 
@@ -366,7 +389,12 @@ export default function DocumentDetailPage({
     );
   }
   if (!doc) {
-    return <div className="min-h-screen bg-background" aria-busy="true" />;
+    return (
+      <div
+        className={embedded ? "h-full bg-background" : "min-h-screen bg-background"}
+        aria-busy="true"
+      />
+    );
   }
 
   const isMarkdown = doc.kind === "markdown";
@@ -425,22 +453,34 @@ export default function DocumentDetailPage({
           )}
         </div>
       )}
-      <div className="shrink-0 px-4 pt-5 sm:px-6">
-        <h1 className="break-words text-xl font-semibold text-foreground">
-          {mode === "edit" ? draftName : doc.name}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">{uiText("nav.document")}</p>
-      </div>
-      <div className="mx-4 my-6 flex min-h-0 flex-1 flex-col overflow-hidden border border-border bg-card sm:mx-6 lg:mx-auto lg:w-full lg:max-w-4xl">
+      {!embedded && (
+        <div className="shrink-0 px-4 pt-5 sm:px-6">
+          <h1 className="break-words text-xl font-semibold text-foreground">
+            {mode === "edit" ? draftName : doc.name}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">{uiText("nav.document")}</p>
+        </div>
+      )}
+      <div
+        className={
+          embedded
+            ? "flex min-h-0 flex-1 flex-col overflow-hidden bg-card"
+            : "mx-4 my-6 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card sm:mx-6 lg:mx-auto lg:w-full lg:max-w-5xl"
+        }
+      >
         <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3 sm:px-6">
-          <Link
-            href={backHref}
-            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            {uiText(" Back")}
-          </Link>
-          {mode === "edit" ? (
+          {!embedded && (
+            <Link
+              href={backHref}
+              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              {uiText(doc.model_id === null ? " Back" : "Back to model")}
+            </Link>
+          )}
+          {embedded ? (
+            <h3 className="min-w-0 flex-1 break-words text-sm font-semibold">{doc.name}</h3>
+          ) : mode === "edit" ? (
             <input
               aria-label={uiText("documents.name")}
               readOnly={accessDenied || !!activeRecovery}
@@ -458,7 +498,15 @@ export default function DocumentDetailPage({
             />
           )}
 
-          {isMarkdown && (canEdit || mode === "edit") && (
+          {embedded && isMarkdown && canEdit && (
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/documents/${doc.id}?edit=1`}>
+                <Pencil className="size-4" aria-hidden />
+                {uiText(" Edit")}
+              </Link>
+            </Button>
+          )}
+          {!embedded && isMarkdown && (canEdit || mode === "edit") && (
             <div role="group" aria-label={uiText("Display")} className="flex items-center">
               <button
                 type="button"
@@ -499,6 +547,18 @@ export default function DocumentDetailPage({
               )}
               {uiText("Save")}
             </button>
+          )}
+          {isMarkdown && mode === "preview" && !accessDenied && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void exportPdf()}
+              loading={printing}
+              disabled={printing || !draftBody}
+            >
+              <Printer className="size-4" aria-hidden />
+              {uiText("Export as PDF")}
+            </Button>
           )}
           {!isMarkdown && !accessDenied && (
             <button
@@ -551,7 +611,9 @@ export default function DocumentDetailPage({
                 </div>
               </div>
             ) : draftBody ? (
-              <MarkdownView source={draftBody} />
+              <div ref={printableRef} className="mx-auto w-full max-w-3xl px-1 sm:px-4">
+                <MarkdownView source={draftBody} />
+              </div>
             ) : (
               <p className="text-sm text-muted-foreground">{uiText("This document is empty.")}</p>
             ))}

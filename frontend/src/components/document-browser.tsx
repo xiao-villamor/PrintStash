@@ -3,11 +3,13 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useId, useRef, useState } from "react";
-import { FileText, FileType2, Loader2 } from "lucide-react";
+import { lazy, Suspense, useId, useRef, useState } from "react";
+import { ChevronDown, FilePlus2, FileText, FileType2, Loader2, Paperclip } from "lucide-react";
 
 import { MODEL_DOCUMENT_PAGE_SIZE } from "@/lib/api/documents";
 import { useDocuments, useDocumentMutations } from "@/lib/queries/documents";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
+import { inputClasses } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { userMessage } from "@/lib/errors";
 import { useRouter } from "@/lib/navigation";
@@ -16,7 +18,10 @@ import { timeAgoShort } from "@/lib/format";
 import { getSessionVersion } from "@/lib/session-transport";
 import { toast } from "@/lib/toast";
 import type { DocumentKind, DocumentListItem } from "@/types";
+import { Modal } from "@/components/ui/modal";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+
+const DocumentReader = lazy(() => import("@/pages/document-detail"));
 
 function KindIcon({ kind }: { kind: DocumentKind }) {
   useUiLocale();
@@ -43,6 +48,9 @@ export function DocumentBrowser({
   const headingId = useId();
   const uploadLabel = modelId === undefined ? uiText("Upload file") : uiText("Attach file");
   const [offset, setOffset] = useState(0);
+  const [activeDocumentId, setActiveDocumentId] = useState<number | null>(null);
+  const [readerOpen, setReaderOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const documents = useDocuments(
     modelId === undefined
       ? { kind: "collection", path: collectionPath }
@@ -61,6 +69,7 @@ export function DocumentBrowser({
   function newMarkdown() {
     // No DB row until the user saves — open the editor on the "new" route.
     const params = new URLSearchParams();
+    if (modelId !== undefined) params.set("modelId", String(modelId));
     if (collectionId != null) params.set("cid", String(collectionId));
     if (collectionPath) params.set("c", collectionPath);
     const qs = params.toString();
@@ -137,15 +146,55 @@ export function DocumentBrowser({
             </h2>
             {canCreate && (
               <>
-                <Button
-                  variant="outline"
-                  size="xs"
-                  onClick={() => fileRef.current?.click()}
-                  disabled={busy}
-                  loading={busy}
+                <DropdownMenu
+                  open={addOpen}
+                  onOpenChange={setAddOpen}
+                  portal
+                  trigger={
+                    <Button
+                      size="xs"
+                      disabled={busy}
+                      loading={busy}
+                      aria-haspopup="menu"
+                      aria-expanded={addOpen}
+                      onClick={() => setAddOpen(!addOpen)}
+                    >
+                      <Paperclip className="size-3.5" aria-hidden />
+                      {uiText("Add attachment")}
+                      <ChevronDown className="size-3.5" aria-hidden />
+                    </Button>
+                  }
+                  contentClassName="min-w-44"
                 >
-                  {uploadLabel}
-                </Button>
+                  <Button
+                    type="button"
+                    role="menuitem"
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start"
+                    onClick={() => {
+                      setAddOpen(false);
+                      fileRef.current?.click();
+                    }}
+                  >
+                    <Paperclip className="size-4" aria-hidden />
+                    {uploadLabel}
+                  </Button>
+                  <Button
+                    type="button"
+                    role="menuitem"
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start"
+                    onClick={() => {
+                      setAddOpen(false);
+                      newMarkdown();
+                    }}
+                  >
+                    <FilePlus2 className="size-4" aria-hidden />
+                    {uiText("New document")}
+                  </Button>
+                </DropdownMenu>
                 <input
                   ref={fileRef}
                   type="file"
@@ -201,7 +250,13 @@ export function DocumentBrowser({
           </div>
         )}
 
-        <div className={modelId === undefined ? undefined : "overflow-hidden rounded-lg border border-border bg-card"}>
+        <div
+          className={
+            modelId === undefined
+              ? undefined
+              : "overflow-hidden rounded-lg border border-border bg-card"
+          }
+        >
           {documents.isError ? (
             <div role="alert" className="p-5 text-sm text-destructive">
               <p>{userMessage(documents.error)}</p>
@@ -237,6 +292,19 @@ export function DocumentBrowser({
                 <div key={doc.id} className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
                   <Link
                     href={`/documents/${doc.id}`}
+                    onClick={(event) => {
+                      if (
+                        modelId === undefined ||
+                        event.metaKey ||
+                        event.ctrlKey ||
+                        event.altKey ||
+                        event.shiftKey
+                      )
+                        return;
+                      event.preventDefault();
+                      setActiveDocumentId(doc.id);
+                      setReaderOpen(true);
+                    }}
                     className="flex min-w-0 flex-1 basis-48 items-center gap-3 hover:text-primary"
                   >
                     <span className="flex h-7 w-7 shrink-0 items-center justify-center bg-muted/70">
@@ -254,9 +322,11 @@ export function DocumentBrowser({
                     </div>
                   </Link>
                   <div className="flex shrink-0 items-center gap-3">
-                    <Button variant="outline" size="xs" asChild>
-                      <Link href={`/documents/${doc.id}`}>{uiText("Open")}</Link>
-                    </Button>
+                    {modelId === undefined && (
+                      <Button variant="outline" size="xs" asChild>
+                        <Link href={`/documents/${doc.id}`}>{uiText("Open")}</Link>
+                      </Button>
+                    )}
                     {canEditItem(doc) && (
                       <Button
                         variant="outline"
@@ -295,6 +365,37 @@ export function DocumentBrowser({
           </div>
         )}
       </section>
+      {modelId !== undefined && (
+        <Modal
+          title={uiText("Attachments")}
+          open={readerOpen}
+          onClose={() => setReaderOpen(false)}
+          className="h-[min(82dvh,52rem)] max-w-5xl"
+          bodyClassName="flex flex-1 flex-col overflow-hidden p-0"
+          headerExtra={
+            <select
+              aria-label={uiText("Select attachment")}
+              className={`${inputClasses} h-8 w-48 max-w-[45%]`}
+              value={activeDocumentId ?? ""}
+              onChange={(event) => setActiveDocumentId(Number(event.target.value))}
+            >
+              {docs.map((doc) => (
+                <option key={doc.id} value={doc.id}>
+                  {doc.name}
+                </option>
+              ))}
+            </select>
+          }
+        >
+          {activeDocumentId !== null && (
+            <div className="min-h-0 min-w-0 flex-1">
+              <Suspense fallback={<div aria-busy="true" />}>
+                <DocumentReader key={activeDocumentId} embeddedDocumentId={activeDocumentId} />
+              </Suspense>
+            </div>
+          )}
+        </Modal>
+      )}
     </>
   );
 }

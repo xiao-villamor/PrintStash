@@ -9,22 +9,20 @@
 import { readFile } from "node:fs/promises";
 import { devices } from "@playwright/test";
 import { test, expect, authBundleFor, authedContext, type Page } from "./helpers";
-import { collapseNavigationSidebar, createCollectionViaVault, stlFor } from "./util";
+import { collapseNavigationSidebar, stlFor } from "./util";
 
 // Collection documents (new in 0.8.0): markdown editor, collection README, and
 // the pdf.js viewer. All real — every save/upload hits the backend DB + storage.
 
 // Create a top-level collection (name == path for slug-safe names).
 async function makeCollection(page: Page, name: string): Promise<void> {
-  await createCollectionViaVault(page, name);
+  const receipt = await page.request.post("/api/v1/collections", { data: { name } });
+  expect(receipt.ok(), await receipt.text()).toBe(true);
 }
 
 // Open Documents through the selected Collection's Library actions.
 async function openDocsTab(page: Page, col: string): Promise<void> {
-  await page.goto(`/?c=${col}`);
-  await expect(page.getByRole("heading", { name: col, exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "More", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Documents", exact: true }).click();
+  await page.goto(`/?c=${col}&v=docs`);
   await expect(page.getByRole("heading", { name: "Documents", exact: true })).toBeVisible();
 }
 
@@ -189,14 +187,15 @@ test.describe("Model attachments", () => {
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aEioAAAAASUVORK5CYII=",
       "base64",
     );
-    const pane = page.getByRole("region", { name: "Attachments", exact: true });
+    const pane = page.getByRole("region", { name: /^Attachments/ });
     for (const [name, mimeType, buffer] of [
       ["assembly.pdf", "application/pdf", minimalPdf()],
       ["reference.png", "image/png", photo],
       ["build.mp4", "video/mp4", videoBytes],
     ] as const) {
       const selection = page.waitForEvent("filechooser");
-      await pane.getByRole("button", { name: "Attach file", exact: true }).click();
+      await pane.getByRole("button", { name: "Add attachment", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Attach file", exact: true }).click();
       await (await selection).setFiles({ name, mimeType, buffer });
       await expect(pane.getByRole("link", { name: new RegExp(name.split(".")[0]!) })).toBeVisible();
     }
@@ -206,24 +205,26 @@ test.describe("Model attachments", () => {
     await page.screenshot({ path: info.outputPath("model-files-populated.png") });
     await pane.getByRole("link", { name: /assembly/ }).click();
     await expect(page.getByText("1 / 1")).toBeVisible({ timeout: 30_000 });
-    const back = page.locator(`a[href="/models/${modelId}?tab=files"]`).filter({ hasText: "Back" });
-    await back.click();
+    const reader = page.getByRole("dialog", { name: "Attachments" });
     await expect(page).toHaveURL(modelUrl);
-
-    await pane.getByRole("link", { name: /reference/ }).click();
-    const image = page.getByRole("img", { name: "reference", exact: true });
+    await reader
+      .getByRole("combobox", { name: "Select attachment" })
+      .selectOption({ label: "reference" });
+    const image = reader.getByRole("img", { name: "reference", exact: true });
     await expect(image).toBeVisible();
     await expect(image).toHaveJSProperty("naturalWidth", 1);
-    await back.click();
-    await pane.getByRole("link", { name: /build/ }).click();
+    await reader
+      .getByRole("combobox", { name: "Select attachment" })
+      .selectOption({ label: "build" });
     await expect(page.getByText("build.mp4 — use Download to open it.")).toBeVisible();
     const downloading = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Download", exact: true }).click();
+    await reader.getByRole("button", { name: "Download", exact: true }).click();
     const download = await downloading;
     expect(download.suggestedFilename()).toBe("build.mp4");
     expect(await readFile(await download.path())).toEqual(videoBytes);
 
-    await back.click();
+    await reader.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(reader).toBeHidden();
     await pane.getByRole("button", { name: "Delete document" }).first().click();
     const confirmation = page.getByRole("dialog", { name: "Delete document?" });
     await expect(confirmation.getByText(/"build" will be moved to trash/)).toBeVisible();
@@ -232,6 +233,42 @@ test.describe("Model attachments", () => {
     await page.reload();
     await expect(pane.getByRole("link", { name: /assembly/ })).toBeVisible();
     await expect(pane.getByRole("link", { name: /build/ })).toHaveCount(0);
+
+    await pane.getByRole("button", { name: "Add attachment", exact: true }).click();
+    await page.getByRole("menuitem", { name: "New document", exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/documents/new\\?modelId=${modelId}`));
+    await page.getByLabel("Document name").fill("Assembly notes");
+    await page
+      .getByPlaceholder(/Write markdown/)
+      .fill("## Parts\n\n| Part | Count |\n| --- | --- |\n| Bolt | 4 |");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page).toHaveURL(/\/documents\/\d+$/);
+    await page.getByRole("link", { name: "Back to model", exact: true }).click();
+    await pane.getByRole("link", { name: /Assembly notes/ }).click();
+    await expect(reader.getByRole("cell", { name: "Bolt" })).toBeVisible();
+    await reader.screenshot({ path: info.outputPath("model-attachment-reader.png") });
+
+    // Capture the isolated print document before the native browser dialog.
+    await page.evaluate(() => {
+      window.print = () => {
+        const sheet = document.querySelector(".document-print-sheet");
+        document.body.dataset.printTitle = document.title;
+        document.body.dataset.printBody = sheet?.textContent ?? "";
+        window.dispatchEvent(new Event("afterprint"));
+      };
+    });
+    await reader.getByRole("button", { name: "Export as PDF", exact: true }).click();
+    await expect(page.locator("body")).toHaveAttribute("data-print-title", "Assembly notes");
+    await expect(page.locator("body")).toHaveAttribute("data-print-body", /Parts.*Bolt/s);
+    await reader.getByRole("link", { name: "Edit", exact: true }).click();
+    await page.getByPlaceholder(/Write markdown/).fill("## Revised parts");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Revised parts" })).toBeVisible();
+    await page.getByRole("link", { name: "Back to model", exact: true }).click();
+    await page.reload();
+    await pane.getByRole("link", { name: /Assembly notes/ }).click();
+    await expect(reader.getByRole("heading", { name: "Revised parts" })).toBeVisible();
+    await reader.getByRole("button", { name: "Close", exact: true }).click();
 
     await page.emulateMedia({ colorScheme: "dark" });
     const resize = page.getByRole("separator", { name: "Resize details panel" });

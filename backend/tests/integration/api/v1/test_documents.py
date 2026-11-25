@@ -222,6 +222,40 @@ class TestCreateDocument:
         assert response.status_code == 201, response.text
         assert response.json()["kind"] == "markdown"
 
+    def test_creates_markdown_for_the_model_and_uses_its_permissions(
+        self,
+        client: TestClient,
+        db_session: Session,
+        admin_headers: dict[str, str],
+        make_model,
+    ) -> None:
+        collection = taxonomy.resolve_or_create_collection(
+            db_session, "Attached guides"
+        )
+        model = make_model(collection=collection)
+        viewer = build_user(db_session, "attached-guide-viewer")
+        _grant(db_session, viewer, collection.id, CollectionRole.VIEW)
+        payload = {"name": "Assembly", "model_id": model.id, "body": "# Step"}
+
+        denied = client.post("/api/v1/documents", json=payload, headers=bearer(viewer))
+        assert denied.status_code == 403
+        conflicting = client.post(
+            "/api/v1/documents",
+            json=payload | {"collection_id": collection.id},
+            headers=admin_headers,
+        )
+        assert conflicting.status_code == 400
+
+        response = client.post("/api/v1/documents", json=payload, headers=admin_headers)
+        assert response.status_code == 201, response.text
+        doc = response.json()
+        assert doc["model_id"] == model.id
+        assert doc["body"] == "# Step"
+        listed = client.get(
+            f"/api/v1/documents?model_id={model.id}", headers=bearer(viewer)
+        )
+        assert [item["id"] for item in listed.json()] == [doc["id"]]
+
     def test_reports_an_unknown_collection_as_not_found(
         self, client: TestClient, admin_headers: dict[str, str]
     ) -> None:
