@@ -53,9 +53,10 @@
 
 .settings-safety-rows > div {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 16px 0;
+  padding: 12px 0;
   border-bottom: 1px solid var(--border);
 }
 
@@ -91,6 +92,24 @@
   margin-top: auto;
 }
 
+.settings-overview-facts > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.settings-overview-facts > div:first-child {
+  border-top: 0;
+}
+
+.settings-overview-facts dd {
+  line-height: 20px;
+  text-align: end;
+}
+
 @container (min-width: 42rem) {
   .settings-overview-pair {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -107,15 +126,8 @@
     grid-column: 1 / -1;
   }
 
-  .settings-overview-pair .settings-safety-rows {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-  }
-
-  .settings-overview-pair .settings-safety-rows > div {
-    flex: 1;
-    align-items: center;
+  .settings-overview-summary > .settings-card > .settings-card-box {
+    align-self: start;
   }
 }
 

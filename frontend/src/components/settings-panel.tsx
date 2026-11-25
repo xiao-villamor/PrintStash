@@ -98,7 +98,6 @@ import {
   Hourglass,
   Files,
   FolderSync,
-  FolderTree,
   HardDrive,
   HeartPulse,
   Activity,
@@ -114,7 +113,6 @@ import {
   Trash2,
   Search,
   Server,
-  Tag,
   Users,
   Clock,
   RefreshCw,
@@ -2025,8 +2023,6 @@ export function SettingsPanel() {
               return uiText("Vault version");
             },
             value: health ? `${health.name} v${health.version}` : uiText("Loading..."),
-            desc: uiText("API server status and version"),
-            icon: Server,
           },
           {
             get label() {
@@ -2039,8 +2035,6 @@ export function SettingsPanel() {
               : health?.status === "ok"
                 ? uiText("Connected")
                 : uiText("Unknown"),
-            desc: uiText("SQLite by default, Postgres optional"),
-            icon: Database,
             text: true,
           },
         ]
@@ -2054,8 +2048,7 @@ export function SettingsPanel() {
           ? uiText("Local")
           : stats.storage.backend.toUpperCase()
         : "...",
-      desc: stats?.storage.bucket ?? stats?.storage.prefix ?? uiText("Configured vault storage"),
-      icon: HardDrive,
+      detail: stats?.storage.bucket ?? stats?.storage.prefix,
       text: true,
     },
     {
@@ -2063,24 +2056,18 @@ export function SettingsPanel() {
         return uiText("Indexed files");
       },
       value: stats ? formatBytes(stats.indexed_size_bytes) : "...",
-      desc: "Tracked in the database",
-      icon: Files,
     },
     {
       get label() {
         return uiText("Collections");
       },
       value: stats ? `${stats.collection_count}` : "...",
-      desc: "Hierarchical tree entries",
-      icon: FolderTree,
     },
     {
       get label() {
         return uiText("Tags");
       },
       value: stats ? `${stats.tag_count}` : "...",
-      desc: "Flat tag vocabulary size",
-      icon: Tag,
     },
   ];
 
@@ -2973,7 +2960,7 @@ export function SettingsPanel() {
                     ))}
                   </div>
 
-                  <div className="settings-overview-pair">
+                  <div className="settings-overview-pair settings-overview-summary">
                     {user?.is_superuser && (
                       <SettingsCard
                         title={t("Data safety")}
@@ -3079,26 +3066,26 @@ export function SettingsPanel() {
                         ) : undefined
                       }
                     >
-                      <div>
+                      <dl className="settings-overview-facts">
                         {systemItems.map((item) => (
-                          <div key={item.label} className="settings-readonly-row">
-                            <div className="min-w-0">
-                              <p className="text-[13px] font-medium text-foreground">
-                                {item.label}
-                              </p>
-                              <p className="settings-row-hint">{item.desc}</p>
-                            </div>
-                            <span
-                              className={cn(
-                                "text-[13px] text-foreground",
-                                !("text" in item && item.text) && "font-mono",
+                          <div key={item.label}>
+                            <dt className="text-sm font-medium text-foreground">{item.label}</dt>
+                            <dd>
+                              <span
+                                className={cn(
+                                  "text-sm text-foreground",
+                                  !("text" in item && item.text) && "font-mono",
+                                )}
+                              >
+                                {item.value}
+                              </span>
+                              {"detail" in item && item.detail && (
+                                <span className="settings-row-hint mt-1 block">{item.detail}</span>
                               )}
-                            >
-                              {item.value}
-                            </span>
+                            </dd>
                           </div>
                         ))}
-                      </div>
+                      </dl>
                     </SettingsCard>
                   </div>
                   <div className="settings-overview-pair">

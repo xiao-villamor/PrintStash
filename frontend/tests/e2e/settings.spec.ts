@@ -103,25 +103,50 @@ test.describe("settings route", () => {
   test("aligns Overview cards and export actions side by side", async ({ page }, testInfo) => {
     await page.goto("/settings?section=overview");
     await collapseNavigationSidebar(page);
-    for (const [left, right] of [
-      ["Data safety", "System"],
-      ["Library migration", "Data export"],
-    ]) {
-      const leftCard = page.getByRole("group", { name: left, exact: true });
-      const rightCard = page.getByRole("group", { name: right, exact: true });
-      const leftBox = (await leftCard.locator(".settings-card-box").boundingBox())!;
-      const rightBox = (await rightCard.locator(".settings-card-box").boundingBox())!;
-      const leftTitle = await leftCard.getByRole("heading").boundingBox();
-      const rightTitle = await rightCard.getByRole("heading").boundingBox();
-      expect(leftBox.x).toBeLessThan(rightBox.x);
-      expect(leftBox.y).toBeCloseTo(rightBox.y);
-      expect(leftBox.height).toBeCloseTo(rightBox.height);
-      expect(leftTitle?.y).toBe(rightTitle?.y);
+    const overviewPairs = page.locator(".settings-overview-pair");
+    await expect(overviewPairs).toHaveCount(2);
+    const pairs = await overviewPairs.evaluateAll((groups) =>
+      groups.map((group) =>
+        Array.from(group.querySelectorAll(".settings-card")).map((card) => ({
+          box: card.querySelector(".settings-card-box")!.getBoundingClientRect().toJSON(),
+          titleY: card.querySelector("h3")!.getBoundingClientRect().y,
+          actionY: card.querySelector(".settings-card-foot button")?.getBoundingClientRect().y,
+        })),
+      ),
+    );
+    for (const [left, right] of pairs) {
+      expect(left.box.x).toBeLessThan(right.box.x);
+      expect(left.box.y).toBeCloseTo(right.box.y);
+      expect(left.titleY).toBeCloseTo(right.titleY);
+    }
+    const [migration, dataExport] = pairs[1];
+    expect(migration.box.height).toBeCloseTo(dataExport.box.height);
+    expect(migration.actionY).toBeCloseTo(dataExport.actionY!);
+
+    const safety = page.getByRole("group", { name: "Data safety", exact: true });
+    const safetyRowHeights = await safety
+      .locator("dl > div")
+      .evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
+    expect(safetyRowHeights).toHaveLength(3);
+    expect(Math.max(...safetyRowHeights)).toBeLessThan(80);
+
+    const system = page.getByRole("group", { name: "System", exact: true });
+    const systemRows = await system.locator("dl > div").evaluateAll((rows) =>
+      rows.map((row) => {
+        const label = row.querySelector("dt")!.getBoundingClientRect();
+        const value = row.querySelector("dd")!.getBoundingClientRect();
+        return { labelX: label.x, labelY: label.y, valueY: value.y, gap: value.x - label.right };
+      }),
+    );
+    expect(systemRows).toHaveLength(6);
+    expect(systemRows[0].labelX).toBe(systemRows[1].labelX);
+    expect(systemRows[0].labelY).toBeLessThan(systemRows[1].labelY);
+    for (const row of systemRows) {
+      expect(row.labelY).toBe(row.valueY);
+      expect(row.gap).toBeGreaterThanOrEqual(20);
     }
 
-    const archive = page.getByRole("button", { name: "Export full library" });
     const metadata = page.getByRole("button", { name: "JSON", exact: true });
-    expect((await archive.boundingBox())?.y).toBe((await metadata.boundingBox())?.y);
     await metadata.scrollIntoViewIfNeeded();
     await page.screenshot({ path: testInfo.outputPath("overview-aligned.png") });
   });
