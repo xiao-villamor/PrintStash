@@ -1,8 +1,8 @@
 """Shareable local embedding spaces and native float32 generations."""
 
-from datetime import datetime
 from typing import ClassVar
 
+from pydantic import NaiveDatetime
 from sqlalchemy import (
     CheckConstraint,
     Column,
@@ -35,7 +35,7 @@ class InferenceEndpoint(SQLModel, table=True):
     native_dimension: int | None = Field(default=None)
     supports_images: bool = False
     dialect: str | None = Field(default=None, max_length=32)
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class EmbeddingSpace(SQLModel, table=True):
@@ -57,7 +57,7 @@ class EmbeddingSpace(SQLModel, table=True):
     prefixes_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
     recipe_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
     config_json: str = Field(sa_column=Column(Text, nullable=False))
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class IndexGeneration(SQLModel, table=True):
@@ -101,7 +101,7 @@ class IndexGeneration(SQLModel, table=True):
     )
     replaces_generation_id: int | None = Field(default=None)
     lease_token: str | None = Field(default=None, max_length=64)
-    lease_expires_at: datetime | None = Field(default=None)
+    lease_expires_at: NaiveDatetime | None = Field(default=None)
     cancel_requested: bool = Field(
         default=False, sa_column_kwargs={"server_default": "0"}
     )
@@ -112,16 +112,16 @@ class IndexGeneration(SQLModel, table=True):
     copied: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
     truncated_count: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
     verified_count: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
-    verified_at: datetime | None = Field(default=None)
-    last_activity_at: datetime | None = Field(default=None)
-    activated_at: datetime | None = Field(default=None)
-    retired_at: datetime | None = Field(default=None)
-    retain_until: datetime | None = Field(default=None)
+    verified_at: NaiveDatetime | None = Field(default=None)
+    last_activity_at: NaiveDatetime | None = Field(default=None)
+    activated_at: NaiveDatetime | None = Field(default=None)
+    retired_at: NaiveDatetime | None = Field(default=None)
+    retain_until: NaiveDatetime | None = Field(default=None)
     error_code: str | None = Field(default=None, max_length=64)
     job_id: str | None = Field(default=None, max_length=64)
     reservation_id: str | None = Field(default=None, max_length=128)
     estimated_bytes: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class PassageVector(SQLModel, table=True):
@@ -158,7 +158,7 @@ class PassageVector(SQLModel, table=True):
     native_dimension: int
     truncated: bool = Field(default=False, sa_column_kwargs={"server_default": "0"})
     vector_blob: bytes = Field(sa_column=Column(LargeBinary, nullable=False))
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class SearchIndexFailure(SQLModel, table=True):
@@ -197,7 +197,7 @@ class SearchIndexFailure(SQLModel, table=True):
     input_hash: str = Field(max_length=64)
     attempts: int = 0
     state: str = Field(default="retry", max_length=16)
-    retry_after: datetime | None = Field(default=None)
+    retry_after: NaiveDatetime | None = Field(default=None)
     error_code: str = Field(max_length=64)
 
 
@@ -210,4 +210,4 @@ class SearchGenerationLease(SQLModel, table=True):
     generation_id: int = Field(
         foreign_key="index_generations.id", ondelete="CASCADE", index=True
     )
-    expires_at: datetime = Field(index=True)
+    expires_at: NaiveDatetime = Field(index=True)

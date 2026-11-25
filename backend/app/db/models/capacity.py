@@ -1,8 +1,8 @@
 """Durable capacity claims and bounded storage evidence."""
 
-from datetime import datetime
 from typing import ClassVar
 
+from pydantic import NaiveDatetime
 from sqlalchemy import BigInteger, CheckConstraint, Column, Text
 from sqlmodel import Field
 
@@ -31,8 +31,8 @@ class CapacityReservation(SQLModel, table=True):
     owner_identity_json: str = Field(
         default="{}", sa_column=Column(Text, nullable=False, server_default="{}")
     )
-    expires_at: datetime = Field(index=True)
-    created_at: datetime = Field(default_factory=utcnow)
+    expires_at: NaiveDatetime = Field(index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class CapacityAdmissionEvent(SQLModel, table=True):
@@ -40,7 +40,7 @@ class CapacityAdmissionEvent(SQLModel, table=True):
 
     __tablename__ = "capacity_admission_events"
     id: int | None = Field(default=None, primary_key=True)
-    occurred_at: datetime = Field(default_factory=utcnow, index=True)
+    occurred_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
     operation_kind: str = Field(max_length=64, index=True)
     decision: str = Field(max_length=16, index=True)
     reason: str = Field(max_length=64)
@@ -58,7 +58,7 @@ class StorageInventorySample(SQLModel, table=True):
         CheckConstraint("owned_bytes >= 0", name="nonnegative_owned_bytes"),
     )
     id: int | None = Field(default=None, primary_key=True)
-    sampled_at: datetime = Field(default_factory=utcnow, index=True)
+    sampled_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
     target_ref: str = Field(max_length=128, index=True)
     owned_bytes: int = Field(sa_column=Column(BigInteger, nullable=False))
     evidence_json: str = Field(sa_column=Column(Text, nullable=False))

@@ -1,8 +1,8 @@
 """Disposable geometry evidence and durable human review."""
 
-from datetime import datetime
 from enum import StrEnum
 
+from pydantic import NaiveDatetime
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
@@ -102,11 +102,11 @@ class GeometryFingerprint(SQLModel, table=True):
     failure_code: str | None = Field(default=None, max_length=64)
     attempts: int = Field(default=0)
     lease_token: str | None = Field(default=None, max_length=64)
-    lease_expires_at: datetime | None = None
+    lease_expires_at: NaiveDatetime | None = None
     duration_ms: int | None = None
     peak_rss_bytes: int | None = Field(default=None, sa_type=BigInteger)
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class SimilarityRun(SQLModel, table=True):
@@ -133,7 +133,7 @@ class SimilarityRun(SQLModel, table=True):
     checkpoint_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
     settings_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
     counters_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
-    cutoff: datetime = Field(default_factory=utcnow)
+    cutoff: NaiveDatetime = Field(default_factory=utcnow)
     cancel_requested: bool = Field(default=False)
     # The engine execution advancing this run now (``<job>:<attempt>``). The
     # engine runs one at a time per run; this only fences writes, so a stale
@@ -142,9 +142,9 @@ class SimilarityRun(SQLModel, table=True):
     failure_code: str | None = Field(default=None, max_length=64)
     trigger: str = Field(default="manual", max_length=16)
     peak_rss_bytes: int | None = Field(default=None, sa_type=BigInteger)
-    created_at: datetime = Field(default_factory=utcnow, index=True)
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
+    created_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
+    started_at: NaiveDatetime | None = None
+    finished_at: NaiveDatetime | None = None
 
 
 class SimilarityCandidate(SQLModel, table=True):
@@ -195,9 +195,9 @@ class SimilarityCandidate(SQLModel, table=True):
         default=None, foreign_key="similarity_candidates.id", ondelete="SET NULL"
     )
     version: int = Field(default=1)
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
-    reviewed_at: datetime | None = None
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
+    reviewed_at: NaiveDatetime | None = None
 
 
 class SimilarityCandidateObservation(SQLModel, table=True):
@@ -235,8 +235,8 @@ class SimilarityCandidateObservation(SQLModel, table=True):
     multiplicity_a: int = Field(default=1)
     multiplicity_b: int = Field(default=1)
     evidence_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class SimilarityReviewDecision(SQLModel, table=True):
@@ -266,7 +266,7 @@ class SimilarityReviewDecision(SQLModel, table=True):
     candidate_version: int
     snapshot_json: str = Field(sa_column=Column(Text, nullable=False))
     request_hash: str = Field(max_length=64)
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class SimilarityEmptyVerification(SQLModel, table=True):
@@ -303,7 +303,7 @@ class SimilarityEmptyVerification(SQLModel, table=True):
     verification_version: str = Field(max_length=64)
     sample_points: int
     triangle_cap: int
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class SimilarityPairOutcome(StrEnum):
@@ -360,5 +360,5 @@ class SimilarityRunPair(SQLModel, table=True):
         sa_column=Column(EnumText(SimilarityPairOutcome), nullable=False),
     )
     lease_token: str | None = Field(default=None, max_length=128)
-    lease_expires_at: datetime | None = None
-    created_at: datetime = Field(default_factory=utcnow)
+    lease_expires_at: NaiveDatetime | None = None
+    created_at: NaiveDatetime = Field(default_factory=utcnow)

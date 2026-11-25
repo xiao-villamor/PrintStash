@@ -1,9 +1,9 @@
 """External libraries, scan checkpoints, discovery inventories and tombstones."""
 
-from datetime import datetime
 from typing import ClassVar, Optional
 from uuid import uuid4
 
+from pydantic import NaiveDatetime
 from sqlalchemy import (
     BigInteger,
     Column,
@@ -80,23 +80,23 @@ class ExternalLibrary(SQLModel, table=True):
         default=None, foreign_key="collections.id"
     )
 
-    last_scanned_at: Optional[datetime] = Field(default=None)
+    last_scanned_at: Optional[NaiveDatetime] = Field(default=None)
     last_scan_status: Optional[ExternalLibraryScanStatus] = Field(default=None)
     # JSON blob: {"added": n, "updated": n, "removed": n, "skipped": n,
     #             "errors": [..], "error": "..."}
     last_scan_summary: Optional[str] = Field(default=None, sa_column=Column(Text))
     scan_claim_token: Optional[str] = Field(default=None, max_length=64, index=True)
-    scan_claim_expires_at: Optional[datetime] = Field(default=None, index=True)
+    scan_claim_expires_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     scan_job_id: Optional[str] = Field(default=None, max_length=64, index=True)
     # A scan someone asked for (the "scan now" button, the folder watcher).
     # Intent the scan source reads; the scan clears it when it starts.
     # ``scan_requested_path`` narrows the request to one folder; two requests
     # for different folders widen it to a full scan.
-    scan_requested_at: Optional[datetime] = Field(default=None, index=True)
+    scan_requested_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     scan_requested_path: Optional[str] = Field(default=None, max_length=2048)
 
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class ExternalLibraryTombstone(SQLModel, table=True):
@@ -116,8 +116,8 @@ class ExternalLibraryTombstone(SQLModel, table=True):
     source_key: str = Field(max_length=2048)
     sha256: Optional[str] = Field(default=None, max_length=64)
     reason: str = Field(default="removed", max_length=32)
-    created_at: datetime = Field(default_factory=utcnow, index=True)
-    cleared_at: Optional[datetime] = Field(default=None, index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
+    cleared_at: Optional[NaiveDatetime] = Field(default=None, index=True)
 
 
 class ExternalLibraryCheckpoint(SQLModel, table=True):
@@ -140,10 +140,10 @@ class ExternalLibraryCheckpoint(SQLModel, table=True):
     )
     metadata_ops: int = 0
     bytes_read: int = Field(default=0, sa_column=Column(BigInteger, nullable=False))
-    backoff_until: Optional[datetime] = Field(default=None, index=True)
-    started_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
-    completed_at: Optional[datetime] = None
+    backoff_until: Optional[NaiveDatetime] = Field(default=None, index=True)
+    started_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
+    completed_at: Optional[NaiveDatetime] = None
 
 
 class RemoteDiscoveryInventory(SQLModel, table=True):
@@ -155,8 +155,8 @@ class RemoteDiscoveryInventory(SQLModel, table=True):
     prefix: str = Field(sa_column=Column(Text, nullable=False))
     complete: bool = False
     metadata_ops: int = 0
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow, index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
 
 
 class RemoteDiscoveryDirectory(SQLModel, table=True):
@@ -178,8 +178,8 @@ class RemoteDiscoveryDirectory(SQLModel, table=True):
     path: str = Field(sa_column=Column(Text, nullable=False))
     path_hash: str = Field(max_length=64)
     complete: bool = False
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class RemoteDiscoveryEntry(SQLModel, table=True):
@@ -198,10 +198,10 @@ class RemoteDiscoveryEntry(SQLModel, table=True):
     source_key: str = Field(sa_column=Column(Text, nullable=False))
     key_hash: str = Field(max_length=64)
     size: int = Field(sa_column=Column(BigInteger, nullable=False))
-    modified_at: Optional[datetime] = None
+    modified_at: Optional[NaiveDatetime] = None
     etag: Optional[str] = None
     version_id: Optional[str] = None
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class ExternalLibraryObservation(SQLModel, table=True):
@@ -220,7 +220,7 @@ class ExternalLibraryObservation(SQLModel, table=True):
     file_id: Optional[int] = Field(
         default=None, foreign_key="files.id", ondelete="CASCADE"
     )
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 ExternalLibrary.database_epoch = column_property(

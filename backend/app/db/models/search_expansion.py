@@ -1,8 +1,8 @@
 """Versioned sparse work and weighted postings, separate from original text."""
 
-from datetime import datetime
 from typing import ClassVar
 
+from pydantic import NaiveDatetime
 from sqlalchemy import CheckConstraint, Index
 from sqlmodel import Field
 
@@ -27,11 +27,11 @@ class SearchExpansion(SQLModel, table=True):
     phase: str = Field(default="running", max_length=16)
     attempts: int = 0
     token: str | None = Field(default=None, max_length=64)
-    lease_until: datetime | None = None
-    retry_at: datetime | None = None
+    lease_until: NaiveDatetime | None = None
+    retry_at: NaiveDatetime | None = None
     error_code: str | None = Field(default=None, max_length=80)
     truncated: bool = False
-    updated_at: datetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class SearchExpansionTerm(SQLModel, table=True):

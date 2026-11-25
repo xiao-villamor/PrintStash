@@ -1,9 +1,9 @@
 """Notification channels and their recorded delivery outcomes."""
 
-from datetime import datetime
 from typing import ClassVar, Optional
 from uuid import uuid4
 
+from pydantic import NaiveDatetime
 from sqlalchemy import (
     BigInteger,
     Column,
@@ -56,15 +56,15 @@ class NotificationChannel(SQLModel, table=True):
     # Visible "last notification" status surfaced in the UI.
     last_status: Optional[str] = Field(default=None, max_length=16)
     last_error: Optional[str] = Field(default=None, max_length=1024)
-    last_delivered_at: Optional[datetime] = Field(default=None)
+    last_delivered_at: Optional[NaiveDatetime] = Field(default=None)
 
     # Circuit breaker: consecutive permanently-failed deliveries. Reset to 0 on
     # any success; once it crosses the threshold the channel is auto-disabled so
     # a dead endpoint stops generating failures for every event.
     consecutive_failures: int = Field(default=0)
 
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 NotificationChannel.database_epoch = column_property(
@@ -104,8 +104,8 @@ class NotificationDelivery(SQLModel, table=True):
     )
     attempts: int = Field(default=0)
     last_error: Optional[str] = Field(default=None, max_length=1024)
-    next_retry_at: datetime = Field(default_factory=utcnow, index=True)
-    delivered_at: Optional[datetime] = Field(default=None)
+    next_retry_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
+    delivered_at: Optional[NaiveDatetime] = Field(default=None)
 
-    created_at: datetime = Field(default_factory=utcnow, index=True)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)

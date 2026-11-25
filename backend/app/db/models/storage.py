@@ -1,10 +1,10 @@
 """Object ownership, deletion intents, restore markers and storage connections."""
 
 import secrets
-from datetime import datetime
 from typing import ClassVar, Optional
 from uuid import uuid4
 
+from pydantic import NaiveDatetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -43,7 +43,7 @@ class StoragePublicationLocator(SQLModel, table=True):
     backend: str = Field(max_length=32)
     namespace: str = Field(max_length=1024)
     key: str = Field(max_length=2048)
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class OwnedStorageObject(SQLModel, table=True):
@@ -86,7 +86,7 @@ class OwnedStorageObject(SQLModel, table=True):
     )
     # Incomplete retired writers retain their recovery evidence and are retried
     # fairly instead of monopolizing every bounded sweep batch.
-    next_recovery_at: Optional[datetime] = Field(default=None, index=True)
+    next_recovery_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     backend: str = Field(max_length=32, index=True)
     namespace: str = Field(max_length=1024, index=True)
     key: str = Field(max_length=2048)
@@ -115,8 +115,8 @@ class OwnedStorageObject(SQLModel, table=True):
     ctime_ns: Optional[int] = Field(
         default=None, sa_column=Column(BigInteger, nullable=True)
     )
-    created_at: datetime = Field(default_factory=utcnow, index=True)
-    committed_at: Optional[datetime] = Field(default=None, index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
+    committed_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     last_error: Optional[str] = Field(default=None, max_length=255)
 
 
@@ -177,18 +177,18 @@ class StorageDeleteIntent(SQLModel, table=True):
     authorized_actor_id: Optional[int] = Field(
         default=None, sa_column=Column(BigInteger, nullable=True)
     )
-    authorized_at: datetime = Field(default_factory=utcnow, index=True)
+    authorized_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
     quarantine_key: Optional[str] = Field(default=None, max_length=2048)
     quarantine_state: str = Field(default="none", max_length=16)
     resource_kind: Optional[str] = Field(default=None, max_length=64, index=True)
     resource_id: Optional[str] = Field(default=None, max_length=64, index=True)
     status: str = Field(default="pending", max_length=16, index=True)
     attempts: int = Field(default=0)
-    next_attempt_at: Optional[datetime] = Field(default=None, index=True)
+    next_attempt_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     last_error: Optional[str] = Field(default=None, max_length=255)
-    created_at: datetime = Field(default_factory=utcnow, index=True)
-    updated_at: datetime = Field(default_factory=utcnow)
-    completed_at: Optional[datetime] = None
+    created_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
+    completed_at: Optional[NaiveDatetime] = None
 
 
 class RestoreMarker(SQLModel, table=True):
@@ -207,8 +207,8 @@ class RestoreMarker(SQLModel, table=True):
     )
     archive_sha256: str = Field(default="", max_length=64, index=True)
     state: str = Field(default="database_active", max_length=32, index=True)
-    created_at: datetime = Field(default_factory=utcnow, index=True)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class StorageFailureDomainDeclaration(SQLModel, table=True):
@@ -221,7 +221,7 @@ class StorageFailureDomainDeclaration(SQLModel, table=True):
     failure_domain: str = Field(max_length=128)
     revision: str = Field(max_length=32)
     declared_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    updated_at: datetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class StorageConnection(SQLModel, table=True):
@@ -260,8 +260,8 @@ class StorageConnection(SQLModel, table=True):
         default=True,
         sa_column=Column(Boolean, nullable=False, server_default="1"),
     )
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 StorageConnection.database_epoch = column_property(

@@ -6,11 +6,11 @@ job state that survives a restore or an engine swap. Its input is never
 serialized: every attempt rebuilds what it needs from the subject row.
 """
 
-from datetime import datetime
 from enum import StrEnum
 from typing import ClassVar, Optional
 from uuid import uuid4
 
+from pydantic import NaiveDatetime
 from sqlalchemy import CheckConstraint, Column, ForeignKey, Index, Integer, Text, text
 from sqlmodel import Field
 
@@ -100,10 +100,10 @@ class Job(SQLModel, table=True):
     # Consecutive interrupted executions; bounded by ``jobs_max_resubmits``.
     resubmits: int = Field(default=0)
     app_version: Optional[str] = Field(default=None, max_length=64)
-    created_at: datetime = Field(default_factory=utcnow, index=True)
-    updated_at: datetime = Field(default_factory=utcnow, index=True)
-    started_at: Optional[datetime] = None
-    finished_at: Optional[datetime] = Field(default=None, index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
+    started_at: Optional[NaiveDatetime] = None
+    finished_at: Optional[NaiveDatetime] = Field(default=None, index=True)
 
 
 class MeshDiscoveryOrder(StrEnum):
@@ -162,24 +162,24 @@ class ReconcileCursor(SQLModel, table=True):
     source: JobKind = Field(
         sa_column=Column(EnumText(JobKind), primary_key=True, nullable=False)
     )
-    nudged_at: Optional[datetime] = None
+    nudged_at: Optional[NaiveDatetime] = None
     # A pass waiting in the engine, and the priority it was queued at.
-    pass_queued_at: Optional[datetime] = None
+    pass_queued_at: Optional[NaiveDatetime] = None
     pass_priority: Optional[WorkPriority] = Field(
         default=None, sa_column=Column(EnumText(WorkPriority), nullable=True)
     )
     holder: Optional[str] = Field(default=None, max_length=128)
-    holder_expires_at: Optional[datetime] = None
-    last_pass_started_at: Optional[datetime] = None
-    last_pass_finished_at: Optional[datetime] = None
+    holder_expires_at: Optional[NaiveDatetime] = None
+    last_pass_started_at: Optional[NaiveDatetime] = None
+    last_pass_finished_at: Optional[NaiveDatetime] = None
     last_pass_submitted: int = Field(default=0)
     last_pass_deferred: int = Field(default=0)
     # For schedule sources: the newest occurrence already turned into a Job.
     # Kept here rather than derived from Job rows, which retention prunes.
-    last_occurrence_at: Optional[datetime] = None
+    last_occurrence_at: Optional[NaiveDatetime] = None
     # A drain source parked after a pass that could make no progress.
-    idle_since: Optional[datetime] = None
-    idle_until: Optional[datetime] = None
+    idle_since: Optional[NaiveDatetime] = None
+    idle_until: Optional[NaiveDatetime] = None
     # A derivative source's scan: the newest Artifact id it has offered, and
     # where its rotating window over older Artifacts stands.
     scan_high_water: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
@@ -200,11 +200,11 @@ class ReconcileCursor(SQLModel, table=True):
     )
     # Indexed keyset for recent uploads or viewer demand. These are scan
     # positions, not foreign keys: deletion must not invalidate pagination.
-    scan_recent_at: datetime | None = None
+    scan_recent_at: NaiveDatetime | None = None
     scan_recent_file_id: int | None = None
     # The start of a secondary admission grace period. Unlike the active
     # primary queue's oldest Job, this cannot move forward under steady input.
-    secondary_deferred_at: datetime | None = None
+    secondary_deferred_at: NaiveDatetime | None = None
 
 
 class WorkFence(SQLModel, table=True):
@@ -225,9 +225,9 @@ class WorkFence(SQLModel, table=True):
     name: str = Field(primary_key=True, max_length=64)
     holder: str = Field(max_length=128)
     reason: str = Field(max_length=64)
-    acquired_at: datetime = Field(default_factory=utcnow)
-    heartbeat_at: datetime = Field(default_factory=utcnow)
-    expires_at: datetime = Field(index=True)
+    acquired_at: NaiveDatetime = Field(default_factory=utcnow)
+    heartbeat_at: NaiveDatetime = Field(default_factory=utcnow)
+    expires_at: NaiveDatetime = Field(index=True)
 
 
 class WorkExecutor(SQLModel, table=True):
@@ -252,8 +252,8 @@ class WorkExecutor(SQLModel, table=True):
     # drains every live executor by waiting for each to report zero after the
     # restore fence was taken.
     active_mutations: int = Field(default=0)
-    started_at: datetime = Field(default_factory=utcnow)
-    heartbeat_at: datetime = Field(default_factory=utcnow, index=True)
+    started_at: NaiveDatetime = Field(default_factory=utcnow)
+    heartbeat_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
 
 
 class WorkLaneOverride(SQLModel, table=True):
@@ -276,4 +276,4 @@ class WorkLaneOverride(SQLModel, table=True):
             Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
         ),
     )
-    updated_at: datetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
