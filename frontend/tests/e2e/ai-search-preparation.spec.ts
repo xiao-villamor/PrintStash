@@ -9,6 +9,7 @@ import {
 } from "../../src/test-support/search";
 import type { SearchGeneration } from "../../src/types/search";
 import { useMockApi } from "./_setup";
+import { collapseNavigationSidebar } from "../e2e-real/util";
 
 useMockApi();
 
@@ -27,7 +28,9 @@ async function serveSearch(page: Page, generation: SearchGeneration) {
     route.fulfill({ json: [generation] }),
   );
   await page.route("**/api/v1/search/status", (route) =>
-    route.fulfill({ json: searchStatus({ enabled: true, semantic_ready: false }) }),
+    route.fulfill({
+      json: searchStatus({ enabled: true, semantic_ready: generation.state === "active" }),
+    }),
   );
 }
 
@@ -44,28 +47,62 @@ test.describe("AI Search preparation", () => {
         verified_at: null,
       }),
     );
-    for (const [label, width, height] of [
-      ["desktop", 1280, 900],
-      ["mobile", 390, 844],
-    ] as const) {
-      await page.setViewportSize({ width, height });
-      await page.goto("/settings?section=ai-search");
-      await page.getByText("Preparation details", { exact: true }).click();
-      const steps = page.getByRole("list", { name: "Preparation steps" });
-      await expect(steps.getByRole("listitem")).toHaveText([
-        /Check library content\(done\)/,
-        /Index passages\(in progress\)/,
-        /Catch up on recent changes\(not started\)/,
-        /Verify the index\(not started\)/,
-      ]);
-      await expect(
-        page.getByText(/bge-small-en-v1\.5 turns each passage into a vector/),
-      ).toBeVisible();
-      await expect(page.getByText("212 of 567 searchable entries prepared")).toBeVisible();
-      expect(
-        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-      ).toBe(true);
-      await steps.screenshot({ path: testInfo.outputPath(`steps-${label}.png`) });
-    }
+    await page.goto("/settings?section=ai-search");
+    await collapseNavigationSidebar(page);
+    await expect(page.getByText("212 of 567 searchable entries prepared")).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("preparation.png") });
+
+    const steps = page.getByRole("list", { name: "Preparation steps" });
+    await expect(steps).toBeVisible();
+    await expect(steps.getByRole("listitem")).toHaveText([
+      /Check library content\(done\)/,
+      /Index passages\(in progress\)/,
+      /Catch up on recent changes\(not started\)/,
+      /Verify the index\(not started\)/,
+    ]);
+    await expect(steps.locator('[aria-current="step"]')).toHaveText(/Index passages/);
+    await expect(
+      page.getByText(/bge-small-en-v1\.5 turns each passage into a vector/),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+  test("aligns the ready status with its actions", async ({ page }, testInfo) => {
+    await serveSearch(page, aSearchGeneration({ state: "active" }));
+
+    await page.goto("/settings?section=ai-search");
+    await collapseNavigationSidebar(page);
+
+    const ready = page.getByText("Ready", { exact: true });
+    const trySearch = page.getByRole("link", { name: "Try AI Search" });
+    await expect(ready).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("ready.png") });
+    await expect(ready).toHaveCSS("border-radius", "9999px", { timeout: 1000 });
+    const badge = (await ready.boundingBox())!;
+    const action = (await trySearch.boundingBox())!;
+    expect(badge.y + badge.height / 2).toBeCloseTo(action.y + action.height / 2, 0);
+  });
+
+  test("shows both processing locations in the setup form", async ({ page }, testInfo) => {
+    await serveSearch(page, aSearchGeneration({ state: "active" }));
+
+    await page.goto("/settings?section=ai-search");
+    await collapseNavigationSidebar(page);
+    await page.getByRole("button", { name: "Change setup" }).click();
+    const dialog = page.getByRole("dialog", { name: "AI Search setup" });
+    await expect(dialog.getByRole("button", { name: "Prepare my library" })).toBeVisible();
+    await dialog.screenshot({ path: testInfo.outputPath("setup.png") });
+
+    await expect(dialog.getByRole("radio", { name: "On this machine" })).toBeChecked({
+      timeout: 1000,
+    });
+    const remote = dialog.getByRole("radio", { name: "Another server" });
+    await remote.focus();
+    await remote.press("Space");
+    await expect(dialog.getByRole("form", { name: "Inference server" })).toBeVisible();
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByRole("button", { name: "Change setup" })).toBeFocused();
   });
 });

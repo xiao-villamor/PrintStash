@@ -4102,7 +4102,6 @@
   "search.scopeLibrary": "Whole library",
   "search.keywordHelpIn": "Find names, tags and file names in {value1}.",
   "search.removeRecent": "Remove {value1} from recent searches",
-  "aiSearch.preparationDetails": "Preparation details",
   "aiSearch.searchLibrary": "Search library",
   "aiSearch.submitAi": "Search with AI",
   "aiSearch.turnOffAi": "Turn off AI search",

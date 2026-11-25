@@ -107,8 +107,9 @@ The model detail inspector uses these action rules with the shared `Button`,
 - `--radius` gives buttons, inputs, selects, and segmented controls 6px corners
   through the default, small, and medium radius utilities. `--radius-popover`
   gives menus, floating lists, toasts, and dialogs 8px corners through the
-  large radius utility. Library cards, panels and the groups inside the model
-  inspector use that same 8px radius. Circular avatars, status dots, and count
+  large radius utility. Library Model cards, Multipart Model cards and their
+  loading cards use 6px corners. Panels and groups inside the Model inspector
+  use 8px corners. Circular avatars, status dots, and count
   badges retain their shape.
 - Type ramp adds `text-2xs` (0.6875rem) and `text-3xs` (0.625rem) for the mono
   label style. No `text-[11px]`.

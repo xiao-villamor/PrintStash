@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, ChevronDown } from "lucide-react";
+import { AlertTriangle, Check } from "lucide-react";
 import { formatDuration, timeAgo } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { isMessageKey } from "@/lib/locale";
@@ -75,7 +75,7 @@ export function SearchProgressBar({
   );
 }
 
-/** Keep the current operation and counts visible; implementation details are optional. */
+/** Show the live operation, counts, and preparation steps together. */
 export function SearchPreparationProgress({ generation }: { generation: SearchGeneration }) {
   const { t } = useI18n();
   const phase = preparationPhase(generation.phase);
@@ -121,15 +121,9 @@ export function SearchPreparationProgress({ generation }: { generation: SearchGe
           )}
         </>
       )}
-      <details className="group border-t border-border pt-3">
-        <summary className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 group-open:rotate-180" aria-hidden />
-          {t("aiSearch.preparationDetails")}
-        </summary>
-        <div className="pt-4">
-          <SearchPreparationStages generation={generation} />
-        </div>
-      </details>
+      <div className="border-t border-border pt-3">
+        <SearchPreparationStages generation={generation} />
+      </div>
     </div>
   );
 }
@@ -152,20 +146,20 @@ export function SearchPreparationStages({ generation }: { generation: SearchGene
           : "current";
   return (
     <div className="space-y-3">
-      <ol aria-label={t("aiSearch.stages")} className="space-y-2 text-sm">
+      <ol aria-label={t("aiSearch.stages")} className="space-y-1 text-sm">
         {STAGES.map((stage, index) => {
           const state = stateOf(index);
           return (
             <li
               key={stage.key}
               aria-current={state === "current" || state === "failed" ? "step" : undefined}
-              className={`flex items-center gap-2 ${
+              className={`flex items-center gap-2 rounded-md px-2 py-1.5 ${
                 state === "pending"
                   ? "text-muted-foreground"
                   : state === "failed"
-                    ? "font-medium text-warning"
+                    ? "bg-muted font-medium text-warning"
                     : state === "current"
-                      ? "font-medium text-foreground"
+                      ? "bg-accent font-semibold text-accent-foreground"
                       : "text-foreground"
               }`}
             >

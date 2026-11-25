@@ -67,7 +67,7 @@ export function MultipartModelCard({
     <article
       data-favorites={favorites || undefined}
       className={cn(
-        `${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} library-model-card group group/selection-card relative flex h-full min-w-0 max-w-full flex-col overflow-hidden rounded-none border border-border bg-card text-card-foreground transition-[border-color,box-shadow,scale] duration-press ease-out hover:border-border-strong active:scale-[0.99] motion-reduce:active:scale-100 `,
+        `${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} library-model-card group group/selection-card relative flex h-full min-w-0 max-w-full flex-col overflow-hidden border border-border bg-card text-card-foreground transition-[border-color,box-shadow,scale] duration-press ease-out hover:border-border-strong active:scale-[0.99] motion-reduce:active:scale-100 `,
         selected && "bg-accent text-accent-foreground",
       )}
     >

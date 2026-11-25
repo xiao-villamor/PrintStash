@@ -513,22 +513,6 @@ export function AiSearchSettings() {
           >
             <div className="settings-list-row">
               <div>
-                <p className="settings-list-title">{t("Guided setup")}</p>
-                <p className="settings-list-meta">
-                  {t("Choose this machine or another server; prepare the Library.")}
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={settings.isError}
-                onClick={() => setChanging(true)}
-              >
-                {t(settings.data.settings.enabled ? "Change setup" : "Start setup")}
-              </Button>
-            </div>
-            <div className="settings-list-row">
-              <div>
                 <p className="settings-list-title">{t("aiSearch.navIndexes")}</p>
                 <p className="settings-list-meta">
                   {t("Text, thumbnail, multiple views and optional point-cloud geometry")}

@@ -5080,7 +5080,7 @@ export function ModelGridSkeleton({
           virtualize={false}
           renderItem={() => (
             <div
-              className="library-model-card flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card"
+              className="library-model-card flex h-full flex-col overflow-hidden border border-border bg-card"
               aria-hidden
             >
               <div className="library-preview">

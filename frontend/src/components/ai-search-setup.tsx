@@ -7,6 +7,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, HardDrive, Search, Server, ArrowRight } from "lucide-react";
 import { Link } from "@/lib/link";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { InferenceEndpointForm } from "@/components/inference-endpoint-form";
 import {
   SearchIndexHealth,
@@ -275,6 +276,24 @@ export function AiSearchSetup({
   const ready =
     settings.settings.enabled && active && availability.data?.semantic_ready && !changing;
   const step = ready ? 3 : enabled && path ? 2 : 1;
+  const locations = [
+    {
+      id: "local",
+      title: t("On this machine"),
+      help: t(
+        "Your library text stays here. Local AI uses this machine’s CPU, memory and storage; GPU acceleration is not available.",
+      ),
+      action: t("Use this machine"),
+      icon: HardDrive,
+    },
+    {
+      id: "server",
+      title: t("Another server"),
+      help: t("Connect an AI service. Library text will be sent to that server."),
+      action: t("Connect another server"),
+      icon: Server,
+    },
+  ] as const;
   if (changing && !settingsReview) {
     return (
       <fieldset disabled={busy} aria-busy={busy} className="min-w-0">
@@ -291,38 +310,43 @@ export function AiSearchSetup({
               )}
             </p>
           )}
-          <label className="block space-y-1.5 text-sm">
-            <span className="font-medium">{t("Location")}</span>
-            <select
-              className="block h-10 w-full border border-input bg-field-surface px-3"
-              value={path ?? ""}
-              disabled={!!building || !!downloading}
-              onChange={(event) => {
-                const value = event.target.value;
-                setPath(value === "local" || value === "server" ? value : null);
-                setConnecting(false);
-                setMessage(null);
-              }}
-            >
-              {!path && <option value="">{t("aiSearch.chooseModel")}</option>}
-              <option value="local">{t("On this machine")}</option>
-              <option value="server">{t("Another server")}</option>
-            </select>
+          <fieldset className="min-w-0 space-y-2" disabled={!!building || !!downloading}>
+            <legend className="mb-2 text-sm font-semibold">{t("Location")}</legend>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {locations.map((option) => (
+                <label
+                  key={option.id}
+                  className="flex cursor-action items-center gap-2.5 rounded-lg border border-border px-3 py-2.5 text-sm font-medium has-[:checked]:bg-accent has-[:checked]:text-accent-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
+                >
+                  <input
+                    type="radio"
+                    name="change-ai-search-location"
+                    checked={path === option.id}
+                    className="accent-primary"
+                    onChange={() => {
+                      setPath(option.id);
+                      setConnecting(false);
+                      setMessage(null);
+                    }}
+                  />
+                  <option.icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                  {option.title}
+                </label>
+              ))}
+            </div>
             {path && (
-              <span className="block text-xs text-muted-foreground">
-                {t(
-                  path === "local"
-                    ? "Your library text stays here. Local AI uses this machine’s CPU, memory and storage; GPU acceleration is not available."
-                    : "Connect an AI service. Library text will be sent to that server.",
-                )}
-              </span>
+              <p className="text-xs text-muted-foreground">
+                {locations.find((option) => option.id === path)?.help}
+              </p>
             )}
-          </label>
+          </fieldset>
           {path && (
             <label className="block space-y-1.5 text-sm">
-              <span className="font-medium">{t("aiSearch.modelOrServer")}</span>
+              <span className="font-medium">
+                {t(path === "local" ? "AI model" : "aiSearch.modelOrServer")}
+              </span>
               <select
-                className="block h-10 w-full border border-input bg-field-surface px-3"
+                className="flex h-11 w-full min-w-0 items-center border border-input bg-field-surface px-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 value={path === "local" ? (local?.id ?? "") : String(remote?.id ?? "")}
                 disabled={!!building || !!downloading}
                 onChange={(event) => {
@@ -593,21 +617,21 @@ export function AiSearchSetup({
           )}
           {ready ? (
             <>
-              <div className="flex flex-wrap items-start gap-3 px-4 py-4 sm:px-5">
-                <Search
-                  className="h-8 w-8 shrink-0 bg-muted p-2 text-muted-foreground"
-                  aria-hidden
-                />
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-sm font-semibold">{t("AI Search is ready")}</h3>
-                  <p className="mt-0.5 max-w-prose text-xs text-muted-foreground">
-                    {t("Describe what you want to print. Try “a holder for my tools”.")}
-                  </p>
+              <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-5">
+                <div className="flex min-w-0 flex-1 basis-64 items-center gap-3">
+                  <Search
+                    className="size-8 shrink-0 rounded-md bg-muted p-2 text-muted-foreground"
+                    aria-hidden
+                  />
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-semibold">{t("AI Search is ready")}</h3>
+                    <p className="mt-0.5 max-w-prose text-xs text-muted-foreground">
+                      {t("Describe what you want to print. Try “a holder for my tools”.")}
+                    </p>
+                  </div>
                 </div>
-                <span className="bg-muted px-2 py-1 text-xs text-muted-foreground">
-                  {t("Ready")}
-                </span>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">{t("Ready")}</Badge>
                   <Button variant="outline" size="sm" onClick={() => setChanging(true)}>
                     {t("Change setup")}
                   </Button>
@@ -689,22 +713,7 @@ export function AiSearchSetup({
               </div>
               {!path ? (
                 <div className="divide-y divide-border rounded-md border border-border">
-                  {[
-                    {
-                      id: "local",
-                      title: t("On this machine"),
-                      help: t(
-                        "Your library text stays here. Local AI uses this machine’s CPU, memory and storage; GPU acceleration is not available.",
-                      ),
-                      icon: HardDrive,
-                    },
-                    {
-                      id: "server",
-                      title: t("Another server"),
-                      help: t("Connect an AI service. Library text will be sent to that server."),
-                      icon: Server,
-                    },
-                  ].map((option) => (
+                  {locations.map((option) => (
                     <div
                       key={option.id}
                       className="flex flex-col items-start gap-3 p-4 sm:flex-row sm:items-center sm:gap-4"
@@ -722,11 +731,11 @@ export function AiSearchSetup({
                         variant="outline"
                         className="min-h-11"
                         onClick={() => {
-                          setPath(option.id === "local" ? "local" : "server");
+                          setPath(option.id);
                           setMessage(null);
                         }}
                       >
-                        {t(option.id === "local" ? "Use this machine" : "Connect another server")}
+                        {option.action}
                       </Button>
                     </div>
                   ))}

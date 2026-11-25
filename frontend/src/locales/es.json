@@ -4102,7 +4102,6 @@
   "search.scopeLibrary": "Toda la biblioteca",
   "search.keywordHelpIn": "Busca nombres, etiquetas y nombres de archivo en {value1}.",
   "search.removeRecent": "Quitar {value1} de las búsquedas recientes",
-  "aiSearch.preparationDetails": "Detalles de la preparación",
   "aiSearch.searchLibrary": "Buscar en la biblioteca",
   "aiSearch.submitAi": "Buscar con IA",
   "aiSearch.turnOffAi": "Desactivar búsqueda con IA",

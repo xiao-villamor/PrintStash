@@ -8,6 +8,8 @@
 - Keep the Model details title and actions clear while scrolling past the image preview. Show G-code in the full Model page and give its toolbar and layer controls dedicated space.
 - Open the Library details preview without briefly showing the cover during loading.
 - Round sidebar highlights, workspace menu highlights, and image preview indicators. Soften preview arrows with a filled background. Match Library loading cards to the current card design.
+- Give dark Library cards a neutral hover border and a shadow that follows the rounded corners. Use the same tighter corners on Models, Multipart Models, and their loading cards.
+- Show all AI Search preparation steps with the current step highlighted. Put location choices in view when changing setup and align the Ready status with its actions.
 - Give the multi-plate tray its own row and keep the selected plate visible when switching views. Improve lighting on dark filament.
 - Align the model's Print actions and add space to attachment rows.
 

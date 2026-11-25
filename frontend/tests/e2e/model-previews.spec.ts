@@ -407,6 +407,31 @@ test.describe("Model preview browsing", () => {
     await expect(next).toHaveCSS("border-top-width", "0px", { timeout: 1000 });
   });
 
+  test("uses a neutral shadow on dark card hover", async ({ page }, testInfo) => {
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
+    const { card } = await library(page);
+    await collapseNavigationSidebar(page);
+
+    await card.locator("[data-model-preview]").hover();
+
+    await page.screenshot({ path: testInfo.outputPath("card-hover.png") });
+    const shadow = await card.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const reference = document.createElement("span");
+      reference.style.color = "var(--border-strong)";
+      element.append(reference);
+      const neutral = getComputedStyle(reference).color;
+      reference.remove();
+      return {
+        radius: style.borderRadius,
+        neutral: style.borderTopColor === neutral,
+        shadow: style.boxShadow,
+      };
+    });
+    expect(shadow).toMatchObject({ radius: "6px", neutral: true });
+    expect(shadow.shadow).toContain("0px 14px 28px -12px");
+  });
+
   test("keeps card arrows compact over the image", async ({ page }) => {
     const { card, next } = await library(page);
 
@@ -425,7 +450,7 @@ test.describe("Model preview browsing", () => {
 
     await expect(dialog.locator("img[data-preview-view]")).toHaveAttribute(
       "data-preview-view",
-      "orbit-1",
+      "orbit-0",
     );
   });
 

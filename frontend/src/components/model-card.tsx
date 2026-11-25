@@ -263,7 +263,7 @@ function ModelCardInner({
             data-selected={selected || undefined}
             data-inspected={inspected || undefined}
             data-dragging={dragging || undefined}
-            className={`${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} library-model-card group group/selection-card relative flex h-full flex-col min-w-0 bg-card border rounded-lg transition-[color,background-color,border-color,opacity,scale] duration-press ease-out active:scale-[0.99] motion-reduce:active:scale-100 overflow-hidden ${
+            className={`${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} library-model-card group group/selection-card relative flex h-full flex-col min-w-0 bg-card border transition-[color,background-color,border-color,opacity,scale] duration-press ease-out active:scale-[0.99] motion-reduce:active:scale-100 overflow-hidden ${
               draggable ? "cursor-grab active:cursor-grabbing" : ""
             } ${dragging ? "opacity-40" : ""} ${
               selected
