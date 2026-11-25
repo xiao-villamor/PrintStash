@@ -95,21 +95,21 @@ function Variant({
         className="max-w-3xl"
       >
         <div className="space-y-3">
-          <dl className="grid gap-3 border border-border bg-muted/30 p-4 text-sm sm:grid-cols-3">
+          <dl className="grid gap-3 rounded-lg border border-border bg-muted/30 p-4 text-sm sm:grid-cols-3">
             <div>
               <dt className="text-xs text-muted-foreground">{uiText("Profile")}</dt>
-              <dd>{profileName}</dd>
+              <dd className="font-medium">{profileName}</dd>
             </div>
             <div>
               <dt className="text-xs text-muted-foreground">{uiText("Variant")}</dt>
-              <dd>
+              <dd className="font-medium">
                 {index + 1}
                 {preset ? ` · ${preset}` : ""}
               </dd>
             </div>
             <div>
               <dt className="text-xs text-muted-foreground">{uiText("Slicer")}</dt>
-              <dd>
+              <dd className="font-medium">
                 {[source.slicer_name, source.slicer_version].filter(Boolean).join(" ") || "—"}
               </dd>
             </div>
@@ -169,7 +169,7 @@ function ProfileSettingsContent({
     .filter((key) => first[key] !== second[key])
     .sort();
   return (
-    <div className="mt-3 space-y-3">
+    <div className="space-y-4 px-4 pb-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <p className="max-w-prose text-xs text-muted-foreground">
           {uiText("profiles.integratedHelp")}
@@ -198,17 +198,17 @@ function ProfileSettingsContent({
         className="max-w-3xl"
       >
         <div className="space-y-4">
-          <dl className="grid gap-3 border border-border bg-muted/30 p-4 text-sm sm:grid-cols-3">
+          <dl className="grid gap-3 rounded-lg border border-border bg-muted/30 p-4 text-sm sm:grid-cols-3">
             <div>
               <dt className="text-xs text-muted-foreground">{uiText("Profile")}</dt>
-              <dd>{profile.name}</dd>
+              <dd className="font-medium">{profile.name}</dd>
             </div>
             {[variants[0], variants[1]].map((variant, index) => (
               <div key={variant?.key ?? index}>
                 <dt className="text-xs text-muted-foreground">
                   {uiText(index === 0 ? "Variant 1" : "Variant 2")}
                 </dt>
-                <dd>
+                <dd className="font-medium">
                   {[
                     variant?.settings.filament_settings_id ?? variant?.settings.printer_settings_id,
                     variant?.sources[0]?.slicer_name,
@@ -229,18 +229,20 @@ function ProfileSettingsContent({
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-left text-sm">
                 <thead>
-                  <tr className="border-b border-border">
-                    <th className="py-2 pr-4">{uiText("Setting")}</th>
-                    <th className="py-2 pr-4">{uiText("Variant 1")}</th>
-                    <th className="py-2">{uiText("Variant 2")}</th>
+                  <tr className="border-b border-border text-xs text-muted-foreground">
+                    <th className="py-2 pr-4 font-semibold">{uiText("Setting")}</th>
+                    <th className="py-2 pr-4 font-semibold">{uiText("Variant 1")}</th>
+                    <th className="py-2 font-semibold">{uiText("Variant 2")}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {differences.map((key) => (
                     <tr key={key} className="border-b border-border">
-                      <th className="break-all py-2 pr-4 font-mono text-xs font-normal">{key}</th>
-                      <td className="break-all py-2 pr-4">{first[key] ?? "—"}</td>
-                      <td className="break-all py-2">{second[key] ?? "—"}</td>
+                      <th className="break-all py-2.5 pr-4 font-mono text-xs font-medium text-muted-foreground">
+                        {key}
+                      </th>
+                      <td className="break-all py-2.5 pr-4">{first[key] ?? "—"}</td>
+                      <td className="break-all py-2.5">{second[key] ?? "—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -345,13 +347,13 @@ export function ProfileSettingsDetails({
   const [expanded, setExpanded] = useState(initiallyExpanded);
   return (
     <section
-      className="min-w-0"
+      className="min-w-0 rounded-lg border border-border"
       aria-label={uiText("profiles.settingsFor", { name: profile.name })}
     >
       <Button
         variant="ghost"
-        size="xs"
-        className="px-0 font-semibold"
+        size="sm"
+        className="w-full justify-between px-4 font-semibold"
         aria-label={uiText(
           expanded ? "profiles.closeProfileSettings" : "profiles.openProfileSettings",
         )}
