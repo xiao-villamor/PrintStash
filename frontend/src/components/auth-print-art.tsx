@@ -374,8 +374,8 @@ export function AuthPrintArt({ animated = true }: { animated?: boolean }) {
         <path d={plateGrid} vectorEffect="non-scaling-stroke" />
         <polygon points={plateOutline} vectorEffect="non-scaling-stroke" />
       </g>
-      <g ref={layersRef} stroke="var(--foreground)" />
-      <g stroke="var(--foreground)">
+      <g ref={layersRef} stroke="var(--auth-art-stroke)" />
+      <g stroke="var(--auth-art-stroke)">
         <path
           ref={travelRef}
           strokeWidth={0.5}

@@ -44,6 +44,21 @@ test.describe("authentication", () => {
       });
     }
 
+    test("the print panel uses a soft white background in dark mode", async ({ page }) => {
+      await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
+      await page.goto("/login");
+      const artwork = page.locator(".auth-split-art");
+      const outline = artwork.locator('path[fill-rule="evenodd"]').last().locator("..");
+      const toggle = page.getByRole("button", { name: "Toggle theme" });
+      await expect(artwork).toHaveCSS("background-color", "rgb(37, 44, 55)");
+      await toggle.click();
+      await expect(artwork).toHaveCSS("background-color", "rgb(237, 241, 247)");
+      await expect(outline).toHaveCSS("stroke", "rgb(105, 123, 146)");
+      await toggle.click();
+      await expect(artwork).toHaveCSS("background-color", "rgb(37, 44, 55)");
+      await expect(outline).toHaveCSS("stroke", "rgb(237, 241, 247)");
+    });
+
     test("the favicon follows the saved theme", async ({ page }) => {
       await page.emulateMedia({ colorScheme: "light" });
       await page.goto("/login");

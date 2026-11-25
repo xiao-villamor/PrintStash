@@ -728,9 +728,15 @@
   }
 
   .auth-split-art {
+    --auth-art-stroke: var(--foreground);
     @apply my-6 mr-6 grid place-items-center overflow-hidden rounded-xl border border-border p-6 xl:p-12;
     background: var(--plate);
     min-width: 0;
+  }
+
+  :root.dark .auth-split-art {
+    --auth-art-stroke: var(--outline);
+    background: var(--inverse-surface);
   }
 
   .auth-split-art > svg {
