@@ -4,7 +4,6 @@ import { FILTER_SELECT } from "@/lib/filter-input";
 import { LibraryStatusFilters } from "@/components/library-status-filters";
 import { CollectionHeaderTags } from "@/components/collection-header-tags";
 import "./library-header.css";
-import { LibraryCollectionGroup } from "@/components/library-collection-group";
 import { LibraryEmptyCollection } from "@/components/library-empty-collection";
 import { LibraryFindBar } from "@/components/library-find-bar";
 import { LibraryCollectionsRegion } from "@/components/library-collections-region";
@@ -1757,20 +1756,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   useLayoutEffect(() => {
     selectionOrder.current = sortedModels;
   }, [sortedModels]);
-  const groupedModels = useRef(new Map<number, ModelListItem[]>());
-  const recordGroupedModels = useCallback((id: number, models: ModelListItem[] | null) => {
-    if (models) groupedModels.current.set(id, models);
-    else groupedModels.current.delete(id);
-  }, []);
   const toggleSelect = useCallback(
     (id: number, range = false) => {
       // Capture this gesture once; React may replay the state updater.
       const sortedModels = Array.from(
-        new Map(
-          [...selectionOrder.current, ...Array.from(groupedModels.current.values()).flat()].map(
-            (model) => [model.id, model],
-          ),
-        ).values(),
+        new Map(selectionOrder.current.map((model) => [model.id, model])).values(),
       );
       const clicked = sortedModels.find((model) => model.id === id);
       const selection = clicked
@@ -2298,6 +2288,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     docView === "models" &&
     !searchQuery &&
     (visibleCollections.length > 0 || reservedCollections > 0);
+  const SubfolderScopeIcon = includeSubfolders ? Check : FolderTree;
   // Links belong to the displayed result even while another destination loads.
   const currentLibraryHref = snapshot?.entry.href ?? destinationHref;
   const inspectorScope = `${entry.session}:${entry.key}:${currentLibraryHref}`;
@@ -3262,9 +3253,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 aria-label={uiText("Include subfolders")}
                 disabled={loading}
                 onClick={() => setModelScope(includeSubfolders ? "here" : "all")}
-                className="h-8 aria-pressed:bg-accent aria-pressed:text-accent-foreground"
+                className="aria-pressed:bg-accent aria-pressed:text-accent-foreground aria-pressed:hover:bg-accent dark:hover:bg-surface-container-highest dark:aria-pressed:bg-surface-bright dark:aria-pressed:hover:bg-surface-bright"
               >
-                <FolderTree className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <SubfolderScopeIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 <span className="library-toolbar-label">{uiText("Include subfolders")}</span>
               </Button>
             )}
@@ -3332,42 +3323,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       {libraryMoreActions}
     </DropdownMenu>
   );
-
-  const childGroups =
-    displayedCollection && !includeSubfolders && libraryView === "all" && user
-      ? visibleCollections
-          .filter((collection) => collection.model_count > 0)
-          .map((collection) => (
-            <LibraryCollectionGroup
-              key={collection.id}
-              collection={collection}
-              userId={user.id}
-              href={collectionHref(collection.path, collection.id)}
-              sort={sortKey}
-              compact={compact}
-              scrollRef={startupContent}
-              onOpen={(child) => handleCollectionChange(child.path, child.id)}
-              onLoaded={recordGroupedModels}
-              renderModel={(model) => (
-                <ModelCard
-                  model={model}
-                  origin={snapshot?.entry}
-                  selectable={selectMode}
-                  selected={
-                    modelSelection(model, selectedIds, selectedCollectionRows.values()).kind !==
-                    "none"
-                  }
-                  onToggleSelect={auth.isAuthenticated ? toggleSelect : undefined}
-                  draggable={canUploadToVault && !selectMode}
-                  onEditTags={openTagEditor}
-                  onIntent={warmModel}
-                  onInspect={inspectModel}
-                  inspected={inspectorOpen && inspectorIntent?.id === model.id}
-                />
-              )}
-            />
-          ))
-      : null;
 
   return (
     <Localized>
@@ -4337,9 +4292,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       failed={modelQuery.isFetchNextPageError}
                       onClick={loadMore}
                     />
-                    {childGroups && childGroups.length > 0 && (
-                      <div className="mt-4 space-y-4">{childGroups}</div>
-                    )}
                   </div>
                 ) : (
                   <div
@@ -4453,9 +4405,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       failed={modelQuery.isFetchNextPageError}
                       onClick={loadMore}
                     />
-                    {childGroups && childGroups.length > 0 && (
-                      <div className="mt-4 space-y-4">{childGroups}</div>
-                    )}
                   </div>
                 )}
               </div>
