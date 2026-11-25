@@ -116,9 +116,7 @@ describe("Library model inspector", () => {
     });
     await userEvent.click(screen.getByRole("button", { name: "Edit description" }));
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Description" }), { key: "1" });
-    expect(
-      app.requestsWithMethod("POST").filter((request) => request.url.endsWith("/print-jobs")),
-    ).toEqual([]);
+    expect(app.requestsWithMethod("POST")).toEqual([]);
   });
 
   it("allows download with read-only access", async () => {

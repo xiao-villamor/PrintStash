@@ -4,7 +4,7 @@ import { collapseNavigationSidebar, gcodeFor, modelCard, uploadModel } from "./u
 import type { ModelPrintJobRead, ModelRead } from "../../src/types";
 
 test.describe("Library inline inspector", () => {
-  test("inspects toolpath layers in the Library details panel", async ({ page }) => {
+  test("keeps toolpath controls on the full Model page", async ({ page }) => {
     const name = `e2e-inspector-toolpath-${Date.now()}`;
     await uploadModel(page, name, {
       gcode: true,
@@ -26,11 +26,11 @@ test.describe("Library inline inspector", () => {
       await card.click();
       const drawer = page.locator("#model-drawer");
       await expect(drawer.getByRole("region", { name: "Preview", exact: true })).toBeVisible();
-      const preview = drawer.getByRole("region", { name: "Preview", exact: true });
-      await expect(preview.getByRole("tab", { name: "G-code", exact: true })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+      await expect(drawer.getByRole("tablist")).toHaveCount(0);
+      await expect(drawer.getByRole("complementary", { name: "Toolpath controls" })).toHaveCount(0);
+      await drawer.getByRole("link", { name: "Open page" }).click();
+      const preview = page.getByRole("region", { name: "Preview", exact: true });
+      await preview.getByRole("button", { name: "G-code", exact: true }).click();
       const panel = preview.getByRole("complementary", { name: "Toolpath controls" });
       await expect(panel.getByRole("slider")).toBeVisible();
       await panel.getByRole("button", { name: "Previous layer" }).click();
@@ -42,18 +42,22 @@ test.describe("Library inline inspector", () => {
       await expect(outerWall).toHaveAttribute("aria-pressed", "true");
       await page.screenshot({ path: test.info().outputPath("toolpath-layers.png") });
       await panel.getByRole("tab", { name: "View", exact: true }).click();
-      const camera = panel.getByRole("combobox", { name: "Camera view" });
-      await camera.selectOption("top");
-      await expect(camera).toHaveValue("top");
+      await preview.getByRole("button", { name: "Top", exact: true }).click();
+      await expect(preview.getByRole("button", { name: "Top", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
       await panel.getByRole("button", { name: "Travel", exact: true }).click();
       await expect(panel.getByRole("button", { name: "Travel", exact: true })).toHaveAttribute(
         "aria-pressed",
         "true",
       );
       await preview.getByRole("button", { name: "Fit to view" }).click();
-      await expect(camera).toHaveValue("isometric");
+      await expect(preview.getByRole("button", { name: "Isometric" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
       await expect(preview.locator("canvas")).toBeVisible();
-      expect(new URL(page.url()).pathname).toBe("/");
       await page.screenshot({ path: test.info().outputPath("toolpath-view.png") });
     } finally {
       expect((await page.request.delete(`/api/v1/models/${modelId}`)).status()).toBe(204);

@@ -25,8 +25,6 @@ import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { MarkdownView } from "@/components/markdown-view";
 import { TabBar } from "@/components/ui/tabs";
-import { GcodePreview } from "@/components/model-detail/gcode-preview";
-import { getBedSize, useToolpathSources } from "@/lib/toolpath-preview";
 import { SendToButtons } from "@/components/model-detail/send-to-buttons";
 import { InspectorPreviewResize } from "./inspector-preview-resize";
 import {
@@ -42,7 +40,7 @@ import type { FileRead, MetadataRead, ModelRead } from "@/types";
 const STLViewer = lazy(() =>
   import("@/components/stl-viewer").then((m) => ({ default: m.STLViewer })),
 );
-type PreviewMode = "model" | "gcode" | "images";
+type PreviewMode = "model" | "images";
 
 const meshTypes = new Set(["stl", "3mf", "obj", "step", "glb", "gltf", "ply", "3dm", "fbx"]);
 
@@ -151,7 +149,6 @@ export function InspectorContent({
     setDescriptionReviewing(false);
   }
   const [preview, setPreview] = useState<PreviewMode | null>(null);
-  const [gcodeSourceId, setGcodeSourceId] = useState<number | null>(null);
   const [sourceId, setSourceId] = useState<number | null>(null);
   const [fileMenu, setFileMenu] = useState<number | null>(null);
   const viewer = useRef<HTMLDivElement>(null);
@@ -163,22 +160,10 @@ export function InspectorContent({
   const hasImages = Boolean(
     previews.large_cover_url || model.thumbnail_url || publishedViews(previews).length,
   );
-  const { sources: toolpathFiles, availability: toolpathAvailability } = useToolpathSources(
-    files,
-    active,
-  );
-  const tabs: { key: PreviewMode; label: string }[] = [];
-  if (sourceFile) tabs.push({ key: "model", label: uiText("3D model") });
-  if (toolpathFiles.length) tabs.push({ key: "gcode", label: uiText("G-code") });
-  if (hasImages) tabs.push({ key: "images", label: uiText("Images") });
-  const defaultPreview =
-    sourceFile && hasImages && coverImageKind(previews, "full") === "photo"
-      ? "images"
-      : (tabs[0]?.key ?? "images");
-  const mode = preview && tabs.some((tab) => tab.key === preview) ? preview : defaultPreview;
-  const selectedTab = tabs.find((tab) => tab.key === mode);
-  const showTabs = tabs.length > 1 || mode === "gcode";
-  const checkingToolpath = !sourceFile && preview === null && toolpathAvailability === "checking";
+  const imagesFirst = coverImageKind(previews, "full") === "photo";
+  const showImages =
+    !sourceFile || (hasImages && (preview === "images" || (!preview && imagesFirst)));
+  const showTabs = Boolean(sourceFile && hasImages);
   const viewerLoading = (
     <span role="status" className="flex items-center justify-center">
       <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden />
@@ -387,8 +372,11 @@ export function InspectorContent({
         >
           {showTabs && (
             <TabBar
-              tabs={tabs}
-              active={mode}
+              tabs={[
+                { key: "model", label: uiText("3D model") },
+                { key: "images", label: uiText("Images") },
+              ]}
+              active={showImages ? "images" : "model"}
               onChange={setPreview}
               showIndicator={false}
               className="absolute left-3 top-3 z-10 w-fit max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-popover p-0.5"
@@ -397,29 +385,12 @@ export function InspectorContent({
             />
           )}
           <div
-            className={
-              mode === "gcode"
-                ? "absolute inset-0 overflow-y-auto"
-                : "absolute inset-0 flex items-center justify-center"
-            }
+            className="absolute inset-0 flex items-center justify-center"
             role={showTabs ? "tabpanel" : undefined}
-            aria-label={showTabs ? selectedTab?.label : undefined}
+            aria-label={showTabs ? uiText(showImages ? "Images" : "3D model") : undefined}
           >
             <Suspense fallback={viewerLoading}>
-              {checkingToolpath ? (
-                viewerLoading
-              ) : mode === "gcode" ? (
-                <GcodePreview
-                  files={toolpathFiles}
-                  selectedFileId={gcodeSourceId ?? file?.id}
-                  onSelectFile={(id) => {
-                    setGcodeSourceId(id);
-                    if (revisions.some((revision) => revision.id === id)) setSelectedId(id);
-                  }}
-                  bedSizeFor={(source) => getBedSize(source.metadata?.printer_model)}
-                  viewerProps={{ screenshotName: model.name }}
-                />
-              ) : mode === "model" && sourceFile ? (
+              {!showImages && sourceFile ? (
                 <STLViewer
                   url={getAssetUrl(`/api/v1/files/${sourceFile.id}/stl`)}
                   modelId={model.id}
@@ -452,10 +423,7 @@ export function InspectorContent({
                 value={file.id}
                 aria-label={uiText("Choose G-code revision")}
                 title={revisionName(file)}
-                onChange={(event) => {
-                  setGcodeSourceId(null);
-                  setSelectedId(Number(event.target.value));
-                }}
+                onChange={(event) => setSelectedId(Number(event.target.value))}
               >
                 {revisions.map((item) => (
                   <option key={item.id} value={item.id}>

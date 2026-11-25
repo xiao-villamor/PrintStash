@@ -75,7 +75,7 @@ test.describe("Library inline inspector", () => {
     const modes = preview.getByRole("tablist");
     const images = modes.getByRole("tab", { name: "Images" });
     await images.click();
-    await expect(preview.getByRole("tab", { name: "G-code", exact: true })).toBeVisible();
+    await expect(preview.getByRole("tab", { name: "G-code", exact: true })).toHaveCount(0);
     await expect(preview.getByText("Cover", { exact: true })).toHaveCount(0);
 
     const headerBounds = (await header.boundingBox())!;
