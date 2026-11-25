@@ -528,6 +528,9 @@ test.describe("motion and layering", () => {
       expect(late.cards).toEqual(early.cards);
       await pane.evaluate((element) => element.getAnimations()[0].finish());
       await expect(toggle).toHaveAttribute("aria-expanded", String(direction === "opening"));
+      const workspace = page.getByRole("main");
+      await expect(pane).toHaveCSS("width", direction === "opening" ? /^[1-9]\d+px$/ : "0px");
+      await expect(workspace).toHaveJSProperty("scrollTop", 0);
     });
   }
 

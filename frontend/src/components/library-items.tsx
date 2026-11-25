@@ -320,15 +320,17 @@ export function LibraryItems<T>({
               focused!,
             ),
           };
-        const bounds = scroll.getBoundingClientRect();
-        const anchor = Array.from(node.querySelectorAll<HTMLElement>("[data-library-key]")).find(
-          (candidate) => candidate.getBoundingClientRect().bottom > bounds.top,
-        );
-        if (resized && !restore.current && anchor?.dataset.libraryKey)
-          restore.current = {
-            key: anchor.dataset.libraryKey,
-            offset: anchor.getBoundingClientRect().top - bounds.top,
-          };
+        // Several collection grids can share this scroller. Only the grid at
+        // the reading edge can restore an anchor, and the top stays at zero.
+        if (resized && !restore.current && scroll.scrollTop > 0) {
+          const top = scroll.getBoundingClientRect().top;
+          for (const card of node.querySelectorAll<HTMLElement>("[data-library-key]")) {
+            const bounds = card.getBoundingClientRect();
+            if (bounds.top > top || bounds.bottom <= top) continue;
+            restore.current = { key: card.dataset.libraryKey!, offset: bounds.top - top };
+            break;
+          }
+        }
         return {
           columns: nextColumns,
           margin,

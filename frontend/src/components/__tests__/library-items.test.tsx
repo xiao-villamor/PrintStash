@@ -128,6 +128,27 @@ describe("LibraryItems", () => {
     expect(flights.size).toBe(0);
   });
 
+  it("keeps the viewport at the top when a lower grid changes width", async () => {
+    render(<Grid />);
+    const card = screen.getByText("Card 0").closest("[data-library-key]")!;
+    const scroller = grid().closest("[data-library-renderer]")!.parentElement!;
+    vi.spyOn(card, "getBoundingClientRect").mockImplementation(
+      () =>
+        new DOMRect(
+          0,
+          grid().style.gridTemplateColumns === "repeat(3, 322px)" ? 200 : 360,
+          300,
+          200,
+        ),
+    );
+    width = 1250;
+    act(() => {
+      window.dispatchEvent(new Event(PANE_SETTLED_EVENT));
+    });
+    await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    expect(scroller.scrollTop).toBe(0);
+  });
+
   it("carries a card that wraps a row in behind its new neighbour, without crossing the grid", () => {
     // Cards sit on the grid's current tracks (16 px gap), 200 px tall.
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(

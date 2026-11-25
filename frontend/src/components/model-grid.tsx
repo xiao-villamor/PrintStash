@@ -138,7 +138,7 @@ import { CollectionReadme } from "@/components/collection-readme";
 import { useCollectionReadmeRenderer } from "@/components/use-collection-readme-renderer";
 import { MultipartModelTagsDialog } from "@/components/multipart-model-tags-dialog";
 import { MultipartModelCard } from "@/components/multipart-model-card";
-import { useCollectionsPaneOpen } from "@/lib/collections-pane-context";
+import { useCollectionsPaneOpen, useHasCollectionsPane } from "@/lib/collections-pane-context";
 import { subscribeUploadRequests } from "@/lib/upload-requests";
 import { LibraryCollectionsPane, LibraryBreadcrumbs } from "@/components/collections-pane";
 import { FilterSidebar } from "@/components/filter-sidebar";
@@ -549,7 +549,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const { locale, t } = useI18n();
   const ui = useCallback((value: string) => translateUiText(locale, value), [locale]);
   const router = useRouter();
-  const paneOpen = useCollectionsPaneOpen();
+  const hasCollectionsPane = useHasCollectionsPane();
   const { savedViewsHost, setSavedViewsAvailable } = useNavigationShell();
   const searchParams = useSearchParams();
   const auth = useRequireAuth();
@@ -3510,7 +3510,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         {/* Stitch layout: filter sidebar + main content */}
         <LibraryCollectionsPane>
           <FilterSidebar
-            collectionsOnly={paneOpen !== null}
+            collectionsOnly={hasCollectionsPane}
             filtersOpen={false}
             outlinerFilters={baseFilters}
             tags={tags}
@@ -3780,7 +3780,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </div>
               </div>
               {newCollectionButton}
-              {paneOpen === null && (
+              {!hasCollectionsPane && (
                 <Button
                   onClick={() => {
                     setDropPreload(null);
@@ -4321,7 +4321,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     />
                     <LoadMore
                       paused={reading.status === "restoring" || !browseReady}
-                      layoutKey={`${viewMode}:${paneOpen ?? true}`}
+                      layout={viewMode}
                       hasMore={snapshot?.moreFolders ?? false}
                       loading={fetchingFolders || currentRefresh !== null}
                       failed={folderPages.isFetchNextPageError}
@@ -4332,7 +4332,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     />
                     <LoadMore
                       paused={reading.status === "restoring" || !browseReady}
-                      layoutKey={`${viewMode}:${paneOpen ?? true}`}
+                      layout={viewMode}
                       hasMore={hasMore && !refreshRequired}
                       loading={loadingMore}
                       failed={modelQuery.isFetchNextPageError}
@@ -4386,7 +4386,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       />
                       <LoadMore
                         paused={reading.status === "restoring" || !browseReady}
-                        layoutKey={`${viewMode}:${paneOpen ?? true}`}
+                        layout={viewMode}
                         hasMore={snapshot?.moreFolders ?? false}
                         loading={fetchingFolders || currentRefresh !== null}
                         failed={folderPages.isFetchNextPageError}
@@ -4449,7 +4449,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     </div>
                     <LoadMore
                       paused={reading.status === "restoring" || !browseReady}
-                      layoutKey={`${viewMode}:${paneOpen ?? true}`}
+                      layout={viewMode}
                       hasMore={hasMore && !refreshRequired}
                       loading={loadingMore}
                       failed={modelQuery.isFetchNextPageError}
@@ -4865,19 +4865,21 @@ function LoadMore({
   loading,
   failed = false,
   paused = false,
-  layoutKey,
+  layout,
   onClick,
   folders = false,
 }: {
   hasMore: boolean;
   paused?: boolean;
-  layoutKey: string;
+  layout: ViewMode;
   loading: boolean;
   failed?: boolean;
   onClick: () => void;
   folders?: boolean;
 }) {
   useUiLocale();
+  const paneOpen = useCollectionsPaneOpen();
+  const layoutKey = `${layout}:${paneOpen ?? true}`;
   const sentinel = useRef<HTMLDivElement>(null);
   const load = useRef(onClick);
   useLayoutEffect(() => {

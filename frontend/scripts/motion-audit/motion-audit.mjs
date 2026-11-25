@@ -226,6 +226,7 @@ function installSampler(tracked) {
       overflow,
       sidebarWidth: sidebar()?.offsetWidth,
       workspaceLeft: main()?.getBoundingClientRect().left,
+      workspaceScroll: main()?.scrollTop,
     });
     requestAnimationFrame(sample);
   };
@@ -532,6 +533,23 @@ function measureSidebarTravel(frames, opening, add) {
     add("slow-sidebar", last.t, `${travelMs} ms to settle the pane width`);
   const movingFrames = frames.slice(first, frames.indexOf(last));
   const anchor = frames[first - 1];
+  const firstTravel = Math.abs(frames[first].workspaceLeft - anchor.workspaceLeft);
+  if (
+    firstTravel > THRESHOLDS.abruptMinPx &&
+    firstTravel > Math.abs(to - from) * THRESHOLDS.abruptFraction
+  )
+    add(
+      "workspace-snaps",
+      frames[first].t,
+      `workspace moves ${Math.round(firstTravel)} px in its first frame`,
+    );
+  const final = frames.at(-1);
+  if (anchor.workspaceScroll === 0 && final.workspaceScroll > THRESHOLDS.stillPx)
+    add(
+      "workspace-scroll-jump",
+      final.t,
+      `workspace scroll changes from 0 to ${final.workspaceScroll} px`,
+    );
   for (const frame of frames.slice(first, frames.indexOf(last) + 1)) {
     const panelTravel = frame.sidebarWidth - anchor.sidebarWidth;
     const workspaceTravel = frame.workspaceLeft - anchor.workspaceLeft;
