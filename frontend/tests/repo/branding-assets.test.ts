@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { brandMarkFold, brandMarkOutline } from "../../src/components/brand-geometry";
 
 const root = resolve(import.meta.dirname, "../..");
+const readme = readFileSync(resolve(root, "../README.md"), "utf8");
 
 describe("favicons", () => {
   it.each([
@@ -63,8 +64,6 @@ describe("Docker icon", () => {
 });
 
 describe("README logo", () => {
-  const readme = readFileSync(resolve(root, "../README.md"), "utf8");
-
   it("displays the project name once at the top", () => {
     expect(readme).toContain('alt="PrintStash logo"');
     expect(readme).not.toMatch(/^# PrintStash\s*$/m);
@@ -112,5 +111,33 @@ describe("README logo", () => {
       expect(durationMs).toBeLessThanOrEqual(300);
       expect(asset.includes(Buffer.from("NETSCAPE2.0"))).toBe(false);
     });
+  });
+});
+
+describe("README badges", () => {
+  const badges = Array.from(
+    readme.matchAll(/\[!\[[^\n]+\]\((https:\/\/img\.shields\.io\/[^)\n]+)\)\]/g),
+    ([, url]) => new URL(url),
+  );
+
+  it("uses the same rounded style across the badge row", () => {
+    expect(badges).toHaveLength(6);
+    expect(new Set(badges.map((badge) => badge.searchParams.get("style")))).toEqual(
+      new Set(["flat"]),
+    );
+  });
+
+  it("reads the latest release from GitHub", () => {
+    expect(badges.map((badge) => badge.pathname)).toContain(
+      "/github/v/release/xiao-villamor/PrintStash",
+    );
+  });
+
+  it("tracks the CI workflow on main", () => {
+    const ci = badges.find((badge) =>
+      badge.pathname.startsWith("/github/actions/workflow/status/"),
+    );
+    expect(ci?.pathname).toBe("/github/actions/workflow/status/xiao-villamor/PrintStash/ci.yml");
+    expect(ci?.searchParams.get("branch")).toBe("main");
   });
 });

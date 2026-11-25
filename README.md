@@ -5,12 +5,12 @@
 **Your 3D printing workflow in one place.**<br />
 A self-hosted library for 3D models, G-code revisions, slicer settings, and print history.
 
-[![Release](https://img.shields.io/github/v/release/xiao-villamor/PrintStash?style=flat-square&color=22c55e)](https://github.com/xiao-villamor/PrintStash/releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/xiao-villamor/PrintStash/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/xiao-villamor/PrintStash/actions/workflows/ci.yml)
-[![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ED?logo=docker&logoColor=white&style=flat-square)](https://github.com/xiao-villamor/PrintStash/pkgs/container/printstash)
-[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](./LICENSE)
-[![Status: core stable](https://img.shields.io/badge/status-core%20stable-22c55e?style=flat-square)](#project-status--roadmap)
-[![Integrations: beta](https://img.shields.io/badge/integrations-beta-f59e0b?style=flat-square)](#printer-compatibility)
+[![Release](https://img.shields.io/github/v/release/xiao-villamor/PrintStash?style=flat&label=Release&labelColor=252c36&color=414b5b)](https://github.com/xiao-villamor/PrintStash/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/xiao-villamor/PrintStash/ci.yml?branch=main&style=flat&label=CI&labelColor=252c36)](https://github.com/xiao-villamor/PrintStash/actions/workflows/ci.yml)
+[![Docker on GHCR](https://img.shields.io/badge/Docker-GHCR-414b5b?style=flat&labelColor=252c36&logo=docker&logoColor=white)](https://github.com/xiao-villamor/PrintStash/pkgs/container/printstash)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-414b5b?style=flat&labelColor=252c36)](./LICENSE)
+[![Core: stable](https://img.shields.io/badge/Core-Stable-225b48?style=flat&labelColor=252c36)](#project-status--roadmap)
+[![Integrations: beta](https://img.shields.io/badge/Integrations-Beta-714b27?style=flat&labelColor=252c36)](#printer-compatibility)
 
 [**Get Started**](#quick-start) · [**Documentation**](https://www.printstash.org/en/docs/) · [**Releases**](https://github.com/xiao-villamor/PrintStash/releases) · [**Contributing**](#contributing)
 
