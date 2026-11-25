@@ -447,6 +447,11 @@ The decorative sign-in build-plate print is the duration exception. It plays
 once over 18.95 seconds, is non-interactive, and shows the filled layers,
 top infill, and parked nozzle under
 reduced motion.
+The Printers routing graph is the second exception: while a printer is printing, the
+edges leading to it flow (`stroke-dashoffset`, 0.9 s linear loop) and its station
+pulses a success-colored outline (`opacity`, 2.4 s loop). Both are non-interactive,
+run only for printing printers, and under reduced motion the edge turns solid and the
+outline stays static.
 
 ### Rules
 
