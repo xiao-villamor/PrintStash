@@ -70,6 +70,10 @@ describe("README logo", () => {
     expect(readme).not.toMatch(/^# PrintStash\s*$/m);
   });
 
+  it("renders the slogan as README text", () => {
+    expect(readme).toContain("**Your 3D printing workflow in one place.**");
+  });
+
   describe.each(["light", "dark"])("in %s mode", (theme) => {
     const file = `screenshots/printstash-logo-${theme}.gif`;
     const asset = readFileSync(resolve(root, "..", file));

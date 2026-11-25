@@ -2,8 +2,8 @@
 
 <a href="screenshots/printstash-logo-dark.gif#gh-dark-mode-only"><img src="screenshots/printstash-logo-dark.gif" alt="PrintStash logo" height="160" /></a><a href="screenshots/printstash-logo-light.gif#gh-light-mode-only"><img src="screenshots/printstash-logo-light.gif" alt="PrintStash logo" height="160" /></a>
 
-Self-hosted library for 3D models, G-code revisions, and print history.<br />
-Keep each model's files, slicer settings, and print results together.
+**Your 3D printing workflow in one place.**<br />
+A self-hosted library for 3D models, G-code revisions, slicer settings, and print history.
 
 [![Release](https://img.shields.io/github/v/release/xiao-villamor/PrintStash?style=flat-square&color=22c55e)](https://github.com/xiao-villamor/PrintStash/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/xiao-villamor/PrintStash/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/xiao-villamor/PrintStash/actions/workflows/ci.yml)
