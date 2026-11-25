@@ -1588,6 +1588,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [findOpen, setFindOpen] = useState(false);
   const findHighlight = useRef<HTMLElement | null>(null);
   const findFrame = useRef(0);
+  const findOpener = useRef<HTMLElement | null>(null);
   // Bring one find match into view and ring it. The list is virtual, so a match
   // far down is first scrolled into existence and then located.
   const revealFound = useCallback((id: number | null) => {
@@ -1626,7 +1627,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       )
         return;
       event.preventDefault();
-      setFindOpen(true);
+      setFindOpen((open) => {
+        // Remember where focus was so closing the bar gives it back there,
+        // rather than ringing the whole collection.
+        if (!open)
+          findOpener.current =
+            document.activeElement instanceof HTMLElement &&
+            document.activeElement !== document.body
+              ? document.activeElement
+              : null;
+        return true;
+      });
     }
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
@@ -3551,7 +3562,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             onReveal={revealFound}
             onClose={() => {
               setFindOpen(false);
-              startupContent.current?.focus({ preventScroll: true });
+              const opener = findOpener.current;
+              findOpener.current = null;
+              if (opener?.isConnected && opener !== startupContent.current)
+                opener.focus({ preventScroll: true });
             }}
           />
         )}
