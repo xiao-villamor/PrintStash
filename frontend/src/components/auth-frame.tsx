@@ -41,12 +41,7 @@ export function AuthFrame({
             <ThemeToggle />
           </div>
         </header>
-        <main
-          className={cn(
-            "grid flex-1 place-items-center px-4 py-6 sm:px-6",
-            setup && "content-start sm:pt-12",
-          )}
-        >
+        <main className="grid flex-1 place-items-center px-4 py-6 sm:px-6">
           <Card
             role={label ? "region" : undefined}
             aria-label={label}

@@ -1,10 +1,18 @@
 /* A fresh installation reaches its first Models using only browser controls. */
 import { mkdir, writeFile } from "node:fs/promises";
-import { test, expect } from "@playwright/test";
+import { test, expect, type Locator } from "@playwright/test";
 import { brandMarkOutline } from "../../../src/components/brand-geometry";
-import { gcodeFor } from "../util";
+import { collapseNavigationSidebar, gcodeFor } from "../util";
 
 const loseResponse = process.env.PLAYWRIGHT_ONBOARDING_LOST_RESPONSE === "1";
+
+async function expectCenteredSetupCard(card: Locator) {
+  const frame = (await card.boundingBox())!;
+  const column = (await card.locator("..").boundingBox())!;
+  expect(frame.x + frame.width / 2).toBeCloseTo(column.x + column.width / 2, 0);
+  expect(frame.y + frame.height / 2).toBeCloseTo(column.y + column.height / 2, 0);
+  await expect(card).toBeInViewport({ ratio: 1 });
+}
 
 test.describe("Browser onboarding", () => {
   test("keeps the localized setup steps visible on desktop", async ({ page }, testInfo) => {
@@ -25,7 +33,7 @@ test.describe("Browser onboarding", () => {
 
     await expect(progress.getByRole("listitem")).toHaveCount(3);
     await expect(progress.locator('[aria-current="step"]')).toHaveText(/Cuenta/);
-    const account = (await frame.boundingBox())!;
+    await expectCenteredSetupCard(frame);
     const passwordBounds = (await password.boundingBox())!;
     const confirmBounds = (await confirmation.boundingBox())!;
     const nextBounds = (await next.boundingBox())!;
@@ -40,7 +48,7 @@ test.describe("Browser onboarding", () => {
     await confirmation.press("Enter");
     await expect(progress.locator('[aria-current="step"]')).toHaveText(/Almacenamiento/);
     await expect(page.getByRole("heading", { name: "Tus archivos", exact: true })).toBeFocused();
-    expect((await frame.boundingBox())!.y).toBe(account.y);
+    await expectCenteredSetupCard(frame);
     await page.getByRole("button", { name: "Cambiar tema" }).click();
     await expect(page.locator("html")).not.toHaveClass(/dark/);
     await expect(mark).toHaveCSS("fill", "rgb(20, 25, 35)");
@@ -65,10 +73,12 @@ test.describe("Browser onboarding", () => {
           localStorage.setItem("printstash.theme", "dark");
       });
       await page.goto("/setup");
+      const frame = page.getByRole("region", { name: "Welcome to PrintStash" });
       await page.getByLabel("Username").fill("first-owner");
       await expect(
         page.getByRole("list", { name: "Setup progress" }).locator('[aria-current="step"]'),
       ).toHaveText(/Account/);
+      await expectCenteredSetupCard(frame);
       await page.screenshot({ path: testInfo.outputPath("account-desktop.png"), fullPage: true });
       await page.getByLabel("Password", { exact: true }).fill("BrowserPassword123");
       await page.getByRole("button", { name: "Show Password", exact: true }).click();
@@ -82,11 +92,13 @@ test.describe("Browser onboarding", () => {
       await expect(page.getByRole("textbox", { name: "Your files", exact: true })).toBeVisible();
       await expect(page.getByLabel("Previews", { exact: true })).toBeVisible();
       await expect(page.getByLabel("Root", { exact: true })).toHaveCount(0);
+      await expectCenteredSetupCard(frame);
       await page.screenshot({ path: testInfo.outputPath("storage-desktop.png"), fullPage: true });
       await page.getByRole("button", { name: "Continue", exact: true }).press("Enter");
       await expect(
         page.getByRole("heading", { name: "Review before creating your account" }),
       ).toBeVisible();
+      await expectCenteredSetupCard(frame);
       await page.screenshot({ path: testInfo.outputPath("review-desktop.png"), fullPage: true });
       let accountRequests = 0;
       if (loseResponse) {
@@ -121,6 +133,11 @@ test.describe("Browser onboarding", () => {
       }
       await expect(page).toHaveURL(/\/getting-started$/);
       await expect(page.getByRole("button", { name: "Upload my first files" })).toBeVisible();
+      await collapseNavigationSidebar(page);
+      await page.screenshot({
+        path: testInfo.outputPath("getting-started-desktop.png"),
+        fullPage: true,
+      });
       await page.getByRole("link", { name: "Customize previews" }).click();
       await expect(page).toHaveURL(/\/setup-appearance$/);
       await expect(page.getByRole("heading", { name: "Customize previews" })).toBeVisible();
@@ -128,6 +145,25 @@ test.describe("Browser onboarding", () => {
         page.getByRole("checkbox", { name: "Add the PrintStash sample collection" }),
       ).not.toBeChecked();
       await expect(page.getByRole("list", { name: "Setup progress" })).toHaveCount(0);
+      const previews = page.locator("[data-preview-theme] img");
+      await expect
+        .poll(() =>
+          previews.evaluateAll(
+            (images) =>
+              images.filter(
+                (image) =>
+                  image instanceof HTMLImageElement &&
+                  image.complete &&
+                  image.naturalWidth > 0 &&
+                  getComputedStyle(image).opacity === "1",
+              ).length,
+          ),
+        )
+        .toBe(2);
+      await page.screenshot({
+        path: testInfo.outputPath("preview-appearance-desktop.png"),
+        fullPage: true,
+      });
       const grid = page.getByRole("switch", { name: "Floor grid" });
       const wasChecked = await grid.getAttribute("aria-checked");
       await grid.click();
