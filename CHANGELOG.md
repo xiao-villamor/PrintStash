@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Bambu LAN connects on Python 3.14 with bundled Bambu CA certificates that lack the Key Usage extension.
+
 - PostgreSQL library browsing works when none of the requested Models have an automatic thumbnail.
 
 - “Preparing previews” completes after a successful rebuild even when older library failures remain, and gives a specific reason when new preview work fails.
