@@ -446,6 +446,10 @@ describe("ModelBrowser", () => {
       expect(await screen.findByText("This collection is empty")).toBeVisible();
       expect(screen.queryByText("Try clearing some filters.")).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Clear all filters" })).not.toBeInTheDocument();
+      // Importing from a URL or connecting a NAS add to the library, not to this collection.
+      expect(screen.queryByRole("link", { name: "Import from URL" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Connect folder or NAS" })).not.toBeInTheDocument();
+      expect(screen.getByText("Or drop files anywhere on this page.")).toBeVisible();
       await user.click(screen.getByRole("button", { name: "Upload files" }));
       const dialog = await screen.findByRole("dialog", { name: "Upload model" });
       await waitFor(() =>

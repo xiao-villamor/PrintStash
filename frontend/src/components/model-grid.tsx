@@ -5,6 +5,7 @@ import { LibraryStatusFilters } from "@/components/library-status-filters";
 import { CollectionHeaderTags } from "@/components/collection-header-tags";
 import "./library-header.css";
 import { LibraryCollectionGroup } from "@/components/library-collection-group";
+import { LibraryEmptyCollection } from "@/components/library-empty-collection";
 import { LibraryFindBar } from "@/components/library-find-bar";
 import { LibraryCollectionsRegion } from "@/components/library-collections-region";
 
@@ -4159,6 +4160,15 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   visibleMultipartModels.length === 0 &&
                   visibleCollections.length === 0 &&
                   !hasMore ? (
+                  selectedCollection && canUploadHere && !emptyFavorites && !hasActiveFilters ? (
+                    <LibraryEmptyCollection
+                      disabled={!canUploadToVault}
+                      onUpload={() => {
+                        setDropPreload({ files: [], mode: "files" });
+                        setUploadOpen(true);
+                      }}
+                    />
+                  ) : (
                   <EmptyState
                     title={uiText(
                       emptyFavorites
@@ -4234,6 +4244,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     }
                     className="flex-1 py-20"
                   />
+                  )
                 ) : viewMode === "grid" ? (
                   <div
                     // One grid across folders: a Model shown in both (subfolders

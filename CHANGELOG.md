@@ -8,6 +8,8 @@
 
 ### Changed
 
+- An empty collection now shows an illustration, one Upload files action and a drop hint, instead of also offering Import from URL and Connect folder or NAS, which add to the library rather than to that collection.
+
 - Printers: each printer card now has a right-click menu (or Shift+F10) with Open page, Edit connection, Set model and Remove printer, replacing the card footer and the Manage printers tab. The fleet summary sits under the tabs, jobs that are printing animate on the routing graph, the Profiles page, slicer configurations and their dialogs follow the new surface style, and the printer detail page shows the printer photo and its status in the header, uses status pills in Files, Jobs and Diagnostics, and groups Settings into section cards with a section list, switches and a sticky save bar. The dark theme uses a softer destructive red.
 
 - Library cards are 280 px wide and show the revision status as one badge beside the revision, with time, weight and layer height on one line. The model panel shows the same badge in its header, labelled key figures for the recommended revision, and the collection, creation date and source link under the description.
