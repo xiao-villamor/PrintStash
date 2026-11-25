@@ -1211,7 +1211,7 @@ export function SendToButtons({
                             >
                               <span
                                 aria-hidden
-                                className={`size-2 shrink-0 rounded-full ${printer.status === "idle" || printer.status === "ready" ? "bg-success" : "bg-muted-foreground"}`}
+                                className={`size-2 shrink-0 rounded-full ${printer.status === "ready" ? "bg-success" : "bg-muted-foreground"}`}
                               />
                               <span className="min-w-0 flex-1">
                                 <span className="block wrap-anywhere text-sm font-medium">

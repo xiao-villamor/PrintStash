@@ -24,6 +24,8 @@ function renderRevision(detail: ModelRead | undefined = model, options: RenderAp
       model={aModelListItem()}
       detail={detail}
       admitted
+      status={null}
+      statusLabel={null}
       dimensions="166 × 166 × 1 mm"
     >
       <span>30m</span>
@@ -144,7 +146,13 @@ describe("ModelCardRevision", () => {
   });
   it("takes its final height at once when the list row has no G-code", () => {
     renderApp(
-      <ModelCardRevision model={aModelListItem()} admitted dimensions={null}>
+      <ModelCardRevision
+        model={aModelListItem()}
+        admitted
+        status={null}
+        statusLabel={null}
+        dimensions={null}
+      >
         <span>30m</span>
       </ModelCardRevision>,
     );
@@ -157,6 +165,8 @@ describe("ModelCardRevision", () => {
       <ModelCardRevision
         model={aModelListItem({ gcode_file_count: 1 })}
         admitted={false}
+        status={null}
+        statusLabel={null}
         dimensions={null}
       >
         <span>30m</span>
