@@ -1,4 +1,4 @@
-/** The Library grid reflows with the Collections pane as one motion, keeping card identity. */
+/** Library grid resizing, card identity, and right-inspector motion. */
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -100,47 +100,32 @@ describe("LibraryItems", () => {
   it("lays native cards out in one grid, so a column change keeps each card element", () => {
     render(<Grid />);
     expect(document.querySelectorAll(".library-virtual-row")).toHaveLength(1);
-    expect(grid().style.gridTemplateColumns).toBe("repeat(4, 238px)");
+    expect(grid().style.gridTemplateColumns).toBe("repeat(3, 322px)");
     const card = screen.getByText("Card 5").closest("[data-library-key]");
 
     width = 1250;
-    document.documentElement.dataset.paneMoving = "";
     act(() => {
-      window.dispatchEvent(
-        new PaneMovingEvent({
-          opening: false,
-          contentDelta: 250,
-          durationMs: 300,
-          progress: [0, 0.5, 1],
-        }),
-      );
+      window.dispatchEvent(new Event(PANE_SETTLED_EVENT));
     });
 
     expect(screen.getByText("Card 5").closest("[data-library-key]")).toBe(card);
   });
 
-  it("switches to the resting columns when the pane starts moving, not when it rests", () => {
+  it("fits the new Collections width without animating the cards", () => {
     render(<Grid />);
     document.documentElement.dataset.paneMoving = "";
-    act(() => {
-      window.dispatchEvent(
-        new PaneMovingEvent({
-          opening: false,
-          contentDelta: 250,
-          durationMs: 300,
-          progress: [0, 0.5, 1],
-        }),
-      );
-    });
-    // The content is still 1000 px wide; the grid already holds 1250 px of tracks.
-    expect(grid().style.gridTemplateColumns).toBe("repeat(5, 237px)");
-
     width = 1250;
+    act(() => {
+      window.dispatchEvent(new Event(PANE_SETTLED_EVENT));
+    });
+    expect(grid().style.gridTemplateColumns).toBe("repeat(3, 322px)");
+
     delete document.documentElement.dataset.paneMoving;
     act(() => {
       window.dispatchEvent(new Event(PANE_SETTLED_EVENT));
     });
-    expect(grid().style.gridTemplateColumns).toBe("repeat(5, 237px)");
+    expect(grid().style.gridTemplateColumns).toBe("repeat(4, 300px)");
+    expect(flights.size).toBe(0);
   });
 
   it("carries a card that wraps a row in behind its new neighbour, without crossing the grid", () => {
@@ -150,7 +135,7 @@ describe("LibraryItems", () => {
         const key = this.dataset.libraryKey;
         if (!key) return new DOMRect(0, 0, width, 800);
         const [, columns, track] = (
-          /repeat\((\d+), (\d+)px\)/.exec(grid()?.style.gridTemplateColumns ?? "") ?? [0, 4, 238]
+          /repeat\((\d+), (\d+)px\)/.exec(grid()?.style.gridTemplateColumns ?? "") ?? [0, 4, 300]
         ).map(Number);
         const index = Number(key.slice("item:".length));
         const pitch = track! + 16;
@@ -164,28 +149,27 @@ describe("LibraryItems", () => {
     );
     width = 1250;
     render(<Grid />);
-    expect(grid().style.gridTemplateColumns).toBe("repeat(5, 237px)");
+    expect(grid().style.gridTemplateColumns).toBe("repeat(4, 300px)");
+    width = 1000;
     act(() => {
       window.dispatchEvent(
         new PaneMovingEvent({
-          opening: true,
-          contentDelta: -250,
           durationMs: 300,
           progress: [0, 0.5, 1],
         }),
       );
     });
-    expect(grid().style.gridTemplateColumns).toBe("repeat(4, 238px)");
+    expect(grid().style.gridTemplateColumns).toBe("repeat(3, 322px)");
 
-    // 5 → 4 columns: card 5 keeps row 1 and slides one cell right…
-    expect(flights.get("item:5")?.[0]).toMatchObject({ transform: "translate(-254px, 0px)" });
-    // …and card 4, leaving row 0, enters row 1 one cell further left, behind it.
-    expect(flights.get("item:4")?.[0]).toMatchObject({
-      transform: "translate(-253px, 0px)",
+    // 4 → 3 columns: card 5 keeps row 1 and slides one cell right.
+    expect(flights.get("item:5")?.[0]).toMatchObject({ transform: "translate(-360px, 0px)" });
+    // Card 3 wraps into the next row from beyond the left edge.
+    expect(flights.get("item:3")?.[0]).toMatchObject({
+      transform: "translate(-316px, 0px)",
       opacity: 0,
     });
-    expect(flights.get("item:4")?.[1]).toMatchObject({ opacity: 1 });
-    expect(flights.get("item:4")?.at(-1)).toMatchObject({ transform: "translate(0px, 0px)" });
+    expect(flights.get("item:3")?.[1]).toMatchObject({ opacity: 1 });
+    expect(flights.get("item:3")?.at(-1)).toMatchObject({ transform: "translate(0px, 0px)" });
     // Cards that keep their cell stay still.
     expect(flights.has("item:0")).toBe(false);
   });

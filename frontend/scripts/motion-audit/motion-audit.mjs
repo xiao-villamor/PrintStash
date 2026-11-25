@@ -220,7 +220,13 @@ function installSampler(tracked) {
               (row) =>
                 `${row.closest("[data-library-renderer]")?.parentElement?.className?.slice(0, 40) ?? "grid"}: content ${row.scrollWidth}px in ${row.clientWidth}px (${row.style.gridTemplateColumns})`,
             );
-    frames.push({ t: now - started, elements, overflow, sidebarWidth: sidebar()?.offsetWidth });
+    frames.push({
+      t: now - started,
+      elements,
+      overflow,
+      sidebarWidth: sidebar()?.offsetWidth,
+      workspaceLeft: main()?.getBoundingClientRect().left,
+    });
     requestAnimationFrame(sample);
   };
   requestAnimationFrame(sample);
@@ -524,6 +530,35 @@ function measureSidebarTravel(frames, opening, add) {
   const travelMs = Math.round(last.t - frames[first - 1].t);
   if (travelMs > THRESHOLDS.sidebarTravelMs)
     add("slow-sidebar", last.t, `${travelMs} ms to settle the pane width`);
+  const movingFrames = frames.slice(first, frames.indexOf(last));
+  const anchor = frames[first - 1];
+  for (const frame of frames.slice(first, frames.indexOf(last) + 1)) {
+    const panelTravel = frame.sidebarWidth - anchor.sidebarWidth;
+    const workspaceTravel = frame.workspaceLeft - anchor.workspaceLeft;
+    if (Math.abs(panelTravel - workspaceTravel) > THRESHOLDS.mismatchPx)
+      add(
+        "workspace-out-of-sync",
+        frame.t,
+        `pane ${Math.round(panelTravel)} px; workspace ${Math.round(workspaceTravel)} px`,
+      );
+  }
+  const initialFrame = movingFrames[0];
+  for (const { t, elements, workspaceLeft } of movingFrames.slice(1)) {
+    const workspaceTravel = workspaceLeft - initialFrame.workspaceLeft;
+    for (const [key, card] of Object.entries(elements)) {
+      if (!key.startsWith("/models") && !key.startsWith("collection:")) continue;
+      const initial = initialFrame.elements[key];
+      if (!initial || initial.area === 0 || card.area === 0) continue;
+      const change = Math.max(
+        Math.abs(card.x - initial.x - workspaceTravel),
+        Math.abs(initial.y - card.y),
+        Math.abs(initial.w - card.w),
+        Math.abs(initial.h - card.h),
+      );
+      if (change > THRESHOLDS.mismatchPx)
+        add("card-moves-with-sidebar", t, `${key} shifts ${Math.round(change)} px`);
+    }
+  }
   return { from, to, travelMs };
 }
 

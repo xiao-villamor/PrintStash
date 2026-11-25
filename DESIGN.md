@@ -391,10 +391,9 @@ mobile. It uses the shared dock curve over the slow timing, sampled into
 compositor keyframes so preview initialization does not drive its frame loop.
 Reversing open/close preserves its current displacement and velocity.
 Hide only when the motion reaches the closed position, never on a fixed exit timer. When the docked
-inspector reserves or releases its column, the Library grid reflows exactly as
-it does for the Collections pane: it commits its resting columns once and carries
-each card from its painted position along the inspector's own progress, so the
-cards follow the timeline of their panel. A card that wraps to the next or
+inspector reserves or releases its column, the Library grid commits its resting
+columns once and carries each card from its painted position along the inspector's
+progress. A card that wraps to the next or
 previous row never crosses the grid: it rides its new row like a conveyor,
 entering from the grid edge right behind the neighbour it follows, so no cell
 empties mid-motion. Cards entering view fade in on the same progress; reduced motion keeps the reflow immediate. Switching Models
@@ -403,9 +402,9 @@ uses immediate visibility changes and retains the existing focus handoff.
 
 The left Collections pane uses a smooth cubic ease into rest over the fast timing (200 ms),
 with zero starting/ending velocity at rest and inherited velocity on interruption.
-It has no spring response or oscillation. Its shell column releases and restores space continuously; the inner outliner keeps its intrinsic width,
-clipped and anchored to the moving right boundary. This deliberately animates one
-layout width so the sidebar and workspace cannot drift onto separate timelines.
+The shell edge and the workspace move together. The Library holds its card tracks
+throughout the motion, then fits the final width once the pane settles. The inner
+outliner keeps its intrinsic width, clipped and anchored to the shell's moving edge.
 Retain the outliner DOM, filter, expansion and scroll state while closed; make it
 inert immediately and hide its contents only at rest. Drag resizing remains 1:1,
 initial page layout does not replay entry, and reduced motion settles immediately.
@@ -457,8 +456,8 @@ outline stays static.
 
 1. **Animate `transform` and `opacity` only.** Animating `width`, `height`,
    `top`, or `margin` triggers layout on every frame. Progress bars use
-   `transform: scaleX()`, not `width`. The docked sidebar is an explicit exception:
-   one width animation keeps its boundary and the workspace on the same timeline.
+   `transform: scaleX()`, not `width`. The Collections shell is an explicit exception:
+   its width animation moves the workspace edge while the Library's card tracks stay fixed.
    Child-collection disclosure uses a bounded clip-path for the row and a
    compositor translation for the Model content, with one layout commit. The
    sign-in build-plate print updates the active SVG path geometry so the tip

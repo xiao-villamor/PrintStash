@@ -19,7 +19,7 @@ const VELOCITY_SETTLED = 0.03;
 
 /** Compositor keyframes keep moving while the 3D preview initializes. Presence
  * follows completion, and reversals inherit the presentation and its velocity.
- * The panel shares the Collections pane's dock curve and duration. */
+ * The panel shares the Collections pane's dock curve. */
 export function useInspectorMotion(open: boolean, onSettled?: () => void) {
   const panel = useRef<HTMLElement>(null);
   const position = useRef(1);
@@ -61,8 +61,6 @@ export function useInspectorMotion(open: boolean, onSettled?: () => void) {
     }
 
     const tokens = getComputedStyle(element);
-    // The same curve and timing as the Collections pane: cards reflowing
-    // beside either panel then move identically.
     const duration = cssTimeSeconds(tokens.getPropertyValue("--duration-slow"));
     const spring = dockMotion(position.current, velocity.current, target, duration);
     paint();
@@ -75,15 +73,12 @@ export function useInspectorMotion(open: boolean, onSettled?: () => void) {
       { duration: spring.duration * 1000, easing: "linear", fill: "both" },
     );
     animation.onfinish = settle;
-    // The docked panel has already reserved (or released) its column. Cards
-    // reflow through the same path as the Collections pane: one resting
-    // layout, each card carried along this motion's own progress.
+    // The inspector has already reserved or released its column. Carry cards
+    // from their painted position along the inspector's progress.
     const from = spring.samples[0]?.position ?? position.current;
     const span = target - from;
     window.dispatchEvent(
       new PaneMovingEvent({
-        opening: open,
-        contentDelta: 0,
         durationMs: spring.duration * 1000,
         progress: spring.samples.map((sample) =>
           Math.abs(span) < 1e-6 ? 1 : (sample.position - from) / span,

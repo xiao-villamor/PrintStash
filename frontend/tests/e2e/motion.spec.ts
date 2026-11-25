@@ -31,23 +31,27 @@ declare global {
   }
 }
 
-async function recordPanelMotion(page: Page, id: string) {
-  await page.addInitScript((panelId) => {
-    window.panelMotions = [];
-    const animate = Element.prototype.animate;
-    Element.prototype.animate = function (...args) {
-      const animation = animate.apply(this, args);
-      if (this.id === panelId && animation.effect instanceof KeyframeEffect) {
-        const frames = animation.effect.getKeyframes();
-        window.panelMotions.push({
-          widths: frames.map((frame) => parseFloat(String(frame.width))),
-          transforms: frames.map((frame) => String(frame.transform ?? "none")),
-          duration: Number(animation.effect.getTiming().duration),
-        });
-      }
-      return animation;
-    };
-  }, id);
+async function recordPanelMotion(page: Page, id: string, pause = false) {
+  await page.addInitScript(
+    ({ panelId, pause }) => {
+      window.panelMotions = [];
+      const animate = Element.prototype.animate;
+      Element.prototype.animate = function (...args) {
+        const animation = animate.apply(this, args);
+        if (this.id === panelId && animation.effect instanceof KeyframeEffect) {
+          if (pause) animation.pause();
+          const frames = animation.effect.getKeyframes();
+          window.panelMotions.push({
+            widths: frames.map((frame) => parseFloat(String(frame.width))),
+            transforms: frames.map((frame) => String(frame.transform ?? "none")),
+            duration: Number(animation.effect.getTiming().duration),
+          });
+        }
+        return animation;
+      };
+    },
+    { panelId: id, pause },
+  );
 }
 
 async function folderWithDescription(page: Page) {
@@ -489,6 +493,43 @@ test.describe("motion and layering", () => {
       (await animationStarts(page)).filter((start) => start.target.includes("pane-in")),
     ).toEqual([]);
   });
+
+  for (const direction of ["opening", "closing"] as const) {
+    test(`workspace glides as one surface while ${direction} Collections`, async ({ page }) => {
+      await recordPanelMotion(page, "collections-pane", true);
+      await page.goto("/?c=maraio&type=all");
+      const pane = page.locator("#collections-pane");
+      const toggle = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+      await expect(page.getByRole("link", { name: "skadis_kitchen-roll_screw" })).toBeVisible();
+      if (direction === "opening") {
+        await toggle.click();
+        await pane.evaluate((element) => element.getAnimations()[0].finish());
+        await expect(pane).toHaveCSS("width", "0px");
+      }
+
+      await toggle.click();
+      const sample = (fraction: number) =>
+        pane.evaluate((element, progress) => {
+          const animation = element.getAnimations()[0];
+          animation.currentTime = Number(animation.effect?.getTiming().duration) * progress;
+          const workspace = document.querySelector("main")!;
+          const left = workspace.getBoundingClientRect().left;
+          const cards = [...workspace.querySelectorAll("[data-library-key]")].map((card) => {
+            const { x, y, width, height } = card.getBoundingClientRect();
+            return { key: card.getAttribute("data-library-key"), x: x - left, y, width, height };
+          });
+          return { paneWidth: element.getBoundingClientRect().width, left, cards };
+        }, fraction);
+      const early = await sample(0.25);
+      const late = await sample(0.75);
+      expect(early.paneWidth).not.toBe(late.paneWidth);
+      expect(late.left - early.left).toBeCloseTo(late.paneWidth - early.paneWidth);
+      expect(early.cards.length).toBeGreaterThan(0);
+      expect(late.cards).toEqual(early.cards);
+      await pane.evaluate((element) => element.getAnimations()[0].finish());
+      await expect(toggle).toHaveAttribute("aria-expanded", String(direction === "opening"));
+    });
+  }
 
   for (const [reducedMotion, moves] of [
     ["no-preference", true],

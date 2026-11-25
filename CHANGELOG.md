@@ -8,7 +8,7 @@
 
 ### Changed
 
-- The Collections sidebar opens and closes in 200 ms.
+- The Collections sidebar opens and closes in 200 ms. The workspace follows the sidebar, and the card grid adjusts once at the end.
 
 - The Trash page uses rounded surfaces and icons on its actions, shows how many days each deleted item has left (the last three days in the destructive tone), and has an illustrated empty state.
 

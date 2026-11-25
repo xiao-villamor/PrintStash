@@ -324,8 +324,7 @@ const COMPACT_COLLECTION_HEIGHT = 84;
 
 /**
  * One row of collections above the models, expandable per folder. It owns its
- * column count, so a pane animation that changes the row size re-renders this
- * strip only, never the whole library mid-motion.
+ * column count, so a width change re-renders this strip only.
  */
 function CollectionStrip({
   total,
@@ -346,10 +345,8 @@ function CollectionStrip({
   const [expandedFor, setExpandedFor] = useState<string | null>(null);
   const [rowSize, setRowSize] = useState(4);
   const expanded = expandedFor === resetKey;
-  // While the pane moves, the row already holds its resting column count (the
-  // grid switches at the start of the motion). One more collection stays
-  // rendered beyond the row's clipped edge: closing, the moving edge uncovers
-  // it; opening, the narrowing row slides the leaving one out under the edge.
+  // The right inspector moves the grid on its resting tracks. Keep one extra
+  // collection beyond the clipped edge until the inspector settles.
   const [extra, setExtra] = useState(0);
   useEffect(() => {
     const moving = () => setExtra(1);

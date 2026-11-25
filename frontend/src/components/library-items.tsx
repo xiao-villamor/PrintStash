@@ -28,13 +28,7 @@ import {
 import "./library-items.css";
 
 const NATIVE_RENDER_LIMIT = 120;
-/**
- * Narrowest card a column may hold. Columns share the row's measured width.
- * When the Collections pane starts moving, the grid switches at once to the
- * tracks of the width it will rest at, and every card travels from where it
- * was to its new cell in lockstep with the pane (see `PaneMotion`), so the
- * reflow is one continuous motion instead of a pop when the pane rests.
- */
+/** Narrowest card a column may hold. Columns share the row's measured width. */
 const CARD_WIDTH = 280;
 const COMPACT_CARD_WIDTH = 280;
 const SINGLE_COLUMN_MAX = 400;
@@ -206,13 +200,10 @@ export function LibraryItems<T>({
     const node = root.current;
     const scroll = scrollRef.current;
     if (!node || !scroll) return;
-    const measure = (restingWidth?: number) => {
-      const measuredWidth = restingWidth ?? node.clientWidth;
+    const measure = () => {
+      const measuredWidth = node.clientWidth;
       // Hidden surfaces have no layout yet; observe again when they become visible.
-      if (node.clientWidth === 0) return;
-      // While the Collections pane moves, the grid already holds the tracks of
-      // its resting width (set when the motion started); never refit mid-motion.
-      if (restingWidth === undefined && "paneMoving" in document.documentElement.dataset) return;
+      if (measuredWidth === 0 || "paneMoving" in document.documentElement.dataset) return;
       // The scroll surface docks the inspector with right padding. Recover the
       // closed width, including when the Collections pane targets a new width.
       const style =
@@ -304,8 +295,6 @@ export function LibraryItems<T>({
           previous.gap === gap &&
           previous.docked === docked &&
           Math.abs(previous.margin - margin) < 1 &&
-          // Tracks are derived from the measured width, which is never
-          // measured while the pane moves (see above).
           previous.width === width &&
           previous.height === scroll.clientHeight
         )
@@ -369,7 +358,9 @@ export function LibraryItems<T>({
     observer.observe(scroll);
     const settled = () => measure();
     const moving = (event: Event) => {
-      if (!(event instanceof PaneMovingEvent) || node.clientWidth === 0) return;
+      if (!(event instanceof PaneMovingEvent) || "paneMoving" in document.documentElement.dataset)
+        return;
+      if (node.clientWidth === 0) return;
       // Visual positions, including any flight a reversed pane interrupts.
       const before = new Map<string, DOMRect>();
       for (const card of node.querySelectorAll<HTMLElement>("[data-library-key]"))
@@ -377,7 +368,7 @@ export function LibraryItems<T>({
       for (const flight of flights.current) flight.cancel();
       flights.current = [];
       flip.current = { before, motion: event.motion, ...painted.current };
-      measure(Math.max(1, Math.round(node.clientWidth + event.motion.contentDelta)));
+      measure();
     };
     window.addEventListener(PANE_SETTLED_EVENT, settled);
     window.addEventListener(PANE_MOVING_EVENT, moving);
@@ -605,9 +596,7 @@ export function LibraryItems<T>({
     };
   }, [readingRenderers, readingId, keys, columns, virtual, virtualizer, geometry]);
 
-  // A card's content depends on its item, not on the grid: a column change
-  // (e.g. the pane starting to move) reuses the same elements, so React skips
-  // re-rendering every card and the motion's first frame is not delayed.
+  // A card's content depends on its item. Column changes reuse the same elements.
   const contents = useMemo(
     () => items.map((item, index) => renderItem(item, index)),
     [items, renderItem],
