@@ -380,8 +380,8 @@
   border-start-end-radius: calc(var(--radius-popover) - 1px);
 }
 [data-compact] .collection-card-collage {
-  width: 72px;
-  height: 44px;
+  width: 100px;
+  height: 64px;
   aspect-ratio: auto;
   border-radius: var(--radius);
 }
@@ -401,13 +401,16 @@
   font-size: 1rem;
 }
 [data-compact] .collection-card-name {
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
+}
+[data-compact] .collection-card-count {
+  font-size: 0.8125rem;
 }
 
-/* A compact collection card's frame (44px collage + 14px padding + 2px border),
+/* A compact collection card's frame (64px collage + 18px padding + 2px border),
    so the reserved row has the height of the row that replaces it. */
 .library-collection-placeholder {
-  height: 60px;
+  height: 84px;
   border: 1px solid var(--border);
   border-radius: var(--radius-popover);
   background: var(--card);

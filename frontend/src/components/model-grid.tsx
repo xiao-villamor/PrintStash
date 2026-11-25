@@ -319,7 +319,7 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 type MenuTriggerSize = "xs" | "sm";
 type MenuTriggerVariant = "outline" | "ghost";
 
-const COMPACT_COLLECTION_HEIGHT = 60;
+const COMPACT_COLLECTION_HEIGHT = 84;
 
 /**
  * One row of collections above the models, expandable per folder. It owns its

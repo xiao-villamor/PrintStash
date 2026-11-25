@@ -125,7 +125,7 @@ export function CollectionOverviewCard({
         title={collection.name}
         className="absolute inset-0 z-10 focus-visible:outline-none"
       />
-      <div className={compact ? "flex items-center gap-3 px-2 py-[7px]" : "block"}>
+      <div className={compact ? "flex items-center gap-3.5 px-2.5 py-[9px]" : "block"}>
         <CollectionCoverArtwork
           models={models}
           image={image}
@@ -145,7 +145,10 @@ export function CollectionOverviewCard({
             <div
               className={`collection-card-name flex min-w-0 items-start gap-1.5 text-sm font-semibold leading-5 text-foreground ${compact ? "" : "min-h-10"}`}
             >
-              <Folder className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+              <Folder
+                className={`shrink-0 text-muted-foreground ${compact ? "mt-0.5 size-4" : "mt-0.5 h-3.5 w-3.5"}`}
+                aria-hidden
+              />
               {renaming && onRenameEnd ? (
                 <CollectionCardRename collection={collection} onEnd={onRenameEnd} />
               ) : (
@@ -154,7 +157,9 @@ export function CollectionOverviewCard({
                 </span>
               )}
             </div>
-            <p className={`text-xs text-muted-foreground ${compact ? "" : "mt-1"}`}>{modelCount}</p>
+            <p className={`collection-card-count text-xs text-muted-foreground ${compact ? "" : "mt-1"}`}>
+              {modelCount}
+            </p>
           </div>
           {!compact && !renaming && (
             <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
