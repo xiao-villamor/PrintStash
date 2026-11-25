@@ -31,7 +31,12 @@
 }
 
 .collection-tree-row:has(> :is([data-outliner-root], [data-outliner-collection]):focus-visible),
-[data-outliner-entry]:focus-visible {
+[data-outliner-entry]:focus-visible,
+[data-outliner-match]:focus-visible {
   outline: 1px solid var(--muted-foreground);
   outline-offset: -1px;
+}
+
+[data-outliner-match]:focus-visible {
+  box-shadow: none;
 }

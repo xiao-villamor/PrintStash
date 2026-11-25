@@ -1,6 +1,6 @@
 /** Library grid resizing, card identity, and right-inspector motion. */
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useMemo, useRef, useState } from "react";
 import { LibraryItems } from "@/components/library-items";
@@ -16,11 +16,13 @@ function Grid({
   virtualize = false,
   keepCollectionCardWidth = false,
   singleRow = false,
+  layout = "grid",
 }: {
   count?: number;
   virtualize?: boolean;
   keepCollectionCardWidth?: boolean;
   singleRow?: boolean;
+  layout?: "grid" | "list";
 }) {
   // The scroller is known before the grid mounts, as in the Library.
   const [node, setNode] = useState<HTMLDivElement | null>(null);
@@ -32,11 +34,15 @@ function Grid({
         <LibraryItems
           items={count === 6 ? ITEMS : Array.from({ length: count }, (_, index) => index)}
           itemKey={(item) => `item:${item}`}
-          renderItem={(item) => <a href={`#${item}`}>Card {item}</a>}
+          renderItem={(item) => (
+            <a href={`#${item}`} data-library-entry={`item:${item}`}>
+              Card {item}
+            </a>
+          )}
           scrollRef={scroll}
           readingRenderers={renderers}
           readingId="test"
-          layout="grid"
+          layout={layout}
           virtualize={virtualize}
           keepCollectionCardWidth={keepCollectionCardWidth}
           singleRow={singleRow}
@@ -91,6 +97,27 @@ afterEach(() => {
 });
 
 describe("LibraryItems", () => {
+  it("moves to the same column on the next virtualized row", () => {
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(900);
+    render(<Grid count={144} virtualize />);
+    const first = screen.getByRole("link", { name: "Card 0" });
+    act(() => first.focus());
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+
+    expect(screen.getByRole("link", { name: "Card 3" })).toHaveFocus();
+  });
+
+  it("moves vertically through Library list results", () => {
+    render(<Grid layout="list" />);
+    const first = screen.getByRole("link", { name: "Card 0" });
+    act(() => first.focus());
+    fireEvent.keyDown(first, { key: "ArrowRight" });
+    expect(first).toHaveFocus();
+
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    expect(screen.getByRole("link", { name: "Card 1" })).toHaveFocus();
+  });
+
   it("retains the focused card across the virtualization threshold", () => {
     vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(900);
     const view = render(<Grid count={120} virtualize />);

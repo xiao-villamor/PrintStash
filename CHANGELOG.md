@@ -11,6 +11,7 @@
 - Keep the Settings header in place. Scroll the sidebar options and the current panel independently. Use a shorter, inset scrollbar and align the paired Overview cards.
 - Group identical confirmation notices, dismiss them sooner, and provide a visible close button.
 - Focus the collection tree when opening it by shortcut. Use arrow keys to move between folders and Models, with a rounded focus outline on the whole row.
+- Use the keyboard in filtered collections. Press G to focus Library results, then use the arrow keys to move between them.
 - Let each browser show or hide the view name and position on Model cards.
 - Label the AI Search toggle and give the Library search field a neutral focus border.
 - Give dark Library cards a neutral hover border and a shadow that follows the rounded corners. Use the same tighter corners on Models, Multipart Models, and their loading cards.

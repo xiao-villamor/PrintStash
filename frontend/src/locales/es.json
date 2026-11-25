@@ -5416,6 +5416,8 @@
   "Show or hide the sidebar": "Mostrar u ocultar la barra lateral",
   "Show or hide details": "Mostrar u ocultar los detalles",
   "Move in the collection tree": "Moverse por el árbol de colecciones",
+  "Focus Library results": "Enfocar los resultados de la Biblioteca",
+  "Move between Library results": "Moverse entre los resultados de la Biblioteca",
   "Print results": "Resultados de impresión",
   "With focus in a model's G-code revisions": "Con el foco en las revisiones G-code de un modelo",
   "Choose a revision": "Elegir una revisión",

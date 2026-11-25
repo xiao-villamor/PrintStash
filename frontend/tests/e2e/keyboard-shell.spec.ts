@@ -21,6 +21,8 @@ test.describe("Shared keyboard commands", () => {
       "Show or hide the sidebar",
       "Show or hide details",
       "Move in the collection tree",
+      "Focus Library results",
+      "Move between Library results",
       "Close details, then clear the selection",
       "Rename this collection",
       "Undo the last change",
@@ -113,6 +115,60 @@ test.describe("Shared keyboard commands", () => {
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/c=maraio/);
+  });
+
+  test("navigates filtered collections with the keyboard", async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto("/");
+    const sidebar = page.getByRole("complementary", { name: "Collections" });
+    const filter = sidebar.getByPlaceholder("Filter collections");
+    const collection = sidebar.getByRole("button", { name: "maraio", exact: true }).first();
+    const model = sidebar.getByRole("button", { name: "skadis_kitchen-roll_screw", exact: true });
+    await filter.fill("a");
+    await expect(collection).toBeVisible();
+    await expect(model).toBeVisible();
+
+    await page.keyboard.press("ArrowDown");
+    await expect(collection).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(model).toBeFocused();
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("ArrowUp");
+    await expect(filter).toBeFocused();
+
+    await page.keyboard.press("Control+Shift+E");
+    await expect(collection).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/c=maraio/);
+    await expect(filter).toBeFocused();
+  });
+
+  test("enters Library results from the collection tree", async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    const created = await page.request.post("/api/v1/collections", {
+      data: { name: "Capture bracket" },
+    });
+    expect(created.status()).toBe(201);
+    await page.goto("/?sort=name-asc");
+    const main = page.getByRole("main");
+    const folders = main.getByRole("button", { name: /^(Capture bracket|maraio)/ });
+    const first = folders.nth(0);
+    const second = folders.nth(1);
+    await expect(second).toBeVisible();
+    const destination =
+      (await first.getAttribute("title")) === "maraio" ? "maraio" : "capture-bracket";
+    await page.keyboard.press("Control+Shift+E");
+    await expect(
+      page.getByRole("tree", { name: "Collections" }).getByRole("button", { name: "All Models" }),
+    ).toBeFocused();
+    await page.keyboard.press("g");
+    await expect(first).toBeFocused();
+    await page.keyboard.press("ArrowRight");
+    await expect(second).toBeFocused();
+    await page.keyboard.press("ArrowLeft");
+    await expect(first).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL((url) => url.searchParams.get("c") === destination);
   });
 
   test("preserves reserved keyboard ownership", async ({ page }) => {

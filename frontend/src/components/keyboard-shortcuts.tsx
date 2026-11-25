@@ -75,6 +75,7 @@ export function KeyboardShortcuts() {
         focusRequest.kind === "search"
           ? host.querySelector<HTMLElement>("[data-shell-panel-search]")
           : (host.querySelector<HTMLElement>('[data-outliner-collection][aria-selected="true"]') ??
+            host.querySelector<HTMLElement>("[data-outliner-match]") ??
             host.querySelector<HTMLElement>(OUTLINER_KEYBOARD_ROW));
       if (target) {
         target.focus({ preventScroll: focusRequest.kind === "search" });
@@ -212,6 +213,8 @@ export function KeyboardShortcuts() {
         { labelKey: "Show or hide the sidebar", keys: [mod, "B"] },
         { labelKey: "Show or hide details", keys: [mod, alt, "B"] },
         { labelKey: "Move in the collection tree", keys: ["↑", "↓", "←", "→"] },
+        { labelKey: "Focus Library results", keys: ["G"] },
+        { labelKey: "Move between Library results", keys: ["↑", "↓", "←", "→"] },
       ],
     },
     {

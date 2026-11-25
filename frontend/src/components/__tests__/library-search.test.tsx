@@ -131,7 +131,7 @@ describe("LibrarySearch", () => {
     await user.type(screen.getByRole("searchbox"), "small boat");
     const ai = await screen.findByRole("button", { name: "AI Search" });
     expect(ai).toHaveAttribute("aria-pressed", "false");
-    expect(ai.textContent).toBe("");
+    expect(ai).toHaveTextContent("AI Search");
     await user.click(ai);
     expect(screen.getByTestId("location")).toHaveTextContent(
       "/search?q=small+boat&mode=hybrid&parse=1",

@@ -29,6 +29,7 @@ import { useTaxonomyCommands } from "@/features/library/taxonomy";
 import { LibraryBatchRecovery } from "@/components/library-batch-recovery";
 
 import {
+  libraryEntryControl,
   libraryReadingSelector,
   useLibraryReadingPosition,
   type LibraryReadingRenderer,
@@ -2588,6 +2589,30 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         return;
       }
       if (keyboardOverlayOpen() || isTypingTarget(event.target)) return;
+      if (
+        event.key.toLowerCase() === "g" &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        !event.shiftKey
+      ) {
+        const results = startupContent.current;
+        if (!results) return;
+        const bounds = results.getBoundingClientRect();
+        const controls = Array.from(results.querySelectorAll<HTMLElement>("[data-library-key]"))
+          .map(libraryEntryControl)
+          .filter((control) => control !== null);
+        const firstVisible = controls.find((control) => {
+          const rect = control.getBoundingClientRect();
+          return rect.height > 0 && rect.top < bounds.bottom && rect.bottom > bounds.top;
+        });
+        const target = firstVisible ?? controls[0];
+        if (target) {
+          event.preventDefault();
+          target.focus();
+        }
+        return;
+      }
       if (
         event.key.toLowerCase() === "s" &&
         !event.ctrlKey &&

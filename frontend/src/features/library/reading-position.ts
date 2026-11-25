@@ -15,6 +15,12 @@ export function libraryReadingSelector(key?: string): string {
   const escaped = CSS.escape(key);
   return `[data-library-entry="${escaped}"], [data-library-anchor="${escaped}"]`;
 }
+
+export function libraryEntryControl(card: HTMLElement): HTMLElement | null {
+  const entry = card.querySelector<HTMLElement>(libraryReadingSelector());
+  if (entry?.matches("a[href], [tabindex='0']")) return entry;
+  return entry?.querySelector<HTMLButtonElement>("button:not([disabled])") ?? null;
+}
 function readingKey(node: HTMLElement | undefined): string | undefined {
   return node?.dataset.libraryEntry ?? node?.dataset.libraryAnchor;
 }

@@ -177,7 +177,7 @@ function DraggableModelLeaf({
       <div
         ref={setNodeRef}
         {...listeners}
-        {...attributes}
+        {...(enabled && !moving ? attributes : undefined)}
         onClick={(event) => {
           if (event.detail <= 1) onOpen?.(model, event.currentTarget);
         }}
@@ -487,7 +487,11 @@ function SearchResults({
   const query = useOutlinerSearch({ ...ctx.params, q: text });
   useTreeReadiness(ctx, "search", query.isError ? "failed" : query.isPending ? "pending" : "ready");
   const matches = query.data?.pages.flatMap((page) => page.items) ?? [];
-  function locate(path: string | null) {
+  function locate(path: string | null, keyboardOpener?: HTMLButtonElement) {
+    keyboardOpener
+      ?.closest("aside")
+      ?.querySelector<HTMLInputElement>("[data-tree-filter]")
+      ?.focus({ preventScroll: true });
     ctx.onSelect(path);
     clear();
   }
@@ -499,8 +503,10 @@ function SearchResults({
             variant="ghost"
             size="sm"
             className="max-w-full justify-start"
-            onClick={() => {
-              if (entry.kind === "collection") locate(entry.collection);
+            data-outliner-match
+            onClick={(event) => {
+              if (entry.kind === "collection")
+                locate(entry.collection, event.detail === 0 ? event.currentTarget : undefined);
               else
                 router.push(
                   entry.kind === "model" ? `/models/${entry.id}` : `/multipart-models/${entry.id}`,
@@ -521,7 +527,9 @@ function SearchResults({
             size="sm"
             className="max-w-full text-muted-foreground"
             title={uiText("Open location")}
-            onClick={() => locate(entry.collection)}
+            onClick={(event) =>
+              locate(entry.collection, event.detail === 0 ? event.currentTarget : undefined)
+            }
           >
             <span className="truncate">{entry.collection_label ?? uiText("All Models")}</span>
           </Button>
@@ -684,7 +692,7 @@ function CollectionTreeRow({
               className={`flex min-h-7 flex-1 min-w-0 items-center gap-1.5 text-left text-sm font-medium truncate ${moving ? "cursor-wait" : ctx.dragEnabled ? "cursor-grab active:cursor-grabbing" : ""}`}
               aria-description={`${node.display_path} · ${uiText("counts.items", { count: node.subtree_entry_count })}`}
               data-outliner-collection={node.path}
-              {...attributes}
+              {...(ctx.dragEnabled && !moving ? attributes : undefined)}
               role="treeitem"
               aria-busy={moving || receiving || undefined}
               aria-selected={isSelected}
@@ -1196,9 +1204,12 @@ export function FilterSidebarContent({
             const target = event.target instanceof HTMLElement ? event.target : null;
             const row = target?.closest<HTMLElement>(OUTLINER_KEYBOARD_ROW);
             if (!row || !contentRef.current) return;
-            const rows = [
-              ...contentRef.current.querySelectorAll<HTMLElement>(OUTLINER_KEYBOARD_ROW),
-            ];
+            const matches = row.hasAttribute("data-outliner-match");
+            const rows = Array.from(
+              contentRef.current.querySelectorAll<HTMLElement>(
+                matches ? "[data-outliner-match]" : OUTLINER_KEYBOARD_ROW,
+              ),
+            );
             const index = rows.indexOf(row);
             const node = row.closest<HTMLElement>("[data-tree-node]");
             const root = rows.find((entry) => entry.hasAttribute("data-outliner-root"));
@@ -1207,8 +1218,12 @@ export function FilterSidebarContent({
             );
             let next: HTMLElement | undefined | null;
             if (event.key === "ArrowDown") next = rows[Math.min(index + 1, rows.length - 1)];
-            else if (event.key === "ArrowUp") next = rows[Math.max(index - 1, 0)];
-            else if (event.key === "Home") next = rows[0];
+            else if (event.key === "ArrowUp") {
+              next =
+                index === 0 && matches
+                  ? row.closest("aside")?.querySelector<HTMLElement>("[data-tree-filter]")
+                  : rows[Math.max(index - 1, 0)];
+            } else if (event.key === "Home") next = rows[0];
             else if (event.key === "End") next = rows.at(-1);
             else if (event.key === "ArrowRight") {
               if (toggle?.getAttribute("aria-expanded") === "false") toggle.click();
@@ -1788,6 +1803,24 @@ export function FilterSidebar(props: FilterSidebarProps) {
               onChange={(e) => setOutlinerFilter(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Escape") setOutlinerFilter("");
+                if (
+                  e.nativeEvent.isComposing ||
+                  e.ctrlKey ||
+                  e.metaKey ||
+                  e.altKey ||
+                  e.shiftKey ||
+                  (e.key !== "ArrowDown" && e.key !== "ArrowUp")
+                )
+                  return;
+                const rows = e.currentTarget
+                  .closest("aside")
+                  ?.querySelectorAll<HTMLElement>(
+                    outlinerFilter.trim() ? "[data-outliner-match]" : OUTLINER_KEYBOARD_ROW,
+                  );
+                const next = rows?.[e.key === "ArrowDown" ? 0 : rows.length - 1];
+                if (!next) return;
+                e.preventDefault();
+                next.focus();
               }}
             />
             {outlinerFilter && (
