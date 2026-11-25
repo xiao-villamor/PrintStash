@@ -203,8 +203,8 @@ test.describe("settings", () => {
     await page.goto("/settings?section=previews");
     await collapseNavigationSidebar(page);
     const colours = page.getByRole("radiogroup", { name: "Colour" });
-    const plum = colours.getByRole("radio", { name: "Plum", exact: true });
-    await expect(plum).toBeEnabled();
+    const sage = colours.getByRole("radio", { name: "Sage", exact: true });
+    await expect(sage).toBeEnabled();
     const rows = await colours
       .getByRole("radio")
       .evaluateAll((radios) =>
@@ -220,6 +220,33 @@ test.describe("settings", () => {
       await expect(radio).toBeEnabled();
       if (await radio.isChecked()) return;
       await radio.locator("..").click();
+      const examples = page.getByRole("group", { name: "Preview look" });
+      await examples.locator("figure").first().scrollIntoViewIfNeeded();
+      await expect(examples.locator("figure img")).toHaveCount(2);
+      await expect
+        .poll(() =>
+          examples
+            .locator("figure img")
+            .evaluateAll(
+              (images) =>
+                images.filter(
+                  (image) =>
+                    image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0,
+                ).length,
+            ),
+        )
+        .toBe(2);
+      const notice = examples.getByText(
+        "Not applied yet. Existing images keep their current look.",
+      );
+      await expect(notice).toBeVisible();
+      const [noticeBox, footerBox] = await Promise.all([
+        notice.boundingBox(),
+        examples.locator(".settings-card-foot").boundingBox(),
+      ]);
+      if (!noticeBox || !footerBox) throw new Error("The draft notice and footer must be visible");
+      expect(footerBox.y - noticeBox.y - noticeBox.height).toBeGreaterThanOrEqual(12);
+
       const saved = page.waitForResponse(
         (response) =>
           new URL(response.url()).pathname === "/api/v1/config" &&
@@ -230,9 +257,20 @@ test.describe("settings", () => {
       await expect(apply).toBeDisabled();
     };
     try {
-      await selectColour("Plum");
+      const next = original === "Sage" ? "Clay" : "Sage";
+      const example = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          url.pathname === "/api/v1/config/preview-example" &&
+          url.searchParams.get("look") === next.toLowerCase()
+        );
+      });
+      await selectColour(next);
+      const rendered = await example;
+      expect(rendered.ok()).toBe(true);
+      expect(rendered.headers()["content-type"]).toBe("image/webp");
       await page.reload();
-      await expect(plum).toBeChecked();
+      await expect(colours.getByRole("radio", { name: next, exact: true })).toBeChecked();
     } finally {
       await selectColour(original);
     }

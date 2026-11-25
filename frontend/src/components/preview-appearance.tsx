@@ -156,7 +156,7 @@ export function PreviewAppearance({
           disabled={disabled}
         />
       </div>
-      <div className="space-y-3 pt-4">
+      <div className={cn("space-y-3 pt-4", layout === "settings" && "pb-3")}>
         <PreviewHeading className="text-sm font-medium text-foreground">
           {t("Preview")}
         </PreviewHeading>

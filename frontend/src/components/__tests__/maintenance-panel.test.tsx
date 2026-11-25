@@ -122,6 +122,7 @@ describe("MaintenancePanel", () => {
       routes: { "GET /api/v1/maintenance/audits": json({ detail: "unavailable" }, 503) },
     });
     expect(await screen.findByRole("button", { name: "Retry check history" })).toBeVisible();
+    expect(screen.getAllByText("Check history could not be loaded.")).toHaveLength(1);
     expect(screen.queryByText("No checks yet. Start with a quick check.")).not.toBeInTheDocument();
   });
   it("retires maintenance command feedback on unmount", async () => {

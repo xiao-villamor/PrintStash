@@ -462,76 +462,61 @@ export function AuditSchedulePanel() {
     <>
       <SettingsCard title={t("auditSchedule.title")} description={t("auditSchedule.description")}>
         <div className="divide-y-0">
-          {error && policies && !denied && (
-            <div role="alert">
-              <p>{t("auditSchedule.loadFailed")}</p>
-              <Button size="sm" onClick={() => void policiesQuery.refetch()}>
-                {t("auditSchedule.retry")}
-              </Button>
-            </div>
-          )}
-          {(error && !policies) || denied ? (
-            <div role="alert" className="space-y-3">
+          {error && (
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-3 py-3">
               <p>{t("auditSchedule.loadFailed")}</p>
               <Button size="sm" variant="outline" onClick={() => void policiesQuery.refetch()}>
                 {t("auditSchedule.retry")}
               </Button>
             </div>
-          ) : !policies ? (
-            <p role="status">{t("auditSchedule.loading")}</p>
-          ) : (
-            policies.map((policy) => (
-              <PolicyForm key={policy.mode} initial={policy} blocked={error} />
-            ))
           )}
+          {!denied &&
+            policies?.map((policy) => (
+              <PolicyForm key={policy.mode} initial={policy} blocked={error} />
+            ))}
+          {!error && !policies && <p role="status">{t("auditSchedule.loading")}</p>}
         </div>
       </SettingsCard>
-      {(historyError || history.length > 0) && (
+      {!historyError && history.length > 0 && (
         <SettingsCard title={t("auditSchedule.recent")}>
           <div className="settings-section-body">
-            {historyError ? (
-              <p role="alert" className="text-sm">
-                {t("auditSchedule.historyLoadFailed")}
-              </p>
-            ) : (
-              <ul className="divide-y divide-border">
-                {history.map((run) => {
-                  const issueCount = run.critical_count + run.warning_count + run.info_count;
-                  const status = {
-                    completed: t("auditSchedule.statusCompleted"),
-                    running: t("auditSchedule.statusRunning"),
-                    pending: t("auditSchedule.statusPending"),
-                    failed: t("auditSchedule.statusFailed"),
-                    cancelled: t("auditSchedule.statusCancelled"),
-                  }[run.state];
-                  return (
-                    <li
-                      key={run.id}
-                      className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm"
-                    >
-                      <div>
-                        <p className="font-medium">
-                          {t(run.mode === "quick" ? "auditSchedule.quick" : "auditSchedule.full")}
-                          {" · "}
-                          {status}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {shownDate(run.finished_at ?? run.created_at)} ·{" "}
-                          {run.trigger === "scheduled"
-                            ? t("auditSchedule.scheduled")
-                            : t("auditSchedule.manual")}
-                        </p>
-                      </div>
-                      <span className="settings-status">
-                        {issueCount
-                          ? t("auditSchedule.issuesFound", { count: issueCount })
-                          : t("auditSchedule.noIssues")}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+            <ul className="divide-y divide-border">
+              {history.map((run) => {
+                const issueCount = run.critical_count + run.warning_count + run.info_count;
+                const status = {
+                  completed: t("auditSchedule.statusCompleted"),
+                  running: t("auditSchedule.statusRunning"),
+                  pending: t("auditSchedule.statusPending"),
+                  failed: t("auditSchedule.statusFailed"),
+                  cancelled: t("auditSchedule.statusCancelled"),
+                }[run.state];
+                return (
+                  <li
+                    key={run.id}
+                    className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm"
+                  >
+                    <div>
+                      <p className="font-medium">
+                        {t(run.mode === "quick" ? "auditSchedule.quick" : "auditSchedule.full")}
+                        {" · "}
+                        {status}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {shownDate(run.finished_at ?? run.created_at)} ·{" "}
+                        {run.trigger === "scheduled"
+                          ? t("auditSchedule.scheduled")
+                          : t("auditSchedule.manual")}
+                      </p>
+                    </div>
+                    <span className="settings-status">
+                      {issueCount
+                        ? t("auditSchedule.issuesFound", { count: issueCount })
+                        : t("auditSchedule.noIssues")}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
           </div>
         </SettingsCard>
       )}

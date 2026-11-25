@@ -335,6 +335,43 @@ test.describe("settings route", () => {
     expect(setup).toContain('"apiKey":"psk_browser_setup_secret"');
   });
 
+  test("keeps Maintenance retry actions clear when its reads fail", async ({ page }) => {
+    let historyAvailable = false;
+    await page.route("**/api/v1/maintenance/audits", (route) =>
+      historyAvailable
+        ? route.fulfill({ json: [] })
+        : route.fulfill({ status: 503, json: { detail: "unavailable" } }),
+    );
+    await page.route(/\/api\/v1\/(maintenance\/audit-policies|backups\/sources)(\?|$)/, (route) =>
+      route.fulfill({ status: 503, json: { detail: "unavailable" } }),
+    );
+    await page.goto("/settings?section=maintenance");
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
+    if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+
+    for (const [section, message] of [
+      ["Latest results", "Check history could not be loaded."],
+      ["Automatic checks", "Automatic checks could not be loaded."],
+      ["Check a backup", "Backup sources could not be loaded."],
+    ]) {
+      const panel = page.getByRole("group", { name: section, exact: true });
+      const text = panel.getByText(message, { exact: true });
+      const retry = panel.getByRole("button", { name: /Retry/ });
+      await expect(text).toBeVisible();
+      await expect(retry).toBeVisible();
+      const [label, button] = await Promise.all([text.boundingBox(), retry.boundingBox()]);
+      if (!label || !button) throw new Error("Error text and Retry must be visible");
+      expect(button.x - label.x - label.width).toBeGreaterThanOrEqual(12);
+    }
+    await expect(page.getByText("Check history could not be loaded.", { exact: true })).toHaveCount(
+      1,
+    );
+    historyAvailable = true;
+    await page.getByRole("button", { name: "Retry check history" }).click();
+    await expect(page.getByText("No checks yet. Start with a quick check.")).toBeVisible();
+  });
+
   test("separates the notification controls from the channel heading", async ({ page }) => {
     await page.route("**/api/v1/notifications", (route) =>
       route.fulfill({

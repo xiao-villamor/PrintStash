@@ -230,10 +230,11 @@ export function MaintenancePanel() {
       <SettingsCard title={uiText("Latest results")}>
         <div className="space-y-4 py-4">
           {history.isError || denied ? (
-            <div role="alert">
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-3">
               <p>{t("auditSchedule.historyLoadFailed")}</p>
               <Button
                 size="sm"
+                variant="outline"
                 onClick={() => void history.refetch()}
                 aria-label={t("maintenance.retryHistory")}
               >
@@ -480,9 +481,9 @@ export function MaintenancePanel() {
       >
         <div>
           {catalog.isError ? (
-            <div role="alert">
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-3 py-3">
               <p>{t("maintenance.backupLoadFailed")}</p>
-              <Button size="sm" onClick={() => void catalog.refetch()}>
+              <Button size="sm" variant="outline" onClick={() => void catalog.refetch()}>
                 {t("auditSchedule.retry")}
               </Button>
             </div>

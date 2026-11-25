@@ -272,7 +272,7 @@ describe("Audit schedules", () => {
 
   it("shows a recoverable loading failure", async () => {
     renderApp(<AuditSchedulePanel />);
-    expect(await screen.findByText("Could not load audit schedules.")).toBeVisible();
+    expect(await screen.findByText("Automatic checks could not be loaded.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
   });
 
@@ -284,7 +284,7 @@ describe("Audit schedules", () => {
       },
     });
     expect(await screen.findByRole("form", { name: "Quick check schedule" })).toBeVisible();
-    expect(await screen.findByRole("alert")).toHaveTextContent("Check history could not be loaded");
+    expect(screen.queryByRole("heading", { name: "Recent checks" })).not.toBeInTheDocument();
   });
 
   it("shows the full-check cost acknowledgement without opening advanced settings", async () => {
