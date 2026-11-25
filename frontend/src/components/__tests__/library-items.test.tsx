@@ -4,7 +4,11 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useMemo, useRef, useState } from "react";
 import { LibraryItems } from "@/components/library-items";
-import { PANE_SETTLED_EVENT, PaneMovingEvent } from "@/components/use-collections-pane-motion";
+import {
+  INSPECTOR_LAYOUT_WILL_CHANGE_EVENT,
+  PANE_SETTLED_EVENT,
+  PaneMovingEvent,
+} from "@/components/use-collections-pane-motion";
 import type { LibraryReadingRenderer } from "@/features/library/reading-position";
 
 let width = 1000;
@@ -186,6 +190,34 @@ describe("LibraryItems", () => {
     });
     await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
     expect(scroller.scrollTop).toBe(0);
+  });
+
+  it("keeps cards in place when inspector padding temporarily moves the grid", () => {
+    render(<Grid />);
+    const card = screen.getByText("Card 0").closest("[data-library-key]")!;
+    vi.spyOn(card, "getBoundingClientRect").mockImplementation(
+      () =>
+        new DOMRect(
+          0,
+          width === 1250 && grid().style.gridTemplateColumns === "repeat(3, 322px)" ? 191 : 307,
+          300,
+          200,
+        ),
+    );
+
+    act(() => {
+      window.dispatchEvent(new Event(INSPECTOR_LAYOUT_WILL_CHANGE_EVENT));
+      width = 1250;
+      window.dispatchEvent(
+        new PaneMovingEvent({
+          targetSidebarWidth: null,
+          durationMs: 200,
+          progress: [0, 0.5, 1],
+        }),
+      );
+    });
+
+    expect(flights.has("item:0")).toBe(false);
   });
 
   it("carries a card that wraps a row in behind its new neighbour, without crossing the grid", () => {
