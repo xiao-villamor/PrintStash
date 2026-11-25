@@ -299,8 +299,9 @@ sends no further setup probe.
   draft and explicitly save revised changes without replacing untouched settings.
 
 - `production-costing.spec.ts`: normalizes filament spool pricing, configures printer expenses, uses Moonraker print measurements, and verifies saved per-piece estimates and reusable pricing rates.
-- `profiles.spec.ts`: two editors per preset kind recover a conditional conflict
-  while preserving the other editor’s notes, verified after reload.
+- `profiles.spec.ts` covers selecting a printer model and nozzle, saving the
+  operating cost defaults, and reloading custom overrides. Two editors per
+  preset kind also recover a conflict while preserving the other editor's notes.
 
 - `provider-connections.spec.ts`: issue a pairing code, claim without an account session, resolve competing browser-name drafts through explicit review, then confirm revocation.
 

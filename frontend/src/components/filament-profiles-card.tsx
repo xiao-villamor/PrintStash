@@ -43,6 +43,7 @@ import {
   type ExpenseDraft,
 } from "@/lib/printer-expenses";
 import { PrinterExpenseFields } from "@/components/printer-expense-fields";
+import { PrinterProfileFields } from "@/components/printer-profile-fields";
 import { PricingTemplatesPanel } from "@/components/pricing-templates";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -871,7 +872,7 @@ export function FilamentProfilesCard() {
       toast.error(uiText("Invalid nozzle diameter"));
       return;
     }
-    const expenses = parseExpenses(newPrinterExpenses);
+    const expenses = parseExpenses(newPrinterExpenses, newPrinterModel);
     const problem = expenseProblem(expenses);
     if (problem) {
       toast.error(problem);
@@ -950,7 +951,7 @@ export function FilamentProfilesCard() {
       toast.error(uiText("Invalid nozzle diameter"));
       return;
     }
-    const expenses = parseExpenses(edit.expenses);
+    const expenses = parseExpenses(edit.expenses, edit.model);
     if (expenseProblem(expenses)) return;
     const key = `p${profile.id}`;
     cancelSavedFeedback(key);
@@ -1553,25 +1554,15 @@ export function FilamentProfilesCard() {
                       aria-describedby={`${helpId}-printer-name`}
                     />
                   </FormField>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <h3 className="col-span-full text-field font-semibold">
-                      {uiText("Printer & nozzle")}
-                    </h3>
-                    <FormField label={uiText("Printer model")}>
-                      <Input
-                        value={newPrinterModel}
-                        onChange={(e) => setNewPrinterModel(e.target.value)}
-                        placeholder={uiText("Machine model")}
-                      />
-                    </FormField>
-                    <FormField label={uiText("Nozzle diameter")}>
-                      <Input
-                        value={newPrinterNozzle}
-                        onChange={(e) => setNewPrinterNozzle(e.target.value)}
-                        inputMode="decimal"
-                        placeholder="0.4"
-                      />
-                    </FormField>
+                  <div className="space-y-4">
+                    <h3 className="text-field font-semibold">{uiText("Printer & nozzle")}</h3>
+                    <PrinterProfileFields
+                      model={newPrinterModel}
+                      nozzle={newPrinterNozzle}
+                      disabled={commands.createPrinter.isPending}
+                      onModelChange={setNewPrinterModel}
+                      onNozzleChange={setNewPrinterNozzle}
+                    />
                   </div>
                   <FormField
                     label={uiText("Notes")}
@@ -1589,6 +1580,7 @@ export function FilamentProfilesCard() {
                   <PrinterExpenseFields
                     currency={currency}
                     draft={newPrinterExpenses}
+                    model={newPrinterModel}
                     disabled={commands.createPrinter.isPending}
                     onChange={setNewPrinterExpenses}
                   />
@@ -1696,7 +1688,7 @@ export function FilamentProfilesCard() {
                           detailsHost={detailsHost}
                           editor={(focusCosts) => (
                             <>
-                              <FormField className="min-w-0 sm:col-span-2" label={uiText("Name")}>
+                              <FormField className="col-span-full" label={uiText("Name")}>
                                 <Input
                                   value={edit.name}
                                   onChange={(e) =>
@@ -1711,39 +1703,18 @@ export function FilamentProfilesCard() {
                                   })}
                                 />
                               </FormField>
-                              <FormField className="lg:col-span-2" label={uiText("Printer model")}>
-                                <Input
-                                  value={edit.model}
-                                  onChange={(e) =>
-                                    updatePrinterEdit(profile.id, { model: e.target.value })
-                                  }
-                                  disabled={
-                                    !auth.isAuthenticated ||
-                                    rowStatus[`p${profile.id}`] === "saving"
-                                  }
-                                  aria-label={uiText("Printer model {value1}", {
-                                    value1: String(profile.id),
-                                  })}
-                                  placeholder={uiText("Machine model")}
-                                />
-                              </FormField>
-                              <FormField className="lg:col-span-2" label={uiText("Nozzle")}>
-                                <Input
-                                  value={edit.nozzle}
-                                  onChange={(e) =>
-                                    updatePrinterEdit(profile.id, { nozzle: e.target.value })
-                                  }
-                                  disabled={
-                                    !auth.isAuthenticated ||
-                                    rowStatus[`p${profile.id}`] === "saving"
-                                  }
-                                  inputMode="decimal"
-                                  aria-label={uiText("Printer nozzle diameter {value1}", {
-                                    value1: String(profile.id),
-                                  })}
-                                  placeholder="0.4"
-                                />
-                              </FormField>
+                              <PrinterProfileFields
+                                id={profile.id}
+                                model={edit.model}
+                                nozzle={edit.nozzle}
+                                disabled={
+                                  !auth.isAuthenticated || rowStatus[`p${profile.id}`] === "saving"
+                                }
+                                onModelChange={(model) => updatePrinterEdit(profile.id, { model })}
+                                onNozzleChange={(nozzle) =>
+                                  updatePrinterEdit(profile.id, { nozzle })
+                                }
+                              />
                               <FormField className="col-span-full min-w-0" label={uiText("Notes")}>
                                 <textarea
                                   value={edit.notes}
@@ -1765,6 +1736,7 @@ export function FilamentProfilesCard() {
                                 currency={currency}
                                 focus={focusCosts}
                                 draft={edit.expenses}
+                                model={edit.model}
                                 disabled={
                                   !auth.isAuthenticated || rowStatus[`p${profile.id}`] === "saving"
                                 }

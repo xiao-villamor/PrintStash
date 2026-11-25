@@ -878,8 +878,14 @@ describe("FilamentProfilesCard", () => {
           ]),
         });
         await user.click(review);
+        if (kind === "printer") {
+          await user.selectOptions(
+            screen.getByRole("combobox", { name: "Printer nozzle diameter 1" }),
+            screen.getByRole("option", { name: "Custom nozzle diameter (mm)" }),
+          );
+        }
         const input = screen.getByRole("textbox", {
-          name: kind === "filament" ? "Filament cost per kg 1" : "Printer nozzle diameter 1",
+          name: kind === "filament" ? "Filament cost per kg 1" : "Custom nozzle diameter (mm)",
         });
         await user.clear(input);
         await user.type(input, "-1");
@@ -1419,6 +1425,62 @@ describe("FilamentProfilesCard", () => {
   });
 
   describe("creating a printer preset", () => {
+    it("saves catalog hardware with operating cost defaults", async () => {
+      const user = userEvent.setup();
+      const app = await renderCard({
+        at: "/profiles?tab=printers",
+        expand: false,
+        routes: {
+          "POST /api/v1/printer-profiles": json(aPrinterProfile({ id: 2, name: "Workshop" }), 201),
+        },
+      });
+      await user.click(screen.getByRole("button", { name: "New printer preset" }));
+      const dialog = within(screen.getByRole("dialog", { name: "New printer preset" }));
+      await user.type(dialog.getByRole("textbox", { name: "Name" }), "Workshop");
+      await user.selectOptions(
+        dialog.getByRole("combobox", { name: "Printer model" }),
+        "Bambu Lab A1",
+      );
+      await user.selectOptions(dialog.getByRole("combobox", { name: "Nozzle diameter" }), "0.6");
+      expect(dialog.getByRole("link", { name: "Published average of 95 W for PLA" })).toBeVisible();
+      expect(dialog.getByLabelText("Expected lifetime (print hours)")).toHaveAttribute(
+        "placeholder",
+        "5000",
+      );
+      fireEvent.change(dialog.getByLabelText(/Purchase cost/), { target: { value: "500" } });
+      await user.click(dialog.getByRole("button", { name: "Add preset" }));
+
+      const [write] = app.requestsWithMethod("POST");
+      expect(JSON.parse(write?.body ?? "{}")).toMatchObject({
+        printer_model: "Bambu Lab A1",
+        nozzle_diameter_mm: 0.6,
+        expenses: { lifetime_hours: 5000, power_watts: 95 },
+      });
+    });
+
+    it("leaves operating costs unset when the user only chooses hardware", async () => {
+      const user = userEvent.setup();
+      const app = await renderCard({
+        at: "/profiles?tab=printers",
+        expand: false,
+        routes: {
+          "POST /api/v1/printer-profiles": json(aPrinterProfile({ id: 2, name: "Workshop" }), 201),
+        },
+      });
+      await user.click(screen.getByRole("button", { name: "New printer preset" }));
+      const dialog = within(screen.getByRole("dialog", { name: "New printer preset" }));
+      await user.type(dialog.getByRole("textbox", { name: "Name" }), "Workshop");
+      await user.selectOptions(
+        dialog.getByRole("combobox", { name: "Printer model" }),
+        "Prusa MK4S",
+      );
+      await user.click(dialog.getByRole("button", { name: "Add preset" }));
+
+      const [write] = app.requestsWithMethod("POST");
+      expect(JSON.parse(write?.body ?? "{}")).toMatchObject({ printer_model: "Prusa MK4S" });
+      expect(JSON.parse(write?.body ?? "{}")).not.toHaveProperty("expenses");
+    });
+
     it("saves operating expenses during initial creation", async () => {
       const user = userEvent.setup();
       const app = await renderCard({
@@ -1520,7 +1582,11 @@ describe("FilamentProfilesCard", () => {
       await screen.findByText("Filament presets");
       await user.click(screen.getByRole("tab", { name: /Printers/ }));
       await openProfileRows();
-      const nozzle = await screen.findByLabelText("Printer nozzle diameter 1");
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: "Printer nozzle diameter 1" }),
+        screen.getByRole("option", { name: "Custom nozzle diameter (mm)" }),
+      );
+      const nozzle = await screen.findByLabelText("Custom nozzle diameter (mm)");
 
       await user.clear(nozzle);
       await user.type(nozzle, "wide");

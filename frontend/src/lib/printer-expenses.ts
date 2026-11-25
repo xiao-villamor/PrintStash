@@ -48,6 +48,39 @@ export const expenseFields = [
 
 export type ExpenseDraft = { [Key in keyof PrinterExpenses]: string };
 
+// A budgeting assumption used only when a profile's operating costs are set.
+export const DEFAULT_LIFETIME_HOURS = 5000;
+
+type PublishedPrintPower = { watts: number; source: string; pla: boolean };
+
+const prusaMkSeriesPower = {
+  watts: 80,
+  source: "https://help.prusa3d.com/article/faq-frequently-asked-questions_1932",
+  pla: true,
+};
+
+const publishedPrintPower = new Map<string, PublishedPrintPower>([
+  ["bambu lab a1", { watts: 95, source: "https://wiki.bambulab.com/en/a1/manual/faq", pla: true }],
+  [
+    "bambu lab a1 mini",
+    { watts: 57, source: "https://wiki.bambulab.com/en/a1-mini/manual/faq", pla: false },
+  ],
+  ["prusa mk3s+", prusaMkSeriesPower],
+  ["prusa mk4", prusaMkSeriesPower],
+  [
+    "prusa mk4s",
+    {
+      watts: 80,
+      source: "https://www.prusa3d.com/product/original-prusa-mk4s-3d-printer/",
+      pla: true,
+    },
+  ],
+]);
+
+export function averagePrintPower(model: string) {
+  return publishedPrintPower.get(model.trim().toLowerCase());
+}
+
 export function machineCostBreakdown(expenses: PrinterExpenses) {
   return {
     depreciation: expenses.acquisition_cost / expenses.lifetime_hours,
@@ -72,13 +105,17 @@ export function expensesChanged(previous: ExpenseDraft, current: ExpenseDraft) {
   return expenseFields.some(({ key }) => previous[key] !== current[key]);
 }
 
-export function parseExpenses(draft: ExpenseDraft): PrinterExpenses | null {
+export function parseExpenses(draft: ExpenseDraft, model: string): PrinterExpenses | null {
   if (!expenseFields.some(({ key }) => draft[key].trim())) return null;
   return {
     acquisition_cost: Number(draft.acquisition_cost),
-    lifetime_hours: Number(draft.lifetime_hours),
+    lifetime_hours: draft.lifetime_hours.trim()
+      ? Number(draft.lifetime_hours)
+      : DEFAULT_LIFETIME_HOURS,
     lifetime_maintenance: Number(draft.lifetime_maintenance),
-    power_watts: Number(draft.power_watts),
+    power_watts: draft.power_watts.trim()
+      ? Number(draft.power_watts)
+      : (averagePrintPower(model)?.watts ?? 0),
     electricity_per_kwh: Number(draft.electricity_per_kwh),
     extra_per_hour: Number(draft.extra_per_hour),
   };
