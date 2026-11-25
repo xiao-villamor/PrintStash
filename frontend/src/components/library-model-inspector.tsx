@@ -47,6 +47,7 @@ function InspectorLoading({ height }: { height: number }) {
 export function LibraryModelInspector({
   id,
   open,
+  focusOnOpen = true,
   motionLocked = false,
   summary,
   origin,
@@ -59,6 +60,7 @@ export function LibraryModelInspector({
 }: {
   id: number;
   open: boolean;
+  focusOnOpen?: boolean;
   motionLocked?: boolean;
   summary?: Pick<ModelListItem, "name">;
   origin?: LibraryEntry;
@@ -114,8 +116,8 @@ export function LibraryModelInspector({
     if (scroll.current) scroll.current.scrollTop = 0;
   }, [id]);
   useEffect(() => {
-    if (open) title.current?.focus({ preventScroll: true });
-  }, [id, open]);
+    if (open && focusOnOpen) title.current?.focus({ preventScroll: true });
+  }, [id, open, focusOnOpen]);
   function widthHandle(edge: "panel" | "viewer") {
     if (!resize) return null;
     return (

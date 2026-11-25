@@ -82,6 +82,7 @@ import {
   isTypingTarget,
   keyboardOverlayOpen,
   modalOverlayOpen,
+  OUTLINER_KEYBOARD_ROW,
 } from "@/lib/keyboard-commands";
 import { uiText, type MessageKey } from "@/lib/locale";
 import { getErrorMessage, parseApiError, userMessage } from "@/lib/errors";
@@ -543,7 +544,8 @@ function storedInspectorWidth() {
   }
 }
 
-type InspectorIntent = { id: number; open: boolean };
+type InspectorFocusTarget = "details" | "collections";
+type InspectorIntent = { id: number; open: boolean; focusTarget: InspectorFocusTarget };
 const libraryInspectorIntents = new Map<string, InspectorIntent>();
 
 export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
@@ -2380,9 +2382,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     [inspectorScope],
   );
   const inspectModel = useCallback(
-    (id: number, opener: HTMLElement | null) => {
+    (id: number, opener: HTMLElement | null, focusTarget: InspectorFocusTarget = "details") => {
       inspectorOpener.current = opener;
-      setInspector({ id, open: true });
+      setInspector({ id, open: true, focusTarget });
     },
     [setInspector],
   );
@@ -2395,6 +2397,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   } | null>(null);
   const [treeFocus, setTreeFocus] = useState<{ id: number; entryKey: string } | null>(null);
   function openTreeModel(model: OutlinerModelRead, opener: HTMLElement) {
+    opener.focus({ preventScroll: true });
     if (
       docView === "models" &&
       libraryView === "all" &&
@@ -2445,7 +2448,15 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       }
       if (card) {
         card.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
-        inspectModel(id, localTreeReveal?.opener ?? anchor ?? null);
+        const originalOpener = localTreeReveal?.opener;
+        const treeOpener = originalOpener?.isConnected
+          ? originalOpener
+          : document.querySelector<HTMLElement>(
+              `[data-collections-pane][data-open="true"] [data-outliner-entry="${CSS.escape(key)}"]`,
+            );
+        if (treeOpener && document.activeElement === document.body)
+          treeOpener.focus({ preventScroll: true });
+        inspectModel(id, treeOpener ?? anchor ?? null, "collections");
         setTreeFocus({ id, entryKey: entry.key });
       }
       finish();
@@ -2506,6 +2517,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     if (inspectorIntent) setInspector({ ...inspectorIntent, open: false });
     requestAnimationFrame(() => {
       if (libraryInspectorIntents.get(inspectorScope)?.open) return;
+      if (document.activeElement?.closest(OUTLINER_KEYBOARD_ROW)) return;
       const opener = inspectorOpener.current;
       const main = startupContent.current;
       if (
@@ -2534,7 +2546,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       const id = inspectorIntent?.id ?? visibleModels[0]?.id;
       if (id !== undefined) {
         const opener = document.activeElement;
-        inspectModel(id, opener instanceof HTMLElement ? opener : null);
+        inspectModel(
+          id,
+          opener instanceof HTMLElement ? opener : null,
+          opener?.closest(OUTLINER_KEYBOARD_ROW) ? "collections" : "details",
+        );
       }
     }
   }, [
@@ -4447,6 +4463,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             key={entry.session}
             id={inspectorIntent.id}
             open={inspectorOpen}
+            focusOnOpen={inspectorIntent.focusTarget === "details"}
             motionLocked={inspectorMotion.moving}
             summary={visibleModels.find((model) => model.id === inspectorIntent.id)}
             style={inspectorDockStyle}
