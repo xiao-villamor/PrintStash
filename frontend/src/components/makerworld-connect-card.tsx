@@ -14,7 +14,7 @@ const EXTENSION_URL = "https://github.com/xiao-villamor/PrintStash/tree/main/bro
 export function MakerWorldConnectCard() {
   useUiLocale();
   const steps = [
-    uiText("Install the extension and configure this Vault with a named API key."),
+    uiText("Install the extension, then create a pairing code below."),
     uiText("Sign in to MakerWorld and open an individual model page."),
     uiText("Use the extension, then review the staged file in Pending Imports."),
   ];

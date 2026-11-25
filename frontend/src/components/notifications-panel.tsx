@@ -631,7 +631,10 @@ export function NotificationsPanel({
             {error}
           </p>
         )}
-        <fieldset className="min-w-0" disabled={busy !== null || Boolean(settingsQuery.error)}>
+        <fieldset
+          className="min-w-0 space-y-6"
+          disabled={busy !== null || Boolean(settingsQuery.error)}
+        >
           <SettingsCard hideHeader title={uiText("Notifications")}>
             <div className="settings-preference-row">
               <span>

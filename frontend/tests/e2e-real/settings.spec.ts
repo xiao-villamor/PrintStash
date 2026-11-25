@@ -199,6 +199,45 @@ test.describe("settings", () => {
     }
   });
 
+  test("persists a new preview colour from the desktop palette", async ({ page }) => {
+    await page.goto("/settings?section=previews");
+    await collapseNavigationSidebar(page);
+    const colours = page.getByRole("radiogroup", { name: "Colour" });
+    const plum = colours.getByRole("radio", { name: "Plum", exact: true });
+    await expect(plum).toBeEnabled();
+    const rows = await colours
+      .getByRole("radio")
+      .evaluateAll((radios) =>
+        radios.map((radio) => radio.parentElement?.getBoundingClientRect().y),
+      );
+    expect(new Set(rows).size).toBe(1);
+    const selected = colours.getByRole("radio", { checked: true });
+    const original = await selected.getAttribute("aria-label");
+    if (!original) throw new Error("The palette must identify the current colour");
+    const apply = page.getByRole("button", { name: "Apply look", exact: true });
+    const selectColour = async (colour: string) => {
+      const radio = colours.getByRole("radio", { name: colour, exact: true });
+      await expect(radio).toBeEnabled();
+      if (await radio.isChecked()) return;
+      await radio.locator("..").click();
+      const saved = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/v1/config" &&
+          response.request().method() === "PUT",
+      );
+      await apply.click();
+      expect((await saved).ok()).toBe(true);
+      await expect(apply).toBeDisabled();
+    };
+    try {
+      await selectColour("Plum");
+      await page.reload();
+      await expect(plum).toBeChecked();
+    } finally {
+      await selectColour(original);
+    }
+  });
+
   test("gives storage usage sections space beside the desktop divider", async ({ page }) => {
     await page.goto("/settings?section=storage");
     await collapseNavigationSidebar(page);
@@ -208,7 +247,12 @@ test.describe("settings", () => {
     const history = page.getByRole("region", { name: "Storage over time" });
     await expect(breakdown).toHaveCSS("padding-inline-end", "24px");
     await expect(history).toHaveCSS("padding-inline-start", "24px");
-    await expect(page.getByRole("region", { name: "Measurement details" })).toBeVisible();
+    const details = page.getByRole("button", { name: "Measurement details" });
+    await expect(details).toHaveAttribute("aria-expanded", "false");
+    await details.click();
+    await expect(page.getByRole("heading", { name: "Files by type" })).toBeVisible();
+    await details.click();
+    await expect(page.getByRole("heading", { name: "Files by type" })).toBeHidden();
   });
 
   test("renders the responsive storage settings workflow", async ({ page }, testInfo) => {

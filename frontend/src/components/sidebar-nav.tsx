@@ -7,7 +7,6 @@ import {
   Keyboard,
   LogIn,
   Search,
-  Settings,
   SlidersHorizontal,
   Trash2,
   type LucideIcon,
@@ -29,14 +28,7 @@ import { useInboxCount } from "@/lib/queries/inbox";
 import { openKeyboardShortcuts } from "@/lib/keyboard-commands";
 import { useCollectionsPane } from "@/lib/collections-pane-context";
 
-type RailDestination =
-  | "library"
-  | "search"
-  | "inbox"
-  | "printers"
-  | "profiles"
-  | "settings"
-  | "trash";
+type RailDestination = "library" | "search" | "inbox" | "printers" | "profiles" | "trash";
 type NavItem = {
   id: RailDestination;
   href: string;
@@ -54,7 +46,6 @@ const mainItems: NavItem[] = [
 const utilityItems: NavItem[] = [
   { id: "printers", href: "/printers", labelKey: "nav.printers", icon: Printer3D, adminOnly: true },
   { id: "profiles", href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
-  { id: "settings", href: "/settings", labelKey: "nav.settings", icon: Settings },
   {
     id: "trash",
     href: "/settings?section=trash",
@@ -132,11 +123,6 @@ export function SidebarNav() {
         return pathname.startsWith("/printers");
       case "profiles":
         return pathname.startsWith("/profiles");
-      case "settings":
-        return (
-          pathname === "/settings" &&
-          (params.get("section") !== "trash" || params.get("view") === "settings")
-        );
       case "trash":
         return (
           pathname === "/settings" &&
@@ -196,10 +182,6 @@ export function SidebarNav() {
           )
             return;
           event.preventDefault();
-          if (item.id === "settings" && isActive("settings")) {
-            pane?.showSettings();
-            return;
-          }
           if (item.id === "search") {
             if (pane) pane.showSearch();
             else router.push("/");

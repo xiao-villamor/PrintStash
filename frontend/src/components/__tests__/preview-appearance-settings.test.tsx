@@ -37,6 +37,13 @@ describe("PreviewAppearanceSettings", () => {
     expect(view.requestsWithMethod("PUT")).toHaveLength(0);
   });
 
+  it.each(["Sage", "Clay", "Plum"])("offers a %s preview swatch", (colour) => {
+    renderSettings();
+    const swatch = screen.getByRole("radio", { name: colour });
+    fireEvent.click(swatch);
+    expect(swatch).toBeChecked();
+  });
+
   it("saves the look once, when applied", async () => {
     const view = renderSettings();
     fireEvent.click(screen.getByRole("radio", { name: "Sand" }));

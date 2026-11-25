@@ -6184,5 +6184,9 @@
   "User deleted.": "User deleted.",
   "{value1} will lose access and disappear from the user list. Their activity history will be kept.": "{value1} will lose access and disappear from the user list. Their activity history will be kept.",
   "Install the extension, prepare a connection here, then open the extension in this tab to finish.": "Install the extension, prepare a connection here, then open the extension in this tab to finish.",
-  "Browser extension": "Browser extension"
+  "Browser extension": "Browser extension",
+  "Sage": "Sage",
+  "Clay": "Clay",
+  "Plum": "Plum",
+  "Install the extension, then create a pairing code below.": "Install the extension, then create a pairing code below."
 }

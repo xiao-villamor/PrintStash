@@ -20,6 +20,7 @@ import type { EditingBase } from "@/types/editing";
 import { getSessionVersion } from "@/lib/session-transport";
 import { onAuthChange } from "@/lib/auth-store";
 import { parseApiError } from "@/lib/errors";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StorageProviderFields } from "@/components/storage-provider-fields";
@@ -528,7 +529,18 @@ export function StorageConfigCard({
                               </span>
                             )}
                         </dt>
-                        <dd className="is-text">{knownUiText(cfg.storage_tier)}</dd>
+                        <dd className="is-text">
+                          <Badge
+                            variant="outline"
+                            className={
+                              cfg.storage_tier === "verified"
+                                ? "border-success/30 bg-success/15 text-success"
+                                : "border-warning/30 bg-warning/15 text-warning"
+                            }
+                          >
+                            {knownUiText(cfg.storage_tier)}
+                          </Badge>
+                        </dd>
                       </div>
                     )}
                     {locationFields.map((field) => (

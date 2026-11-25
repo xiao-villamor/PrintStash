@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
 import { Camera, Grid2X2, Minus, Plus, Ruler } from "lucide-react";
+import {
+  readPreviewPreferences,
+  usePreviewPreferences,
+  writePreviewPreferences,
+} from "@/lib/preview-preferences";
 import { Button } from "@/components/ui/button";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
@@ -46,6 +51,7 @@ export function ViewerToolbar({
   setCamera?: (preset: ViewerCameraPreset) => void;
 }) {
   useUiLocale();
+  const { screenshotScale } = usePreviewPreferences();
   const [localCamera, setLocalCamera] = useState<ViewerCameraPreset>("isometric");
   const activeCamera = camera === undefined ? localCamera : camera;
   const chooseCamera = setCamera ?? setLocalCamera;
@@ -107,6 +113,26 @@ export function ViewerToolbar({
           )}
         </div>
         <div className="detail-viewer-control-group detail-viewer-actions">
+          {!gcodeOnly && (
+            <select
+              aria-label={uiText("Screenshot resolution")}
+              title={uiText("Screenshot resolution")}
+              className="h-9 rounded-md border border-border bg-card px-2 text-xs text-card-foreground"
+              value={screenshotScale}
+              disabled={!viewerReady}
+              onChange={(event) => {
+                const scale = Number(event.target.value);
+                if (scale === 1 || scale === 2 || scale === 3)
+                  writePreviewPreferences({ ...readPreviewPreferences(), screenshotScale: scale });
+              }}
+            >
+              {([1, 2, 3] as const).map((scale) => (
+                <option key={scale} value={scale}>
+                  {scale}×
+                </option>
+              ))}
+            </select>
+          )}
           <Button
             variant="ghost"
             size="icon-sm"

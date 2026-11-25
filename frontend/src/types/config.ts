@@ -79,7 +79,8 @@ export interface SetupResponse {
   token_type: string;
 }
 
-export type PreviewLook = "sky" | "printstash_blue" | "slate" | "graphite" | "sand";
+export type PreviewLook =
+  keyof typeof import("@/lib/thumbnail-profile.generated").PREVIEW_LOOK_COLOURS;
 
 export interface PreviewAppearance {
   preview_look: PreviewLook;

@@ -1,5 +1,4 @@
 "use client";
-import { WorkbenchSidebarContent } from "@/components/collections-pane";
 import {
   SETTINGS_SECTION_LABELS,
   settingsSection,
@@ -8,7 +7,6 @@ import {
 import { SettingsNav, type SettingsNavGroup } from "@/components/settings-nav";
 import { SettingsToc } from "@/components/settings-toc";
 import { CardMetricsPreview, ThemeTiles } from "@/components/settings-appearance-parts";
-import { useCollectionsPane } from "@/lib/collections-pane-context";
 
 import { useContentReveal } from "@/lib/use-content-reveal";
 import { StorageConnectionReview } from "@/components/storage-connection-review";
@@ -96,7 +94,6 @@ import {
   Eraser,
   Eye,
   EyeOff,
-  ExternalLink,
   Gpu,
   Hourglass,
   Files,
@@ -111,7 +108,6 @@ import {
   Copy,
   Loader2,
   Palette,
-  Puzzle,
   ShieldCheck,
   RotateCcw,
   Save,
@@ -222,10 +218,8 @@ import {
   type PreviewPreferences,
   type PreviewQuality,
   type MeshRendererPreference,
-  type ScreenshotScale,
 } from "@/lib/preview-preferences";
 import {
-  CHROME_EXTENSION_URL,
   prepareBrowserExtensionSetup,
   discardBrowserExtensionSetup,
   type BrowserExtensionSetup,
@@ -329,7 +323,6 @@ const MESH_RENDERERS = [
   "auto",
   "webgpu",
 ] as const satisfies readonly MeshRendererPreference[];
-const SCREENSHOT_SCALES = [1, 2, 3] as const satisfies readonly ScreenshotScale[];
 /** Widths the vault offers; a legacy config value outside this list shows as "Custom". */
 const MODEL_THUMBNAIL_WIDTHS = [320, 640, 1280] as const;
 type ModelThumbnailWidth = (typeof MODEL_THUMBNAIL_WIDTHS)[number];
@@ -509,7 +502,6 @@ function TrashExpiry({ expiresAt }: { expiresAt: string | null | undefined }) {
 const EMPTY_CREATE_USER = { username: "", email: "", password: "", confirmation: "" };
 
 export function SettingsPanel() {
-  const sidebar = useCollectionsPane();
   useUiLocale();
   const { user } = useAuth();
   const [addingSamples, setAddingSamples] = useState(false);
@@ -560,7 +552,7 @@ export function SettingsPanel() {
   const [archiveBusy, setArchiveBusy] = useState<"export" | "import" | null>(null);
   const apiKeysQuery = useQuery({
     ...apiKeysOptions(user?.id ?? null),
-    enabled: user !== null && activeSection === "access",
+    enabled: user !== null && (activeSection === "access" || activeSection === "imports"),
   });
   const usersQuery = useQuery({
     ...adminUsersOptions(user?.is_superuser ? user.id : null),
@@ -653,7 +645,7 @@ export function SettingsPanel() {
       : `${printerCommand.variables.printerId}:${printerCommand.variables.targetUserId}`
     : null;
   const [ownedReceipt, setOwnedReceipt] = useState<
-    (ApiKeyReceipt & { handoff: BrowserExtensionSetup | null }) | null
+    (ApiKeyReceipt & { handoff: BrowserExtensionSetup | null; extension: boolean }) | null
   >(null);
   const receipt =
     user &&
@@ -889,9 +881,6 @@ export function SettingsPanel() {
     });
     return sections.length ? [{ label: uiText(group.labelKey), sections }] : [];
   });
-  // The Settings sidebar and the in-page rail are the same navigation; the rail
-  // shows whenever the sidebar is not already showing it.
-  const pageRail = !(sidebar && sidebar.open && sidebar.mode === "settings");
 
   function changeSection(section: SettingsSection) {
     const params = new URLSearchParams(searchParams.toString());
@@ -1403,7 +1392,7 @@ export function SettingsPanel() {
         name: extension ? "Browser extension" : keyName.trim() || "Programmatic access",
         receiveReceipt: (result) => {
           if (!accountCurrent(session)) return;
-          setOwnedReceipt({ ...result, handoff: null });
+          setOwnedReceipt({ ...result, handoff: null, extension });
           if (extension) {
             try {
               const handoff = prepareBrowserExtensionSetup(
@@ -1412,7 +1401,7 @@ export function SettingsPanel() {
                 result.secret,
               );
               handoffPrepared = true;
-              setOwnedReceipt({ ...result, handoff });
+              setOwnedReceipt({ ...result, handoff, extension });
             } catch {
               toast.error(t("settings.accountHandoffFailed"));
             }
@@ -2764,10 +2753,7 @@ export function SettingsPanel() {
         />
 
         {!trashPage && (
-          <div
-            ref={mobileTabsRef}
-            className={cn("border-b border-border pb-3", pageRail ? "lg:hidden" : "md:hidden")}
-          >
+          <div ref={mobileTabsRef} className="border-b border-border pb-3 lg:hidden">
             <TabBar
               tabs={visibleSettingsSections.map((section) => {
                 const Icon = section.icon;
@@ -2795,42 +2781,24 @@ export function SettingsPanel() {
           className={
             trashPage
               ? ""
-              : pageRail
-                ? "lg:grid lg:grid-cols-[14.5rem_minmax(0,1fr)] lg:items-start lg:gap-8 xl:grid-cols-[14.5rem_minmax(0,1fr)_10.5rem]"
-                : "xl:grid xl:grid-cols-[minmax(0,1fr)_10.5rem] xl:items-start xl:gap-8"
+              : "lg:grid lg:grid-cols-[14.5rem_minmax(0,1fr)] lg:items-start lg:gap-8 xl:grid-cols-[14.5rem_minmax(0,1fr)_10.5rem]"
           }
         >
           {!trashPage && (
-            <>
-              <WorkbenchSidebarContent>
-                {sidebar && (
-                  <SettingsNav
-                    variant="sidebar"
-                    groups={settingsNavGroups}
-                    active={activeSection}
-                    onChange={(id) => changeSection(settingsSection(id))}
-                    hidden={sidebar.mode !== "settings"}
-                  />
-                )}
-              </WorkbenchSidebarContent>
-              {pageRail && (
-                <SettingsNav
-                  variant="page"
-                  groups={settingsNavGroups}
-                  active={activeSection}
-                  onChange={(id) => changeSection(settingsSection(id))}
-                  account={
-                    user
-                      ? {
-                          name: user.username,
-                          role: user.is_superuser ? uiText("Vault admin") : uiText("Member"),
-                        }
-                      : undefined
-                  }
-                  onBack={() => router.push("/")}
-                />
-              )}
-            </>
+            <SettingsNav
+              groups={settingsNavGroups}
+              active={activeSection}
+              onChange={(id) => changeSection(settingsSection(id))}
+              account={
+                user
+                  ? {
+                      name: user.username,
+                      role: user.is_superuser ? uiText("Vault admin") : uiText("Member"),
+                    }
+                  : undefined
+              }
+              onBack={() => router.push("/")}
+            />
           )}
 
           <main ref={sectionMotion} className="settings-main min-w-0">
@@ -4102,66 +4070,6 @@ export function SettingsPanel() {
                       </p>
                     ) : (
                       <>
-                        <div className="flex flex-wrap items-start gap-3 rounded-lg border border-border bg-muted/30 p-4">
-                          <Puzzle
-                            className="mt-0.5 size-5 shrink-0 text-muted-foreground"
-                            aria-hidden
-                          />
-                          <div className="min-w-44 flex-1 space-y-1">
-                            <p className="text-sm font-semibold text-foreground">
-                              {uiText("Browser extension")}
-                            </p>
-                            {extensionSetupReady ? (
-                              <>
-                                <span className="settings-status" role="status">
-                                  {uiText("Setup prepared")}
-                                </span>
-                                <p className="text-sm text-muted-foreground">
-                                  {uiText(
-                                    "Open the PrintStash extension on this tab to finish the verified connection.",
-                                  )}
-                                </p>
-                              </>
-                            ) : (
-                              <>
-                                <p className="text-sm text-muted-foreground">
-                                  {uiText(
-                                    "Install the extension, prepare a connection here, then open the extension in this tab to finish.",
-                                  )}
-                                </p>
-                                <Button
-                                  asChild
-                                  variant="link"
-                                  size="xs"
-                                  className="h-auto px-0 py-1"
-                                >
-                                  <a
-                                    href={CHROME_EXTENSION_URL}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                  >
-                                    {uiText("Install Chrome extension")}
-                                    <ExternalLink className="size-3.5" aria-hidden />
-                                  </a>
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                          {!extensionSetupReady && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={setupBrowserExtension}
-                              loading={keyBusy}
-                              disabled={
-                                receipt !== null || apiKeysQuery.isError || apiKeysQuery.isPending
-                              }
-                            >
-                              {uiText("Set up extension")}
-                            </Button>
-                          )}
-                        </div>
-
                         <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
                           <FormField htmlFor="api-key-name" label={uiText("Key name")}>
                             <Input
@@ -4187,7 +4095,7 @@ export function SettingsPanel() {
                           </Button>
                         </div>
 
-                        {newApiKey && (
+                        {newApiKey && !receipt?.extension && (
                           <div className="border border-primary/40 bg-primary/10 rounded p-3 space-y-2">
                             <p className="text-xs text-muted-foreground">
                               {uiText("Copy this key now. It will only be shown once.")}
@@ -5252,6 +5160,81 @@ export function SettingsPanel() {
               <div className="settings-imports">
                 <MakerWorldConnectCard />
                 <ProviderConnectionsPanel />
+                {user && (
+                  <SettingsCard
+                    title={uiText("Browser extension")}
+                    description={uiText(
+                      "Install the extension, prepare a connection here, then open the extension in this tab to finish.",
+                    )}
+                    action={
+                      !extensionSetupReady && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={setupBrowserExtension}
+                          loading={keyBusy}
+                          disabled={
+                            receipt !== null || apiKeysQuery.isError || apiKeysQuery.isPending
+                          }
+                        >
+                          {uiText("Set up extension")}
+                        </Button>
+                      )
+                    }
+                  >
+                    <div
+                      className="space-y-3 py-3"
+                      hidden={!apiKeysQuery.isError && !receipt?.extension}
+                    >
+                      {apiKeysQuery.isError && (
+                        <div role="alert" className="flex items-center gap-2 text-sm">
+                          <p>{t("settings.accountKeysFailed")}</p>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void apiKeysQuery.refetch()}
+                          >
+                            {t("Retry")}
+                          </Button>
+                        </div>
+                      )}
+                      {extensionSetupReady ? (
+                        <div role="status" className="space-y-1">
+                          <span className="settings-status">{uiText("Setup prepared")}</span>
+                          <p className="text-sm text-muted-foreground">
+                            {uiText(
+                              "Open the PrintStash extension on this tab to finish the verified connection.",
+                            )}
+                          </p>
+                        </div>
+                      ) : receipt?.extension && newApiKey ? (
+                        <div className="space-y-2">
+                          <p className="text-xs text-muted-foreground">
+                            {uiText("Copy this key now. It will only be shown once.")}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded bg-muted p-2 text-xs">
+                              {newApiKey}
+                            </code>
+                            <button
+                              type="button"
+                              onClick={copyApiKey}
+                              className={BTN_ICON}
+                              title={uiText("Copy API key")}
+                            >
+                              <Copy className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                      {receipt?.extension && (
+                        <Button size="sm" variant="ghost" onClick={dismissReceipt}>
+                          {t("settings.accountDismissSecret")}
+                        </Button>
+                      )}
+                    </div>
+                  </SettingsCard>
+                )}
               </div>
             )}
 
@@ -5607,29 +5590,6 @@ export function SettingsPanel() {
                           { value: "performance", label: uiText("Performance · 1×") },
                           { value: "balanced", label: uiText("Balanced · 1.5×") },
                           { value: "detail", label: uiText("High detail · 2×") },
-                        ]}
-                      />
-                    </div>
-
-                    <div className="settings-preference-row">
-                      <span>
-                        {uiText("Screenshot resolution")}
-                        <span className="settings-row-hint">
-                          {uiText("Standard 1× · Sharp 2× · Print-ready 3×")}
-                        </span>
-                      </span>
-                      <SettingsSegmented
-                        label={uiText("Screenshot resolution")}
-                        value={String(previewPreferences.screenshotScale)}
-                        onChange={(value) =>
-                          savePreviewPreference({
-                            screenshotScale: selectedOption(SCREENSHOT_SCALES, Number(value)),
-                          })
-                        }
-                        options={[
-                          { value: "1", label: uiText("Standard · 1×") },
-                          { value: "2", label: uiText("Sharp · 2×") },
-                          { value: "3", label: uiText("Print-ready · 3×") },
                         ]}
                       />
                     </div>

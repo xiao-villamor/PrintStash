@@ -309,14 +309,16 @@ test.describe("settings route", () => {
   test("settings prepares a one-time browser extension setup", async ({ page }) => {
     await page.goto("/settings?section=access");
 
+    await expect(page.getByRole("button", { name: "Set up extension" })).toHaveCount(0);
+    await page.goto("/settings?section=imports");
     await expect(page.getByRole("link", { name: "Install Chrome extension" })).toHaveAttribute(
       "href",
       /^https:\/\/chromewebstore\.google\.com\//,
     );
     await page.getByRole("button", { name: "Set up extension" }).click();
 
-    const apiKeys = page.getByRole("group", { name: "API keys" });
-    await expect(apiKeys.getByRole("status")).toHaveText("Setup prepared");
+    const extension = page.getByRole("group", { name: "Browser extension" });
+    await expect(extension.getByRole("status")).toContainText("Setup prepared");
     await expect(page.getByRole("button", { name: "Set up extension" })).toHaveCount(0);
     await expect(
       page.getByText(
@@ -333,10 +335,40 @@ test.describe("settings route", () => {
     expect(setup).toContain('"apiKey":"psk_browser_setup_secret"');
   });
 
+  test("separates the notification controls from the channel heading", async ({ page }) => {
+    await page.route("**/api/v1/notifications", (route) =>
+      route.fulfill({
+        json: { enabled: false, channels: [], edit_epoch: "test", edit_version: 1 },
+      }),
+    );
+    await page.route("**/api/v1/notifications/deliveries?**", (route) =>
+      route.fulfill({ json: [] }),
+    );
+    await page.goto("/settings?section=notifications");
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
+    if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+    const master = page.getByRole("group", { name: "Notifications", exact: true });
+    const channels = page.getByRole("heading", { name: "Channels", exact: true });
+    await expect(master).toBeVisible();
+    await expect(channels).toBeVisible();
+    const [masterBox, channelBox] = await Promise.all([
+      master.boundingBox(),
+      channels.boundingBox(),
+    ]);
+    if (!masterBox || !channelBox) throw new Error("Both notification sections must be visible");
+    expect(channelBox.y - masterBox.y - masterBox.height).toBeGreaterThanOrEqual(24);
+  });
+
   test("settings creates a temporary browser pairing code", async ({ page }) => {
     await page.goto("/settings?section=imports");
 
-    await expect(page.getByRole("heading", { name: "Provider connections" })).toBeVisible();
+    const pairing = page.getByRole("heading", { name: "Paired browsers" });
+    const providers = page.getByRole("heading", { name: "Provider connections" });
+    await expect(pairing).toBeVisible();
+    await expect(providers).toBeVisible();
+    expect((await pairing.boundingBox())!.y).toBeLessThan((await providers.boundingBox())!.y);
+    await expect(page.getByText("Staging capacity", { exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "Create pairing code" }).click();
     await expect(page.getByText("PAIR-1234")).toBeVisible();
     await expect(page.getByText(/Expires at/)).toBeVisible();
@@ -360,7 +392,6 @@ test.describe("settings route", () => {
     await page.goto("/settings?section=previews");
 
     await page.getByLabel("Preview quality").selectOption("detail");
-    await page.getByLabel("Screenshot resolution").selectOption("3");
     await expect
       .poll(() => page.evaluate(() => localStorage.getItem("printstash.preview.preferences:v1")))
       .toContain('"previewQuality":"detail"');

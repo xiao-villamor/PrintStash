@@ -2953,10 +2953,11 @@ describe("SettingsPanel", () => {
       expect(await screen.findByLabelText("Preview quality")).toBeInTheDocument();
     });
 
-    it("offers the screenshot resolution choices", async () => {
+    it("keeps capture resolution out of interactive preview preferences", async () => {
       renderSettings({ at: "/settings?section=previews" });
 
-      expect(await screen.findByLabelText("Screenshot resolution")).toBeInTheDocument();
+      await screen.findByLabelText("Preview quality");
+      expect(screen.queryByLabelText("Screenshot resolution")).not.toBeInTheDocument();
     });
 
     it("offers the model image quality choices", async () => {
@@ -3696,7 +3697,7 @@ describe("Settings account recovery", () => {
   });
   it("retires an owned extension handoff with its private session", async () => {
     const app = renderSettings({
-      at: "/settings?section=access",
+      at: "/settings?section=imports",
       routes: { "POST /api/v1/auth/api-keys": json(MINTED_KEY) },
     });
     await userEvent.click(await screen.findByRole("button", { name: "Set up extension" }));
@@ -3721,7 +3722,7 @@ describe("Settings account intent", () => {
       return store.call(this, key, value);
     });
     const app = renderSettings({
-      at: "/settings?section=access",
+      at: "/settings?section=imports",
       routes: {
         "POST /api/v1/auth/api-keys": json(MINTED_KEY),
       },

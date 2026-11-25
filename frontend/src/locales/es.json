@@ -6184,5 +6184,9 @@
   "User deleted.": "Usuario eliminado.",
   "{value1} will lose access and disappear from the user list. Their activity history will be kept.": "{value1} perderá el acceso y desaparecerá de la lista de usuarios. Se conservará su historial de actividad.",
   "Install the extension, prepare a connection here, then open the extension in this tab to finish.": "Instala la extensión, prepara la conexión aquí y abre la extensión en esta pestaña para terminar.",
-  "Browser extension": "Extensión del navegador"
+  "Browser extension": "Extensión del navegador",
+  "Sage": "Salvia",
+  "Clay": "Arcilla",
+  "Plum": "Ciruela",
+  "Install the extension, then create a pairing code below.": "Instala la extensión y crea un código de vinculación abajo."
 }

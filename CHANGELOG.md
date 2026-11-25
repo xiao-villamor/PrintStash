@@ -22,6 +22,9 @@
 - Browser extension setup explains how to finish connecting. Storage shows measurement details directly and gives the usage breakdown and history chart separate space.
 - Maintenance explains each check, shows what a running check is doing, and loads the findings behind the latest result.
 
+- Storage shows verification badges and a compact control for measurement details. Imports puts browser pairing beside extension setup and keeps upload capacity checks in the upload flow.
+- Model screenshots offer resolution in the viewer. Generated Model images have three additional colour choices, and Settings is available from the workspace menu.
+
 ### Performance
 
 - Model details shows the selected cover during opening and initializes the interactive body after the pane docks.

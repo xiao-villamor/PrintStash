@@ -11,6 +11,7 @@ import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ViewerToolbar } from "@/components/model-detail/viewer-toolbar";
+import { readPreviewPreferences } from "@/lib/preview-preferences";
 import type { STLViewerControls } from "@/components/stl-viewer";
 
 function renderToolbar(
@@ -64,6 +65,14 @@ describe("ViewerToolbar screenshot", () => {
     renderToolbar(false);
 
     expect(screen.getByRole("button", { name: "Screenshot" })).toBeDisabled();
+  });
+
+  it("sets the screenshot resolution from the viewer toolbar", async () => {
+    renderToolbar(true);
+    const resolution = screen.getByRole("combobox", { name: "Screenshot resolution" });
+    await userEvent.selectOptions(resolution, "3");
+    expect(resolution).toHaveValue("3");
+    expect(readPreviewPreferences().screenshotScale).toBe(3);
   });
 
   it("uses the asynchronous viewer capture once ready", async () => {

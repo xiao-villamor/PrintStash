@@ -15,9 +15,21 @@ const looks = {
   slate: "Slate",
   graphite: "Graphite",
   sand: "Sand",
+  sage: "Sage",
+  clay: "Clay",
+  plum: "Plum",
 } as const satisfies Record<PreviewLook, string>;
 
-const lookOrder: readonly PreviewLook[] = ["sky", "printstash_blue", "slate", "graphite", "sand"];
+const lookOrder: readonly PreviewLook[] = [
+  "sky",
+  "printstash_blue",
+  "slate",
+  "graphite",
+  "sand",
+  "sage",
+  "clay",
+  "plum",
+];
 
 function swatchStyle(look: PreviewLook): CSSProperties & { "--preview-swatch": string } {
   return { "--preview-swatch": PREVIEW_LOOK_COLOURS[look] };
@@ -85,7 +97,7 @@ export function PreviewAppearance({
             </span>
           )}
         </div>
-        <div className="flex min-w-0 items-center gap-3 md:justify-end">
+        <div className="preview-palette flex min-w-0 flex-wrap items-center gap-3 md:justify-end">
           <span aria-hidden className="whitespace-nowrap text-xs text-muted-foreground">
             {t(looks[value.preview_look])}
           </span>
@@ -93,7 +105,7 @@ export function PreviewAppearance({
             role="radiogroup"
             aria-labelledby={colourLabel}
             aria-describedby={layout === "settings" ? colourHint : undefined}
-            className="flex shrink-0 gap-2"
+            className="grid grid-cols-4 gap-2 sm:grid-cols-8"
           >
             {lookOrder.map((look) => (
               <label
@@ -112,18 +124,13 @@ export function PreviewAppearance({
                 />
                 <span
                   style={swatchStyle(look)}
-                  className="flex size-7 items-center justify-center border border-border-strong bg-preview-swatch transition-shadow duration-press peer-checked:ring-2 peer-checked:ring-ring peer-checked:ring-offset-1 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ring peer-disabled:opacity-60"
+                  className="flex size-8 items-center justify-center rounded-full border border-border-strong bg-preview-swatch transition-shadow duration-press peer-checked:ring-2 peer-checked:ring-ring peer-checked:ring-offset-1 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ring peer-disabled:opacity-60"
                   aria-hidden
                 >
                   {value.preview_look === look && (
                     <Check
                       strokeWidth={3}
-                      className={cn(
-                        "size-4",
-                        look === "graphite"
-                          ? "text-primary-foreground"
-                          : "text-foreground dark:text-inverse-on-surface",
-                      )}
+                      className="size-5 rounded-full bg-inverse-surface p-0.5 text-inverse-on-surface"
                     />
                   )}
                 </span>

@@ -262,7 +262,7 @@
 }
 
 /* Let long choice groups take more room without squeezing out the label. */
-.settings-preference-row:has(> .settings-segmented) {
+.settings-preference-row:has(> :is(.settings-segmented, .preview-palette)) {
   grid-template-columns: minmax(0, 1fr) fit-content(70%);
 }
 
@@ -456,7 +456,7 @@
 
 @container (max-width: 32rem) {
   .settings-preference-row,
-  .settings-preference-row:has(> .settings-segmented) {
+  .settings-preference-row:has(> :is(.settings-segmented, .preview-palette)) {
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
   }

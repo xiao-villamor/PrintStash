@@ -41,10 +41,10 @@ function setMoving(moving: boolean) {
 }
 
 /** Move the shell edge with the workspace with the workspace and fit the grid when it settles. */
-export function useCollectionsPaneMotion(open: boolean) {
+export function useCollectionsPaneMotion(open: boolean, pathname: string) {
   const viewport = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
-  const initialized = useRef(false);
+  const previousPath = useRef<string | null>(null);
   const velocity = useRef(0);
 
   useLayoutEffect(() => {
@@ -72,8 +72,9 @@ export function useCollectionsPaneMotion(open: boolean) {
       widthAnimation?.cancel();
       setMoving(false);
     };
-    if (!initialized.current || reduced.matches || !desktop.matches || fullWidth === 0) {
-      initialized.current = true;
+    const routeChanged = previousPath.current !== pathname;
+    previousPath.current = pathname;
+    if (routeChanged || reduced.matches || !desktop.matches || fullWidth === 0) {
       finish();
     } else {
       const target = open ? 1 : 0;
@@ -124,7 +125,7 @@ export function useCollectionsPaneMotion(open: boolean) {
       }
       widthAnimation?.cancel();
     };
-  }, [open]);
+  }, [open, pathname]);
   // Clear the motion marker if the shell unmounts during a toggle.
   useEffect(() => () => setMoving(false), []);
 

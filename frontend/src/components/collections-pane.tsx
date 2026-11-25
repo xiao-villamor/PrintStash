@@ -91,11 +91,8 @@ export function CollectionsPaneProvider({ children }: { children: ReactNode }) {
       ? requestedMode.mode
       : pathname === "/search"
         ? "search"
-        : settings
-          ? "settings"
-          : "collections";
-  // Section navigation never changes the user's sidebar geometry.
-  const open = preference ?? true;
+        : "collections";
+  const open = (!settings || requestedMode?.scope === routeScope) && (preference ?? true);
   useEffect(() => {
     if (preference === null) return;
     try {
@@ -113,7 +110,11 @@ export function CollectionsPaneProvider({ children }: { children: ReactNode }) {
       open,
       width,
       setWidth,
-      toggle: () => setPreference(!open),
+      toggle: () => {
+        if (!open && settings && requestedMode?.scope !== routeScope)
+          setRequestedMode({ scope: routeScope, mode: "collections" });
+        setPreference(!open);
+      },
       mode,
       showCollections: () => {
         setPreference(true);
@@ -133,16 +134,26 @@ export function CollectionsPaneProvider({ children }: { children: ReactNode }) {
         setPreference(true);
         setRequestedMode({ scope: routeScope, mode: "pending" });
       },
+      dismissTool: () => setRequestedMode(null),
       showSavedViews: () => {
         setPreference(true);
         setRequestedMode({ scope: routeScope, mode: "views" });
       },
-      showSettings: () => {
-        setPreference(true);
-        setRequestedMode(null);
-      },
     }),
-    [host, breadcrumbHost, open, mode, routeScope, width, setWidth, pathname, searchParams, router],
+    [
+      host,
+      breadcrumbHost,
+      open,
+      mode,
+      routeScope,
+      width,
+      setWidth,
+      pathname,
+      searchParams,
+      router,
+      requestedMode,
+      settings,
+    ],
   );
   return (
     <CollectionsPaneContext.Provider value={value}>
@@ -245,7 +256,7 @@ export function CollectionsPaneHost() {
   const pathname = usePathname();
   if (!pane) throw new Error("Collections pane host requires its shell provider");
   const { attach, open, mode } = pane;
-  const { viewport, content } = useCollectionsPaneMotion(open);
+  const { viewport, content } = useCollectionsPaneMotion(open, pathname);
   const sectionMotion = useContentReveal(`${mode}:${pathname === "/" ? "library" : "navigation"}`, {
     enabled: open,
     timing: "press",
@@ -264,7 +275,7 @@ export function CollectionsPaneHost() {
         <div ref={sectionMotion} className="workbench-section-content flex h-full w-full min-h-0">
           <div
             ref={attach}
-            className={`flex h-full w-full min-h-0 ${mode !== "collections" && mode !== "settings" ? "hidden" : ""}`}
+            className={`flex h-full w-full min-h-0 ${mode !== "collections" ? "hidden" : ""}`}
           >
             {pathname !== "/" && mode === "collections" ? <NavigationCollections /> : null}
           </div>

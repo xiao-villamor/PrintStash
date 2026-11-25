@@ -9,12 +9,12 @@ export interface CollectionsPaneState {
   width: number;
   setWidth: (width: number) => void;
   toggle: () => void;
-  mode: "collections" | "search" | "pending" | "views" | "settings";
+  mode: "collections" | "search" | "pending" | "views";
   showCollections: () => void;
   showSearch: () => void;
   showPending: () => void;
   showSavedViews: () => void;
-  showSettings: () => void;
+  dismissTool: () => void;
 }
 
 export const CollectionsPaneContext = createContext<CollectionsPaneState | null>(null);

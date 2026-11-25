@@ -207,6 +207,9 @@ class PreviewLook(StrEnum):
     SLATE = "slate"
     GRAPHITE = "graphite"
     SAND = "sand"
+    SAGE = "sage"
+    CLAY = "clay"
+    PLUM = "plum"
 
 
 @dataclass(frozen=True)

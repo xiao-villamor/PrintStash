@@ -16855,7 +16855,10 @@
           "printstash_blue",
           "slate",
           "graphite",
-          "sand"
+          "sand",
+          "sage",
+          "clay",
+          "plum"
         ],
         "title": "PreviewLook",
         "type": "string"
