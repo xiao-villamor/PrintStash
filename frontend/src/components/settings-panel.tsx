@@ -348,6 +348,7 @@ const BTN_ICON = buttonVariants({ variant: "outline", size: "icon-sm" });
 // destructive token, like Remove and Revoke elsewhere in Settings.
 const BTN_DANGER = SETTINGS_BUTTON_DANGER;
 const INPUT = SETTINGS_FIELD;
+const APPEARANCE_SELECT = cn(INPUT, "bg-card dark:bg-surface-container-high");
 
 function formatBytes(bytes: number | null | undefined): string {
   if (bytes == null) return "...";
@@ -5380,7 +5381,7 @@ export function SettingsPanel() {
                           preferenceCommand.blocked ||
                           backupPolicy.isPending
                         }
-                        className={INPUT}
+                        className={APPEARANCE_SELECT}
                       >
                         {CURRENCY_OPTIONS.map((opt) => (
                           <option key={opt.code} value={opt.code}>
@@ -5417,7 +5418,7 @@ export function SettingsPanel() {
                               );
                               if (option) updateCardMetric(slot, option.id);
                             }}
-                            className={INPUT}
+                            className={APPEARANCE_SELECT}
                           >
                             {CARD_METRIC_OPTIONS.map((opt) => (
                               <option

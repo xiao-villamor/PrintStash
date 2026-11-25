@@ -711,12 +711,13 @@ function FleetPrinterCard({
               <PrinterCardArtwork key={artworkUrl} url={artworkUrl} model={model} />
             )}
             <div className="grid min-w-0 flex-1 grid-cols-1 content-start gap-3 px-4 py-4 text-xs">
-              <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-1.5">
-                <div className="min-w-0">
-                  <Heading className="text-lg font-semibold leading-tight tracking-tight">
+              <div className="flex min-w-0 items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <Heading className="truncate text-lg font-semibold leading-tight tracking-tight">
                     <Link
                       href={`/printers/${printer.id}`}
-                      className="wrap-anywhere after:absolute after:inset-0 after:z-10 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring"
+                      title={printer.name}
+                      className="after:absolute after:inset-0 after:z-10 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring"
                     >
                       {printer.name}
                       <ArrowUpRight
@@ -725,38 +726,46 @@ function FleetPrinterCard({
                       />
                     </Link>
                   </Heading>
-                  <p className="mt-1 wrap-anywhere text-xs text-muted-foreground">
+                  <p className="mt-1 truncate text-xs text-muted-foreground">
                     {providerLabel(printer)}
                     {printer.capabilities.support_level === "beta" ? ` · ${uiText("Beta")}` : ""}
                     {!grouped && printer.group ? ` · ${printer.group}` : ""}
                   </p>
                 </div>
-                <PrinterStatusBadge status={status} />
-              </div>
-              <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
-                <div className="min-w-0 flex-1 basis-28 space-y-1.5">
-                  <div className="flex min-w-0 items-center justify-between gap-2">
-                    <span className="text-muted-foreground">{uiText("Current job")}</span>
-                    {progress !== null && (
-                      <span className="shrink-0 font-mono text-sm font-semibold tabular-nums">
-                        {formatNumber(progress, { maximumFractionDigits: 0 })}%
-                      </span>
-                    )}
-                  </div>
-                  <p
-                    className="truncate text-sm font-semibold"
-                    title={row?.current_job_name ?? undefined}
-                  >
-                    {row?.current_job_name ??
-                      (row?.current_job_id != null
-                        ? knownUiText(status)
-                        : row
-                          ? uiText("No active print")
-                          : "—")}
-                  </p>
-                  {progress !== null && <PrinterProgress value={progress} />}
+                <div className="shrink-0">
+                  <PrinterStatusBadge status={status} />
                 </div>
-                {row?.telemetry && <FleetTelemetryReadings telemetry={row.telemetry} />}
+              </div>
+              <div className="@container/printer-details">
+                <div className="flex flex-col gap-3 @min-[16rem]/printer-details:flex-row @min-[16rem]/printer-details:items-start">
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <div className="flex min-h-5 items-center justify-between gap-2">
+                      <span className="truncate text-muted-foreground">
+                        {uiText("Current job")}
+                      </span>
+                      {progress !== null && (
+                        <span className="shrink-0 font-mono text-sm font-semibold tabular-nums">
+                          {formatNumber(progress, { maximumFractionDigits: 0 })}%
+                        </span>
+                      )}
+                    </div>
+                    <p
+                      className="truncate text-sm font-semibold"
+                      title={row?.current_job_name ?? undefined}
+                    >
+                      {row?.current_job_name ??
+                        (row?.current_job_id != null
+                          ? knownUiText(status)
+                          : row
+                            ? uiText("No active print")
+                            : "—")}
+                    </p>
+                    <div className="h-1.5">
+                      {progress !== null && <PrinterProgress value={progress} />}
+                    </div>
+                  </div>
+                  {row?.telemetry && <FleetTelemetryReadings telemetry={row.telemetry} />}
+                </div>
               </div>
               {(row?.next_job_name || hold) && (
                 <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-t border-border pt-2.5">
@@ -882,15 +891,15 @@ function FleetTelemetryReadings({ telemetry }: { telemetry: FleetPrinterTelemetr
   if (readings.every(({ value }) => value == null)) return null;
 
   return (
-    <dl className="grid max-w-full gap-y-1 border-s border-border ps-3">
+    <dl className="grid min-w-0 gap-y-1 border-s border-border ps-2 @min-[16rem]/printer-details:w-36 @min-[16rem]/printer-details:shrink-0">
       {readings.map(({ label, value, unit }) =>
         value == null ? null : (
-          <div key={label} className="flex items-baseline justify-between gap-2">
-            <dt className="flex min-w-0 items-center gap-1 wrap-anywhere text-muted-foreground">
+          <div key={label} className="flex items-baseline justify-between gap-1.5">
+            <dt className="min-w-0 truncate text-muted-foreground" title={label}>
               {unit === "%" && (
                 <Fan
                   aria-hidden="true"
-                  className="size-3 shrink-0 transition-transform duration-fast ease-out motion-reduce:transition-none"
+                  className="me-1 inline size-3 align-text-bottom transition-transform duration-fast ease-out motion-reduce:transition-none"
                   style={{ transform: `rotate(${value * 2.7}deg)` }}
                 />
               )}

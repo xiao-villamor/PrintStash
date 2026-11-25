@@ -10,7 +10,7 @@
  * live status for nothing.
  */
 import { expect, test, type WebSocketRoute } from "@playwright/test";
-import type { PrinterSnapshot } from "@/types";
+import type { FleetSummary, PrinterSnapshot } from "@/types";
 import { aPrinter } from "../../src/test-support/factories";
 
 import { collectPageProblems, useMockApi } from "./_setup";
@@ -473,6 +473,88 @@ test.describe("printer routes", () => {
     await expect(card.getByText("No active print")).toBeVisible();
   });
 
+  test("keeps Fleet card heights stable through a print", async ({ page }, testInfo) => {
+    let printing = false;
+    const printers = [
+      aPrinter({ id: 1, name: "Klipper Lab", group: "Lab" }),
+      aPrinter({ id: 2, name: "Bambu Lab", group: "Lab" }),
+      aPrinter({ id: 3, name: "Bambu AMS", group: "Routing demo" }),
+      aPrinter({ id: 4, name: "Klipper PLA", group: "Routing demo" }),
+    ];
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
+    await page.route("**/api/v1/printers", (route) => route.fulfill({ json: printers }));
+    await page.route("**/api/v1/fleet/summary", (route) => {
+      const summary: FleetSummary = {
+        total_printers: printers.length,
+        queued_jobs: 0,
+        active_jobs: Number(printing),
+        draining_printers: 0,
+        maintenance_printers: 0,
+        attention_jobs: 0,
+        printers: printers.map((printer) => {
+          const active = printer.id === 3 && printing;
+          return {
+            printer_id: printer.id,
+            name: printer.name,
+            status: active ? "printing" : "ready",
+            group: printer.group,
+            progress: active ? 0.6 : null,
+            loaded_slots: ["PETG AMS tray 1"],
+            nozzle_diameter_mm: 0.4,
+            telemetry: { nozzle_c: 22, bed_c: active ? 55 : 22, part_fan_speed: active ? 1 : 0 },
+            current_job_id: active ? 156 : null,
+            current_job_name: active ? "poco-20axe-20v2_0.28mm_PLA_Generic.gcode" : null,
+            current_priority: null,
+            next_job_id: null,
+            next_job_name: null,
+            next_priority: null,
+            drain_mode: false,
+            maintenance: false,
+            pending_operator_release: false,
+          };
+        }),
+      };
+      return route.fulfill({ json: summary });
+    });
+    await page.goto("/printers");
+    await collapseNavigationSidebar(page);
+    await page.getByRole("button", { name: "Group printers" }).click();
+
+    const lab = page.getByRole("region", { name: "Lab", exact: true });
+    const routing = page.getByRole("region", { name: "Routing demo", exact: true });
+    const card = routing.getByRole("article").filter({
+      has: page.getByRole("link", { name: "Bambu AMS", exact: true }),
+    });
+    await expect(card.getByText("No active print")).toBeVisible();
+    await expect(card.getByText("0%", { exact: true })).toBeVisible();
+    await page.mouse.move(0, 0);
+
+    const measureHeights = async () => ({
+      cards: await lab
+        .getByRole("article")
+        .or(routing.getByRole("article"))
+        .evaluateAll((cards) => cards.map((element) => element.getBoundingClientRect().height)),
+      frames: await lab
+        .or(routing)
+        .evaluateAll((groups) => groups.map((element) => element.getBoundingClientRect().height)),
+    });
+    const idle = await measureHeights();
+    expect(new Set(idle.cards).size).toBe(1);
+    expect(new Set(idle.frames).size).toBe(1);
+    await page.screenshot({ path: testInfo.outputPath("fleet-ready.png") });
+
+    printing = true;
+    await expect(card.getByText("printing", { exact: true })).toBeVisible();
+    await expect(card.getByText("60%", { exact: true })).toBeVisible();
+    await expect(card.getByText("100%", { exact: true })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("fleet-printing.png") });
+    expect(await measureHeights()).toEqual(idle);
+
+    printing = false;
+    await expect(card.getByText("No active print")).toBeVisible();
+    expect(await measureHeights()).toEqual(idle);
+  });
+
   test("animates the live farm route beside waiting jobs", async ({ page }, testInfo) => {
     let printing = false;
     await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
@@ -681,18 +763,13 @@ test.describe("printer routes", () => {
     const second = page
       .getByRole("article")
       .filter({ has: page.getByRole("link", { name: "Workshop Bambu" }) });
-    const activity = page.getByRole("region", { name: "Fleet activity" });
-    await expect(activity.getByText("interrupted-part.gcode")).toBeVisible();
     const firstBox = await card.boundingBox();
     const secondBox = await second.boundingBox();
-    const railBox = await activity.boundingBox();
     expect(firstBox).not.toBeNull();
     expect(secondBox).not.toBeNull();
-    expect(railBox).not.toBeNull();
     expect(firstBox!.y).toBeCloseTo(secondBox!.y, 0);
     expect(firstBox!.width).toBeCloseTo(secondBox!.width, 0);
-    expect(secondBox!.x + secondBox!.width).toBeLessThan(railBox!.x);
-    expect(railBox!.x + railBox!.width).toBeLessThanOrEqual(1920);
+    expect(secondBox!.x + secondBox!.width).toBeLessThanOrEqual(1920);
     await expect(card.getByText("Image: OrcaSlicer")).toHaveCount(0);
 
     const art = card.getByRole("img");

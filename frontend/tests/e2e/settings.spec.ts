@@ -19,6 +19,7 @@
 import { expect, test } from "@playwright/test";
 
 import { useMockApi } from "./_setup";
+import { collapseNavigationSidebar } from "../e2e-real/util";
 
 useMockApi();
 
@@ -131,6 +132,33 @@ test.describe("settings route", () => {
     await card.getByRole("button", { name: "Check again" }).click();
     await expect.poll(() => probes).toBe(answered + 1);
   });
+  for (const theme of ["light", "dark"] as const) {
+    test(`uses the Appearance field surface in ${theme} mode`, async ({ page }, testInfo) => {
+      await page.addInitScript((value) => localStorage.setItem("printstash.theme", value), theme);
+      await page.goto("/settings?section=design");
+      await collapseNavigationSidebar(page);
+      const fields = [
+        page.getByLabel("Display currency"),
+        page.getByRole("combobox", { name: "Metric 1", exact: true }),
+        page.getByRole("combobox", { name: "Metric 2", exact: true }),
+        page.getByRole("combobox", { name: "Metric 3", exact: true }),
+      ];
+      await expect(fields[0]).toBeEnabled();
+      await fields[3].scrollIntoViewIfNeeded();
+      await page.screenshot({ path: testInfo.outputPath(`appearance-${theme}.png`) });
+      const token = theme === "dark" ? "--surface-container-high" : "--card";
+      for (const field of fields) {
+        const { actual, expected } = await field.evaluate((element, surface) => {
+          const style = getComputedStyle(element);
+          const canvas = document.createElement("canvas").getContext("2d")!;
+          canvas.fillStyle = style.backgroundColor;
+          return { actual: canvas.fillStyle, expected: style.getPropertyValue(surface).trim() };
+        }, token);
+        expect(actual).toBe(expected);
+      }
+    });
+  }
+
   test("persists a conditional preference in the browser fake", async ({ page }) => {
     await page.goto("/settings?section=design");
     const input = page.getByLabel("Display currency");
