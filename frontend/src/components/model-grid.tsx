@@ -2513,7 +2513,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         "--library-inspector-padding-offset": `${appliedDock.paddingOffset}px`,
       }
     : {};
-  const inspectorKeyboardOpener = useRef<HTMLElement | null>(null);
+  const inspectorOpener = useRef<HTMLElement | null>(null);
   const setInspector = useCallback(
     (intent: InspectorIntent) => {
       libraryInspectorIntents.set(inspectorScope, intent);
@@ -2525,8 +2525,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   );
   const inspectModel = useCallback(
     (id: number, opener: HTMLElement | null) => {
-      // Capture focus modality before the drawer moves focus to its title.
-      inspectorKeyboardOpener.current = opener?.matches(":focus-visible") ? opener : null;
+      inspectorOpener.current = opener;
       setInspector({ id, open: true });
     },
     [setInspector],
@@ -2650,9 +2649,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const closeInspector = useCallback(() => {
     if (inspectorIntent) setInspector({ ...inspectorIntent, open: false });
     requestAnimationFrame(() => {
-      const opener = inspectorKeyboardOpener.current;
-      if (opener?.isConnected) opener.focus({ preventScroll: true });
-      else startupContent.current?.focus({ preventScroll: true });
+      const opener = inspectorOpener.current;
+      const main = startupContent.current;
+      if (opener?.isConnected && opener !== document.body && opener !== main) {
+        opener.focus({ preventScroll: true });
+        return;
+      }
+      // Docking can remount the row that held the original card.
+      const card = inspectorIntent
+        ? main?.querySelector<HTMLElement>(libraryReadingSelector(`/models/${inspectorIntent.id}`))
+        : null;
+      (card ?? main)?.focus({ preventScroll: true });
     });
   }, [inspectorIntent, setInspector]);
   const toggleInspector = useCallback(() => {

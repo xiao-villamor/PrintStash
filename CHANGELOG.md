@@ -163,6 +163,8 @@
 
 ### Fixed
 
+- Closing Model details returns keyboard focus to the control that opened it.
+
 - Background mesh thumbnail generation uses temporary space on the PrintStash data volume, so a full system temp directory no longer blocks it.
 
 - The browser extension launcher can connect to HTTP PrintStash servers on marketplace pages that upgrade insecure requests to HTTPS.
