@@ -4025,6 +4025,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           freezeInspectorTracks={inspectorOpen}
                           compact={compact}
                           estimateSize={COMPACT_COLLECTION_HEIGHT}
+                          keepCollectionCardWidth
                           minCardWidth={300}
                           virtualize={false}
                           onColumnsChange={onColumns}
@@ -4123,6 +4124,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           freezeInspectorTracks={inspectorOpen}
                           compact={!collectionOverview && compact}
                           estimateSize={collectionOverview ? 266 : COMPACT_COLLECTION_HEIGHT}
+                          keepCollectionCardWidth={!collectionOverview}
                           minCardWidth={collectionOverview ? undefined : 300}
                           onColumnsChange={onColumns}
                           extraColumns={extraColumns}

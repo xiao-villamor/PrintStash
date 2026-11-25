@@ -534,6 +534,54 @@ test.describe("motion and layering", () => {
     });
   }
 
+  test("collection strip keeps the same card dimensions at both sidebar positions", async ({
+    page,
+  }) => {
+    // This width crosses a collection column breakpoint when the sidebar opens.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.route("**/api/v1/collections/lookup?**", (route) => {
+      const query = new URL(route.request().url()).searchParams;
+      if (query.get("path") !== "maraio" && query.get("id") !== "1") return route.fallback();
+      return route.fulfill({
+        json: {
+          collection: aCollectionNode({ id: 1, name: "maraio", path: "maraio", child_count: 3 }),
+          ancestors: [],
+        },
+      });
+    });
+    await page.route("**/api/v1/collections/children?**", (route) => {
+      const parent = new URL(route.request().url()).searchParams.get("parent_id");
+      if (parent !== "1") return route.fallback();
+      return route.fulfill({
+        json: {
+          items: ["Garden", "Backpack wall mount", "Bag holder"].map((name, index) =>
+            aCollectionNode({ id: index + 2, name, path: `maraio/folder-${index}`, parent_id: 1 }),
+          ),
+          next_cursor: null,
+        },
+      });
+    });
+    await page.goto("/?c=maraio&type=all");
+    const workspace = page.getByRole("main");
+    const card = workspace.getByRole("button", { name: /^Backpack wall mount/ });
+    const toggle = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+    const pane = page.locator("#collections-pane");
+    await expect(card).toBeVisible();
+    const geometry = () =>
+      card.evaluate((button) => {
+        const { x, y, width, height } = button.getBoundingClientRect();
+        return { x: x - button.closest("main")!.getBoundingClientRect().x, y, width, height };
+      });
+    const initial = await geometry();
+    const initiallyOpen = (await toggle.getAttribute("aria-expanded")) === "true";
+    for (const open of [!initiallyOpen, initiallyOpen]) {
+      await toggle.click();
+      await expect(pane).toHaveCSS("width", open ? /^[1-9]\d+px$/ : "0px");
+      await expect(page.locator("html")).not.toHaveAttribute("data-pane-moving");
+      expect(await geometry()).toEqual(initial);
+    }
+  });
+
   for (const [reducedMotion, moves] of [
     ["no-preference", true],
     ["reduce", false],

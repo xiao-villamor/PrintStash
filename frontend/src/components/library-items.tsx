@@ -72,6 +72,8 @@ interface LibraryItemsProps<T> {
   estimateSize?: number;
   /** Keep the closed grid's tracks while the docked inspector consumes space. */
   freezeInspectorTracks?: boolean;
+  /** Keep collection strip tracks the same at both sidebar positions. */
+  keepCollectionCardWidth?: boolean;
   /** Only the Model results measure the dock's width. */
   onInspectorDockChange?: (dock: LibraryInspectorDock | null) => void;
   inspectorDockLocked?: boolean;
@@ -103,6 +105,7 @@ export function LibraryItems<T>({
   virtualize = import.meta.env.VITE_LIBRARY_VIRTUALIZATION !== "off",
   className,
   freezeInspectorTracks = false,
+  keepCollectionCardWidth = false,
   onInspectorDockChange,
   inspectorDockLocked = false,
   preferredInspectorWidth = null,
@@ -214,6 +217,9 @@ export function LibraryItems<T>({
       // A scrollbar can appear as the cards rewrap. The outer frame tells us
       // whether the closed layout itself changed or just the open grid did.
       const scrollbarWidth = scroll.offsetWidth - scroll.clientWidth;
+      const collectionsPaneWidth = keepCollectionCardWidth
+        ? (document.querySelector<HTMLElement>("[data-collections-pane]")?.offsetWidth ?? 0)
+        : 0;
       const closedFrameWidth = measuredWidth + dockWidth + scrollbarWidth;
       const inset = style?.getPropertyValue("--library-inspector-inset");
       const gutter = style?.getPropertyValue("--library-inspector-gutter");
@@ -240,7 +246,7 @@ export function LibraryItems<T>({
             ? 0
             : frozen
               ? previous.closedTrack
-              : fittedTrack(measuredWidth + dockWidth, preferredWidth, gap);
+              : fittedTrack(measuredWidth + dockWidth + collectionsPaneWidth, preferredWidth, gap);
         let width = measuredWidth;
         let inspectorMaxWidth = 0;
         let inspectorWidth = 0;
@@ -274,14 +280,22 @@ export function LibraryItems<T>({
             width = closedFrameWidth - reservedSpace - inspectorWidth;
         }
         const nextColumns =
-          layout === "list" ? 1 : fittingColumns(width, docked ? closedTrack : preferredWidth, gap);
+          layout === "list"
+            ? 1
+            : fittingColumns(
+                width,
+                docked || keepCollectionCardWidth ? closedTrack : preferredWidth,
+                gap,
+              );
         const customTracks =
           layout === "grid" &&
           docked &&
           (inspectorDockLocked ? appliedInspectorCustomWidth : inspectorCustomWidth);
         const nextTrack = customTracks
           ? (width - (nextColumns - 1) * gap) / nextColumns
-          : closedTrack;
+          : keepCollectionCardWidth
+            ? Math.min(closedTrack, width)
+            : closedTrack;
         if (
           previous.columns === nextColumns &&
           previous.track === nextTrack &&
@@ -386,6 +400,7 @@ export function LibraryItems<T>({
     gap,
     preferredWidth,
     freezeInspectorTracks,
+    keepCollectionCardWidth,
     onInspectorDockChange,
     inspectorDockLocked,
     preferredInspectorWidth,

@@ -10,7 +10,15 @@ import type { LibraryReadingRenderer } from "@/features/library/reading-position
 let width = 1000;
 const ITEMS = Array.from({ length: 6 }, (_, index) => index);
 
-function Grid({ count = 6, virtualize = false }: { count?: number; virtualize?: boolean }) {
+function Grid({
+  count = 6,
+  virtualize = false,
+  keepCollectionCardWidth = false,
+}: {
+  count?: number;
+  virtualize?: boolean;
+  keepCollectionCardWidth?: boolean;
+}) {
   // The scroller is known before the grid mounts, as in the Library.
   const [node, setNode] = useState<HTMLDivElement | null>(null);
   const scroll = useMemo(() => ({ current: node }), [node]);
@@ -27,6 +35,7 @@ function Grid({ count = 6, virtualize = false }: { count?: number; virtualize?: 
           readingId="test"
           layout="grid"
           virtualize={virtualize}
+          keepCollectionCardWidth={keepCollectionCardWidth}
         />
       )}
     </div>
@@ -126,6 +135,29 @@ describe("LibraryItems", () => {
     });
     expect(grid().style.gridTemplateColumns).toBe("repeat(4, 300px)");
     expect(flights.size).toBe(0);
+  });
+
+  it("preserves collection card width when the sidebar changes how many columns fit", () => {
+    let paneWidth = 0;
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(
+      function (this: HTMLElement) {
+        return this.hasAttribute("data-collections-pane") ? paneWidth : width;
+      },
+    );
+    width = 1150;
+    render(
+      <>
+        <aside data-collections-pane />
+        <Grid keepCollectionCardWidth />
+      </>,
+    );
+    expect(grid().style.gridTemplateColumns).toBe("repeat(3, 372px)");
+    for (const sidebarOpen of [true, false]) {
+      paneWidth = sidebarOpen ? 320 : 0;
+      width = 1150 - paneWidth;
+      act(() => window.dispatchEvent(new Event(PANE_SETTLED_EVENT)));
+      expect(grid().style.gridTemplateColumns).toBe(`repeat(${sidebarOpen ? 2 : 3}, 372px)`);
+    }
   });
 
   it("keeps the viewport at the top when a lower grid changes width", async () => {
