@@ -102,14 +102,20 @@ describe("README logo", () => {
       expect(frameControls.every((offset) => asset[offset] & 1)).toBe(true);
     });
 
-    it("plays one brief sequence", () => {
-      expect(frameControls.length).toBeGreaterThan(1);
-      const durationMs = frameControls.reduce(
-        (sum, offset) => sum + asset.readUInt16LE(offset + 1) * 10,
-        0,
+    it("repeats the logo animation indefinitely", () => {
+      const infiniteLoopExtension = Buffer.from(
+        "\x21\xff\x0bNETSCAPE2.0\x03\x01\x00\x00\x00",
+        "latin1",
       );
-      expect(durationMs).toBeLessThanOrEqual(300);
-      expect(asset.includes(Buffer.from("NETSCAPE2.0"))).toBe(false);
+      expect(asset.includes(infiniteLoopExtension)).toBe(true);
+    });
+
+    it("rests briefly between each movement", () => {
+      expect(frameControls.length).toBeGreaterThan(1);
+      const durationsMs = frameControls.map((offset) => asset.readUInt16LE(offset + 1) * 10);
+      const motionMs = durationsMs.slice(0, -1).reduce((sum, duration) => sum + duration, 0);
+      expect(motionMs).toBeLessThanOrEqual(300);
+      expect(durationsMs.at(-1)).toBeGreaterThanOrEqual(2500);
     });
   });
 });
