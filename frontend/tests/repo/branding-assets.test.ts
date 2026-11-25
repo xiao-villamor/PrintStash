@@ -110,12 +110,17 @@ describe("README logo", () => {
       expect(asset.includes(infiniteLoopExtension)).toBe(true);
     });
 
-    it("rests briefly between each movement", () => {
+    it("reveals the layers gradually", () => {
       expect(frameControls.length).toBeGreaterThan(1);
       const durationsMs = frameControls.map((offset) => asset.readUInt16LE(offset + 1) * 10);
       const motionMs = durationsMs.slice(0, -1).reduce((sum, duration) => sum + duration, 0);
-      expect(motionMs).toBeLessThanOrEqual(300);
-      expect(durationsMs.at(-1)).toBeGreaterThanOrEqual(2500);
+      expect(motionMs).toBeGreaterThanOrEqual(1000);
+      expect(motionMs).toBeLessThanOrEqual(2000);
+    });
+
+    it("rests briefly between each movement", () => {
+      const restingFrame = frameControls.at(-1)!;
+      expect(asset.readUInt16LE(restingFrame + 1) * 10).toBeGreaterThanOrEqual(3000);
     });
   });
 });
