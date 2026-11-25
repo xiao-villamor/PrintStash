@@ -188,7 +188,7 @@ function PresetReviewPanel({
     <div
       role="status"
       aria-label={uiText("Current preset values")}
-      className="col-span-full space-y-2 rounded-md border p-3 text-sm"
+      className="col-span-full space-y-2 rounded-lg border p-3 text-sm"
     >
       <p>{uiText("This preset needs review before another save. Your draft is preserved.")}</p>
       {replaced && (
@@ -308,7 +308,7 @@ function ProfileRow({
     <div ref={detailsRef} className="min-w-0 space-y-5 p-5 sm:p-6">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 flex-1 items-start gap-3">
-          <div className="grid size-10 shrink-0 place-items-center bg-primary-soft text-foreground">
+          <div className="grid size-10 shrink-0 place-items-center rounded-md bg-foreground/10 text-foreground">
             <Icon className="size-5" aria-hidden="true" />
           </div>
           <div className="min-w-0">
@@ -342,7 +342,7 @@ function ProfileRow({
       </header>
       <section
         aria-label={rate.label}
-        className="flex flex-wrap items-center justify-between gap-3 border border-border bg-muted/40 px-4 py-3"
+        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 px-4 py-3"
       >
         <div className="min-w-0">
           <h4 className="text-xs font-medium text-muted-foreground">{rate.label}</h4>
@@ -412,12 +412,18 @@ function ProfileRow({
       role="region"
       aria-label={uiText("profiles.profileRow", { name })}
     >
-      <div className={selected ? "bg-accent text-accent-foreground" : "hover:bg-muted"}>
+      <div
+        className={
+          selected
+            ? "rounded-md bg-foreground/12 text-foreground"
+            : "rounded-md hover:bg-foreground/6"
+        }
+      >
         <button
           type="button"
           onClick={toggleDetails}
           aria-pressed={selected}
-          className="w-full min-w-0 px-3 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          className="w-full min-w-0 rounded-md px-3 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >
           <span className="block break-words text-sm font-semibold">{name}</span>
           {summary && <p className="mt-1 break-words text-xs text-muted-foreground">{summary}</p>}
@@ -985,7 +991,7 @@ export function FilamentProfilesCard() {
   }
 
   const tabClass =
-    "flex items-center gap-1 px-0 py-3 text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+    "flex h-7.5 items-center gap-1.5 rounded-md px-3 text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
   const profileActions = (
     <div className="flex items-center justify-end gap-2">
@@ -1073,7 +1079,7 @@ export function FilamentProfilesCard() {
         )}
 
         <div className="space-y-3">
-          <div className="border border-border bg-card px-4">
+          <div>
             <TabBar
               tabs={[
                 {
@@ -1083,7 +1089,7 @@ export function FilamentProfilesCard() {
                       {translateUiText(locale, "Filaments")}{" "}
                       <Badge
                         variant="secondary"
-                        className="border-0 bg-transparent px-0 text-muted-foreground"
+                        className="rounded-full border-0 bg-foreground/10 px-1.5 font-mono text-xs text-foreground/82"
                       >
                         {filaments.length}
                       </Badge>
@@ -1097,7 +1103,7 @@ export function FilamentProfilesCard() {
                       {translateUiText(locale, "Printers")}{" "}
                       <Badge
                         variant="secondary"
-                        className="border-0 bg-transparent px-0 text-muted-foreground"
+                        className="rounded-full border-0 bg-foreground/10 px-1.5 font-mono text-xs text-foreground/82"
                       >
                         {printers.length}
                       </Badge>
@@ -1107,9 +1113,10 @@ export function FilamentProfilesCard() {
               ]}
               active={activeTab}
               onChange={setActiveTab}
-              className="max-w-full flex-wrap gap-6"
+              showIndicator={false}
+              className="w-fit max-w-full gap-0.5 rounded-lg border border-border bg-card p-0.75"
               tabClassName={tabClass}
-              activeTabClassName="font-semibold text-foreground"
+              activeTabClassName="bg-foreground/12 text-foreground"
             />
           </div>
           {activeDenied ? null : activeTab === "filaments" ? (
@@ -1252,7 +1259,7 @@ export function FilamentProfilesCard() {
                 />
               ) : (
                 <div className="grid min-w-0 items-start gap-3 md:grid-cols-[minmax(15rem,1fr)_minmax(0,2fr)]">
-                  <div className="space-y-1 border border-border bg-card p-2">
+                  <div className="space-y-1 rounded-lg border border-border bg-card p-2">
                     {filaments.map((profile) => {
                       const review = filamentReviews[profile.id];
                       const edit = filamentEdits[profile.id] ?? filamentEdit(profile);
@@ -1472,7 +1479,7 @@ export function FilamentProfilesCard() {
                       );
                     })}
                   </div>
-                  <aside className="min-w-0 border border-border bg-card" ref={setDetailsHost} />
+                  <aside className="min-w-0 rounded-lg border border-border bg-card" ref={setDetailsHost} />
                 </div>
               )}
             </section>
@@ -1595,7 +1602,7 @@ export function FilamentProfilesCard() {
                 />
               ) : (
                 <div className="grid min-w-0 items-start gap-3 md:grid-cols-[minmax(15rem,1fr)_minmax(0,2fr)]">
-                  <div className="space-y-1 border border-border bg-card p-2">
+                  <div className="space-y-1 rounded-lg border border-border bg-card p-2">
                     {printers.map((profile) => {
                       const review = printerReviews[profile.id];
                       const edit = printerEdits[profile.id] ?? printerEdit(profile);
@@ -1840,7 +1847,7 @@ export function FilamentProfilesCard() {
                       );
                     })}
                   </div>
-                  <aside className="min-w-0 border border-border bg-card" ref={setDetailsHost} />
+                  <aside className="min-w-0 rounded-lg border border-border bg-card" ref={setDetailsHost} />
                 </div>
               )}
             </section>
