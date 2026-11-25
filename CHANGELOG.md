@@ -22,7 +22,7 @@
 
 - Assign a printer cost profile to a connected printer. Prints launched from PrintStash show an estimated production cost, then record the cost of the completed, failed, or stopped run using available measurements. History identifies estimates and partial costs.
 
-- G-code costing fills draft prices from matching saved presets or the embedded slicer cost and previews a per-piece cost chart as you edit.
+- G-code costing fills draft prices from matching saved presets or the embedded slicer cost and previews the selling price, profit, and a stacked per-piece cost breakdown as you edit.
 - Model costing saves per-piece production estimates for STL and G-code Artifacts. Use filament presets or individual Spoolman spools, enter print time or copy it from measured print history, and include printer amortization, maintenance, electricity, and other hourly costs. Apply reusable profit margin and tax templates to calculate a price.
 - Filament presets can calculate cost per kilogram from a spool's purchase price and net filament weight. Printer presets can store operating costs for reuse in estimates.
 - Add optional Statistics panels for print outcomes, failures by printer, filament use by printer, and coverage of recorded measurements, slicer estimates, and material costs.

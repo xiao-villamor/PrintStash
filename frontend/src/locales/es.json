@@ -5942,6 +5942,7 @@
   "Production costing is available for STL and G-code files.": "Puedes estimar costes de producción para archivos STL y G-code.",
   "This record changed before your changes were saved.": "Este registro cambió antes de que se guardaran tus cambios.",
   "Completed prints": "Impresiones completadas",
+  "{value1} to make · {value2} profit per piece": "{value1} de coste · {value2} de beneficio por pieza",
   "Production cost preview": "Vista previa del coste de producción",
   "Production cost breakdown": "Desglose del coste de producción",
   "Print outcomes": "Resultados de impresión",

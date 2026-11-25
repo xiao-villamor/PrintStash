@@ -81,7 +81,7 @@ describe("ProductionCosting", () => {
       profiles: [{ id: 1, name: "Generic PLA", cost_per_kg: 20 }],
       embedded: 1,
       rate: 20,
-      total: "3.00",
+      total: "$3.00",
     },
     {
       name: "falls back to the embedded rate when presets are ambiguous",
@@ -91,7 +91,7 @@ describe("ProductionCosting", () => {
       ],
       embedded: 1,
       rate: 10,
-      total: "2.00",
+      total: "$2.00",
     },
     {
       name: "requires a price when no rate is available",
@@ -106,7 +106,7 @@ describe("ProductionCosting", () => {
       embedded: 1,
       multipleFilaments: true,
       rate: 10,
-      total: "2.00",
+      total: "$2.00",
     },
   ])("$name", async ({ profiles, embedded, multipleFilaments, rate, total }) => {
     renderApp(
@@ -174,9 +174,9 @@ describe("ProductionCosting", () => {
     await user.clear(price);
     expect(save).toBeDisabled();
     await user.type(price, "40");
-    expect(finalPrice().getByText("5.00")).toBeVisible();
+    expect(finalPrice().getByText("$5.00")).toBeVisible();
     await user.selectOptions(form.getByLabelText("Cost profile"), "");
-    expect(finalPrice().getByText("4.00")).toBeVisible();
+    expect(finalPrice().getByText("$4.00")).toBeVisible();
   });
 
   it("keeps the draft after a concurrent estimate edit", async () => {

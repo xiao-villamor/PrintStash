@@ -66,6 +66,8 @@
     --chart-1: #4d6f9b;
     --chart-2: #0891b2;
     --chart-3: #7c3aed;
+    --chart-4: #b67515;
+    --chart-5: #be5278;
     --chart-grid: #cdd3db;
 
     /* Shared feedback timing and a critically damped content-settle profile. */
@@ -168,6 +170,8 @@
     --chart-1: #7896bc;
     --chart-2: #22d3ee;
     --chart-3: #a78bfa;
+    --chart-4: #e6ad58;
+    --chart-5: #ee8eaa;
     --chart-grid: #36404e;
 
     /* Surface scale — clear luminosity steps */
@@ -221,6 +225,12 @@
   }
   .bg-chart-violet {
     background-color: var(--chart-3);
+  }
+  .bg-chart-amber {
+    background-color: var(--chart-4);
+  }
+  .bg-chart-rose {
+    background-color: var(--chart-5);
   }
   .bg-chart-cyan-soft {
     background-color: color-mix(in srgb, var(--chart-2) 14%, transparent);

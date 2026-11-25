@@ -9,7 +9,7 @@ import { Input, inputClasses } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { productionCostOptions, useProductionCostCommands } from "@/features/library/model-detail";
 import { parseApiError, userMessage } from "@/lib/errors";
-import { formatNumber } from "@/lib/format";
+import { formatDuration, formatNumber } from "@/lib/format";
 import { uiText } from "@/lib/locale";
 import { usePrinters, useSpoolmanStatus, useSpools } from "@/lib/queries";
 import { filamentProfilesOptions, printerProfilesOptions } from "@/lib/queries/profiles";
@@ -155,14 +155,13 @@ function toEstimate(draft: Draft, rates: PricingRates | null): ProductionInputs 
 }
 
 const costComponents = [
-  ["material", "Filament"],
-  ["amortization", "Amortization"],
-  ["maintenance", "Maintenance"],
-  ["electricity", "Electricity"],
-  ["extra", "Additional hourly costs"],
-] as const satisfies readonly [keyof PieceCosts, string][];
+  ["material", "Filament", "bg-chart-blue"],
+  ["electricity", "Electricity", "bg-chart-cyan"],
+  ["amortization", "Amortization", "bg-chart-violet"],
+  ["maintenance", "Maintenance", "bg-chart-amber"],
+  ["extra", "Additional hourly costs", "bg-chart-rose"],
+] as const satisfies readonly [keyof PieceCosts, string, string][];
 
-/** The saved estimate's cost, row by row; costs are computed by the server on save. */
 function CostBreakdown({
   estimate,
   costs,
@@ -172,96 +171,109 @@ function CostBreakdown({
   costs: PieceCosts | null;
   preview?: boolean;
 }) {
-  const amount = (value: number) =>
-    formatNumber(value, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
-  const rows: {
-    label: string;
-    value: string;
-    share?: number;
-    strong?: boolean;
-    muted?: boolean;
-  }[] = [];
-  if (estimate && costs) {
-    const hasMachine = estimate.printer !== null;
-    for (const [key, label] of hasMachine ? costComponents : costComponents.slice(0, 1)) {
-      rows.push({
-        label: uiText(label),
-        value: amount(costs[key]),
-        share:
-          costs.production > 0 && costs[key] > 0
-            ? Math.min(100, (costs[key] / costs.production) * 100)
-            : undefined,
-      });
-    }
-    if (!hasMachine) {
-      rows.push({
-        label: uiText("Machine"),
-        value: uiText("Cost not configured"),
-        muted: true,
-      });
-    }
-    rows.push({
-      label: uiText("Production cost"),
-      value: hasMachine
-        ? amount(costs.production)
-        : `${amount(costs.production)} · ${uiText("partial")}`,
-      strong: true,
-    });
-    rows.push({
-      label: uiText("Profit margin (%)"),
-      value: `${formatNumber(estimate.pricing.margin_percent, { maximumFractionDigits: 2 })}%`,
-    });
-    rows.push({ label: uiText("Price before tax"), value: amount(costs.price_before_tax) });
-    rows.push({ label: uiText("Tax"), value: amount(costs.tax) });
-    rows.push({ label: uiText("Final price"), value: amount(costs.final_price), strong: true });
-  }
-  return (
-    <InspectorSection
-      title={uiText(preview ? "Production cost preview" : "Production cost breakdown")}
-    >
-      {estimate && costs ? (
-        <SoftCard>
-          <dl aria-label={uiText("Cost per piece")} className="divide-y divide-border">
-            {rows.map((item) => (
-              <div
-                key={item.label}
-                className={`grid grid-cols-[minmax(7rem,1fr)_minmax(0,1fr)] gap-3 px-4 py-2.5 text-sm ${item.strong ? "font-semibold" : ""}`}
-              >
-                <dt className={item.strong ? "" : "text-muted-foreground"}>{item.label}</dt>
-                <dd
-                  className={`flex items-center justify-end gap-3 text-end tabular-nums ${item.muted ? "text-muted-foreground" : ""}`}
-                >
-                  {item.share !== undefined && (
-                    <div
-                      aria-hidden="true"
-                      className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-muted"
-                    >
-                      <div
-                        className="h-full rounded-full bg-chart-blue"
-                        style={{ width: `${item.share}%` }}
-                      />
-                    </div>
-                  )}
-                  <span className={item.share === undefined ? "" : "min-w-14"}>{item.value}</span>
-                </dd>
-              </div>
-            ))}
-          </dl>
-          <p className="px-4 py-2 text-xs text-muted-foreground">
-            {uiText("Amounts are per piece in {value1}.", { value1: estimate.currency })}
-          </p>
-        </SoftCard>
-      ) : (
+  const title = uiText(preview ? "Production cost preview" : "Production cost breakdown");
+  if (!estimate || !costs) {
+    return (
+      <InspectorSection title={title}>
         <p className="px-1 text-sm text-muted-foreground">
           {uiText("No production estimate saved for this artifact.")}
         </p>
-      )}
-      {estimate && !estimate.printer && (
-        <p className="px-1 text-sm text-muted-foreground">
-          {uiText("Machine expenses are excluded.")}{" "}
-          {uiText("Set operating costs in Profiles → Printers to include machine expenses.")}
-        </p>
-      )}
+      </InspectorSection>
+    );
+  }
+
+  const money = (value: number, maximumFractionDigits = 4) =>
+    formatNumber(value, {
+      style: "currency",
+      currency: estimate.currency,
+      maximumFractionDigits,
+    });
+  const percent = (value: number) =>
+    formatNumber(value, { style: "percent", maximumFractionDigits: 0 });
+  const hasMachine = estimate.printer !== null;
+  const components = costComponents.filter(([key]) => hasMachine || key === "material");
+  const total = components.reduce((sum, [key]) => sum + costs[key], 0);
+  const profit = Math.max(0, costs.price_before_tax - costs.production);
+  const charge = [
+    [
+      uiText("Profit margin (%)"),
+      formatNumber(estimate.pricing.margin_percent / 100, {
+        style: "percent",
+        maximumFractionDigits: 2,
+      }),
+    ],
+    [uiText("Price before tax"), money(costs.price_before_tax)],
+    [uiText("Tax"), money(costs.tax)],
+    [uiText("Print time"), formatDuration(estimate.print_minutes * 60)],
+  ];
+
+  return (
+    <InspectorSection title={title}>
+      <SoftCard className="divide-y-0 p-3">
+        <dl aria-label={uiText("Cost per piece")} className="space-y-3 text-sm">
+          <div className="rounded-md border border-outline-variant bg-surface-container-low p-3">
+            <dt className="text-sm text-muted-foreground">{uiText("Final price")}</dt>
+            <dd className="text-3xl font-bold tracking-tight tabular-nums">
+              {money(costs.final_price, 2)}
+            </dd>
+            <dd className="mt-1 text-xs text-muted-foreground">
+              {uiText("{value1} to make · {value2} profit per piece", {
+                value1: money(costs.production),
+                value2: money(profit),
+              })}
+            </dd>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex flex-wrap justify-between gap-x-2 font-semibold">
+              <dt>{uiText("Production cost")}</dt>
+              <dd className="tabular-nums">{money(costs.production)}</dd>
+            </div>
+            <div aria-hidden="true" className="flex h-3 overflow-hidden rounded-full bg-muted">
+              {total > 0 &&
+                components
+                  .filter(([key]) => costs[key] > 0)
+                  .map(([key, , color]) => (
+                    <span
+                      key={key}
+                      className={`h-full ${color} [&+&]:border-s [&+&]:border-card`}
+                      style={{ width: `${(costs[key] / total) * 100}%` }}
+                    />
+                  ))}
+            </div>
+            {components.map(([key, label, color]) => (
+              <div
+                key={key}
+                className="grid grid-cols-[minmax(0,1fr)_auto_2.75rem] items-baseline gap-2"
+              >
+                <dt className="flex min-w-0 items-center gap-2">
+                  <span aria-hidden="true" className={`size-2 shrink-0 rounded-sm ${color}`} />
+                  <span>{uiText(label)}</span>
+                </dt>
+                <dd className="text-end font-medium tabular-nums">{money(costs[key])}</dd>
+                <dd className="text-end text-xs tabular-nums text-muted-foreground">
+                  {total > 0 ? percent(costs[key] / total) : "—"}
+                </dd>
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-1.5 border-t border-border pt-3">
+            {charge.map(([label, value]) => (
+              <div key={label} className="flex flex-wrap justify-between gap-x-2">
+                <dt className="text-muted-foreground">{label}</dt>
+                <dd className="font-medium tabular-nums">{value}</dd>
+              </div>
+            ))}
+          </div>
+        </dl>
+        {!hasMachine && (
+          <p className="mt-3 border-t border-border pt-3 text-xs text-muted-foreground">
+            {uiText("Machine expenses are excluded.")}{" "}
+            {uiText("Set operating costs in Profiles → Printers to include machine expenses.")}
+          </p>
+        )}
+      </SoftCard>
     </InspectorSection>
   );
 }
@@ -608,6 +620,11 @@ function EstimateForm({
       onSubmit={submit}
     >
       <fieldset disabled={commands.save.isPending} className="space-y-5">
+        <CostBreakdown
+          estimate={preview ? { ...estimate, currency } : row.estimate}
+          costs={preview ? previewPieceCosts(estimate) : row.costs}
+          preview={preview}
+        />
         <InspectorSection
           title={`${uiText("Production estimate")} · ${revisionLabel(file)}`}
           actions={
@@ -951,11 +968,6 @@ function EstimateForm({
             </div>
           </SoftCard>
         </InspectorSection>
-        <CostBreakdown
-          estimate={preview ? { ...estimate, currency } : row.estimate}
-          costs={preview ? previewPieceCosts(estimate) : row.costs}
-          preview={preview}
-        />
         {messages}
       </fieldset>
       <div className="flex flex-wrap justify-end gap-2">

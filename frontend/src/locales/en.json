@@ -5942,6 +5942,7 @@
   "Production costing is available for STL and G-code files.": "Production costing is available for STL and G-code files.",
   "This record changed before your changes were saved.": "This record changed before your changes were saved.",
   "Completed prints": "Completed prints",
+  "{value1} to make · {value2} profit per piece": "{value1} to make · {value2} profit per piece",
   "Production cost preview": "Production cost preview",
   "Production cost breakdown": "Production cost breakdown",
   "Print outcomes": "Print outcomes",

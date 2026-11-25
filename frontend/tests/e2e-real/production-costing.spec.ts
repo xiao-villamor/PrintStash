@@ -161,13 +161,25 @@ test.describe("production costing", () => {
         response.url().endsWith("/production-cost") && response.request().method() === "PUT",
     );
     await saveEstimate.click();
-    expect((await saveResponse).ok()).toBe(true);
+    const saved = await saveResponse;
+    expect(saved.ok()).toBe(true);
+    expect((await saved.json()).costs.final_price).toBe(3.6438);
     const cost = page.getByLabel("Cost per piece");
-    await expect(cost.getByText("3.6438", { exact: true })).toBeVisible();
+    await expect(cost.getByText("$3.64", { exact: true })).toBeVisible();
     await page.reload();
-    await expect(cost.getByText("3.6438", { exact: true })).toBeVisible();
-    await expect(cost.getByText("2.65", { exact: true })).toBeVisible();
-    await expect(cost.locator(".bg-chart-blue")).toHaveCount(5);
+    await expect(cost.getByText("$3.64", { exact: true })).toBeVisible();
+    await expect(cost.getByText("$2.65", { exact: true })).toBeVisible();
+    const legend = cost
+      .getByText("Additional hourly costs", { exact: true })
+      .locator("xpath=../..");
+    await expect(legend.getByText("$1.00")).toBeVisible();
+    await expect(legend.getByText("38%")).toBeVisible();
+    const segmentColors = await cost
+      .locator(".h-3 > span")
+      .evaluateAll((segments) =>
+        segments.map((segment) => getComputedStyle(segment).backgroundColor),
+      );
+    expect(new Set(segmentColors).size).toBe(5);
     await cost.screenshot({ path: testInfo.outputPath("costing-breakdown.png") });
 
     await expect(form.getByLabel("Filament per copy")).toHaveValue("100");
@@ -180,7 +192,7 @@ test.describe("production costing", () => {
     await expect(
       form.getByLabel("Pricing template", { exact: true }).getByRole("option", { name }),
     ).toHaveCount(0);
-    await expect(cost.getByText("3.6438", { exact: true })).toBeVisible();
+    await expect(cost.getByText("$3.64", { exact: true })).toBeVisible();
 
     await clickModelAction(page, "Delete model");
     await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
