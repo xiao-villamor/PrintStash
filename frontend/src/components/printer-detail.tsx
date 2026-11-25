@@ -1926,13 +1926,7 @@ function SettingsToggle({
 }) {
   const descriptionId = useId();
   return (
-    <div className="flex items-start justify-between gap-6 border-t border-border pt-4 first:border-t-0 first:pt-0">
-      <div className="min-w-0">
-        <div className="text-sm font-medium text-foreground">{title}</div>
-        <p id={descriptionId} className="mt-0.5 max-w-prose text-xs text-muted-foreground">
-          {description}
-        </p>
-      </div>
+    <div className="flex items-start gap-3 border-t border-border pt-4 first:border-t-0 first:pt-0">
       <Switch
         checked={checked}
         onChange={onChange}
@@ -1940,7 +1934,14 @@ function SettingsToggle({
         descriptionId={descriptionId}
         stateLabels={null}
         disabled={disabled}
+        className="mt-0.5"
       />
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-foreground">{title}</div>
+        <p id={descriptionId} className="mt-0.5 max-w-prose text-xs text-muted-foreground">
+          {description}
+        </p>
+      </div>
     </div>
   );
 }
