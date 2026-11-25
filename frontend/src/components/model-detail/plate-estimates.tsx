@@ -1,4 +1,4 @@
-import type { GcodePlateMetadata, GcodePlates } from "@/lib/api/plates";
+import type { GcodePlateEstimateMetric, GcodePlateMetadata, GcodePlates } from "@/lib/api/plates";
 import { uiText } from "@/lib/locale";
 import { SoftCard } from "./inspector-section";
 import { formatPlateEstimate } from "./format-plate-estimate";
@@ -11,7 +11,7 @@ function plateTotal(data: GcodePlates): GcodePlateMetadata | null {
   );
   if (!rows.every((row) => row?.estimated_time_s != null && row.filament_weight_g != null))
     return null;
-  const sum = (key: keyof GcodePlateMetadata) =>
+  const sum = (key: GcodePlateEstimateMetric) =>
     rows.reduce((total, row) => total + (row?.[key] ?? 0), 0);
   return {
     estimated_time_s: sum("estimated_time_s"),
@@ -37,13 +37,13 @@ export function PlateEstimates({
   showWeight?: boolean;
   showCost?: boolean;
 }) {
-  const columns: { key: keyof GcodePlateMetadata; label: string }[] = [
+  const columns: { key: GcodePlateEstimateMetric; label: string }[] = [
     ...(showTime ? [{ key: "estimated_time_s" as const, label: uiText("Time") }] : []),
     ...(showWeight ? [{ key: "filament_weight_g" as const, label: uiText("Filament") }] : []),
     ...(showCost ? [{ key: "filament_cost" as const, label: uiText("Cost") }] : []),
   ];
   const total = plateTotal(data);
-  const cell = (metadata: GcodePlateMetadata | undefined, key: keyof GcodePlateMetadata) =>
+  const cell = (metadata: GcodePlateMetadata | undefined, key: GcodePlateEstimateMetric) =>
     formatPlateEstimate(key, metadata?.[key]);
   return (
     <SoftCard className="divide-y-0">

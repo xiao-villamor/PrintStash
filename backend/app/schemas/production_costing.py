@@ -90,6 +90,8 @@ class ArtifactCostingRead(EditingBase):
     currency: str
     estimate: ProductionEstimate | None
     costs: PieceCosts | None
+    slicer_filament_cost: float | None
+    multiple_filaments: bool
 
 
 class JobCostRates(BaseModel):

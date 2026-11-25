@@ -27,7 +27,15 @@ from app.core.errors import ErrorKind, OperationError
 from app.core.http import get_or_404
 from app.core.logging import get_logger
 from app.core.security import get_current_user, require_auth, require_user
-from app.db.models import CollectionRole, DerivativeKind, File, FileType, Model, User
+from app.db.models import (
+    ArtifactMaterialRequirement,
+    CollectionRole,
+    DerivativeKind,
+    File,
+    FileType,
+    Model,
+    User,
+)
 from app.db.scopes import live
 from app.db.session import get_session
 from app.modules.administration import runtime_config
@@ -341,13 +349,31 @@ def _costing_file(session: Session, file_id: int, user: User) -> tuple[File, Mod
     return artifact, model
 
 
-def _costing_read(artifact: File, model: Model, currency: str) -> ArtifactCostingRead:
+def _costing_read(
+    session: Session, artifact: File, model: Model, currency: str
+) -> ArtifactCostingRead:
     estimate = (
         ProductionEstimate.model_validate(artifact.production_estimate)
         if artifact.production_estimate is not None
         else None
     )
+    metadata = (
+        artifact.file_metadata
+        if estimate is None and artifact.file_type == FileType.GCODE
+        else None
+    )
+    tools = (
+        session.exec(
+            select(ArtifactMaterialRequirement.tool_index)
+            .where(ArtifactMaterialRequirement.file_id == artifact.id)
+            .limit(2)
+        ).all()
+        if metadata is not None
+        else []
+    )
     return ArtifactCostingRead(
+        slicer_filament_cost=metadata.filament_cost if metadata is not None else None,
+        multiple_filaments=len(tools) > 1,
         currency=currency,
         estimate=estimate,
         costs=piece_costs(estimate) if estimate is not None else None,
@@ -365,7 +391,7 @@ def get_production_cost(
     session: Session = Depends(get_session),
 ) -> ArtifactCostingRead:
     artifact, model = _costing_file(session, file_id, user)
-    return _costing_read(artifact, model, runtime_config.currency(session))
+    return _costing_read(session, artifact, model, runtime_config.currency(session))
 
 
 @router.put(
@@ -404,7 +430,7 @@ def put_production_cost(
     session.add(artifact)
     session.flush()
     session.refresh(model)
-    receipt = _costing_read(artifact, model, vault_currency)
+    receipt = _costing_read(session, artifact, model, vault_currency)
     session.commit()
     return receipt
 

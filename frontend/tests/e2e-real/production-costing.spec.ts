@@ -11,7 +11,7 @@ import {
 test.use({ actionTimeout: 15_000 });
 
 test.describe("production costing", () => {
-  test("persists a per-piece estimate through reload", async ({ page }) => {
+  test("persists a per-piece estimate through reload", async ({ page }, testInfo) => {
     const stamp = Date.now();
     const name = `costing-${stamp}`;
     const api = `http://127.0.0.1:${process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410}/api/v1`;
@@ -82,7 +82,15 @@ test.describe("production costing", () => {
     });
 
     // Produce and import a real Moonraker history record from the emulator.
-    await uploadModel(page, name, { gcode: true });
+    const gcode = [
+      gcodeFor(name),
+      `; filament_vendor = PLA ${stamp}`,
+      "; filament_type = PLA",
+      `; printer_model = ${name}`,
+    ].join("\n");
+    await uploadModel(page, name, {
+      gcodeFile: { name: `${name}.gcode`, mimeType: "text/plain", buffer: Buffer.from(gcode) },
+    });
     await openModelPage(page, name);
     const modelPath = new URL(page.url()).pathname;
     const filename = `${name}.gcode`;
@@ -117,31 +125,29 @@ test.describe("production costing", () => {
     );
 
     await page.goto(`${modelPath}?tab=costing`);
-    await page.getByRole("button", { name: "Create estimate" }).click();
     const form = page.getByRole("form", { name: "Production estimate" });
     const saveEstimate = form.getByRole("button", { name: "Save estimate" });
-    await expect(saveEstimate).toBeInViewport();
-    const time = form.getByLabel("Print time (minutes)");
-    const grams = form.getByLabel("Filament used (g)");
+    await expect(saveEstimate).toBeEnabled();
+    const time = form.getByLabel("Estimated time per copy");
+    const grams = form.getByLabel("Filament per copy");
+    await expect(time).toHaveValue("30.2");
+    await expect(grams).toHaveValue("6.8");
+    await expect(form.getByLabel(/Cost per kg/)).toHaveValue("20");
+    await expect(form.getByLabel("Cost profile")).toHaveValue(String(preset.id));
+    await expect(page.getByRole("heading", { name: "Production cost preview" })).toBeVisible();
     await time.fill("20");
     await grams.fill("1");
     await form.getByRole("button", { name: /Use latest print measurements/ }).click();
     await expect(time).toHaveValue("10");
     await expect(grams).toHaveValue("3.58");
-    await form
-      .getByLabel("Fill from filament preset or spool")
-      .selectOption({ label: `PLA ${stamp}` });
-    await expect(form.getByLabel(/Cost per kg/)).toHaveValue("20");
-    await form.getByLabel("Printer operating costs").selectOption({ label: name });
     await form.getByLabel("Pieces per print").fill("2");
     await time.fill("120");
-    await form.getByLabel("Filament used (g)").fill("100");
+    await form.getByLabel("Filament per copy").fill("100");
 
     // Save reusable pricing rates and apply them to the pending estimate.
     await form.getByLabel("Profit margin (%)").fill("20");
     await form.getByLabel("Tax (%)").fill("10");
     await form.getByLabel("New template name").fill(name);
-    await expect(saveEstimate).toBeInViewport();
     await form.getByRole("button", { name: "Save pricing template" }).click();
     await form.getByLabel("Pricing template", { exact: true }).selectOption({ label: name });
     await form.getByLabel("Profit margin (%)").fill("0");
@@ -150,16 +156,21 @@ test.describe("production costing", () => {
     await expect(form.getByLabel("Profit margin (%)")).toHaveValue("20");
     await expect(form.getByLabel("Tax (%)")).toHaveValue("10");
 
-    await form.getByRole("button", { name: "Save estimate" }).click();
-    const cost = page.getByRole("region", { name: "Cost per piece" });
-    await expect(cost.getByRole("heading", { name: "Production cost breakdown" })).toBeVisible();
+    const saveResponse = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/production-cost") && response.request().method() === "PUT",
+    );
+    await saveEstimate.click();
+    expect((await saveResponse).ok()).toBe(true);
+    const cost = page.getByLabel("Cost per piece");
     await expect(cost.getByText("3.6438", { exact: true })).toBeVisible();
     await page.reload();
     await expect(cost.getByText("3.6438", { exact: true })).toBeVisible();
     await expect(cost.getByText("2.65", { exact: true })).toBeVisible();
+    await expect(cost.locator(".bg-chart-blue")).toHaveCount(5);
+    await cost.screenshot({ path: testInfo.outputPath("costing-breakdown.png") });
 
-    await page.getByRole("button", { name: "Edit estimate" }).click();
-    await expect(form.getByLabel("Filament used (g)")).toHaveValue("100");
+    await expect(form.getByLabel("Filament per copy")).toHaveValue("100");
     await form.getByLabel("Pricing template", { exact: true }).selectOption({ label: name });
     await form.getByRole("button", { name: "Delete template" }).click();
     await page
@@ -293,7 +304,8 @@ test.describe("production costing", () => {
       const receipt = await page.request.get(`/api/v1/printers/${printer.id}`);
       expect((await receipt.json()).cost_profile_id).toBe(profile.id);
 
-      await settings.click();
+      await page.getByRole("article").filter({ has: card }).click({ button: "right" });
+      await page.getByRole("menuitem", { name: "Edit connection", exact: true }).click();
       await expect(picker).toHaveValue(String(profile.id));
       const catalogTab = page.waitForEvent("popup");
       await dialog.getByRole("link", { name: "Manage profiles" }).click();

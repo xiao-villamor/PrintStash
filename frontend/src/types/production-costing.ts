@@ -54,6 +54,8 @@ export interface ArtifactCostingRead extends EditingBase {
   currency: string;
   estimate: ProductionEstimate | null;
   costs: PieceCosts | null;
+  slicer_filament_cost?: number | null;
+  multiple_filaments?: boolean;
 }
 
 export interface JobProductionCost {

@@ -1114,7 +1114,7 @@ function ModelDetailPresentation({
                   <Input
                     type="url"
                     value={editSourceUrl}
-                    placeholder="https://www.printables.com/model/…"
+                    placeholder="https://www.printables.com/model/..."
                     onChange={(event) => setEditSourceUrl(event.target.value)}
                     disabled={saving}
                   />

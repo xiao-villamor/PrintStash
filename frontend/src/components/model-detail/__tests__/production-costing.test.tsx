@@ -4,7 +4,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { ProductionCosting } from "@/components/model-detail/production-costing";
-import { anEditingBase, aRevision } from "@/test-support/factories";
+import { aMetadata, anEditingBase, aRevision } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
 import type { ArtifactCostingRead } from "@/types/production-costing";
 
@@ -73,6 +73,110 @@ describe("ProductionCosting", () => {
     expect(form.getByRole("button", { name: "Save estimate" })).toBeVisible();
     expect(screen.getByText("No production estimate saved for this artifact.")).toBeVisible();
     expect(view.requestsWithMethod("PUT")).toHaveLength(0);
+  });
+
+  it.each([
+    {
+      name: "uses a unique preset ahead of the embedded rate",
+      profiles: [{ id: 1, name: "Generic PLA", cost_per_kg: 20 }],
+      embedded: 1,
+      rate: 20,
+      total: "3.00",
+    },
+    {
+      name: "falls back to the embedded rate when presets are ambiguous",
+      profiles: [
+        { id: 1, name: "Generic PLA", cost_per_kg: 20 },
+        { id: 2, name: "generic pla", cost_per_kg: 30 },
+      ],
+      embedded: 1,
+      rate: 10,
+      total: "2.00",
+    },
+    {
+      name: "requires a price when no rate is available",
+      profiles: [],
+      embedded: null,
+      rate: null,
+      total: null,
+    },
+    {
+      name: "uses the embedded total for a multi-filament print",
+      profiles: [{ id: 1, name: "Generic PLA", cost_per_kg: 20 }],
+      embedded: 1,
+      multipleFilaments: true,
+      rate: 10,
+      total: "2.00",
+    },
+  ])("$name", async ({ profiles, embedded, multipleFilaments, rate, total }) => {
+    renderApp(
+      <ProductionCosting
+        modelId={1}
+        files={[
+          aRevision({
+            metadata: aMetadata({
+              estimated_time_s: 3600,
+              filament_weight_g: 100,
+              material_type: "PLA",
+              material_brand: "Generic",
+              printer_model: "Workshop",
+            }),
+          }),
+        ]}
+        initialFileId={1}
+        jobs={[]}
+        canEdit
+        admin={false}
+      />,
+      {
+        routes: {
+          "GET /api/v1/files/1/production-cost": json({
+            ...anEditingBase(),
+            estimate: null,
+            costs: null,
+            currency: "USD",
+            slicer_filament_cost: embedded,
+            multiple_filaments: multipleFilaments ?? false,
+          }),
+          "GET /api/v1/filament-profiles": json(profiles),
+          "GET /api/v1/printer-profiles": json([
+            {
+              id: 5,
+              name: "Workshop",
+              expenses: {
+                acquisition_cost: 100,
+                lifetime_hours: 100,
+                lifetime_maintenance: 0,
+                power_watts: 0,
+                electricity_per_kwh: 0,
+                extra_per_hour: 0,
+              },
+            },
+          ]),
+          "GET /api/v1/pricing-templates": json([]),
+        },
+      },
+    );
+
+    const form = within(await screen.findByRole("form", { name: "Production estimate" }));
+    await waitFor(() => expect(form.getByLabelText("Cost profile")).toHaveValue("5"));
+    const price = form.getByLabelText("Cost per kg (USD)");
+    await waitFor(() => expect(price).toHaveValue(rate));
+    const save = form.getByRole("button", { name: "Save estimate" });
+    expect(save).toHaveProperty("disabled", total === null);
+    if (total === null) return;
+    const finalPrice = () =>
+      within(
+        within(screen.getByLabelText("Cost per piece")).getByText("Final price").parentElement!,
+      );
+    expect(finalPrice().getByText(total)).toBeVisible();
+    const user = userEvent.setup();
+    await user.clear(price);
+    expect(save).toBeDisabled();
+    await user.type(price, "40");
+    expect(finalPrice().getByText("5.00")).toBeVisible();
+    await user.selectOptions(form.getByLabelText("Cost profile"), "");
+    expect(finalPrice().getByText("4.00")).toBeVisible();
   });
 
   it("keeps the draft after a concurrent estimate edit", async () => {

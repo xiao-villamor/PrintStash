@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { formatPlateEstimate } from "./format-plate-estimate";
-import type { GcodePlateMetadata } from "@/lib/api/plates";
+import type { GcodePlateEstimateMetric } from "@/lib/api/plates";
 import { useFilePlates, useGcodePlates } from "@/lib/queries/file-plates";
 import { HashValue } from "./file-hashes";
 import { Button } from "@/components/ui/button";
@@ -238,7 +238,7 @@ export function RevisionCompare({
   const rightSliced = useGcodePlates(selectedRight.model_id, slicedId(selectedRight));
   function estimate(
     file: FileRead,
-    metric: keyof GcodePlateMetadata,
+    metric: GcodePlateEstimateMetric,
     format: (value: number) => string,
   ): Value {
     const data = file.id === selectedLeft.id ? leftSliced : rightSliced;

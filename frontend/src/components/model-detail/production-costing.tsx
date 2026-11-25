@@ -1,3 +1,4 @@
+import type { GcodePlateMetadata } from "@/lib/api/plates";
 import { useGcodePlates } from "@/lib/queries/file-plates";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -10,7 +11,7 @@ import { productionCostOptions, useProductionCostCommands } from "@/features/lib
 import { parseApiError, userMessage } from "@/lib/errors";
 import { formatNumber } from "@/lib/format";
 import { uiText } from "@/lib/locale";
-import { useSpoolmanStatus, useSpools } from "@/lib/queries";
+import { usePrinters, useSpoolmanStatus, useSpools } from "@/lib/queries";
 import { filamentProfilesOptions, printerProfilesOptions } from "@/lib/queries/profiles";
 import { getSessionVersion } from "@/lib/session-transport";
 import { toast } from "@/lib/toast";
@@ -21,32 +22,36 @@ import type {
   PieceCosts,
   PricingRates,
   ProductionInputs,
+  ProductionEstimate,
 } from "@/types/production-costing";
 import { InspectorSection, SoftCard } from "./inspector-section";
 import { summarizePrintEstimate } from "./print-estimate";
+import {
+  embeddedRatePerKg,
+  matchFilamentPreset,
+  matchPrinterPreset,
+  previewPieceCosts,
+} from "./costing-defaults";
 import { PricingTemplateControls } from "./pricing-template-controls";
 
 type PlateCostInput = {
   fileId: number;
   number: number;
-  metadata: {
-    estimated_time_s: number | null;
-    filament_weight_g: number | null;
-  };
+  metadata: GcodePlateMetadata;
 };
 
 type MaterialDraft = {
   key: number;
   name: string;
   grams: string;
-  rate: string;
+  rate: string | null;
   spoolId: number | null;
 };
 type Draft = {
   pieces: string;
   minutes: string;
   materials: MaterialDraft[];
-  printer: ProductionInputs["printer"];
+  printer: ProductionInputs["printer"] | undefined;
   margin: string;
   tax: string;
 };
@@ -56,7 +61,11 @@ function blankMaterial(key: number): MaterialDraft {
 }
 
 /** The estimate a new draft starts from when the file itself carries one. */
-type DefaultEstimate = { time: number | null; grams: number | null };
+type DefaultEstimate = {
+  time: number | null;
+  grams: number | null;
+  plateMetadata: GcodePlateMetadata[];
+};
 
 function makeDraft(
   file: FileRead,
@@ -81,7 +90,7 @@ function makeDraft(
       tax: String(saved.pricing.tax_percent),
     };
   }
-  const metadata = file.metadata;
+  const metadata = plate?.metadata ?? fileEstimate?.plateMetadata[0] ?? file.metadata;
   const grams = plate
     ? plate.metadata.filament_weight_g
     : fileEstimate
@@ -98,11 +107,16 @@ function makeDraft(
     materials: [
       {
         ...blankMaterial(0),
-        name: [metadata?.material_brand, metadata?.material_type].filter(Boolean).join(" "),
+        name:
+          row.multiple_filaments || ((fileEstimate?.plateMetadata.length ?? 0) > 1 && !plate)
+            ? uiText("Filament")
+            : [metadata?.material_brand, metadata?.material_type].filter(Boolean).join(" ") ||
+              (grams == null ? "" : uiText("Filament")),
+        rate: null,
         grams: grams == null ? "" : String(grams),
       },
     ],
-    printer: null,
+    printer: undefined,
     margin: "0",
     tax: "0",
   };
@@ -127,11 +141,17 @@ function toEstimate(draft: Draft, rates: PricingRates | null): ProductionInputs 
   const materials: CostedMaterial[] = [];
   for (const line of draft.materials) {
     const grams = numberInRange(line.grams, 0, 1000000);
-    const rate = numberInRange(line.rate, 0, 1000000);
+    const rate = numberInRange(line.rate ?? "", 0, 1000000);
     if (!line.name.trim() || grams === null || rate === null) return null;
     materials.push({ name: line.name.trim(), grams, cost_per_kg: rate, spool_id: line.spoolId });
   }
-  return { pieces, print_minutes: minutes, materials, printer: draft.printer, pricing: rates };
+  return {
+    pieces,
+    print_minutes: minutes,
+    materials,
+    printer: draft.printer ?? null,
+    pricing: rates,
+  };
 }
 
 const costComponents = [
@@ -143,18 +163,37 @@ const costComponents = [
 ] as const satisfies readonly [keyof PieceCosts, string][];
 
 /** The saved estimate's cost, row by row; costs are computed by the server on save. */
-function CostBreakdown({ row }: { row: ArtifactCostingRead }) {
-  const { costs, estimate } = row;
+function CostBreakdown({
+  estimate,
+  costs,
+  preview = false,
+}: {
+  estimate: ProductionEstimate | null;
+  costs: PieceCosts | null;
+  preview?: boolean;
+}) {
   const amount = (value: number) =>
     formatNumber(value, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
-  const rows: { label: string; value: string; strong?: boolean; muted?: boolean }[] = [];
+  const rows: {
+    label: string;
+    value: string;
+    share?: number;
+    strong?: boolean;
+    muted?: boolean;
+  }[] = [];
   if (estimate && costs) {
     const hasMachine = estimate.printer !== null;
-    rows.push({ label: uiText("Filament"), value: amount(costs.material) });
-    if (hasMachine) {
-      for (const [key, label] of costComponents.slice(1))
-        rows.push({ label: uiText(label), value: amount(costs[key]) });
-    } else {
+    for (const [key, label] of hasMachine ? costComponents : costComponents.slice(0, 1)) {
+      rows.push({
+        label: uiText(label),
+        value: amount(costs[key]),
+        share:
+          costs.production > 0 && costs[key] > 0
+            ? Math.min(100, (costs[key] / costs.production) * 100)
+            : undefined,
+      });
+    }
+    if (!hasMachine) {
       rows.push({
         label: uiText("Machine"),
         value: uiText("Cost not configured"),
@@ -177,20 +216,33 @@ function CostBreakdown({ row }: { row: ArtifactCostingRead }) {
     rows.push({ label: uiText("Final price"), value: amount(costs.final_price), strong: true });
   }
   return (
-    <InspectorSection title={uiText("Production cost breakdown")}>
+    <InspectorSection
+      title={uiText(preview ? "Production cost preview" : "Production cost breakdown")}
+    >
       {estimate && costs ? (
         <SoftCard>
           <dl aria-label={uiText("Cost per piece")} className="divide-y divide-border">
             {rows.map((item) => (
               <div
                 key={item.label}
-                className={`grid grid-cols-[10rem_minmax(0,1fr)] gap-3 px-4 py-2.5 text-sm ${item.strong ? "font-semibold" : ""}`}
+                className={`grid grid-cols-[minmax(7rem,1fr)_minmax(0,1fr)] gap-3 px-4 py-2.5 text-sm ${item.strong ? "font-semibold" : ""}`}
               >
                 <dt className={item.strong ? "" : "text-muted-foreground"}>{item.label}</dt>
                 <dd
-                  className={`text-end tabular-nums ${item.muted ? "text-muted-foreground" : ""}`}
+                  className={`flex items-center justify-end gap-3 text-end tabular-nums ${item.muted ? "text-muted-foreground" : ""}`}
                 >
-                  {item.value}
+                  {item.share !== undefined && (
+                    <div
+                      aria-hidden="true"
+                      className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-muted"
+                    >
+                      <div
+                        className="h-full rounded-full bg-chart-blue"
+                        style={{ width: `${item.share}%` }}
+                      />
+                    </div>
+                  )}
+                  <span className={item.share === undefined ? "" : "min-w-14"}>{item.value}</span>
                 </dd>
               </div>
             ))}
@@ -326,7 +378,11 @@ function ArtifactEstimate({
   const summary = summarizePrintEstimate(file, plates);
   const fileEstimate: DefaultEstimate | null =
     summary.kind === "single" || summary.kind === "plates"
-      ? { time: summary.time, grams: summary.weight }
+      ? {
+          time: summary.time,
+          grams: summary.weight,
+          plateMetadata: plates?.plate_metadata.map((entry) => entry.metadata) ?? [],
+        }
       : null;
   // The form restarts from the server's row after every confirmed write.
   const [formVersion, setFormVersion] = useState(0);
@@ -378,7 +434,6 @@ function ArtifactEstimate({
           admin={admin}
           blocked={reviewRequired}
           commands={commands}
-          breakdown={<CostBreakdown row={row} />}
           messages={
             <>
               {message && (
@@ -416,7 +471,7 @@ function ArtifactEstimate({
           onSave={(estimate) => void persist(estimate, row)}
         />
       ) : (
-        <CostBreakdown row={row} />
+        <CostBreakdown estimate={row.estimate} costs={row.costs} />
       )}
       <ConfirmModal
         open={canEdit && clearBase !== null}
@@ -442,7 +497,6 @@ function EstimateForm({
   admin,
   blocked,
   commands,
-  breakdown,
   messages,
   onClear,
   onSave,
@@ -455,13 +509,13 @@ function EstimateForm({
   admin: boolean;
   blocked: boolean;
   commands: ReturnType<typeof useProductionCostCommands>;
-  breakdown: ReactNode;
   messages: ReactNode;
   onClear?: () => void;
   onSave: (estimate: ProductionInputs) => void;
 }) {
   const [estimatePlate] = useState(() => (row.estimate ? undefined : plate));
-  const [draft, setDraft] = useState(() => makeDraft(file, row, estimatePlate, fileEstimate));
+  const [initialDraft] = useState(() => makeDraft(file, row, estimatePlate, fileEstimate));
+  const [draft, setDraft] = useState(initialDraft);
   const [nextKey, setNextKey] = useState(draft.materials.length);
   // Where each material's rate came from, until the reader types over it.
   const [rateOrigins, setRateOrigins] = useState<Record<number, string>>({});
@@ -469,6 +523,7 @@ function EstimateForm({
   const sameCurrency = currency === row.currency;
   const filamentProfiles = useQuery(filamentProfilesOptions()).data ?? [];
   const printerProfiles = useQuery(printerProfilesOptions()).data ?? [];
+  const printers = usePrinters({ enabled: admin && !row.estimate && jobs.length > 0 });
   const spoolman = useSpoolmanStatus({ enabled: admin });
   const spools = useSpools({ enabled: admin && spoolman.data?.enabled === true }).data ?? [];
   const measured = jobs.find(
@@ -476,7 +531,49 @@ function EstimateForm({
   );
   const duration = measured?.actual_duration_s;
   const rates = toRates(draft);
-  const estimate = toEstimate(draft, rates);
+  const plateMetadata = estimatePlate
+    ? [estimatePlate.metadata]
+    : (fileEstimate?.plateMetadata ?? []);
+  const metadata = plateMetadata[0] ?? file.metadata;
+  const pickedFilament =
+    sameCurrency && !row.multiple_filaments && plateMetadata.length <= 1
+      ? matchFilamentPreset(filamentProfiles, metadata ?? undefined)
+      : undefined;
+  const embeddedRate = file.original_filename.toLowerCase().endsWith(".3mf")
+    ? embeddedRatePerKg(plateMetadata)
+    : embeddedRatePerKg([
+        {
+          filament_cost: row.slicer_filament_cost,
+          filament_weight_g: file.metadata?.filament_weight_g,
+        },
+      ]);
+  const suggestedRate = pickedFilament?.cost_per_kg ?? embeddedRate;
+  const printerId = jobs.find(
+    (job) => job.file_id === file.id && job.state === "completed",
+  )?.printer_id;
+  const linkedProfileId = printers.data?.find(
+    (printer) => printer.id === printerId,
+  )?.cost_profile_id;
+  const pickedPrinter =
+    printerProfiles.find((profile) => profile.id === linkedProfileId && profile.expenses) ??
+    matchPrinterPreset(
+      printerProfiles,
+      metadata?.printer_model ?? file.metadata?.printer_model,
+      metadata?.nozzle_diameter_mm ?? file.metadata?.nozzle_diameter_mm,
+    );
+  const printer =
+    draft.printer === undefined
+      ? sameCurrency && pickedPrinter?.expenses
+        ? { name: pickedPrinter.name, expenses: pickedPrinter.expenses }
+        : null
+      : draft.printer;
+  const materials = draft.materials.map((line) => ({
+    ...line,
+    autoRate: line.rate === null,
+    rate: line.rate ?? (suggestedRate == null ? "" : String(Number(suggestedRate.toFixed(4)))),
+  }));
+  const estimate = toEstimate({ ...draft, printer, materials }, rates);
+  const preview = estimate !== null && (row.estimate === null || draft !== initialDraft);
   const fromFile = !row.estimate;
   const fileOrigin = estimatePlate
     ? uiText("modelDetail.plateCostSource", {
@@ -488,8 +585,8 @@ function EstimateForm({
         ? uiText("Saved estimate")
         : null;
   const costedPrinters = printerProfiles.filter((item) => item.expenses);
-  const matchedPrinter = draft.printer
-    ? costedPrinters.find((item) => item.name === draft.printer?.name)
+  const matchedPrinter = printer
+    ? costedPrinters.find((item) => item.name === printer.name)
     : undefined;
 
   function updateMaterial(key: number, patch: Partial<MaterialDraft>) {
@@ -540,12 +637,18 @@ function EstimateForm({
         >
           <SoftCard className="divide-y-0">
             <div className="grid grid-cols-2 items-start gap-3 p-4">
-              <FormField className="col-span-2" label={uiText("Cost profile")}>
+              <FormField
+                className="col-span-2"
+                label={uiText("Cost profile")}
+                hint={
+                  draft.printer === undefined && printer
+                    ? uiText("From the {value1} preset", { value1: printer.name })
+                    : undefined
+                }
+              >
                 <select
                   className={inputClasses}
-                  value={
-                    matchedPrinter ? String(matchedPrinter.id) : draft.printer ? "current" : ""
-                  }
+                  value={matchedPrinter ? String(matchedPrinter.id) : printer ? "current" : ""}
                   disabled={!sameCurrency}
                   onChange={(event) => {
                     if (event.target.value === "") {
@@ -563,13 +666,11 @@ function EstimateForm({
                   }}
                 >
                   <option value="">
-                    {draft.printer
+                    {printer
                       ? uiText("Exclude machine expenses")
                       : uiText("Choose a saved printer profile")}
                   </option>
-                  {draft.printer && !matchedPrinter && (
-                    <option value="current">{draft.printer.name}</option>
-                  )}
+                  {printer && !matchedPrinter && <option value="current">{printer.name}</option>}
                   {costedPrinters.map((item) => (
                     <option key={item.id} value={item.id}>
                       {item.name}
@@ -608,7 +709,7 @@ function EstimateForm({
                   )}
                 </p>
               )}
-              {draft.materials.map((line) => (
+              {materials.map((line) => (
                 <fieldset
                   key={line.key}
                   className={
@@ -719,14 +820,23 @@ function EstimateForm({
                   </FormField>
                   <FormField
                     label={`${uiText("Cost per kg")} (${currency})`}
-                    hint={rateOrigins[line.key]}
+                    hint={
+                      rateOrigins[line.key] ??
+                      (line.autoRate
+                        ? pickedFilament
+                          ? uiText("From the {value1} preset", { value1: pickedFilament.name })
+                          : embeddedRate !== null
+                            ? uiText("From the G-code")
+                            : undefined
+                        : undefined)
+                    }
                   >
                     <Input
                       type="number"
                       min={0}
                       max={1000000}
                       step="any"
-                      value={line.rate}
+                      value={line.rate ?? ""}
                       required
                       onChange={(event) => {
                         updateMaterial(line.key, { rate: event.target.value });
@@ -841,7 +951,11 @@ function EstimateForm({
             </div>
           </SoftCard>
         </InspectorSection>
-        {breakdown}
+        <CostBreakdown
+          estimate={preview ? { ...estimate, currency } : row.estimate}
+          costs={preview ? previewPieceCosts(estimate) : row.costs}
+          preview={preview}
+        />
         {messages}
       </fieldset>
       <div className="flex flex-wrap justify-end gap-2">

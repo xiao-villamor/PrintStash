@@ -2,7 +2,12 @@
 
 import pytest
 
-from app.db.models import CollectionRole, FileType
+from app.db.models import (
+    ArtifactMaterialRequirement,
+    CollectionRole,
+    FileType,
+    Metadata,
+)
 
 EXPENSES = {
     "acquisition_cost": 500,
@@ -35,6 +40,26 @@ def _edit(headers, model_id, snapshot):
 
 
 class TestProductionCosting:
+    @pytest.mark.parametrize("tools", [1, 2])
+    def test_exposes_raw_slicer_price_and_multiple_filaments(
+        self, client, auth_headers, make_model, make_file, db_session, tools
+    ):
+        artifact = make_file(make_model(), file_type=FileType.GCODE)
+        db_session.add(Metadata(file_id=artifact.id, filament_cost=0.40))
+        for tool in range(tools):
+            db_session.add(
+                ArtifactMaterialRequirement(
+                    file_id=artifact.id, tool_index=tool, material_type="PLA"
+                )
+            )
+        db_session.commit()
+
+        response = client.get(_cost_url(artifact), headers=auth_headers)
+
+        assert response.status_code == 200
+        assert response.json()["slicer_filament_cost"] == 0.40
+        assert response.json()["multiple_filaments"] is (tools > 1)
+
     @pytest.mark.parametrize("file_type", [FileType.STL, FileType.GCODE])
     def test_persists_a_snapshot_for_each_artifact(
         self, client, auth_headers, make_model, make_file, file_type
