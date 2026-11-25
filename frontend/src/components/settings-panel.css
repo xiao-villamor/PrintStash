@@ -469,10 +469,8 @@
 .settings-theme-layer {
   position: absolute;
   inset: 0;
-  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 
 .settings-theme-layer[data-theme="light"] {
@@ -489,24 +487,52 @@
   clip-path: inset(0 50% 0 0);
 }
 
-.settings-theme-bar {
-  display: block;
-  height: 8px;
-  width: 40%;
-  border-radius: 3px;
-  background: currentColor;
-  opacity: 0.8;
+.settings-theme-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 18%;
+  padding: 0 8px;
+  border-bottom: 1px solid color-mix(in oklab, currentColor 14%, transparent);
 }
 
-.settings-theme-cells {
+.settings-theme-titlebar > i {
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0.35;
+}
+
+.settings-theme-body {
   display: flex;
   flex: 1;
+  gap: 8px;
+  padding: 8px;
+}
+
+.settings-theme-side {
+  width: 22%;
+  border-radius: 3px;
+  background: currentColor;
+  opacity: 0.12;
+}
+
+.settings-theme-main {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
   gap: 6px;
 }
 
-.settings-theme-cells > span {
-  flex: 1;
-  border-radius: 4px;
+.settings-theme-main > span {
+  border-radius: 3px;
   background: currentColor;
   opacity: 0.16;
+}
+
+.settings-theme-main > span:first-child {
+  grid-column: 1 / -1;
+  opacity: 0.22;
 }

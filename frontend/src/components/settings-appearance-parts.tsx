@@ -8,11 +8,18 @@ type ThemeChoice = "light" | "dark" | "system";
 function ThemeLayer({ theme, half = false }: { theme: "light" | "dark"; half?: boolean }) {
   return (
     <span className="settings-theme-layer" data-theme={theme} data-clip={half ? "half" : undefined}>
-      <span className="settings-theme-bar" />
-      <span className="settings-theme-cells">
-        <span />
-        <span />
-        <span />
+      <span className="settings-theme-titlebar">
+        <i />
+        <i />
+        <i />
+      </span>
+      <span className="settings-theme-body">
+        <span className="settings-theme-side" />
+        <span className="settings-theme-main">
+          <span />
+          <span />
+          <span />
+        </span>
       </span>
     </span>
   );
@@ -32,7 +39,11 @@ export function ThemeTiles({
     { value: "system", label: uiText("System"), Icon: Monitor },
   ] as const;
   return (
-    <div role="radiogroup" aria-label={uiText("Theme")} className="grid grid-cols-3 gap-3">
+    <div
+      role="radiogroup"
+      aria-label={uiText("Theme")}
+      className="grid grid-cols-[repeat(3,minmax(0,13rem))] gap-4"
+    >
       {tiles.map(({ value: tile, label, Icon }) => {
         const selected = tile === value;
         return (
@@ -46,7 +57,7 @@ export function ThemeTiles({
           >
             <span
               className={cn(
-                "settings-theme-swatch block h-21 overflow-hidden rounded-lg border-2",
+                "settings-theme-swatch block aspect-16/10 overflow-hidden rounded-lg border-2",
                 selected ? "border-primary" : "border-border",
                 "group-focus-visible:ring-2 group-focus-visible:ring-ring",
               )}
