@@ -728,6 +728,8 @@
   }
 
   .auth-split-art {
+    --auth-art-bed: none;
+    --auth-art-grid: color-mix(in srgb, var(--muted-foreground) 24%, transparent);
     --auth-art-stroke: var(--foreground);
     @apply my-6 mr-6 grid place-items-center overflow-hidden rounded-xl border border-border p-6 xl:p-12;
     background: var(--plate);
@@ -735,8 +737,10 @@
   }
 
   :root.dark .auth-split-art {
+    --auth-art-bed: var(--inverse-surface);
+    --auth-art-grid: color-mix(in srgb, var(--outline) 62%, transparent);
     --auth-art-stroke: var(--outline);
-    background: var(--inverse-surface);
+    background: var(--card);
   }
 
   .auth-split-art > svg {

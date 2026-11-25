@@ -44,19 +44,30 @@ test.describe("authentication", () => {
       });
     }
 
-    test("the print panel uses a soft white background in dark mode", async ({ page }) => {
+    test("the white build plate follows dark mode", async ({ page }) => {
       await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
       await page.goto("/login");
       const artwork = page.locator(".auth-split-art");
+      const bed = artwork.locator("polygon");
       const outline = artwork.locator('path[fill-rule="evenodd"]').last().locator("..");
       const toggle = page.getByRole("button", { name: "Toggle theme" });
       await expect(artwork).toHaveCSS("background-color", "rgb(37, 44, 55)");
+      await expect(bed).toHaveCSS("fill", "none");
       await toggle.click();
-      await expect(artwork).toHaveCSS("background-color", "rgb(237, 241, 247)");
+      await expect(artwork).toHaveCSS("background-color", "rgb(19, 23, 30)");
+      await expect(bed).toHaveCSS("fill", "rgb(237, 241, 247)");
       await expect(outline).toHaveCSS("stroke", "rgb(105, 123, 146)");
       await toggle.click();
       await expect(artwork).toHaveCSS("background-color", "rgb(37, 44, 55)");
+      await expect(bed).toHaveCSS("fill", "none");
       await expect(outline).toHaveCSS("stroke", "rgb(237, 241, 247)");
+    });
+
+    test("the build plate grid has more contrast in dark mode", async ({ page }) => {
+      await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+      await page.goto("/login");
+      const grid = page.locator(".auth-split-art polygon + path");
+      await expect(grid).toHaveCSS("stroke", "color(srgb 0.411765 0.482353 0.572549 / 0.62)");
     });
 
     test("the favicon follows the saved theme", async ({ page }) => {
