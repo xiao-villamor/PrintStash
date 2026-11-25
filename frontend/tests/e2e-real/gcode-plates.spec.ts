@@ -121,13 +121,14 @@ function namedPlateProject(name: string, count: number, sliced: boolean): Buffer
     resolve(backend, ".venv/bin/python"),
     [
       "-c",
-      `import io, sys, zipfile
+      `import io, math, sys, zipfile
 from xml.etree import ElementTree as ET
 from tests.fixtures.three_mf_projects import build_multi_plate_project, build_sliced_project
 marker, count, sliced = sys.argv[1], int(sys.argv[2]), sys.argv[3] == 'true'
+columns = math.ceil(math.sqrt(count))
 project = io.BytesIO(build_multi_plate_project(
     marker=marker, names=tuple(f'Part {i+1}' for i in range(count)),
-    placements=tuple((128 + i * 307.2, 128) for i in range(count)),
+    placements=tuple((128 + i % columns * 307.2, 128 - i // columns * 307.2) for i in range(count)),
 ))
 if sliced:
     gcode = build_sliced_project(marker=marker, plate_numbers=tuple(range(1, count+1)))
@@ -146,7 +147,7 @@ if sliced:
                 content = ET.tostring(config)
             target.writestr(member, content)
         for member in source.namelist():
-           target.writestr(member, source.read(member))
+            target.writestr(member, source.read(member))
         target.writestr('Metadata/slice_info.config', ET.tostring(slice_info))
     project = sliced_project
 sys.stdout.buffer.write(project.getvalue())`,
@@ -203,7 +204,9 @@ test.describe("Sliced G-code plates", () => {
       }
 
       try {
-        await source.getByRole("button", { name: last }).click();
+        const lastSourcePlate = source.getByRole("button", { name: last });
+        await expect(lastSourcePlate).toBeVisible();
+        await lastSourcePlate.click();
         await expect(
           preview.getByText("Selected plate mesh bounds", { exact: false }),
         ).toBeVisible();
