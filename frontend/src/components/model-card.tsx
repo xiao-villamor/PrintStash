@@ -7,7 +7,7 @@ import { useUiLocale } from "@/lib/i18n";
 
 import { LibraryItemLink } from "@/features/library/navigation";
 import { displayModelName } from "@/lib/display-name";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ModelListItem, FileRevisionStatus } from "@/types";
 import { ScanSearch, ArrowUpRight, Maximize2, PanelRight, Star, Tags } from "lucide-react";
 import { useCardDetail, cardDimensions, cardRevisions } from "@/features/library/card-detail";
@@ -23,8 +23,8 @@ import { keepOffCard } from "@/lib/card-overlay";
 import { useModelPreviewCard } from "@/lib/use-model-preview-card";
 import { Localized } from "@/components/ui/localized";
 import "./library-items.css";
-import { MODEL_DND_MIME, captureModelDrag } from "@/lib/model-dnd";
-import { setModelDragImage } from "@/lib/model-drag-image";
+import { useDraggable } from "@dnd-kit/core";
+import type { GalleryDragSource } from "@/components/model-gallery-drag";
 
 import {
   CARD_METRIC_STORAGE_KEY,
@@ -130,6 +130,10 @@ function ModelCardInner({
   selected = false,
   onToggleSelect,
   draggable = false,
+  dragging,
+  dragRef,
+  dragListeners,
+  setDragPreviewReset,
   onEditTags,
   onIntent,
   favorites = false,
@@ -146,6 +150,10 @@ function ModelCardInner({
   selected?: boolean;
   onToggleSelect?: (id: number, range?: boolean) => void;
   draggable?: boolean;
+  dragging: boolean;
+  dragRef: (element: HTMLElement | null) => void;
+  dragListeners: ReturnType<typeof useDraggable>["listeners"];
+  setDragPreviewReset: (reset: (() => void) | null) => void;
   onEditTags?: (model: ModelListItem) => void;
   onIntent?: (id: number | null) => void;
   favorites?: boolean;
@@ -153,7 +161,6 @@ function ModelCardInner({
   inspected?: boolean;
 }) {
   useUiLocale();
-  const [dragging, setDragging] = useState(false);
   const starMutation = useLibraryStar();
   const starred =
     starMutation.isPending && starMutation.variables
@@ -161,6 +168,10 @@ function ModelCardInner({
       : model.starred;
   const starBusy = starMutation.isPending;
   const [previewAdmission, preview] = useModelPreviewCard(model.thumbnail_url, model.previews);
+  useLayoutEffect(() => {
+    setDragPreviewReset(preview.clearHover);
+    return () => setDragPreviewReset(null);
+  }, [setDragPreviewReset, preview.clearHover]);
   const regeneratePreviews = useRegenerateModelPreviews();
   const menuOpener = useRef<HTMLAnchorElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -172,6 +183,17 @@ function ModelCardInner({
     admitted,
     data: detail,
   } = useCardDetail(model.id, !favorites && model.gcode_file_count > 0);
+  const attachCard = useCallback(
+    (element: HTMLElement | null) => {
+      dragRef(element);
+      const detach = cardRef(element);
+      return () => {
+        detach?.();
+        dragRef(null);
+      };
+    },
+    [cardRef, dragRef],
+  );
   const dimensions = cardDimensions(model.bounding_box);
   const revisions = cardRevisions(detail);
   const revision = revisions.find((file) => file.is_recommended) ?? revisions[0];
@@ -219,7 +241,7 @@ function ModelCardInner({
         contentClassName="w-60 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
         trigger={
           <article
-            ref={cardRef}
+            ref={attachCard}
             onContextMenu={(event) => {
               event.preventDefault();
               menuOpener.current =
@@ -243,26 +265,6 @@ function ModelCardInner({
             data-selected={selected || undefined}
             data-inspected={inspected || undefined}
             data-dragging={dragging || undefined}
-            draggable={draggable}
-            onDragStart={
-              draggable
-                ? (e) => {
-                    e.dataTransfer.setData(MODEL_DND_MIME, JSON.stringify(captureModelDrag(model)));
-                    e.dataTransfer.effectAllowed = "move";
-                    setModelDragImage(
-                      e.dataTransfer,
-                      e.currentTarget,
-                      displayModelName(model.name),
-                    );
-                    preview.clearHover();
-                    setDragging(true);
-                  }
-                : undefined
-            }
-            onDragEnd={() => {
-              preview.clearHover();
-              setDragging(false);
-            }}
             className={`${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} library-model-card group group/selection-card relative flex h-full flex-col min-w-0 bg-card border rounded-lg transition-[color,background-color,border-color,opacity,scale] duration-press ease-out active:scale-[0.99] motion-reduce:active:scale-100 overflow-hidden ${
               draggable ? "cursor-grab active:cursor-grabbing" : ""
             } ${dragging ? "opacity-40" : ""} ${
@@ -281,6 +283,7 @@ function ModelCardInner({
               />
             )}
             <LibraryItemLink
+              {...dragListeners}
               origin={origin}
               href={`/models/${model.id}`}
               aria-label={model.name}
@@ -560,6 +563,17 @@ export function ModelCard({
   // preference, so it is the correct initial value rather than something to
   // re-read after mount.
   const [metrics, setMetrics] = useState(readCardMetrics);
+  const dragPreviewReset = useRef<(() => void) | null>(null);
+  const setDragPreviewReset = useCallback((reset: (() => void) | null) => {
+    dragPreviewReset.current = reset;
+  }, []);
+  // Drag context updates may reach every registered Model. Keep the card
+  // contents memoized so only the source changes when a drag starts.
+  const { isDragging, setNodeRef, listeners } = useDraggable({
+    id: `gallery-model:${model.id}`,
+    disabled: !draggable,
+    data: { model, clearHover: () => dragPreviewReset.current?.() } satisfies GalleryDragSource,
+  });
 
   useEffect(() => {
     function onStorage(e: StorageEvent) {
@@ -581,6 +595,10 @@ export function ModelCard({
         selected={selected}
         onToggleSelect={onToggleSelect}
         draggable={draggable}
+        dragging={isDragging}
+        dragRef={setNodeRef}
+        dragListeners={listeners}
+        setDragPreviewReset={setDragPreviewReset}
         onEditTags={onEditTags}
         onIntent={onIntent}
         favorites={favorites}

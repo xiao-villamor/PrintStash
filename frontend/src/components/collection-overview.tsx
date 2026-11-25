@@ -1,4 +1,6 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useDroppable } from "@dnd-kit/core";
+import type { GalleryDropTarget } from "@/components/model-gallery-drag";
 import { ArrowRight, Folder, Image, Pencil, RotateCw } from "lucide-react";
 import { LibraryCardSelection } from "@/components/library-card-selection";
 import { CollectionCoverArtwork } from "@/components/collection-cover-artwork";
@@ -74,10 +76,26 @@ export function CollectionOverviewCard({
     previewSource,
   );
   const { dragOver, handlers } = useModelDropTarget(collection.path, onDropModel);
+  const { setNodeRef: dropRef, isOver } = useDroppable({
+    id: `gallery-collection:${collection.id}`,
+    disabled: !onDropModel || renaming,
+    data: { collectionPath: collection.path } satisfies GalleryDropTarget,
+  });
+  const attach = useCallback(
+    (element: HTMLDivElement | null) => {
+      dropRef(element);
+      const detach = ref(element);
+      return () => {
+        detach?.();
+        dropRef(null);
+      };
+    },
+    [dropRef, ref],
+  );
   const modelCount = uiText("counts.models", { count: collection.model_count });
   const card = (
     <div
-      ref={ref}
+      ref={attach}
       data-collection-path={collection.path}
       data-compact={compact || undefined}
       data-library-anchor={`collection:${collection.id}`}
@@ -94,7 +112,11 @@ export function CollectionOverviewCard({
           : undefined
       }
       className={`${arriving ? "animate-card-arrive" : ""} library-collection-card group group/selection-card relative min-w-0 overflow-hidden rounded-lg border bg-card transition-[border-color,box-shadow,scale] duration-press ease-out ${renaming ? "" : "active:scale-[0.99] motion-reduce:active:scale-100"} ${
-        selected || dragOver ? "border-primary" : "border-border"
+        dragOver || isOver
+          ? "border-primary ring-1 ring-inset ring-ring"
+          : selected
+            ? "border-primary"
+            : "border-border"
       }`}
     >
       <button

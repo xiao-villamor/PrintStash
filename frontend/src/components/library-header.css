@@ -227,6 +227,20 @@
   position: relative;
   min-height: 30px;
 }
+.library-collection-name {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--foreground);
+  outline: none;
+  box-shadow: none;
+}
+.library-collection-name:focus {
+  border-color: var(--ring);
+}
+.library-collection-name[aria-invalid="true"] {
+  border-color: var(--destructive);
+}
 .library-collection-title .library-collection-name {
   box-sizing: content-box;
   line-height: 1.4;
@@ -240,18 +254,9 @@
   height: 38px;
   margin: 0;
   padding: 0 8px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--foreground);
   font-size: 20px;
   font-weight: 600;
   letter-spacing: -0.015em;
-  outline: none;
-  box-shadow: none;
-}
-.library-collection-title .library-collection-name:focus {
-  border-color: var(--ring);
 }
 
 .collection-description-editor {

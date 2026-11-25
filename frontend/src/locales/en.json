@@ -3475,6 +3475,8 @@
     "other": "Renamed {count} folders"
   },
   "collection.cardActions": "Collection actions",
+  "collection.newName": "Collection name",
+  "collection.nameTooLong": "Use {limit} characters or fewer.",
   "collection.regenerateThumbnails": "Recreate thumbnails",
   "collection.thumbnailsQueued": {
     "one": "{count} thumbnail queued",

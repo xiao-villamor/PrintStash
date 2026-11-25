@@ -7,6 +7,8 @@ import "./library-header.css";
 import { LibraryEmptyCollection } from "@/components/library-empty-collection";
 import { LibraryFindBar } from "@/components/library-find-bar";
 import { LibraryCollectionsRegion } from "@/components/library-collections-region";
+import { ModelGalleryDrag } from "@/components/model-gallery-drag";
+import { NewCollectionCard } from "@/components/new-collection-card";
 
 import { arrivingKeys, entryKeys } from "@/lib/library-arrivals";
 import { FOLDER_ENTRANCE_MS } from "@/lib/folder-transition";
@@ -320,6 +322,7 @@ type MenuTriggerSize = "xs" | "sm";
 type MenuTriggerVariant = "outline" | "ghost";
 
 const COMPACT_COLLECTION_HEIGHT = 84;
+const COLLECTION_NAME_LIMIT = 100;
 
 /**
  * One row of collections above the models, expandable per folder. It owns its
@@ -328,25 +331,40 @@ const COMPACT_COLLECTION_HEIGHT = 84;
 function CollectionStrip({
   total,
   overview,
+  hasCreateCard = false,
   resetKey,
   children,
 }: {
   total: number;
   overview: boolean;
+  hasCreateCard?: boolean;
   resetKey: string;
-  children: (singleRow: boolean, onColumns: (columns: number) => void) => ReactNode;
+  children: (
+    singleRow: boolean,
+    onColumns: (columns: number, rowWidth: number) => void,
+    visibleCount: number,
+  ) => ReactNode;
 }) {
   useUiLocale();
   const [expandedFor, setExpandedFor] = useState<string | null>(null);
-  const [rowSize, setRowSize] = useState(4);
+  const [{ columns: rowSize, width: rowWidth }, setRowFit] = useState({ columns: 4, width: 0 });
+  const updateRowFit = useCallback((columns: number, width: number) => {
+    setRowFit((previous) =>
+      previous.columns === columns && previous.width === width ? previous : { columns, width },
+    );
+  }, []);
   const expanded = expandedFor === resetKey;
   // How many collections the resting row leaves out, so "N more" fades in or
   // out together with the pane motion rather than after it.
-  const hidden = Math.max(0, total - rowSize);
+  const visibleInRow = hasCreateCard ? Math.max(1, rowSize - 1) : rowSize;
+  const hidden = Math.max(0, total - visibleInRow);
   return (
     <>
       {!overview && (
-        <div className="mb-1 flex min-h-5 items-center justify-between gap-3">
+        <div
+          className="mb-2.5 flex min-h-5 items-center justify-between gap-3"
+          style={rowWidth > 0 ? { maxWidth: rowWidth } : undefined}
+        >
           <h2 className="text-xs font-medium text-foreground">
             {uiText("Collections")} <span className="font-mono font-normal">{total}</span>
           </h2>
@@ -369,7 +387,11 @@ function CollectionStrip({
           </Button>
         </div>
       )}
-      {children(!overview && !expanded, setRowSize)}
+      {children(
+        !overview && !expanded && (!hasCreateCard || rowSize > 1),
+        updateRowFit,
+        overview || expanded ? total : visibleInRow,
+      )}
     </>
   );
 }
@@ -2705,26 +2727,32 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     router,
   ]);
 
-  async function handleCreateCollection() {
-    const name = newCollectionName.trim();
-    if (!name) return;
+  async function saveNewCollection(name: string) {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
-      return;
+      return false;
     }
     if (!canAdminSelectedCollection) {
       toast.warning(uiText("Admin access required"));
-      return;
+      return false;
     }
     // Until the open folder has loaded, a new folder would land at the root.
-    if (selectedCollection !== null && selectedCollectionRow === null) return;
+    if (selectedCollection !== null && selectedCollectionRow === null) return false;
     try {
       await createCollection({ name, parent_id: selectedCollectionRow?.id ?? null });
-      setNewCollectionName("");
-      setIsCreatingCollection(false);
       toast.success(uiText('Collection "{value1}" created', { value1: String(name) }));
+      return true;
     } catch (e: any) {
       toast.error(e);
+      return false;
+    }
+  }
+
+  async function handleCreateCollection() {
+    const name = newCollectionName.trim();
+    if (name && (await saveNewCollection(name))) {
+      setNewCollectionName("");
+      setIsCreatingCollection(false);
     }
   }
 
@@ -2995,6 +3023,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       {uiText("New collection")}
     </Button>
   );
+  const showNewCollectionCard =
+    viewMode === "grid" && canCreateCollection && !loading && visibleCollections.length > 0;
 
   const libraryMoreActions = (
     <>
@@ -3325,7 +3355,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     </DropdownMenu>
   );
 
-  return (
+  const layout = (
     <Localized>
       <>
         <ModelMoveReview moves={modelMoves} />
@@ -3668,7 +3698,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               <div className="library-collection-identity min-w-0 flex-1">
                 <InlineTitleEditor
                   fieldLabel={uiText("inbox.collectionName")}
-                  maxLength={100}
+                  maxLength={COLLECTION_NAME_LIMIT}
                   title={
                     unavailableCollection
                       ? uiText("library.collectionUnavailable")
@@ -3734,7 +3764,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   )}
                 </div>
               </div>
-              {newCollectionButton}
+              {!showNewCollectionCard && newCollectionButton}
               {!hasCollectionsPane && (
                 <Button
                   onClick={() => {
@@ -3977,8 +4007,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           freezeInspectorTracks={inspectorOpen}
                           compact={compact}
                           estimateSize={COMPACT_COLLECTION_HEIGHT}
-                          keepCollectionCardWidth
-                          minCardWidth={300}
                           virtualize={false}
                           singleRow={singleRow}
                           onColumnsChange={onColumns}
@@ -3996,77 +4024,92 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     <CollectionStrip
                       total={visibleCollections.length}
                       overview={collectionOverview}
+                      hasCreateCard={showNewCollectionCard}
                       resetKey={displayedPath ?? ""}
                     >
-                      {(singleRow, onColumns) => (
+                      {(singleRow, onColumns, visibleCount) => (
                         <LibraryItems
                           key={`collections:${displayedPath ?? ""}`}
-                          items={visibleCollections}
-                          itemKey={(collection) => `collection:${collection.id}`}
-                          renderItem={(collection) => (
-                            <LibraryCardFill
-                              identity={cardIdentity}
-                              animateOnMount={cardEntrance !== null}
-                              className="library-collection-reveal"
-                            >
-                              <CollectionOverviewCard
-                                collection={collection}
-                                compact={!collectionOverview}
-                                arriving={arriving.has(`c:${collection.id}`)}
-                                authorizationRevision={snapshot?.authorizationRevision}
-                                onAuthorityRetired={onAuthorityRetired}
-                                previewsReady={browseReady}
-                                previewSource={snapshot?.previewSource}
-                                onSelect={handleCollectionChange}
-                                onIntent={prefetchFolder}
-                                onDropModel={canUploadToVault ? handleMoveModel : undefined}
-                                selectable={selectMode}
-                                selected={selectedCollectionRows.has(collection.id)}
-                                onToggleSelect={
-                                  auth.isAuthenticated ? toggleCollectionSelect : undefined
-                                }
-                                onRename={
-                                  canManageCard(collection, "rename")
-                                    ? () =>
-                                        setCollectionCardTarget({
-                                          entry,
-                                          id: collection.id,
-                                          action: "rename",
-                                        })
-                                    : undefined
-                                }
-                                onEditCover={
-                                  canManageCard(collection, "cover")
-                                    ? () =>
-                                        setCollectionCardTarget({
-                                          entry,
-                                          id: collection.id,
-                                          action: "cover",
-                                        })
-                                    : undefined
-                                }
-                                onRegenerateThumbnails={
-                                  canManageCard(collection, "cover")
-                                    ? () => void regenerateCardThumbnails(collection)
-                                    : undefined
-                                }
-                                renaming={
-                                  managedCollection?.id === collection.id &&
-                                  collectionCardTarget?.action === "rename"
-                                }
-                                onRenameEnd={(saved) => {
-                                  setCollectionCardTarget((target) =>
-                                    target?.entry === entry &&
-                                    target.id === collection.id &&
-                                    target.action === "rename"
-                                      ? null
-                                      : target,
-                                  );
-                                  if (saved) void refresh();
-                                }}
+                          items={[
+                            ...visibleCollections.slice(0, visibleCount),
+                            ...(showNewCollectionCard ? ["create" as const] : []),
+                          ]}
+                          itemKey={(collection) =>
+                            collection === "create"
+                              ? "create-collection"
+                              : `collection:${collection.id}`
+                          }
+                          renderItem={(collection) =>
+                            collection === "create" ? (
+                              <NewCollectionCard
+                                maxLength={COLLECTION_NAME_LIMIT}
+                                onCreate={saveNewCollection}
                               />
-                            </LibraryCardFill>
-                          )}
+                            ) : (
+                              <LibraryCardFill
+                                identity={cardIdentity}
+                                animateOnMount={cardEntrance !== null}
+                                className="library-collection-reveal"
+                              >
+                                <CollectionOverviewCard
+                                  collection={collection}
+                                  compact={!collectionOverview}
+                                  arriving={arriving.has(`c:${collection.id}`)}
+                                  authorizationRevision={snapshot?.authorizationRevision}
+                                  onAuthorityRetired={onAuthorityRetired}
+                                  previewsReady={browseReady}
+                                  previewSource={snapshot?.previewSource}
+                                  onSelect={handleCollectionChange}
+                                  onIntent={prefetchFolder}
+                                  onDropModel={canUploadToVault ? handleMoveModel : undefined}
+                                  selectable={selectMode}
+                                  selected={selectedCollectionRows.has(collection.id)}
+                                  onToggleSelect={
+                                    auth.isAuthenticated ? toggleCollectionSelect : undefined
+                                  }
+                                  onRename={
+                                    canManageCard(collection, "rename")
+                                      ? () =>
+                                          setCollectionCardTarget({
+                                            entry,
+                                            id: collection.id,
+                                            action: "rename",
+                                          })
+                                      : undefined
+                                  }
+                                  onEditCover={
+                                    canManageCard(collection, "cover")
+                                      ? () =>
+                                          setCollectionCardTarget({
+                                            entry,
+                                            id: collection.id,
+                                            action: "cover",
+                                          })
+                                      : undefined
+                                  }
+                                  onRegenerateThumbnails={
+                                    canManageCard(collection, "cover")
+                                      ? () => void regenerateCardThumbnails(collection)
+                                      : undefined
+                                  }
+                                  renaming={
+                                    managedCollection?.id === collection.id &&
+                                    collectionCardTarget?.action === "rename"
+                                  }
+                                  onRenameEnd={(saved) => {
+                                    setCollectionCardTarget((target) =>
+                                      target?.entry === entry &&
+                                      target.id === collection.id &&
+                                      target.action === "rename"
+                                        ? null
+                                        : target,
+                                    );
+                                    if (saved) void refresh();
+                                  }}
+                                />
+                              </LibraryCardFill>
+                            )
+                          }
                           scrollRef={startupContent}
                           readingRenderers={readingRenderers}
                           readingId="collections"
@@ -4074,8 +4117,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           freezeInspectorTracks={inspectorOpen}
                           compact={!collectionOverview && compact}
                           estimateSize={collectionOverview ? 266 : COMPACT_COLLECTION_HEIGHT}
-                          keepCollectionCardWidth={!collectionOverview}
-                          minCardWidth={collectionOverview ? undefined : 300}
                           singleRow={singleRow}
                           onColumnsChange={onColumns}
                         />
@@ -4525,6 +4566,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       </>
     </Localized>
   );
+  return <ModelGalleryDrag onMove={handleMoveModel}>{layout}</ModelGalleryDrag>;
 }
 
 function CollectionListRow({

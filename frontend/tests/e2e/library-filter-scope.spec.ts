@@ -189,7 +189,7 @@ test.describe("filters in a folder of folders", () => {
     expect(enabledHoverFill).toBe("rgb(54, 64, 78)");
   });
 
-  test("preserves the subfolder scope after keyboard activation and reload", async ({ page }) => {
+  test("restores the keyboard-selected subfolder scope on reload", async ({ page }) => {
     await folderOfFolders(page, { withModels: true });
     await page.goto("/?c=parent&scope=here");
     const scope = page.getByRole("button", { name: "Include subfolders", exact: true });

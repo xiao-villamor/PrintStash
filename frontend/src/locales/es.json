@@ -3475,6 +3475,8 @@
     "other": "Se cambió el nombre de {count} carpetas"
   },
   "collection.cardActions": "Acciones de la colección",
+  "collection.newName": "Nombre de la colección",
+  "collection.nameTooLong": "Usa {limit} caracteres como máximo.",
   "collection.regenerateThumbnails": "Regenerar miniaturas",
   "collection.thumbnailsQueued": {
     "one": "{count} miniatura en cola",

@@ -273,7 +273,7 @@ describe("FilterSidebar", () => {
     }
   });
 
-  it("reveals the hovered destination for a model move and shows when the drop is pending", async () => {
+  it("keeps model drag feedback visible until the move settles", async () => {
     const user = userEvent.setup();
     const move = Promise.withResolvers<void>();
     const onMoveModel = vi.fn<NonNullable<FilterSidebarProps["onMoveModel"]>>(() => move.promise);

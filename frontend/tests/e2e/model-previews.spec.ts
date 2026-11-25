@@ -1,6 +1,5 @@
 /** Issue #434: real browser input, request scheduling and decoded-image replacement. */
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { writeFile } from "node:fs/promises";
 import { aModelListItem } from "../../src/test-support/factories";
 import type { ArtifactPreviews, ModelPreviews } from "../../src/types/previews";
 import { NO_PREVIEWS } from "../../src/types/previews";
@@ -98,36 +97,44 @@ function secondaries(paths: string[]) {
 }
 
 test.describe("Model preview browsing", () => {
-  test("uses a compact preview for a gallery drag", async ({ page }, testInfo) => {
+  test("follows a gallery drag with a compact on-page preview", async ({ page }, testInfo) => {
     await page.addInitScript(() => {
       localStorage.setItem("printstash.theme", "dark");
-      const setDragImage = DataTransfer.prototype.setDragImage;
-      DataTransfer.prototype.setDragImage = function (element, x, y) {
-        if (element instanceof HTMLCanvasElement) {
-          document.body.dataset.dragImage = element.toDataURL();
-          document.body.dataset.dragImageSize = `${element.width}x${element.height}`;
-        }
-        setDragImage.call(this, element, x, y);
-      };
+      document.addEventListener("dragstart", () => {
+        document.body.dataset.nativeDrag = "true";
+      });
     });
     const { card } = await library(page);
     await collapseNavigationSidebar(page);
-    const heading = page.getByRole("main").getByRole("heading", { name: "All Models" });
-    await card.locator("[data-model-preview]").dragTo(heading);
+    const image = card.locator("[data-model-preview]");
+    await expect(image.locator("img")).toHaveJSProperty("complete", true);
+    const bounds = await image.boundingBox();
+    if (!bounds) throw new Error("Missing gallery drag source");
+    const start = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+    const preview = page.locator("[data-gallery-drag-preview]");
 
-    const body = page.locator("body");
-    await expect(body).toHaveAttribute("data-drag-image-size", /^\d+x48$/);
-    const size = await body.getAttribute("data-drag-image-size");
-    expect(Number(size?.split("x")[0])).toBeLessThan(160);
-    const data = await page.locator("body").getAttribute("data-drag-image");
-    expect(data).toMatch(/^data:image\/png;base64,/);
-    await writeFile(
-      testInfo.outputPath("model-drag-preview.png"),
-      Buffer.from(data?.split(",")[1] ?? "", "base64"),
-    );
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(start.x + 30, start.y, { steps: 3 });
+    await expect(preview).toBeVisible();
+    const end = { x: start.x + 110, y: start.y - 40 };
+    await page.mouse.move(end.x, end.y);
+    await expect(preview).toHaveText("Bracket 1");
+    await expect(preview.locator("img")).toBeVisible();
+    await expect(preview).toHaveCSS("height", "48px");
+    const frame = await preview.boundingBox();
+    if (!frame) throw new Error("Missing rendered drag feedback");
+    expect(frame.width).toBeLessThan(160);
+    expect(Math.abs(frame.x - (end.x + 12))).toBeLessThan(3);
+    expect(Math.abs(frame.y - (end.y + 16))).toBeLessThan(3);
+    await expect(page.locator("body")).not.toHaveAttribute("data-native-drag");
+    await preview.screenshot({ path: testInfo.outputPath("model-drag-preview.png") });
+    await page.keyboard.press("Escape");
+    await page.mouse.up();
+    await expect(preview).toHaveCount(0);
   });
 
-  test("hides gallery controls after cancelling a focused card drag", async ({ page }) => {
+  test("hides gallery controls after dropping outside a collection", async ({ page }) => {
     const { card, next } = await library(page);
     await collapseNavigationSidebar(page);
     const navigation = card.locator("[data-preview-navigation]");
@@ -137,13 +144,51 @@ test.describe("Model preview browsing", () => {
     await expect(navigation).toHaveCSS("opacity", "1");
 
     const heading = page.getByRole("main").getByRole("heading", { name: "All Models" });
-    await card.locator("[data-model-preview]").dragTo(heading);
+    const source = await card.locator("[data-model-preview]").boundingBox();
+    const target = await heading.boundingBox();
+    if (!source || !target) throw new Error("Missing gallery drag bounds");
+    const x = source.x + source.width / 2;
+    const y = source.y + source.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 30, y, { steps: 3 });
+    const preview = page.locator("[data-gallery-drag-preview]");
+    await expect(preview).toBeVisible();
+    await page.mouse.move(target.x, target.y, { steps: 6 });
+    await page.mouse.up();
+    await expect(preview).toHaveCount(0);
 
     await expect(navigation).toHaveCSS("opacity", "0");
     await expect(card.getByRole("checkbox", { name: "Select Bracket 1" }).locator("..")).toHaveCSS(
       "opacity",
       "0",
     );
+  });
+
+  test("releasing a drag over its original card keeps the gallery open", async ({ page }) => {
+    const { card } = await library(page);
+    await collapseNavigationSidebar(page);
+    const image = card.locator("[data-model-preview]");
+    const bounds = await image.boundingBox();
+    if (!bounds) throw new Error("Missing gallery drag source");
+    const x = bounds.x + bounds.width / 2;
+    const y = bounds.y + bounds.height / 2;
+    const galleryUrl = page.url();
+    const preview = page.locator("[data-gallery-drag-preview]");
+    const main = page.getByRole("main");
+
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 40, y, { steps: 4 });
+    await expect(preview).toBeVisible();
+    await page.mouse.move(x, y, { steps: 4 });
+    await page.mouse.up();
+    await expect(preview).toHaveCount(0);
+    await expect(page).toHaveURL(galleryUrl);
+    await expect(main).not.toHaveAttribute("data-inspector-open");
+
+    await image.click();
+    await expect(main).toHaveAttribute("data-inspector-open", "true");
   });
 
   test("browses all five flat-model views from the card", async ({ page }) => {
