@@ -4,7 +4,7 @@ import { LibraryCardSelection } from "@/components/library-card-selection";
 
 function renderSelection(checked: boolean) {
   render(
-    <LibraryCardSelection selecting checked={checked} label="Select Demo" onChange={vi.fn()} />,
+    <LibraryCardSelection selecting checked={checked} label="Select Demo" onChange={vi.fn<() => void>()} />,
   );
   return screen.getByRole("checkbox", { name: "Select Demo" });
 }
