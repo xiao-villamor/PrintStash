@@ -19,7 +19,7 @@ import {
   type PrinterStatus,
 } from "@/types";
 import { usePrinterCatalogCommands } from "@/features/printers/queries";
-import { useFleetQueue, useFleetSummary, usePrinters } from "@/lib/queries";
+import { useFleetSummary, usePrinters } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -55,10 +55,24 @@ import {
 import { printerArtwork } from "@/lib/orca-printer-images";
 import { formatNumber, parseApiInstant } from "@/lib/format";
 import { PrinterProgress } from "@/components/printer-telemetry";
-import { ArrowUpRight, Fan, ListOrdered, Plus, RefreshCw, Pencil } from "lucide-react";
+import {
+  ArrowUpRight,
+  CircleAlert,
+  CircleCheck,
+  CirclePause,
+  CirclePlay,
+  CircleQuestionMark,
+  Fan,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+  WifiOff,
+  type LucideIcon,
+} from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
-import { printJobArtifactLabel } from "@/lib/print-job-reproducibility";
-import type { PrintJobState } from "@/types";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
 
 const FleetAddJobDialog = lazy(() =>
   import("./fleet-add-job").then((module) => ({ default: module.FleetAddJobDialog })),
@@ -256,7 +270,7 @@ export function PrintersPage() {
             }
           />
 
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
             <TabBar
               tabs={[
                 { key: "fleet", label: translateUiText(locale, "Fleet") },
@@ -275,15 +289,17 @@ export function PrintersPage() {
               ]}
               active={activeView}
               onChange={setActiveView}
-              className="shrink-0"
-              tabClassName="px-3 py-2 text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              activeTabClassName="font-semibold text-foreground"
+              showIndicator={false}
+              className="shrink-0 gap-0.5 rounded-lg border border-border bg-card p-0.75"
+              tabClassName="h-7.5 rounded-md px-3 text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              activeTabClassName="bg-foreground/12 text-foreground"
             />
             {activeView === "fleet" && printers.length > 0 && (
               <section
                 aria-label={uiText("Fleet summary")}
-                className="flex flex-wrap items-center gap-x-1 gap-y-1 pb-1"
+                className="flex flex-wrap items-center gap-3"
               >
+                <div className="flex divide-x divide-border overflow-hidden rounded-lg border border-border bg-card">
                 <FleetMetric
                   label={uiText("Ready")}
                   value={readyCount}
@@ -306,12 +322,13 @@ export function PrintersPage() {
                   selected={healthFilter === "attention"}
                   onClick={() => setHealthFilter(healthFilter === "attention" ? null : "attention")}
                 />
-                <label className="ml-1 flex min-w-0 max-w-full items-center gap-2 border-l border-border pl-3 text-xs text-muted-foreground">
+                </div>
+                <label className="flex min-w-0 max-w-full items-center gap-2 text-xs text-muted-foreground">
                   {uiText("Group")}
                   <select
                     value={selectedGroup ?? ""}
                     onChange={(event) => setSelectedGroup(event.target.value || null)}
-                    className="h-8 min-w-0 border border-input bg-card px-2 text-xs text-foreground"
+                    className="h-8 min-w-0 rounded-md border border-input bg-card px-2 text-xs text-foreground"
                   >
                     <option value="">{uiText("All groups")}</option>
                     {printerGroups.map((group) => (
@@ -347,7 +364,7 @@ export function PrintersPage() {
                   {Array.from({ length: 3 }).map((_, i) => (
                     <div
                       key={i}
-                      className="bg-card border border-border rounded-none p-5 space-y-3"
+                      className="bg-card border border-border rounded-lg p-5 space-y-3"
                     >
                       <Skeleton className="h-5 w-32" />
                       <Skeleton className="h-4 w-48" />
@@ -367,18 +384,18 @@ export function PrintersPage() {
                       </Button>
                     ) : undefined
                   }
-                  className="animate-panel-in rounded-none border border-border bg-card shadow-sm"
+                  className="animate-panel-in rounded-lg border border-border bg-card shadow-sm"
                 />
               ) : (
-                <div className="grid min-w-0 grid-cols-1 items-start gap-4 @5xl/fleet:grid-cols-[minmax(0,1fr)_minmax(17rem,24%)]">
+                <div className="min-w-0">
                   {visiblePrinters.length === 0 ? (
                     <EmptyState
                       icon={Printer3D}
                       title={uiText("No matching printers")}
-                      className="border border-border bg-card"
+                      className="rounded-lg border border-border bg-card"
                     />
                   ) : (
-                    <div className="grid min-w-0 gap-3 grid-cols-[repeat(auto-fit,minmax(min(100%,21rem),1fr))]">
+                    <div className="grid min-w-0 gap-4 grid-cols-[repeat(auto-fit,minmax(min(100%,26rem),1fr))]">
                       {visiblePrinters.map((printer) => (
                         <FleetPrinterCard
                           key={printer.id}
@@ -389,10 +406,6 @@ export function PrintersPage() {
                       ))}
                     </div>
                   )}
-                  <FleetActivity
-                    printers={printers}
-                    openQueue={canSeeQueue ? openQueue : undefined}
-                  />
                 </div>
               )}
             </>
@@ -500,13 +513,13 @@ function FleetMetric({
 }) {
   const contents = (
     <>
-      <span className="text-xs font-medium text-muted-foreground">{label}</span>
-      <span className="font-mono text-xs font-semibold tabular-nums">
+      <span className="font-mono text-lg font-semibold leading-none tabular-nums">
         {value === undefined ? "—" : formatNumber(value)}
       </span>
+      <span className="text-xs text-muted-foreground">{label}</span>
     </>
   );
-  const classes = "flex min-w-0 items-center gap-1.5 px-2 py-1.5 text-left";
+  const classes = "flex min-w-24 flex-col items-start gap-1 px-4 py-2.5 text-left";
   return onClick ? (
     <button
       type="button"
@@ -521,133 +534,72 @@ function FleetMetric({
   );
 }
 
-const STATUS_DOT = {
-  ready: "bg-success",
-  printing: "bg-chart-cyan",
-  paused: "bg-warning",
-  error: "bg-destructive",
-  offline: "bg-muted-foreground",
-  unknown: "bg-muted-foreground",
-} satisfies Record<PrinterStatus, string>;
+const STATUS_ICON = {
+  ready: CircleCheck,
+  printing: CirclePlay,
+  paused: CirclePause,
+  error: CircleAlert,
+  offline: WifiOff,
+  unknown: CircleQuestionMark,
+} satisfies Record<PrinterStatus, LucideIcon>;
 
-const ACTIVITY_VIEW = {
-  queued: "queued",
-  uploading: "active",
-  started: "active",
-  printing: "active",
-  paused: "active",
-  completed: "recent",
-  cancelled: "recent",
-  failed: "recent",
-} satisfies Record<PrintJobState, FleetQueueView>;
-
-function FleetActivity({
-  printers,
-  openQueue,
-}: {
-  printers: PrinterRead[];
-  openQueue?: (view: FleetQueueView) => void;
-}) {
-  const activity = useFleetQueue({ refetchInterval: 8_000 });
-  const printersById = new Map(printers.map((printer) => [printer.id, printer]));
-  const jobs = activity.data ?? [];
-  const live = jobs.filter((job) => ACTIVITY_VIEW[job.state] !== "recent").slice(0, 3);
-  const recent = jobs.filter((job) => ACTIVITY_VIEW[job.state] === "recent").slice(0, 4);
-  const rows = [...live, ...recent];
+/** A printer's status as a quiet neutral pill; only an error takes the destructive tone. */
+function PrinterStatusBadge({ status }: { status: PrinterStatus }) {
+  useUiLocale();
+  const Icon = STATUS_ICON[status];
   return (
-    <section aria-label={uiText("Fleet activity")} className="border border-border bg-card">
-      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
-        <h2 className="text-sm font-semibold">{uiText("Fleet activity")}</h2>
-        {openQueue && (
-          <Button variant="ghost" size="xs" onClick={() => openQueue("recent")}>
-            {uiText("View history")}
-          </Button>
-        )}
-      </div>
-      {activity.isPending ? (
-        <div role="status" aria-label={uiText("Loading")} className="space-y-2 p-4">
-          <Skeleton className="h-5 w-full" />
-          <Skeleton className="h-5 w-2/3" />
-        </div>
-      ) : activity.isError && !activity.data ? (
-        <div className="space-y-2 p-4 text-xs text-muted-foreground">
-          <p role="alert">{uiText("Fleet job data unavailable")}</p>
-          <Button variant="outline" size="xs" onClick={() => void activity.refetch()}>
-            {uiText("Retry")}
-          </Button>
-        </div>
-      ) : rows.length === 0 ? (
-        <div className="flex items-center gap-3 p-4 text-sm text-muted-foreground">
-          <ListOrdered aria-hidden="true" className="size-4 shrink-0" />
-          {uiText("No fleet activity yet")}
-        </div>
-      ) : (
-        <ul className="divide-y divide-border">
-          {rows.map((job) => {
-            const printer = job.printer_id === null ? undefined : printersById.get(job.printer_id);
-            const view = ACTIVITY_VIEW[job.state];
-            const timestamp = parseApiInstant(job.finished_at ?? job.started_at ?? job.created_at);
-            const name =
-              job.identity?.display_name ??
-              job.external_display_name ??
-              job.remote_filename ??
-              printJobArtifactLabel(job);
-            const contents = (
-              <>
-                <span className="flex min-w-0 items-start justify-between gap-2">
-                  <span className="truncate text-sm font-medium" title={name}>
-                    {name}
-                  </span>
-                  <span
-                    className={`shrink-0 text-xs capitalize ${job.state === "failed" ? "text-destructive" : job.state === "completed" ? "text-success" : "text-muted-foreground"}`}
-                  >
-                    {knownUiText(job.state)}
-                  </span>
-                </span>
-                <span className="mt-1 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-2xs text-muted-foreground">
-                  <span className="truncate">
-                    {printer?.name ??
-                      (job.printer_id === null ? uiText("Unassigned") : uiText("Printer"))}
-                  </span>
-                  {timestamp ? (
-                    <time dateTime={timestamp.toISOString()}>
-                      {timestamp.toLocaleString(currentLocale(), {
-                        month: "short",
-                        day: "numeric",
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
-                    </time>
-                  ) : (
-                    <span>{uiText("Not recorded")}</span>
-                  )}
-                </span>
-              </>
-            );
-            const base = "block w-full min-w-0 px-4 py-3 text-left";
-            const interactive = `${base} hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring`;
-            return (
-              <li key={job.id}>
-                {view === "queued" && openQueue ? (
-                  <button type="button" className={interactive} onClick={() => openQueue("queued")}>
-                    {contents}
-                  </button>
-                ) : printer ? (
-                  <Link
-                    href={`/printers/${printer.id}${view === "recent" ? "?tab=jobs" : ""}`}
-                    className={interactive}
-                  >
-                    {contents}
-                  </Link>
-                ) : (
-                  <div className={base}>{contents}</div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </section>
+    <span
+      className={`inline-flex h-5.5 min-w-0 max-w-full items-center gap-1.5 rounded-full bg-foreground/10 pe-2.5 ps-2 text-xs font-medium capitalize ${status === "error" ? "text-destructive" : "text-foreground/80"}`}
+    >
+      <Icon aria-hidden="true" className="size-3 shrink-0" />
+      <span className="truncate">{knownUiText(status)}</span>
+    </span>
+  );
+}
+
+function PrinterRowMenu({
+  printer,
+  onRemove,
+}: {
+  printer: PrinterRead;
+  onRemove: (printer: PrinterRead) => void;
+}) {
+  useUiLocale();
+  const [open, setOpen] = useState(false);
+  return (
+    <DropdownMenu
+      open={open}
+      onOpenChange={setOpen}
+      portal
+      align="end"
+      contentClassName="w-48 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+      trigger={
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-label={uiText("More actions for {value1}", { value1: printer.name })}
+          onClick={() => setOpen(!open)}
+        >
+          <MoreHorizontal className="size-4" aria-hidden />
+        </Button>
+      }
+    >
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          setOpen(false);
+          onRemove(printer);
+        }}
+        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10 focus-visible:outline-none"
+      >
+        <Trash2 className="size-4" aria-hidden />
+        {uiText("Remove printer")}
+      </button>
+    </DropdownMenu>
   );
 }
 
@@ -673,7 +625,7 @@ function PrinterManagement({
   return (
     <section
       aria-label={uiText("Manage printers")}
-      className="max-w-5xl overflow-x-auto border border-border bg-card"
+      className="max-w-5xl overflow-x-auto rounded-lg border border-border bg-card"
     >
       <table className="w-full text-left text-sm">
         <thead className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
@@ -715,27 +667,14 @@ function PrinterManagement({
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  <span className="inline-flex items-center gap-1.5 text-xs font-medium capitalize">
-                    <span
-                      className={`size-2 shrink-0 rounded-full ${STATUS_DOT[printer.status]}`}
-                      aria-hidden
-                    />
-                    {knownUiText(printer.status)}
-                  </span>
+                  <PrinterStatusBadge status={printer.status} />
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap items-center justify-end gap-1">
                     <Button variant="outline" size="xs" onClick={() => onSettings(printer)}>
                       {uiText("Settings")}
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => onRemove(printer)}
-                    >
-                      {uiText("Remove printer")}
-                    </Button>
+                    <PrinterRowMenu printer={printer} onRemove={onRemove} />
                   </div>
                 </td>
               </tr>
@@ -773,7 +712,7 @@ function FleetPrinterCard({
   const artworkUrl = printerArtwork(artworkPreference === "model" ? model : null).imageUrl;
   const lastSeen = parseApiInstant(printer.last_seen_at);
   return (
-    <article className="group @container/printer-card relative flex min-w-0 flex-col border border-border bg-card text-card-foreground hover:border-border-strong motion-safe:transition-transform duration-fast ease-out motion-safe:hover:-translate-y-0.5 motion-safe:active:scale-[0.99]">
+    <article className="group @container/printer-card relative flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card text-card-foreground hover:border-border-strong motion-safe:transition-transform duration-fast ease-out motion-safe:hover:-translate-y-0.5 motion-safe:active:scale-[0.99]">
       <div className="flex flex-1 items-stretch">
         {artworkPreference !== "off" && (
           <PrinterCardArtwork key={artworkUrl} url={artworkUrl} model={model} />
@@ -799,13 +738,7 @@ function FleetPrinterCard({
                 {printer.group ? ` · ${printer.group}` : ""}
               </p>
             </div>
-            <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 wrap-anywhere text-xs font-medium capitalize">
-              <span
-                aria-hidden="true"
-                className={`size-2 shrink-0 rounded-full ${STATUS_DOT[printer.status]}`}
-              />
-              {knownUiText(printer.status)}
-            </span>
+            <PrinterStatusBadge status={printer.status} />
           </div>
           <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
             <div className="min-w-0 flex-1 basis-28 space-y-1.5">
@@ -867,7 +800,7 @@ function FleetPrinterCard({
               <span
                 key={slot.slot_key}
                 title={color}
-                className="inline-flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 border border-border px-1.5 py-0.5 text-2xs"
+                className="inline-flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-md border border-border px-1.5 py-0.5 text-2xs"
               >
                 {color && (
                   <span
@@ -952,13 +885,13 @@ function FleetTelemetryReadings({ telemetry }: { telemetry: FleetPrinterTelemetr
 function PrinterCardArtwork({ url, model }: { url: string; model: string | null | undefined }) {
   const [failed, setFailed] = useState(false);
   return (
-    <div className="grid min-h-36 w-20 shrink-0 place-items-center overflow-hidden border-e border-border bg-preview-image-matte px-1.5 py-2 dark:bg-muted @xs/printer-card:w-24 @lg/printer-card:w-32">
+    <div className="grid min-h-36 w-20 shrink-0 place-items-center overflow-hidden border-e border-border bg-preview-image-matte px-1.5 py-2 dark:bg-muted @xs/printer-card:w-28 @lg/printer-card:w-36">
       <img
         src={failed ? printerArtwork(null).imageUrl : url}
         alt={model ? uiText("{value1} printer", { value1: model }) : uiText("Printer")}
         referrerPolicy="no-referrer"
         onError={() => setFailed(true)}
-        className="h-32 w-full object-contain motion-safe:transition-transform duration-fast ease-out motion-safe:group-hover:-translate-y-1 motion-safe:group-active:scale-[0.98]"
+        className="h-36 w-full object-contain motion-safe:transition-transform duration-fast ease-out motion-safe:group-hover:-translate-y-1 motion-safe:group-active:scale-[0.98]"
       />
     </div>
   );

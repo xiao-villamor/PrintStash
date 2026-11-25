@@ -459,7 +459,11 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
                   ))}
                 </div>
                 <p>
-                  {uiText("{count} queued", { count: jobs.length })}
+                  {jobs.length === 0
+                    ? uiText("Queue is empty")
+                    : jobs.length === 1
+                      ? uiText("1 item in queue")
+                      : uiText("{count} items in queue", { count: jobs.length })}
                   <span> · </span>
                   {uiText("{count} running", { count: running.length })}
                 </p>
@@ -480,12 +484,6 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
                   </button>
                 ))}
               </div>
-              {onAdd && (
-                <Button size="sm" onClick={onAdd}>
-                  <Plus />
-                  {uiText("Add to queue")}
-                </Button>
-              )}
             </>
           )}
         </aside>
