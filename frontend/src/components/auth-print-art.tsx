@@ -371,11 +371,7 @@ export function AuthPrintArt({ animated = true }: { animated?: boolean }) {
       focusable="false"
     >
       <g stroke="var(--auth-art-grid)">
-        <polygon
-          points={plateOutline}
-          fill="var(--auth-art-bed)"
-          vectorEffect="non-scaling-stroke"
-        />
+        <polygon points={plateOutline} vectorEffect="non-scaling-stroke" />
         <path d={plateGrid} vectorEffect="non-scaling-stroke" />
       </g>
       <g ref={layersRef} stroke="var(--auth-art-stroke)" />

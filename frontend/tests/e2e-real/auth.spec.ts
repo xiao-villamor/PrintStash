@@ -44,7 +44,7 @@ test.describe("authentication", () => {
       });
     }
 
-    test("the white build plate follows dark mode", async ({ page }) => {
+    test("the print panel uses a white backdrop in dark mode", async ({ page }) => {
       await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
       await page.goto("/login");
       const artwork = page.locator(".auth-split-art");
@@ -54,8 +54,8 @@ test.describe("authentication", () => {
       await expect(artwork).toHaveCSS("background-color", "rgb(37, 44, 55)");
       await expect(bed).toHaveCSS("fill", "none");
       await toggle.click();
-      await expect(artwork).toHaveCSS("background-color", "rgb(19, 23, 30)");
-      await expect(bed).toHaveCSS("fill", "rgb(237, 241, 247)");
+      await expect(artwork).toHaveCSS("background-color", "rgb(237, 241, 247)");
+      await expect(bed).toHaveCSS("fill", "none");
       await expect(outline).toHaveCSS("stroke", "rgb(105, 123, 146)");
       await toggle.click();
       await expect(artwork).toHaveCSS("background-color", "rgb(37, 44, 55)");
