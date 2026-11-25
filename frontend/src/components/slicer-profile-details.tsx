@@ -323,27 +323,6 @@ function ProfileSettingsContent({
                     />
                   ))}
                 </div>
-                <section aria-label={uiText("Used by")} className="border-t border-border pt-4">
-                  <h4 className="text-sm font-semibold">{uiText("Used by")}</h4>
-                  <div className="divide-y divide-border">
-                    {captures.map((file) => (
-                      <div
-                        key={file.file_id}
-                        className="flex flex-wrap items-center justify-between gap-3 py-4"
-                      >
-                        <div className="min-w-0">
-                          <p className="break-words text-sm font-medium">{file.model_name}</p>
-                          <p className="break-words text-xs text-muted-foreground">
-                            {file.filename}
-                          </p>
-                        </div>
-                        <Button variant="ghost" size="xs" asChild>
-                          <Link href={`/models/${file.model_id}`}>{uiText("Open Model")}</Link>
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </section>
               </>
             )}
             {query.hasNextPage && (
