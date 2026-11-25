@@ -163,6 +163,8 @@
 
 ### Fixed
 
+- Library card controls stay visible over any cover. The selection box, the previous and next arrows and the view label are outlined chips with their own fill, so they no longer disappear into the dark area around a photo or render.
+
 - Background mesh thumbnail generation uses temporary space on the PrintStash data volume, so a full system temp directory no longer blocks it.
 
 - The browser extension launcher can connect to HTTP PrintStash servers on marketplace pages that upgrade insecure requests to HTTPS.

@@ -276,6 +276,31 @@ test.describe("Model preview browsing", () => {
     }
   });
 
+  for (const theme of ["light", "dark"] as const) {
+    test(`outlines card controls against the image area in ${theme} mode`, async ({ page }) => {
+      await page.addInitScript((value) => localStorage.setItem("printstash.theme", value), theme);
+      const { card, next } = await library(page);
+      const plate = await card
+        .locator('[data-model-preview="Bracket 1"]')
+        .evaluate((element) => getComputedStyle(element).backgroundColor);
+      for (const control of [
+        next,
+        card.getByRole("button", { name: "Model views", exact: true }),
+        card.getByRole("checkbox", { name: /^Select / }),
+      ]) {
+        // A photo or render can sit on any colour; the chip is bounded by its own edge and fill.
+        const style = await control.evaluate((element) => {
+          const { backgroundColor, borderTopColor, borderTopWidth } = getComputedStyle(element);
+          return { backgroundColor, borderTopColor, borderTopWidth };
+        });
+        expect(style.borderTopWidth).toBe("1px");
+        expect(style.borderTopColor).not.toBe("rgba(0, 0, 0, 0)");
+        expect(style.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+        expect(style.backgroundColor).not.toBe(plate);
+      }
+    });
+  }
+
   test("keeps card arrows compact over the image", async ({ page }) => {
     const { card, next } = await library(page);
 
