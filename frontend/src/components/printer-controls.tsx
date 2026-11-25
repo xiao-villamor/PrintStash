@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { ArrowDownToLine, ArrowUpFromLine, Flame, Snowflake } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { PrinterFeedRows } from "@/components/printer-machine";
 import type { useMachineSetup } from "@/features/printers/materials";
@@ -290,6 +291,11 @@ export function PrinterControls({
                   )
                 }
               >
+                {distance > 0 ? (
+                  <ArrowDownToLine className="size-3.5" aria-hidden="true" />
+                ) : (
+                  <ArrowUpFromLine className="size-3.5" aria-hidden="true" />
+                )}
                 {uiText(label)} {millimetres(Math.abs(distance))}
               </Button>
             ))}
@@ -507,9 +513,11 @@ export function ThermalPresets({
       </fieldset>
       <div className="flex flex-wrap items-center gap-2">
         <Button size="xs" disabled={disabled} onClick={() => preheat(selected)}>
+          <Flame className="size-3.5" aria-hidden="true" />
           {uiText("Preheat")}
         </Button>
         <Button variant="outline" size="xs" disabled={disabled} onClick={cooldown}>
+          <Snowflake className="size-3.5" aria-hidden="true" />
           {uiText("Cooldown")}
         </Button>
       </div>
