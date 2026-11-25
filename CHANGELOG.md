@@ -18,6 +18,8 @@
 
 ### Added
 
+- The 3D viewer uses the saved material color of single-color 3MF projects when the file provides one.
+
 - Press Ctrl+F (⌘F on Mac) in a collection to open an editor-style find bar. It counts the matching models, steps through them with Enter and Shift+Enter, rings the current one, and closes with Esc.
 
 - Assign a printer cost profile to a connected printer. Prints launched from PrintStash show an estimated production cost, then record the cost of the completed, failed, or stopped run using available measurements. History identifies estimates and partial costs.

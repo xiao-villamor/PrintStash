@@ -2,8 +2,70 @@
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { test, expect } from "./helpers";
+import { collapseNavigationSidebar } from "./util";
 
 test.describe("viewer STL", () => {
+  test("renders the saved 3MF filament color in the 3D viewer", async ({ page }, testInfo) => {
+    const name = `e2e-viewer-color-${Date.now()}`;
+    const backend = resolve("../backend");
+    const mesh = execFileSync(
+      resolve(backend, ".venv/bin/python"),
+      [
+        "-c",
+        'import sys; from tests.fixtures.three_mf_projects import build_profile_project; sys.stdout.buffer.write(build_profile_project({"print_settings_id":sys.argv[1],"filament_colour":["#E53042"]}))',
+        name,
+      ],
+      { cwd: backend },
+    );
+    const upload = await page.request.post("/api/v1/ingest/model", {
+      multipart: {
+        file: { name: `${name}.3mf`, mimeType: "model/3mf", buffer: mesh },
+        model_name: name,
+      },
+    });
+    expect(upload.status()).toBe(202);
+    const { job_id } = await upload.json();
+    let modelId = 0;
+    await expect
+      .poll(
+        async () => {
+          const job = await (await page.request.get(`/api/v1/jobs/${job_id}`)).json();
+          modelId = job.model_id;
+          return job.state;
+        },
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    try {
+      await page.goto(`/models/${modelId}`);
+      await collapseNavigationSidebar(page);
+      await expect(page.getByRole("button", { name: "Screenshot", exact: true })).toBeEnabled({
+        timeout: 60000,
+      });
+      const screenshot = await page
+        .locator("canvas")
+        .screenshot({ path: testInfo.outputPath("saved-3mf-color.png") });
+      const coloredPixels = await page.evaluate(
+        async (png) => {
+          const image = await createImageBitmap(await (await fetch(png)).blob());
+          const canvas = new OffscreenCanvas(image.width, image.height);
+          const context = canvas.getContext("2d")!;
+          context.drawImage(image, 0, 0);
+          const { data } = context.getImageData(0, 0, image.width, image.height);
+          let count = 0;
+          for (let i = 0; i < data.length; i += 4)
+            if (data[i] > 100 && data[i] > data[i + 1] * 1.8 && data[i] > data[i + 2] * 1.6)
+              count++;
+          return count;
+        },
+        `data:image/png;base64,${screenshot.toString("base64")}`,
+      );
+      expect(coloredPixels).toBeGreaterThan(100);
+    } finally {
+      expect((await page.request.delete(`/api/v1/models/${modelId}`)).status()).toBe(204);
+    }
+  });
+
   test("opens a large mesh automatically", async ({ page }) => {
     const name = `e2e-viewer-large-${Date.now()}`;
     const backend = resolve("../backend");
