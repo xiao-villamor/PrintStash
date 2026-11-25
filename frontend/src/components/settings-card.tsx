@@ -115,7 +115,10 @@ export function SettingsNotice({
   return (
     <div
       role={role}
-      className={cn("flex items-start gap-2.5 border border-border bg-card p-3", className)}
+      className={cn(
+        "flex items-start gap-2.5 rounded-lg border border-border bg-card p-3",
+        className,
+      )}
     >
       <Icon
         aria-hidden
@@ -191,13 +194,13 @@ export function SettingsGroupHead({
   return (
     <div
       className={cn(
-        "settings-card-head flex justify-between gap-3",
+        "settings-card-head flex flex-wrap justify-between gap-x-4 gap-y-2",
         placement === "outside" ? "mb-2.5 items-end" : "items-start px-5 pb-2 pt-4",
         stackActionOnMobile && "flex-col sm:flex-row sm:items-end",
         className,
       )}
     >
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1 basis-auto sm:basis-60">
         <Heading id={id} className="text-sm font-semibold text-foreground">
           {title}
         </Heading>
@@ -206,7 +209,7 @@ export function SettingsGroupHead({
       {action && (
         <div
           className={cn(
-            "flex flex-shrink-0 flex-wrap items-center gap-2",
+            "flex min-w-0 max-w-full flex-wrap items-center gap-2",
             stackActionOnMobile && "w-full sm:w-auto",
           )}
         >
@@ -230,7 +233,7 @@ export function SettingsEmptyRow({
   return (
     <div
       className={cn(
-        "flex items-center justify-between gap-4 py-3.5 text-sm text-muted-foreground",
+        "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3.5 text-sm text-muted-foreground",
         className,
       )}
     >
@@ -325,7 +328,7 @@ export function SettingsSegmented<T extends string>({
     <div
       role="radiogroup"
       aria-label={label}
-      className="inline-flex max-w-full gap-0.5 overflow-x-auto rounded-lg border border-border bg-card p-0.75"
+      className="settings-segmented inline-flex max-w-full flex-wrap gap-0.5 rounded-md border border-border bg-card p-0.5"
     >
       {options.map((option) => {
         const selected = option.value === value;

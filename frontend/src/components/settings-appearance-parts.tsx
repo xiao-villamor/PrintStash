@@ -53,7 +53,7 @@ export function ThemeTiles({
             role="radio"
             aria-checked={selected}
             onClick={() => onChange(tile)}
-            className="group text-left focus-visible:outline-none"
+            className="group min-w-0 text-left focus-visible:outline-none"
           >
             <span
               className={cn(
@@ -75,13 +75,13 @@ export function ThemeTiles({
               <span
                 aria-hidden
                 className={cn(
-                  "flex size-4 items-center justify-center rounded-full border",
+                  "flex size-4 shrink-0 items-center justify-center rounded-full border",
                   selected ? "border-primary" : "border-border",
                 )}
               >
                 {selected && <span className="size-2 rounded-full bg-primary" />}
               </span>
-              <Icon className="size-3.5 text-muted-foreground" aria-hidden />
+              <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
               {label}
             </span>
           </button>

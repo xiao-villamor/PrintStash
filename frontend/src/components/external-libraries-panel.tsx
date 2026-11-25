@@ -44,7 +44,6 @@ import { getSessionVersion } from "@/lib/session-transport";
 import { parseApiError, userMessage } from "@/lib/errors";
 import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/lib/toast";
 import { Localized } from "@/components/ui/localized";
@@ -294,14 +293,11 @@ export function ExternalLibrariesPanel(props: {
   const { t } = useI18n();
   if (!props.canEdit || !user?.is_superuser)
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>{uiText("Library sources")}</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <SettingsCard title={uiText("Library sources")}>
+        <div className="py-4 text-sm">
           <p>{t("librarySources.adminRequired")}</p>
-        </CardContent>
-      </Card>
+        </div>
+      </SettingsCard>
     );
   return <AdminLibrarySourcesPanel {...props} />;
 }
@@ -590,11 +586,8 @@ function AdminLibrarySourcesPanel({
   if (retired) return null;
   if (!allowed || !config.data || denied)
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>{uiText("Library sources")}</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <SettingsCard title={uiText("Library sources")}>
+        <div className="py-4 text-sm">
           {!allowed ? (
             <p>{t("librarySources.adminRequired")}</p>
           ) : config.isPending ? (
@@ -619,8 +612,8 @@ function AdminLibrarySourcesPanel({
               </Button>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </SettingsCard>
     );
 
   return (
@@ -629,7 +622,7 @@ function AdminLibrarySourcesPanel({
         title={uiText("Scanning")}
         description={uiText("Applies to every Library source.")}
       >
-        <div className="settings-section-body">
+        <div>
           <div className="settings-preference-row">
             <span>{uiText("Library sources enabled")}</span>
             <Switch
@@ -641,12 +634,12 @@ function AdminLibrarySourcesPanel({
               disabled={!allowed || config.isError || enableBusy || toggleReview.phase !== "idle"}
             />
           </div>
-          <div className="settings-preference-row">
-            <span>{uiText("Auto-scan enabled")}</span>
+          <div className="settings-readonly-row">
+            <span className="font-medium">{uiText("Auto-scan enabled")}</span>
             <span className="text-xs text-muted-foreground">{uiText("Configured per source")}</span>
           </div>
-          <div className="settings-preference-row">
-            <span>{uiText("Scan schedule")}</span>
+          <div className="settings-readonly-row">
+            <span className="font-medium">{uiText("Scan schedule")}</span>
             <span className="text-xs text-muted-foreground">{uiText("Configured per source")}</span>
           </div>
         </div>
@@ -1053,6 +1046,34 @@ function AdminLibrarySourcesPanel({
                 if (busyId !== "create") setAddOpen(false);
               }}
               title={uiText("Add a library source")}
+              className="settings-dialog"
+              dismissible={busyId !== "create"}
+              footer={
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={busyId === "create"}
+                    onClick={() => setAddOpen(false)}
+                  >
+                    {uiText("Cancel")}
+                  </Button>
+                  <button
+                    type="button"
+                    disabled={
+                      !commandsAllowed ||
+                      busyId !== null ||
+                      (sourceKind !== "mounted" &&
+                        (connectionRead.isPending || connectionRead.isError))
+                    }
+                    onClick={handleCreate}
+                    className={cn(BTN_PRIMARY, "h-9")}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    {busyId === "create" ? uiText("Adding") : uiText("Add source")}
+                  </button>
+                </>
+              }
             >
               <div
                 className="space-y-3"
@@ -1061,7 +1082,7 @@ function AdminLibrarySourcesPanel({
                 }}
               >
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  <label className="flex flex-col gap-1 text-sm font-medium text-foreground">
                     {uiText("Source name")}
                     <input
                       className={INPUT}
@@ -1072,7 +1093,7 @@ function AdminLibrarySourcesPanel({
                       onChange={(e) => setName(e.target.value)}
                     />
                   </label>
-                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  <label className="flex flex-col gap-1 text-sm font-medium text-foreground">
                     {uiText("Source type")}
                     <select
                       className={INPUT}
@@ -1094,7 +1115,7 @@ function AdminLibrarySourcesPanel({
                     </select>
                   </label>
                   {sourceKind === "mounted" ? (
-                    <label className="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2">
+                    <label className="flex flex-col gap-1 text-sm font-medium text-foreground sm:col-span-2">
                       {uiText("Mounted folder path")}
                       <input
                         className={INPUT}
@@ -1107,7 +1128,7 @@ function AdminLibrarySourcesPanel({
                     </label>
                   ) : (
                     <>
-                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                      <label className="flex flex-col gap-1 text-sm font-medium text-foreground">
                         {uiText("Remote connection")}
                         <select
                           className={INPUT}
@@ -1135,7 +1156,7 @@ function AdminLibrarySourcesPanel({
                             ))}
                         </select>
                       </label>
-                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                      <label className="flex flex-col gap-1 text-sm font-medium text-foreground">
                         {uiText("Path within connection (optional)")}
                         <input
                           className={INPUT}
@@ -1148,7 +1169,7 @@ function AdminLibrarySourcesPanel({
                       </label>
                     </>
                   )}
-                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  <label className="flex flex-col gap-1 text-sm font-medium text-foreground">
                     {uiText("Scan schedule")}
                     <ScheduleControl
                       value={scanSchedule}
@@ -1158,7 +1179,7 @@ function AdminLibrarySourcesPanel({
                     />
                   </label>
                   {sourceKind === "mounted" && (
-                    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    <label className="flex flex-col gap-1 text-sm font-medium text-foreground">
                       {uiText("Real-time watching")}
                       <select
                         className={INPUT}
@@ -1174,7 +1195,7 @@ function AdminLibrarySourcesPanel({
                       </select>
                     </label>
                   )}
-                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  <label className="flex flex-col gap-1 text-sm font-medium text-foreground">
                     {uiText("Collection layout")}
                     <select
                       className={INPUT}
@@ -1188,7 +1209,7 @@ function AdminLibrarySourcesPanel({
                     </select>
                   </label>
                 </div>
-                <p className="text-2xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {uiText(
                     "PrintStash stores catalog metadata and thumbnails only; source files stay in their original location.",
                   )}{" "}
@@ -1200,22 +1221,6 @@ function AdminLibrarySourcesPanel({
                         "Remote sources use bounded manual or scheduled scans and are always read-only.",
                       )}
                 </p>
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    disabled={
-                      !commandsAllowed ||
-                      busyId !== null ||
-                      (sourceKind !== "mounted" &&
-                        (connectionRead.isPending || connectionRead.isError))
-                    }
-                    onClick={handleCreate}
-                    className={BTN_PRIMARY}
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    {busyId === "create" ? uiText("Adding") : uiText("Add source")}
-                  </button>
-                </div>
               </div>
             </Modal>
           </div>

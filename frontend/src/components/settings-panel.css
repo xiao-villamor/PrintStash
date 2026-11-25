@@ -8,7 +8,7 @@
 .settings-imports,
 .settings-maintenance,
 .settings-notifications,
-.settings-storage-pane {
+.settings-storage-pane:not([hidden]) {
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -21,6 +21,10 @@
   padding: 4px 20px;
 }
 
+.settings-card-box:has(> [hidden]:only-child) {
+  display: none;
+}
+
 .settings-card-box[data-tone="danger"] {
   border-color: color-mix(in oklab, var(--destructive) 45%, var(--border));
 }
@@ -28,6 +32,7 @@
 .settings-card-foot {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 12px 0;
   border-top: 1px solid var(--border);
@@ -39,8 +44,7 @@
 }
 
 .settings-preference-fields {
-  padding-right: 20px;
-  padding-bottom: 12px;
+  min-width: 0;
 }
 
 .settings-safety-rows {
@@ -70,12 +74,12 @@
 
 .settings-preference-row {
   display: grid;
-  grid-template-columns: 240px minmax(0, 440px);
+  grid-template-columns: minmax(0, 1fr) minmax(0, min(50%, 22rem));
   gap: 24px;
   align-items: center;
   padding: 14px 0;
   border-bottom: 1px solid var(--border);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
 }
 
@@ -100,12 +104,8 @@
 }
 
 .settings-access-fields .settings-preference-row > :first-child {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
-}
-
-.settings-access-fields .settings-preference-row > :not(:first-child) {
-  justify-self: stretch;
 }
 
 .settings-access-fields .settings-access-submit {
@@ -113,7 +113,7 @@
   width: fit-content;
 }
 
-@media (max-width: 1100px) {
+@container (max-width: 38rem) {
   .settings-access-fields {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -133,7 +133,7 @@
 }
 
 .settings-storage-summary dt {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
 }
 
@@ -145,20 +145,8 @@
   font-size: 12px;
 }
 
-@media (max-width: 767px) {
-  .settings-preference-row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
-  }
-}
-
-/* ── Settings language (Zed-like) ──────────────────────────────────────────
-   One layer for every section: compact square controls, label + hint on the
-   left with the control on the right, text-only statuses and text-only
-   buttons. Section components keep their markup; this layer owns the look. */
-
-.settings-main select,
-.settings-main
+:where(.settings-main, .settings-dialog) select,
+:where(.settings-main, .settings-dialog)
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]) {
   height: 36px;
   min-height: 36px;
@@ -169,11 +157,7 @@
   line-height: 20px;
 }
 
-.settings-main select {
-  padding-right: 28px;
-}
-
-.settings-main textarea {
+:where(.settings-main, .settings-dialog) textarea {
   border-radius: var(--radius);
   font-size: 14px;
   font-weight: 400;
@@ -243,12 +227,21 @@
   color: var(--destructive);
 }
 
-.settings-status[data-tone="warning"]::before {
+.settings-status::before {
   content: "";
   width: 6px;
   height: 6px;
   border-radius: 50%;
+  flex: none;
+  background: var(--muted-foreground);
+}
+
+.settings-status[data-tone="warning"]::before {
   background: var(--warning);
+}
+
+.settings-status[data-tone="danger"]::before {
+  background: var(--destructive);
 }
 
 /* Group heads: title and description at reading width above the box. */
@@ -257,10 +250,18 @@
   line-height: 1.5;
 }
 
-/* Rows: label and hint on the left, control on the right. */
-.settings-preference-row {
-  grid-template-columns: minmax(0, 1fr) minmax(320px, max-content);
-  align-items: center;
+/* Let long choice groups take more room without squeezing out the label. */
+.settings-preference-row:has(> .settings-segmented) {
+  grid-template-columns: minmax(0, 1fr) fit-content(70%);
+}
+
+.settings-preference-row:has(> .settings-row-switch) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.settings-preference-row.settings-preference-row--stack {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
 }
 
 .settings-preference-row > :first-child {
@@ -270,7 +271,7 @@
 }
 
 .settings-preference-row > :not(:first-child) {
-  justify-self: stretch;
+  min-width: 0;
 }
 
 .settings-preference-row > .settings-row-switch {
@@ -305,7 +306,7 @@
   align-items: center;
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .settings-readonly-row:last-child {
@@ -335,11 +336,13 @@
 
 .settings-list-row > :first-child {
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.settings-list-row > :last-child {
+.settings-list-row > :last-child:not(:first-child) {
   display: flex;
   flex-shrink: 0;
+  max-width: 60%;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
@@ -347,7 +350,7 @@
 }
 
 .settings-list-title {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--foreground);
 }
@@ -366,13 +369,14 @@
   color: var(--muted-foreground);
 }
 
-@media (max-width: 767px) {
+@container (max-width: 32rem) {
   .settings-list-row {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .settings-list-row > :last-child {
+  .settings-list-row > :last-child:not(:first-child) {
+    max-width: 100%;
     justify-content: flex-start;
   }
 
@@ -387,7 +391,7 @@
 
 .settings-preference-row > :first-child,
 .settings-preference-row > :first-child > p:first-child {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--foreground);
 }
@@ -403,29 +407,13 @@
   justify-self: end;
 }
 
-.settings-main .settings-preference-row [data-menu-trigger] {
-  height: 34px;
-  padding: 7px 10px;
-  border-radius: 0;
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 18px;
-}
-
-/* Body of a group inside panels that do not use the grouped indent rule. */
 .settings-section-body {
-  padding: 0 20px 16px;
-}
-
-@media (max-width: 767px) {
-  .settings-section-body {
-    padding: 0 16px 16px;
-  }
+  padding-bottom: 12px;
 }
 
 .settings-main [role="alert"],
 .settings-main [role="status"] {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .settings-storage-summary dt {
@@ -434,31 +422,47 @@
   gap: 2px;
 }
 
-/* Phones stack each row: label and hint above a full-width control. Declared
-   last so it wins over the two-column row rule above. */
-@media (max-width: 767px) {
-  .settings-preference-row {
+.settings-main {
+  container-type: inline-size;
+  transform-origin: center top;
+}
+
+.settings-preference-row > .settings-segmented {
+  justify-self: end;
+}
+
+.settings-users-table {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  column-gap: 24px;
+}
+
+.settings-users-table [data-user-columns] {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+@container (max-width: 32rem) {
+  .settings-preference-row,
+  .settings-preference-row:has(> .settings-segmented) {
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
   }
 
-  .settings-preference-row > :not(:first-child):has([role="switch"]),
-  .settings-preference-row > [role="switch"] {
+  .settings-preference-row > .settings-segmented {
     justify-self: start;
   }
-}
 
-/* A group head outside a SettingsCard: no rule under it, like grouped cards. */
-.settings-card-head.settings-card-head--flush {
-  border-bottom: 0;
-}
+  .settings-users-table,
+  .settings-users-table [data-user-columns] {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 8px;
+  }
 
-.settings-main {
-  transform-origin: center top;
-}
-
-.settings-preference-row > [role="radiogroup"] {
-  justify-self: end;
+  .settings-users-table [aria-hidden="true"][data-user-columns] {
+    display: none;
+  }
 }
 
 /* Theme tiles show each theme regardless of the one in use. */

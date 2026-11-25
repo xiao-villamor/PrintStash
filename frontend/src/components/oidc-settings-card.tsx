@@ -330,7 +330,7 @@ function OidcEditor({
               label={uiText("Issuer URL")}
               value={draft.oidc_issuer_url}
               onChange={(event) => set("oidc_issuer_url", event.target.value)}
-              placeholder="https://auth.example.com/application/o/printstash"
+              placeholder="https://auth.example.com"
               disabled={loading || saving || retired}
             />
             <Field

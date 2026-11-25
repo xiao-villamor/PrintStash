@@ -154,7 +154,9 @@ export function SettingsNav({
                 )}
               >
                 <Icon className="size-4 shrink-0" aria-hidden />
-                <span className="truncate">{section.label}</span>
+                <span className="truncate" title={section.label}>
+                  {section.label}
+                </span>
               </button>
             );
           })}

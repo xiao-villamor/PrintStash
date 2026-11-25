@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, ArrowRightLeft, RefreshCw } from "lucide-react";
-import { Card } from "@/components/ui/card";
+import { ArrowRight, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, inputClasses } from "@/components/ui/input";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -327,22 +326,8 @@ export function VaultMigrationPanel() {
 
   return (
     <Localized>
-      <Card
-        id="vault-migration"
-        role="region"
-        aria-label={t("migration.title")}
-        className="overflow-hidden"
-      >
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-4 sm:px-5">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
-              <ArrowRightLeft className="h-4 w-4" aria-hidden />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold">{t("migration.title")}</h3>
-              <p className="mt-1 text-xs text-muted-foreground">{t("migration.description")}</p>
-            </div>
-          </div>
+      <section id="vault-migration" aria-label={t("migration.title")}>
+        <div className="flex justify-end border-b border-border py-2">
           <Button
             variant="ghost"
             size="sm"
@@ -355,7 +340,7 @@ export function VaultMigrationPanel() {
           </Button>
         </div>
         {loading ? (
-          <div role="status" aria-label={t("migration.loading")} className="space-y-4 p-4 sm:p-5">
+          <div role="status" aria-label={t("migration.loading")} className="space-y-4 py-4">
             <Skeleton className="h-5 w-40" />
             <div className="grid gap-2 sm:grid-cols-2">
               {[0, 1, 2, 3].map((item) => (
@@ -403,7 +388,7 @@ export function VaultMigrationPanel() {
               </div>
             )}
             {denied || (history.isError && !history.data) ? null : !run ? (
-              <div className="space-y-5 p-4 sm:p-5">
+              <div className="space-y-5 py-4">
                 <h4 className="text-sm font-semibold">{t("migration.destination")}</h4>
                 <StorageProviderPicker
                   providers={providers}
@@ -492,7 +477,7 @@ export function VaultMigrationPanel() {
                     </p>
                   </div>
                 </div>
-                <div className="space-y-3 p-4 sm:p-5" aria-live="polite">
+                <div className="space-y-3 py-4" aria-live="polite">
                   <h4 className="text-sm font-semibold">
                     {t(run.recovery_required ? "migration.recovery" : labels[run.state])}
                   </h4>
@@ -987,7 +972,7 @@ export function VaultMigrationPanel() {
                     : "migration.discard",
           )}
         />
-      </Card>
+      </section>
     </Localized>
   );
 }

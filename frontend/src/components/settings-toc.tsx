@@ -32,7 +32,10 @@ export function SettingsToc({ scope, section }: { scope: string; section: string
     function collect() {
       const groups = Array.from(
         root!.querySelectorAll<HTMLElement>('section.settings-card[role="group"]'),
-      ).filter((group) => group.parentElement?.closest("section.settings-card") === null);
+      ).filter(
+        (group) =>
+          !group.closest("[hidden]") && !group.parentElement?.closest("section.settings-card"),
+      );
       const next = groups.flatMap((group, index) => {
         const label = group.getAttribute("aria-label");
         if (!label) return [];
@@ -40,14 +43,20 @@ export function SettingsToc({ scope, section }: { scope: string; section: string
         return [{ id: group.id, label }];
       });
       setItems((current) =>
-        current.length === next.length && current.every((item, i) => item.id === next[i]?.id)
+        current.length === next.length &&
+        current.every((item, i) => item.id === next[i]?.id && item.label === next[i]?.label)
           ? current
           : next,
       );
     }
     collect();
     const mutations = new MutationObserver(collect);
-    mutations.observe(root, { childList: true, subtree: true });
+    mutations.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["aria-label", "hidden"],
+    });
     return () => mutations.disconnect();
   }, [scope, section]);
 

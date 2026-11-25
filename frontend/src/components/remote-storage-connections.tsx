@@ -1,5 +1,5 @@
 import { captureEditingBase } from "@/lib/api/editing";
-import { SettingsCard, SettingsEmptyRow } from "@/components/settings-card";
+import { SettingsCard, SettingsEmptyRow, SettingsStatus } from "@/components/settings-card";
 import { StorageConnectionReview } from "@/components/storage-connection-review";
 import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
@@ -25,8 +25,8 @@ import {
   PauseCircle,
   PlayCircle,
   Plus,
-  Server,
   Trash2,
+  Server,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -466,7 +466,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
       >
         {!formOpen && connectionReview}
         {connectionsFailed && connections.length > 0 && (
-          <div role="alert" className="flex items-center gap-2 px-4 py-3 text-sm sm:px-5">
+          <div role="alert" className="flex items-center gap-2 py-3 text-sm">
             <p>{i18n.t("storage.connectionsLoadFailed")}</p>
             <Button
               variant="outline"
@@ -479,7 +479,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
           </div>
         )}
         {catalogueFailed && (
-          <div role="alert" className="flex items-center gap-2 px-4 py-3 text-sm sm:px-5">
+          <div role="alert" className="flex items-center gap-2 py-3 text-sm">
             <p>{i18n.t("storage.providersLoadFailed")}</p>
             <Button variant="outline" size="sm" onClick={() => void providerQuery.refetch()}>
               {uiText("Retry")}
@@ -487,26 +487,26 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
           </div>
         )}
         {user?.is_superuser && editUnavailable && !connectionsFailed && (
-          <p role="alert" className="px-4 py-3 text-sm sm:px-5">
+          <p role="alert" className="py-3 text-sm">
             {i18n.t("storage.connectionUnavailable")}
           </p>
         )}
-        <div className="border-b border-border">
+        <div>
           {!user?.is_superuser ? (
-            <p className="px-4 pb-4 text-sm text-muted-foreground sm:px-5">
+            <p className="py-3 text-sm text-muted-foreground">
               {i18n.t("storage.connectionsAdministratorRequired")}
             </p>
           ) : loading ? (
             <div
               role="status"
               aria-label={uiText("Loading connections…")}
-              className="space-y-3 px-4 pb-4 sm:px-5"
+              className="space-y-3 py-3"
             >
               <Skeleton className="h-14 w-full" />
               <span className="sr-only">{uiText("Loading connections…")}</span>
             </div>
           ) : connectionsFailed && connections.length === 0 ? (
-            <div role="alert" className="flex items-center gap-2 px-4 pb-4 text-sm sm:px-5">
+            <div role="alert" className="flex items-center gap-2 py-3 text-sm">
               <p>{i18n.t("storage.connectionsLoadFailed")}</p>
               <Button
                 variant="outline"
@@ -531,7 +531,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                 return (
                   <li
                     key={connection.id}
-                    className="grid gap-3 px-4 py-3 sm:px-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end"
+                    className="grid gap-3 py-3 @min-[40rem]:grid-cols-[minmax(0,1fr)_auto] @min-[40rem]:items-center"
                   >
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -542,9 +542,9 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         {remoteStorageKindPresentation(connection.kind).beta && (
                           <Badge variant="secondary">{uiText("Beta")}</Badge>
                         )}
-                        <Badge variant={connection.enabled ? "secondary" : "outline"}>
+                        <SettingsStatus>
                           {connection.enabled ? uiText("Enabled") : uiText("Paused")}
-                        </Badge>
+                        </SettingsStatus>
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {uiText("counts.credentials", {
@@ -575,7 +575,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         </p>
                       )}
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-[minmax(12rem,15rem)_auto] sm:items-end">
+                    <div className="grid gap-3 sm:grid-cols-[minmax(11rem,13rem)_auto] sm:items-end">
                       <label className={FIELD_LABEL}>
                         {uiText("Use for")}
                         <select
@@ -610,37 +610,41 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         </Button>
                         <Button
                           type="button"
-                          variant="outline"
-                          size="sm"
+                          variant="ghost"
+                          size="icon-sm"
+                          title={uiText(" Test").trim()}
+                          aria-label={uiText(" Test").trim()}
                           disabled={unavailable || busy !== null || !connection.enabled}
                           onClick={() => void probe(connection)}
                         >
-                          <CheckCircle2 className="h-4 w-4" aria-hidden />
-                          {uiText(" Test")}
+                          <CheckCircle2 className="size-4" aria-hidden />
                         </Button>
                         <Button
                           type="button"
-                          variant="outline"
-                          size="sm"
+                          variant="ghost"
+                          size="icon-sm"
+                          title={connection.enabled ? uiText("Pause") : uiText("Resume")}
+                          aria-label={connection.enabled ? uiText("Pause") : uiText("Resume")}
                           disabled={unavailable || busy !== null || command.blocked}
                           onClick={() => void toggle(connection)}
                         >
                           {connection.enabled ? (
-                            <PauseCircle className="h-4 w-4" aria-hidden />
+                            <PauseCircle className="size-4" aria-hidden />
                           ) : (
-                            <PlayCircle className="h-4 w-4" aria-hidden />
+                            <PlayCircle className="size-4" aria-hidden />
                           )}
-                          {connection.enabled ? uiText("Pause") : uiText("Resume")}
                         </Button>
                         <Button
                           type="button"
-                          variant="outline"
-                          size="sm"
+                          variant="ghost"
+                          size="icon-sm"
+                          className="text-destructive"
+                          title={uiText(" Remove").trim()}
+                          aria-label={uiText(" Remove").trim()}
                           disabled={unavailable || busy !== null || command.blocked}
                           onClick={() => setRemoveTarget(connection)}
                         >
-                          <Trash2 className="h-4 w-4" aria-hidden />
-                          {uiText(" Remove")}
+                          <Trash2 className="size-4" aria-hidden />
                         </Button>
                       </div>
                     </div>
@@ -655,7 +659,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
           <div
             role="status"
             aria-label={uiText("Add remote connection")}
-            className="space-y-5 px-4 py-4 sm:px-5 sm:py-5"
+            className="space-y-4 py-4"
           >
             <Skeleton className="h-5 w-44" />
             <div className="grid gap-2 sm:grid-cols-2">
@@ -686,7 +690,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                 : uiText("Add remote connection")
             }
             dismissible={busy === null}
-            className="max-w-3xl"
+            className="settings-dialog max-w-3xl"
             footer={
               <>
                 <Button
@@ -753,7 +757,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         }
                         onClick={() => chooseCategory(choice.id)}
                         className={cn(
-                          "h-auto min-h-11 justify-start gap-2 whitespace-normal px-3 py-3 text-left",
+                          "h-auto min-h-9 justify-start gap-2 whitespace-normal px-3 py-2 text-left text-sm",
                           category === choice.id &&
                             "border-transparent bg-accent text-accent-foreground hover:bg-accent",
                         )}
@@ -769,7 +773,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                 <legend className="text-[13px] font-medium text-foreground">
                   {uiText("Provider")}
                 </legend>
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-2 sm:grid-cols-3">
                   {categoryProviders.map((provider) => {
                     const providerAvailability = availability(provider.id);
                     const providerUnavailable = providerAvailability?.available === false;
@@ -787,7 +791,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         }
                         onClick={() => chooseProvider(provider)}
                         className={cn(
-                          "h-auto min-h-12 justify-start whitespace-normal px-3 py-3 text-left",
+                          "h-auto min-h-9 justify-start whitespace-normal px-3 py-2 text-left",
                           provider.id === providerId &&
                             "border-transparent bg-accent text-accent-foreground hover:bg-accent",
                         )}
@@ -807,7 +811,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                   })}
                 </div>
               </fieldset>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid items-start gap-4">
                 <label className={FIELD_LABEL}>
                   {uiText("Connection name")}
                   <Input
@@ -825,7 +829,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                   <legend className="text-xs font-medium text-on-surface-variant">
                     {uiText("Use for")}
                   </legend>
-                  <div className="grid grid-cols-3 gap-1">
+                  <div className="flex flex-wrap gap-1.5">
                     {PURPOSES.map((value) => (
                       <Button
                         size="sm"
@@ -839,7 +843,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                           setPurpose(value);
                         }}
                         className={cn(
-                          "h-auto min-h-10 whitespace-normal px-2 py-2 text-xs",
+                          "h-9 text-sm",
                           purpose === value &&
                             "border-transparent bg-accent text-accent-foreground hover:bg-accent",
                         )}

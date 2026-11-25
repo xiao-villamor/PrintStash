@@ -19,7 +19,7 @@ import {
 import { Link } from "@/lib/link";
 
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { SettingsCard } from "@/components/settings-card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -318,33 +318,23 @@ export function StorageInventoryPanel() {
   ]);
 
   return (
-    <Card className="overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-4 sm:px-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <HardDrive className="h-8 w-8 rounded-md bg-muted p-2" />
-          <div>
-            <h2 className="text-sm font-semibold">{t("Storage insights")}</h2>
-            <p className="text-xs text-muted-foreground">
-              {t("See what uses space and how your storage changes.")}
-            </p>
-          </div>
-        </div>
+    <SettingsCard
+      title={t("Storage insights")}
+      description={t("See what uses space and how your storage changes.")}
+      action={
         <Button variant="outline" size="sm" disabled={busy} onClick={refresh}>
-          <RefreshCw className="mr-2 h-4 w-4" />
+          <RefreshCw className="h-4 w-4" aria-hidden />
           {t("Refresh measurement")}
         </Button>
-      </div>
+      }
+    >
       {error && (
         <div role="alert" className="border-b p-4 text-sm text-destructive">
           {t("Storage insights could not be loaded. Retry the measurement.")}
         </div>
       )}
       {!current && !error && (
-        <div
-          role="status"
-          aria-label={t("Loading storage insights…")}
-          className="space-y-5 p-4 sm:p-5"
-        >
+        <div role="status" aria-label={t("Loading storage insights…")} className="space-y-5 py-4">
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
             {[0, 1, 2].map((item) => (
               <div key={item} className="space-y-3">
@@ -359,8 +349,8 @@ export function StorageInventoryPanel() {
       )}
       {current && (
         <>
-          <dl className="grid grid-cols-2 border-b md:grid-cols-[1.4fr_1fr_1fr]">
-            <div className="col-span-2 border-b bg-muted/30 px-4 py-4 md:col-span-1 md:border-b-0 md:border-r">
+          <dl className="grid grid-cols-2 border-b @min-[38rem]:grid-cols-[1.4fr_1fr_1fr]">
+            <div className="col-span-2 border-b bg-muted/30 px-4 py-4 @min-[38rem]:col-span-1 @min-[38rem]:border-b-0 @min-[38rem]:border-r">
               <dt className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                 <Database className="h-4 w-4" aria-hidden />
                 {t("Files stored here")}
@@ -426,10 +416,7 @@ export function StorageInventoryPanel() {
             </div>
           )}
           {current.locations.length > 0 && (
-            <section
-              aria-labelledby="storage-by-place-title"
-              className="border-b px-4 py-4 sm:px-5"
-            >
+            <section aria-labelledby="storage-by-place-title" className="border-b py-4">
               <div className="flex items-center gap-2">
                 <HardDrive className="h-4 w-4 text-muted-foreground" aria-hidden />
                 <h3 id="storage-by-place-title" className="text-sm font-semibold">
@@ -504,7 +491,7 @@ export function StorageInventoryPanel() {
           <div className="grid border-b lg:grid-cols-2">
             <section
               aria-labelledby="storage-by-purpose-title"
-              className="border-b px-4 py-4 sm:px-5 lg:border-b-0 lg:border-r"
+              className="border-b py-4 lg:border-b-0 lg:border-r"
             >
               <div className="flex items-center gap-2">
                 <Box className="h-4 w-4 text-muted-foreground" aria-hidden />
@@ -552,7 +539,7 @@ export function StorageInventoryPanel() {
                 {t("Based on recorded file sizes. Shared files may appear in more than one total.")}
               </p>
             </section>
-            <section aria-labelledby="storage-history-title" className="px-4 py-4 sm:px-5">
+            <section aria-labelledby="storage-history-title" className="py-4">
               <div className="flex items-center gap-2">
                 <TrendingUp className="h-4 w-4 text-muted-foreground" aria-hidden />
                 <h3 id="storage-history-title" className="text-sm font-semibold">
@@ -633,7 +620,7 @@ export function StorageInventoryPanel() {
               {t("Measurement details")}
             </summary>
             <div className="grid border-t lg:grid-cols-2">
-              <section className="px-4 py-4 sm:px-5 lg:border-r">
+              <section className="py-4 lg:border-r">
                 <h3 className="text-sm font-semibold">{t("Files by type")}</h3>
                 <div className="mt-2 divide-y divide-border">
                   {current.buckets
@@ -945,10 +932,7 @@ export function StorageInventoryPanel() {
           </section>
           {activity &&
             (activity.active_reservations.length > 0 || activity.recent_denials.length > 0) && (
-              <section
-                className="border-t px-4 py-4 sm:px-5"
-                aria-labelledby="storage-activity-title"
-              >
+              <section className="border-t py-4" aria-labelledby="storage-activity-title">
                 <h3 id="storage-activity-title" className="text-sm font-semibold">
                   {t("Recent storage activity")}
                 </h3>
@@ -1082,6 +1066,6 @@ export function StorageInventoryPanel() {
         confirmLabel={t("Clean up")}
         busy={busy}
       />
-    </Card>
+    </SettingsCard>
   );
 }

@@ -87,7 +87,7 @@ export function BackupRunHistory({ onPublished }: { onPublished: () => void }) {
         </Button>
       }
     >
-      <div className="space-y-4 p-4 sm:p-5" aria-busy={loading}>
+      <div className="space-y-4 py-4" aria-busy={loading}>
         {failed && (
           <p role="alert" className="text-sm text-destructive">
             {t("settings.backupRunsLoadFailed")}

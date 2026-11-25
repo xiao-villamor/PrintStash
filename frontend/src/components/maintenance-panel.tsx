@@ -8,7 +8,7 @@ import { AuditSchedulePanel } from "@/components/audit-schedule-panel";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { SettingsCard, SettingsGroupHead } from "@/components/settings-card";
+import { SettingsCard, SettingsEmptyRow } from "@/components/settings-card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -164,23 +164,17 @@ export function MaintenancePanel() {
   if (commands.retired) return null;
   return (
     <div className="settings-grouped settings-maintenance">
-      <section aria-labelledby="maintenance-heading">
-        <SettingsGroupHead
-          placement="outside"
-          level={2}
-          id="maintenance-heading"
+      <section aria-label={t("maintenance.checkNow")}>
+        <SettingsCard
           title={t("maintenance.checkNow")}
           description={t("maintenance.checkNowDescription")}
-        />
-        <div className="grid gap-4 md:grid-cols-2">
-          <SettingsCard hideHeader title={t("auditSchedule.quick")}>
-            <div className="space-y-3 py-4">
-              <div>
-                <h3 className="text-sm font-semibold">{t("auditSchedule.quick")}</h3>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t("maintenance.quickDescription")}
-                </p>
-              </div>
+        >
+          <div className="settings-list-row">
+            <div>
+              <h3 className="settings-list-title">{t("auditSchedule.quick")}</h3>
+              <p className="settings-list-meta">{t("maintenance.quickDescription")}</p>
+            </div>
+            <div>
               <Button
                 size="sm"
                 onClick={() => void start("quick")}
@@ -191,15 +185,13 @@ export function MaintenancePanel() {
                 {t("maintenance.runQuick")}
               </Button>
             </div>
-          </SettingsCard>
-          <SettingsCard hideHeader title={t("auditSchedule.full")}>
-            <div className="space-y-3 py-4">
-              <div>
-                <h3 className="text-sm font-semibold">{t("auditSchedule.full")}</h3>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {t("maintenance.fullDescription")}
-                </p>
-              </div>
+          </div>
+          <div className="settings-list-row">
+            <div>
+              <h3 className="settings-list-title">{t("auditSchedule.full")}</h3>
+              <p className="settings-list-meta">{t("maintenance.fullDescription")}</p>
+            </div>
+            <div>
               <Button
                 size="sm"
                 variant="outline"
@@ -210,8 +202,8 @@ export function MaintenancePanel() {
                 {t("maintenance.runFull")}
               </Button>
             </div>
-          </SettingsCard>
-        </div>
+          </div>
+        </SettingsCard>
       </section>
       <SettingsCard title={uiText("Latest results")}>
         <div className="space-y-4 py-4">
@@ -437,7 +429,7 @@ export function MaintenancePanel() {
         title={t("maintenance.backupTitle")}
         description={t("maintenance.backupDescription")}
       >
-        <div className="settings-section-body">
+        <div>
           {catalog.isError ? (
             <div role="alert">
               <p>{t("maintenance.backupLoadFailed")}</p>
@@ -448,7 +440,7 @@ export function MaintenancePanel() {
           ) : catalog.isPending ? (
             <p role="status">{t("auditSchedule.loading")}</p>
           ) : backups.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t("maintenance.noBackups")}</p>
+            <SettingsEmptyRow>{t("maintenance.noBackups")}</SettingsEmptyRow>
           ) : (
             backups.map((item) => {
               const sourceRef = sourceKey(item);

@@ -192,6 +192,7 @@ import { localeDefinitions, SUPPORTED_LOCALES, useI18n, type MessageKey } from "
 import "./settings-panel.css";
 import {
   SettingsCard,
+  SettingsEmptyRow,
   SettingsNotice,
   SettingsChoiceCards,
   SettingsStatus,
@@ -2301,7 +2302,7 @@ export function SettingsPanel() {
           </button>
         }
       >
-        <div className="settings-preference-fields px-4 sm:px-5">
+        <div className="settings-preference-fields">
           <label className="settings-preference-row">
             <span>{uiText("Days")}</span>
             <input
@@ -2408,19 +2409,10 @@ export function SettingsPanel() {
               {uiText("settings.trashLoadFailed")}
             </p>
           ) : trashItems.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
-              <span className="grid size-14 place-items-center rounded-lg border border-dashed border-border-strong bg-foreground/[0.04] text-muted-foreground">
-                <Trash2 className="size-6" aria-hidden="true" />
-              </span>
-              <div className="space-y-1">
-                <p className="text-base font-semibold text-foreground">
-                  {uiText("Trash is empty.")}
-                </p>
-                <p className="mx-auto max-w-sm text-sm text-muted-foreground">
-                  {uiText("Deleted models wait here until the retention window ends.")}
-                </p>
-              </div>
-            </div>
+            <SettingsEmptyRow className={trashPage ? "px-5" : undefined}>
+              <strong className="font-medium text-foreground">{uiText("Trash is empty.")}</strong>{" "}
+              {uiText("Deleted models wait here until the retention window ends.")}
+            </SettingsEmptyRow>
           ) : (
             trashItems.map((item) => (
               <div
@@ -2506,7 +2498,7 @@ export function SettingsPanel() {
 
   return (
     <Localized>
-      <div className="w-full space-y-6">
+      <div className={cn("w-full space-y-6", !trashPage && "mx-auto max-w-7xl")}>
         <ConfirmModal
           open={restartConfirmOpen}
           variant="default"
@@ -3243,10 +3235,37 @@ export function SettingsPanel() {
                           if (usersBusy !== "create") setCreateUserOpen(false);
                         }}
                         title={t("Create user")}
+                        className="settings-dialog"
+                        footer={
+                          <>
+                            <Button
+                              variant="outline"
+                              onClick={() => setCreateUserOpen(false)}
+                              disabled={usersBusy === "create"}
+                            >
+                              {t("Cancel")}
+                            </Button>
+                            <button
+                              type="button"
+                              onClick={createUser}
+                              disabled={
+                                usersBusy !== null ||
+                                usersQuery.isError ||
+                                usersQuery.isPending ||
+                                !newUsername.trim() ||
+                                newUserPassword.trim().length < 8
+                              }
+                              className={cn(BTN_PRIMARY, "h-9")}
+                            >
+                              <UserPlus className="h-3.5 w-3.5" />
+                              {uiText("Create")}
+                            </button>
+                          </>
+                        }
                       >
                         <div className="grid gap-4">
                           <label className="block space-y-1">
-                            <span className="block text-[13px] font-medium text-foreground">
+                            <span className="block text-sm font-medium text-foreground">
                               {uiText("Username")}
                             </span>
                             <input
@@ -3264,7 +3283,7 @@ export function SettingsPanel() {
                             />
                           </label>
                           <label className="block space-y-1">
-                            <span className="block text-[13px] font-medium text-foreground">
+                            <span className="block text-sm font-medium text-foreground">
                               {uiText("Email")}
                             </span>
                             <input
@@ -3283,7 +3302,7 @@ export function SettingsPanel() {
                             />
                           </label>
                           <label className="block space-y-1">
-                            <span className="block text-[13px] font-medium text-foreground">
+                            <span className="block text-sm font-medium text-foreground">
                               {uiText("Initial password")}
                             </span>
                             <input
@@ -3304,34 +3323,12 @@ export function SettingsPanel() {
                             />
                           </label>
                         </div>
-                        <p id="new-user-password-help" className="text-xs text-muted-foreground">
+                        <p
+                          id="new-user-password-help"
+                          className="mt-2 text-xs text-muted-foreground"
+                        >
                           {uiText("Initial password: at least 8 characters.")}
                         </p>
-                        <div className="mt-5 flex justify-end gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setCreateUserOpen(false)}
-                            disabled={usersBusy === "create"}
-                          >
-                            {t("Cancel")}
-                          </Button>
-                          <button
-                            type="button"
-                            onClick={createUser}
-                            disabled={
-                              usersBusy !== null ||
-                              usersQuery.isError ||
-                              usersQuery.isPending ||
-                              !newUsername.trim() ||
-                              newUserPassword.trim().length < 8
-                            }
-                            className={BTN_PRIMARY}
-                          >
-                            <UserPlus className="h-3.5 w-3.5" />
-                            {uiText("Create")}
-                          </button>
-                        </div>
                       </Modal>
 
                       <div className="space-y-2">
@@ -3352,24 +3349,26 @@ export function SettingsPanel() {
                         ) : usersQuery.isError && users.length === 0 ? null : users.length === 0 ? (
                           <p className="text-sm text-muted-foreground">{uiText("No users.")}</p>
                         ) : (
-                          <>
+                          <div className="settings-users-table">
                             <div
                               aria-hidden
-                              className="hidden grid-cols-[minmax(0,1fr)_7rem_9.5rem_auto] gap-3 pb-2 text-sm text-muted-foreground md:grid"
+                              data-user-columns
+                              className="items-center pb-3 text-sm text-muted-foreground"
                             >
                               <span>{uiText("User")}</span>
                               <span>{uiText("Role")}</span>
                               <span>{uiText("Created")}</span>
-                              <span className="w-[13rem]" />
+                              <span />
                             </div>
                             {users.map((row) => (
                               <div
                                 key={row.id}
                                 role="group"
                                 aria-label={`${uiText("User")}: ${row.username}`}
+                                data-user-columns
                                 className="border-t border-border py-3"
                               >
-                                <div className="grid items-center gap-3 md:grid-cols-[minmax(0,1fr)_7rem_9.5rem_auto]">
+                                <div data-user-columns className="items-center">
                                   <div className="flex min-w-0 items-center gap-3">
                                     <span
                                       aria-hidden
@@ -3378,15 +3377,15 @@ export function SettingsPanel() {
                                       {row.username.slice(0, 1)}
                                     </span>
                                     <div className="min-w-0">
-                                      <div className="flex items-center gap-2">
-                                        <p className="settings-list-title truncate">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <p className="settings-list-title wrap-anywhere">
                                           {row.username}
                                         </p>
                                         {row.id === user?.id && (
                                           <Badge variant="secondary">{uiText("You")}</Badge>
                                         )}
                                       </div>
-                                      <p className="text-sm text-muted-foreground">
+                                      <p className="settings-list-meta wrap-anywhere">
                                         {row.email || uiText("No email")}
                                       </p>
                                     </div>
@@ -3395,7 +3394,7 @@ export function SettingsPanel() {
                                     <span
                                       aria-hidden
                                       className={cn(
-                                        "size-1.5 rounded-full",
+                                        "size-1.5 shrink-0 rounded-full",
                                         !row.is_active
                                           ? "bg-destructive"
                                           : row.is_superuser
@@ -3412,7 +3411,7 @@ export function SettingsPanel() {
                                   <p className="text-sm text-muted-foreground">
                                     {formatDate(row.created_at)}
                                   </p>
-                                  <div className="flex items-center justify-end gap-1.5">
+                                  <div className="flex flex-wrap items-center justify-end gap-1.5">
                                     <button
                                       type="button"
                                       disabled={
@@ -3491,7 +3490,7 @@ export function SettingsPanel() {
                                 </ConfirmModal>
                               </div>
                             ))}
-                          </>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -3546,7 +3545,7 @@ export function SettingsPanel() {
                                 onClick={() => setAccessPickerOpen((open) => !open)}
                                 aria-haspopup="dialog"
                                 aria-expanded={accessPickerOpen}
-                                className={`${INPUT} w-full text-left`}
+                                className={cn(INPUT, "w-full truncate text-left")}
                               >
                                 {accessCollection?.display_path ?? uiText("Select collection")}
                               </button>
@@ -3701,7 +3700,7 @@ export function SettingsPanel() {
                       "Grant access per printer. Roles build from view to print, machine control, and administration.",
                     )}
                   >
-                    <div className="space-y-4 p-4 sm:p-5">
+                    <div className="space-y-4 py-4">
                       <div className="settings-access-fields">
                         <label className="settings-preference-row">
                           <span className="text-[13px] font-medium text-foreground">
@@ -4015,7 +4014,7 @@ export function SettingsPanel() {
 
                         <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
                           <label className="block space-y-1">
-                            <span className="block text-[13px] font-medium text-foreground">
+                            <span className="block text-sm font-medium text-foreground">
                               {uiText("Key name")}
                             </span>
                             <input
@@ -4180,7 +4179,6 @@ export function SettingsPanel() {
                   <StorageConfigCard storageHealth={storageHealth} migrationManaged />
                   {user?.is_superuser && (
                     <SettingsCard
-                      className="settings-storage-migration"
                       title={t("migration.title")}
                       description={t("migration.description")}
                       action={
@@ -4420,7 +4418,7 @@ export function SettingsPanel() {
                     </button>
                   }
                 >
-                  <div className="space-y-5 p-4 sm:p-5">
+                  <div className="space-y-3">
                     <div>
                       <div className="settings-preference-row">
                         <span>
@@ -4587,9 +4585,9 @@ export function SettingsPanel() {
                           </div>
                         ))}
                         {backupConnections.length === 0 ? (
-                          <p className="py-4 text-sm text-muted-foreground">
+                          <SettingsEmptyRow>
                             {t("settings.backupNoRemoteDestinations")}
-                          </p>
+                          </SettingsEmptyRow>
                         ) : null}
                       </div>
                     </div>
@@ -4622,7 +4620,7 @@ export function SettingsPanel() {
                     </button>
                   }
                 >
-                  <div className="p-4 sm:p-5">
+                  <div>
                     <div className="settings-preference-row">
                       <span>
                         <label htmlFor="backup-retention-days">
@@ -5159,9 +5157,11 @@ export function SettingsPanel() {
                   description={t("Theme and language apply to this browser.")}
                   action={<SettingsScope scope="browser" />}
                 >
-                  <div className="space-y-4 py-4">
-                    <ThemeTiles value={themeMode} onChange={setThemeMode} />
-                    <div className="settings-preference-row border-t border-border pt-4">
+                  <div className="pt-4">
+                    <div className="pb-4">
+                      <ThemeTiles value={themeMode} onChange={setThemeMode} />
+                    </div>
+                    <div className="settings-preference-row border-t border-border">
                       <span>{t("locale.label")}</span>
                       <SettingsSegmented
                         label={t("locale.label")}
@@ -5347,7 +5347,7 @@ export function SettingsPanel() {
                       {METADATA_FIELDS.map((field) => (
                         <label
                           key={field.id}
-                          className="flex h-9 items-center gap-2 rounded-md border border-border bg-muted/30 px-3 text-sm text-foreground"
+                          className="flex min-h-9 items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-1.5 text-sm text-foreground"
                         >
                           <Checkbox
                             checked={metadataPrefs[field.id]}
@@ -5565,7 +5565,7 @@ export function SettingsPanel() {
                       <div
                         role="radiogroup"
                         aria-label={uiText("Multi-angle previews")}
-                        className="grid w-full gap-2 sm:grid-cols-3 lg:max-w-3xl"
+                        className="grid w-full gap-2 @min-[36rem]:grid-cols-3"
                       >
                         {(["single", "oblique", "oblique-poles"] as const).map((mode) => {
                           const selected = selectedPreviewMode === mode;
@@ -5726,7 +5726,7 @@ export function SettingsPanel() {
                       releaseStatus.latest_version && (
                         <div
                           role="status"
-                          className="mb-2 flex flex-wrap items-center justify-between gap-3 border border-border p-3"
+                          className="my-2 flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3"
                         >
                           <div className="flex min-w-0 items-start gap-2">
                             <CircleArrowUp
