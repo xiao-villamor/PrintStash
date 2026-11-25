@@ -259,7 +259,7 @@
 
 /* Rows: label and hint on the left, control on the right. */
 .settings-preference-row {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 320px);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, max-content);
   align-items: center;
 }
 
@@ -457,27 +457,36 @@
   transform-origin: center top;
 }
 
+.settings-preference-row > [role="radiogroup"] {
+  justify-self: end;
+}
+
 /* Theme tiles show each theme regardless of the one in use. */
 .settings-theme-swatch {
+  position: relative;
+}
+
+.settings-theme-layer {
+  position: absolute;
+  inset: 0;
   padding: 10px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.settings-theme-swatch[data-theme="light"] {
+.settings-theme-layer[data-theme="light"] {
   background: #f6f7f9;
   color: #0c0f14;
 }
 
-.settings-theme-swatch[data-theme="dark"] {
+.settings-theme-layer[data-theme="dark"] {
   background: #0c0f14;
   color: #edf1f7;
 }
 
-.settings-theme-swatch[data-theme="system"] {
-  background: linear-gradient(90deg, #f6f7f9 50%, #0c0f14 50%);
-  color: #7f8a9d;
+.settings-theme-layer[data-clip="half"] {
+  clip-path: inset(0 50% 0 0);
 }
 
 .settings-theme-bar {
@@ -500,10 +509,4 @@
   border-radius: 4px;
   background: currentColor;
   opacity: 0.16;
-}
-
-.settings-preference-row.settings-preference-row--stack {
-  grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
 }

@@ -5,6 +5,19 @@ import type { CardMetricId } from "@/lib/card-metrics";
 
 type ThemeChoice = "light" | "dark" | "system";
 
+function ThemeLayer({ theme, half = false }: { theme: "light" | "dark"; half?: boolean }) {
+  return (
+    <span className="settings-theme-layer" data-theme={theme} data-clip={half ? "half" : undefined}>
+      <span className="settings-theme-bar" />
+      <span className="settings-theme-cells">
+        <span />
+        <span />
+        <span />
+      </span>
+    </span>
+  );
+}
+
 /** Theme as three small pictures of the interface, so the choice shows what it does. */
 export function ThemeTiles({
   value,
@@ -33,18 +46,19 @@ export function ThemeTiles({
           >
             <span
               className={cn(
-                "settings-theme-swatch block h-21 overflow-hidden rounded-lg border",
-                selected ? "border-2 border-primary" : "border-border",
+                "settings-theme-swatch block h-21 overflow-hidden rounded-lg border-2",
+                selected ? "border-primary" : "border-border",
                 "group-focus-visible:ring-2 group-focus-visible:ring-ring",
               )}
-              data-theme={tile}
             >
-              <span className="settings-theme-bar" />
-              <span className="settings-theme-cells">
-                <span />
-                <span />
-                <span />
-              </span>
+              {tile === "system" ? (
+                <>
+                  <ThemeLayer theme="dark" />
+                  <ThemeLayer theme="light" half />
+                </>
+              ) : (
+                <ThemeLayer theme={tile} />
+              )}
             </span>
             <span className="mt-2 flex items-center gap-2 text-sm font-medium">
               <span

@@ -325,7 +325,7 @@ export function SettingsSegmented<T extends string>({
     <div
       role="radiogroup"
       aria-label={label}
-      className="inline-flex gap-0.5 rounded-lg border border-border bg-card p-0.75"
+      className="inline-flex max-w-full gap-0.5 overflow-x-auto rounded-lg border border-border bg-card p-0.75"
     >
       {options.map((option) => {
         const selected = option.value === value;
@@ -338,7 +338,7 @@ export function SettingsSegmented<T extends string>({
             disabled={disabled}
             onClick={() => onChange(option.value)}
             className={cn(
-              "h-7.5 rounded-md px-3 text-sm font-medium transition-[color,background-color] duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+              "h-7.5 shrink-0 whitespace-nowrap rounded-md px-3 text-sm font-medium transition-[color,background-color] duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
               selected
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:text-foreground",
