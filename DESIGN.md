@@ -554,7 +554,7 @@ these calls at zero.
 | `Drawer` | The above, sliding from an edge, interruptible mid-flight |
 | `DropdownMenu` | Origin-aware scale/fade, outside-`pointerdown` dismiss, Escape refocuses trigger, arrow-key roving |
 | `TabBar` | ARIA `tablist`, arrow-key nav, sliding indicator |
-| `Switch` | Settings toggle with a square 36×20 track and written On/Off states |
+| `Switch` | Settings toggle with a pill 38×22 track and written On/Off states |
 | `Checkbox` | Form options and selection with an outlined square, a checkmark on a neutral fill when selected, and a visible keyboard ring |
 | `Input`, `Badge`, `Spinner`, `EmptyState`, `Card`, `Skeleton` | Token-correct defaults |
 

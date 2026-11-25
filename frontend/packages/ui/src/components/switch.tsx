@@ -5,7 +5,7 @@ import { forwardRef } from "react";
 import { cn } from "../lib/utils";
 
 /**
- * The one binary toggle: a square 36×20 track with its state also written as
+ * The one binary toggle: a pill 38×22 track with its state also written as
  * text, so On/Off never depends on colour alone.
  */
 export const Switch = forwardRef<
@@ -45,14 +45,14 @@ export const Switch = forwardRef<
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={cn(
-          "relative inline-flex h-5 w-9 shrink-0 items-center transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:cursor-disabled disabled:opacity-50",
+          "relative inline-flex h-5.5 w-9.5 shrink-0 items-center rounded-full transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:cursor-disabled disabled:opacity-50",
           checked ? "bg-primary" : "bg-input",
         )}
       >
         <span
           aria-hidden
           className={cn(
-            "ml-0.5 inline-block h-4 w-4 bg-card transition-transform duration-press",
+            "ml-0.5 inline-block size-4.5 rounded-full bg-white shadow-sm transition-transform duration-press",
             checked ? "translate-x-4" : "translate-x-0",
           )}
         />
