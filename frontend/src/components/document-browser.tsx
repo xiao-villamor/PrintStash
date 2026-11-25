@@ -4,7 +4,15 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { lazy, Suspense, useId, useRef, useState } from "react";
-import { ChevronDown, FilePlus2, FileText, FileType2, Loader2, Paperclip } from "lucide-react";
+import {
+  ChevronDown,
+  FilePlus2,
+  FileText,
+  FileType2,
+  Loader2,
+  Paperclip,
+  Upload,
+} from "lucide-react";
 
 import { MODEL_DOCUMENT_PAGE_SIZE } from "@/lib/api/documents";
 import { useDocuments, useDocumentMutations } from "@/lib/queries/documents";
@@ -59,11 +67,22 @@ export function DocumentBrowser({
   const mutations = useDocumentMutations();
   const [deleteTarget, setDeleteTarget] = useState<DocumentListItem | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const uploadInProgress = useRef(false);
+  const dragDepth = useRef(0);
+  const [uploading, setUploading] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const items = documents.data ?? [];
   const hasNextPage = modelId !== undefined && items.length > MODEL_DOCUMENT_PAGE_SIZE;
   const docs = hasNextPage ? items.slice(0, MODEL_DOCUMENT_PAGE_SIZE) : items;
   const loading = documents.isPending;
-  const busy = mutations.upload.isPending;
+  const showDropzone =
+    modelId !== undefined &&
+    canCreate &&
+    offset === 0 &&
+    docs.length === 0 &&
+    !loading &&
+    !documents.isError;
+  const busy = uploading;
   const deleteBusy = mutations.remove.isPending;
 
   function newMarkdown() {
@@ -76,27 +95,45 @@ export function DocumentBrowser({
     router.push(`/documents/new${qs ? `?${qs}` : ""}`);
   }
 
-  async function onFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  async function uploadFiles(files: File[]) {
+    if (!canCreate || !files.length || uploadInProgress.current) return;
+    uploadInProgress.current = true;
+    setUploading(true);
     const session = getSessionVersion();
     try {
-      const doc = await mutations.upload.mutateAsync({
-        file,
-        collectionId: collectionId ?? null,
-        modelId,
-        session,
-      });
-      if (getSessionVersion() !== session) return;
-      if (modelId === undefined) {
-        router.push(`/documents/${doc.id}`);
-      } else {
-        setOffset(0);
+      for (const file of files) {
+        if (getSessionVersion() !== session) return;
+        try {
+          const doc = await mutations.upload.mutateAsync({
+            file,
+            collectionId: collectionId ?? null,
+            modelId,
+            session,
+          });
+          if (getSessionVersion() !== session) return;
+          if (modelId === undefined) {
+            router.push(`/documents/${doc.id}`);
+            return;
+          }
+          setOffset(0);
+        } catch (error) {
+          if (getSessionVersion() === session) toast.error(error);
+        }
       }
-    } catch (err) {
-      if (getSessionVersion() === session) toast.error(err);
+    } finally {
+      uploadInProgress.current = false;
+      setUploading(false);
     }
+  }
+
+  function onFilePicked(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.currentTarget.files ?? []);
+    event.currentTarget.value = "";
+    void uploadFiles(files);
+  }
+
+  function isFileDrag(event: React.DragEvent) {
+    return event.dataTransfer.types.includes("Files");
   }
 
   function remove(doc: DocumentListItem) {
@@ -149,6 +186,7 @@ export function DocumentBrowser({
                 <DropdownMenu
                   open={addOpen}
                   onOpenChange={setAddOpen}
+                  aria-label={uiText("Add attachment")}
                   portal
                   trigger={
                     <Button
@@ -165,7 +203,7 @@ export function DocumentBrowser({
                       <ChevronDown className="size-3.5" aria-hidden />
                     </Button>
                   }
-                  contentClassName="min-w-44"
+                  contentClassName="min-w-44 border border-border-strong bg-popover p-1 text-popover-foreground shadow-lg"
                 >
                   <Button
                     type="button"
@@ -199,6 +237,7 @@ export function DocumentBrowser({
                 <input
                   ref={fileRef}
                   type="file"
+                  multiple
                   aria-label={uploadLabel}
                   onChange={onFilePicked}
                   className="hidden"
@@ -253,7 +292,7 @@ export function DocumentBrowser({
 
         <div
           className={
-            modelId === undefined
+            modelId === undefined || showDropzone
               ? undefined
               : "overflow-hidden rounded-lg border border-border bg-card"
           }
@@ -269,15 +308,75 @@ export function DocumentBrowser({
             <div className="flex items-center justify-center py-16 text-muted-foreground">
               <Loader2 className="w-5 h-5 animate-spin" />
             </div>
+          ) : showDropzone ? (
+            <div
+              onDragEnter={(event) => {
+                if (!isFileDrag(event)) return;
+                event.preventDefault();
+                event.stopPropagation();
+                dragDepth.current += 1;
+                if (!busy) setDragging(true);
+              }}
+              onDragOver={(event) => {
+                if (!isFileDrag(event)) return;
+                event.preventDefault();
+                event.stopPropagation();
+                event.dataTransfer.dropEffect = busy ? "none" : "copy";
+              }}
+              onDragLeave={(event) => {
+                if (!dragDepth.current) return;
+                event.stopPropagation();
+                dragDepth.current -= 1;
+                if (!dragDepth.current) setDragging(false);
+              }}
+              onDrop={(event) => {
+                if (!isFileDrag(event)) return;
+                event.preventDefault();
+                event.stopPropagation();
+                dragDepth.current = 0;
+                setDragging(false);
+                void uploadFiles(Array.from(event.dataTransfer.files));
+              }}
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={busy}
+                aria-busy={busy}
+                onClick={() => fileRef.current?.click()}
+                className={`h-auto min-h-28 w-full flex-col gap-2 rounded-lg border border-dashed px-4 py-4 text-center whitespace-normal hover:border-primary hover:bg-accent ${dragging ? "border-primary bg-accent" : "border-border-strong bg-card"}`}
+              >
+                <span
+                  className="flex size-8 items-center justify-center rounded-md bg-muted text-muted-foreground"
+                  aria-hidden
+                >
+                  {busy ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Upload className="size-4" />
+                  )}
+                </span>
+                <span className="text-sm font-medium">
+                  {uiText(
+                    busy
+                      ? "Uploading attachments…"
+                      : dragging
+                        ? "Drop files to attach"
+                        : "Drop files here or click to upload",
+                  )}
+                </span>
+                <span className="text-xs font-normal text-muted-foreground">
+                  {uiText("Assembly guides, photos, or other supporting files.")}
+                </span>
+              </Button>
+            </div>
           ) : docs.length === 0 ? (
             <div className="flex flex-col items-start gap-1 px-5 py-6 text-muted-foreground">
               {modelId === undefined && <FileText className="w-8 h-8 mb-2 opacity-40" />}
               <p className="text-sm">
                 {modelId === undefined
                   ? uiText("No documents here yet.")
-                  : uiText(
-                      "No attachments yet. Add assembly guides, photos of finished prints or videos.",
-                    )}
+                  : uiText("No attachments yet.")}
               </p>
               {canCreate && modelId === undefined && (
                 <p className="text-xs mt-1">

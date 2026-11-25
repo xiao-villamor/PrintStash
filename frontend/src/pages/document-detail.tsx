@@ -9,6 +9,7 @@ import {
   type ComponentType,
   Suspense,
   lazy,
+  useDeferredValue,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -16,7 +17,7 @@ import {
   useState,
 } from "react";
 import { useParams } from "@tanstack/react-router";
-import { ArrowLeft, Download, Eye, Loader2, Pencil, Printer, Save } from "lucide-react";
+import { ArrowLeft, Download, Eye, FileText, Loader2, Pencil, Printer, Save } from "lucide-react";
 
 import { printMarkdown } from "@/lib/print-markdown";
 import { MarkdownView } from "@/components/markdown-view";
@@ -139,6 +140,7 @@ export default function DocumentDetailPage({
   const liveDraft = draft?.docId === docKey ? draft : null;
   const draftName = liveDraft?.name ?? doc?.name ?? "";
   const draftBody = liveDraft?.body ?? doc?.body ?? "";
+  const livePreviewBody = useDeferredValue(draftBody);
   const activeBinaryPreview =
     binaryPreview && binaryPreview.documentId === doc?.id && binaryPreview.kind === doc.kind
       ? binaryPreview
@@ -398,6 +400,11 @@ export default function DocumentDetailPage({
   }
 
   const isMarkdown = doc.kind === "markdown";
+  const editing = isMarkdown && mode === "edit";
+  const unsaved =
+    isNew ||
+    (liveDraft !== null &&
+      (draftName !== liveDraft.base.name || draftBody !== (liveDraft.base.body ?? "")));
 
   return (
     <div className="h-full flex flex-col bg-background">
@@ -453,22 +460,14 @@ export default function DocumentDetailPage({
           )}
         </div>
       )}
-      {!embedded && (
-        <div className="shrink-0 px-4 pt-5 sm:px-6">
-          <h1 className="break-words text-xl font-semibold text-foreground">
-            {mode === "edit" ? draftName : doc.name}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">{uiText("nav.document")}</p>
-        </div>
-      )}
       <div
         className={
           embedded
             ? "flex min-h-0 flex-1 flex-col overflow-hidden bg-card"
-            : "mx-4 my-6 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card sm:mx-6 lg:mx-auto lg:w-full lg:max-w-5xl"
+            : `mx-4 mb-4 mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card sm:mx-6 md:mt-6 ${editing ? "2xl:mx-auto 2xl:w-[calc(100%-3rem)] 2xl:max-w-[96rem]" : "lg:mx-auto lg:w-[calc(100%-3rem)] lg:max-w-5xl"}`
         }
       >
-        <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3 sm:px-6">
+        <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-surface-container-low px-4 py-3">
           {!embedded && (
             <Link
               href={backHref}
@@ -487,15 +486,12 @@ export default function DocumentDetailPage({
               disabled={saving}
               value={draftName}
               onChange={(e) => setDraftName(e.target.value)}
-              className="min-w-0 flex-1 bg-surface text-foreground text-lg font-semibold border border-border rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-ring max-sm:basis-full"
+              className="min-w-40 flex-1 rounded-md border border-transparent bg-background/60 px-2.5 py-1.5 text-base font-semibold text-foreground hover:border-border focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           ) : (
-            <input
-              aria-label={uiText("documents.name")}
-              readOnly
-              value={doc.name}
-              className="min-w-0 flex-1 border border-border bg-surface px-2 py-1 text-sm font-semibold text-foreground max-sm:basis-full"
-            />
+            <h1 className="min-w-0 flex-1 break-words text-base font-semibold text-foreground">
+              {doc.name}
+            </h1>
           )}
 
           {embedded && isMarkdown && canEdit && (
@@ -507,9 +503,15 @@ export default function DocumentDetailPage({
             </Button>
           )}
           {!embedded && isMarkdown && (canEdit || mode === "edit") && (
-            <div role="group" aria-label={uiText("Display")} className="flex items-center">
-              <button
+            <div
+              role="group"
+              aria-label={uiText("Display")}
+              className="flex items-center gap-0.5 rounded-md border border-border bg-card p-0.5"
+            >
+              <Button
                 type="button"
+                variant="ghost"
+                size="xs"
                 aria-pressed={mode === "edit"}
                 disabled={!canEdit}
                 onClick={() => {
@@ -518,35 +520,35 @@ export default function DocumentDetailPage({
                   );
                   setModeChoice({ docId: docKey, mode: "edit" });
                 }}
-                className={`flex items-center gap-1.5 border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50 ${mode === "edit" ? "bg-muted" : "bg-background"}`}
+                className="h-7 px-2 aria-pressed:bg-accent aria-pressed:text-accent-foreground"
               >
                 <Pencil className="w-3.5 h-3.5" />
                 {uiText(" Edit")}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                variant="ghost"
+                size="xs"
                 aria-pressed={mode === "preview"}
                 onClick={() => setModeChoice({ docId: docKey, mode: "preview" })}
-                className={`flex items-center gap-1.5 border border-l-0 border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted ${mode === "preview" ? "bg-muted" : "bg-background"}`}
+                className="h-7 px-2 aria-pressed:bg-accent aria-pressed:text-accent-foreground"
               >
                 <Eye className="w-3.5 h-3.5" />
                 {uiText(" Preview")}
-              </button>
+              </Button>
             </div>
           )}
-          {isMarkdown && mode === "edit" && (
-            <button
+          {editing && (
+            <Button
+              type="button"
+              size="xs"
               onClick={save}
+              loading={saving}
               disabled={saving || uploading || !canEdit || !!activeRecovery}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-foreground bg-primary rounded hover:bg-primary-hover disabled:opacity-50"
             >
-              {saving ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Save className="w-3.5 h-3.5" />
-              )}
+              <Save className="size-3.5" aria-hidden />
               {uiText("Save")}
-            </button>
+            </Button>
           )}
           {isMarkdown && mode === "preview" && !accessDenied && (
             <Button
@@ -569,37 +571,73 @@ export default function DocumentDetailPage({
               {uiText(" Download")}
             </button>
           )}
-        </div>
+        </header>
 
-        <div className="min-h-0 flex-1 overflow-auto px-4 py-5 pb-24 sm:px-6 md:pb-6">
+        <div
+          className={
+            editing
+              ? "flex min-h-0 flex-1 flex-col"
+              : "min-h-0 flex-1 overflow-auto px-4 py-5 pb-24 sm:px-6 md:pb-6"
+          }
+        >
           {/* Markdown: edit or preview */}
           {isMarkdown &&
             (mode === "edit" ? (
-              <div className="flex flex-col h-full">
-                <textarea
-                  readOnly={accessDenied || !!activeRecovery}
-                  disabled={saving}
-                  ref={textareaRef}
-                  value={draftBody}
-                  onChange={(e) => setDraftBody(e.target.value)}
-                  onPaste={(e) => {
-                    if (e.clipboardData.files.length) {
-                      e.preventDefault();
-                      handleImages(e.clipboardData.files);
-                    }
-                  }}
-                  onDrop={(e) => {
-                    if (e.dataTransfer.files.length) {
-                      e.preventDefault();
-                      handleImages(e.dataTransfer.files);
-                    }
-                  }}
-                  placeholder={uiText(
-                    "# Document\n\nWrite markdown. Paste or drop images to embed them.",
-                  )}
-                  className="w-full flex-1 min-h-0 resize-none bg-surface text-foreground font-mono text-sm border border-border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <div className="mt-1 text-xs text-muted-foreground">
+              <>
+                <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-2">
+                  <section
+                    className="flex min-h-0 min-w-0 flex-col bg-background"
+                    aria-label={uiText("Markdown source")}
+                  >
+                    <div className="flex items-center gap-2 border-b border-border bg-card px-4 py-2 text-xs font-medium text-muted-foreground">
+                      <FileText className="size-3.5" aria-hidden />
+                      {uiText("Markdown source")}
+                    </div>
+                    <textarea
+                      aria-label={uiText("Markdown source")}
+                      readOnly={accessDenied || !!activeRecovery}
+                      disabled={saving}
+                      ref={textareaRef}
+                      value={draftBody}
+                      onChange={(e) => setDraftBody(e.target.value)}
+                      onPaste={(e) => {
+                        if (e.clipboardData.files.length) {
+                          e.preventDefault();
+                          handleImages(e.clipboardData.files);
+                        }
+                      }}
+                      onDrop={(e) => {
+                        if (e.dataTransfer.files.length) {
+                          e.preventDefault();
+                          handleImages(e.dataTransfer.files);
+                        }
+                      }}
+                      placeholder={uiText(
+                        "# Document\n\nWrite markdown. Paste or drop images to embed them.",
+                      )}
+                      className="min-h-0 w-full flex-1 resize-none bg-transparent px-5 py-4 font-mono text-sm leading-6 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-6"
+                    />
+                  </section>
+                  <section
+                    aria-label={uiText("Live preview")}
+                    className="hidden min-h-0 min-w-0 flex-col border-s border-border bg-card lg:flex"
+                  >
+                    <div className="flex items-center gap-2 border-b border-border px-4 py-2 text-xs font-medium text-muted-foreground">
+                      <Eye className="size-3.5" aria-hidden />
+                      {uiText("Live preview")}
+                    </div>
+                    <div className="min-h-0 flex-1 overflow-auto px-6 py-5 lg:px-8">
+                      {livePreviewBody.trim() ? (
+                        <MarkdownView source={livePreviewBody} className="mx-auto max-w-3xl" />
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          {uiText("The preview updates as you write.")}
+                        </p>
+                      )}
+                    </div>
+                  </section>
+                </div>
+                <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-border bg-surface-container-low px-4 py-2 text-xs text-muted-foreground">
                   {uploading ? (
                     <span className="flex items-center gap-1.5">
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -608,8 +646,9 @@ export default function DocumentDetailPage({
                   ) : (
                     uiText("Markdown · paste or drop images to embed")
                   )}
+                  {unsaved && <span>{uiText("Unsaved changes")}</span>}
                 </div>
-              </div>
+              </>
             ) : draftBody ? (
               <div ref={printableRef} className="mx-auto w-full max-w-3xl px-1 sm:px-4">
                 <MarkdownView source={draftBody} />

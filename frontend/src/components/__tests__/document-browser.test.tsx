@@ -17,7 +17,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -161,6 +161,41 @@ describe("DocumentBrowser", () => {
     expect(screen.getByRole("button", { name: /^Next$/ })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: /^Previous$/ }));
     expect(await screen.findByText("Guide 0")).toBeInTheDocument();
+  });
+
+  it("keeps the empty upload area unavailable to a Model reader", async () => {
+    renderApp(<DocumentBrowser modelId={42} canCreate={false} />, {
+      routes: { "GET /api/v1/documents?model_id=42&limit=101&offset=0": json([]) },
+    });
+    expect(await screen.findByText("No attachments yet.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Drop files here or click to upload/ })).toBeNull();
+  });
+
+  it("continues attaching dropped files after one file is refused", async () => {
+    const uploaded: string[] = [];
+    renderApp(<DocumentBrowser modelId={42} canCreate />, {
+      routes: {
+        "GET /api/v1/documents?model_id=42&limit=101&offset=0": json([]),
+        "POST /api/v1/documents": (_url, init) => {
+          if (!(init?.body instanceof FormData)) throw new Error("Expected attachment form data");
+          const file = init.body.get("file");
+          if (!(file instanceof File)) throw new Error("Expected an attachment file");
+          uploaded.push(file.name);
+          return file.name === "refused.pdf"
+            ? json({ detail: "unsupported_file_type" }, 415)
+            : json(aDocument({ model_id: 42, name: "Manual", filename: file.name, kind: "pdf" }));
+        },
+      },
+    });
+    const area = await screen.findByRole("button", { name: /Drop files here or click to upload/ });
+    fireEvent.drop(area, {
+      dataTransfer: {
+        types: ["Files"],
+        files: [new File(["refused"], "refused.pdf"), new File(["accepted"], "manual.pdf")],
+      },
+    });
+    await waitFor(() => expect(uploaded).toEqual(["refused.pdf", "manual.pdf"]));
+    await waitFor(() => expect(area).toBeEnabled());
   });
 
   describe("read recovery", () => {

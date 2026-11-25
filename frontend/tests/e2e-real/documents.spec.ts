@@ -85,7 +85,8 @@ test.describe("documents", () => {
     await page.getByRole("button", { name: "Edit" }).click();
     await page.getByPlaceholder(/Write markdown/).fill("# Step one\n\nUse the M3 bolts.");
     await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByText("Use the M3 bolts.")).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Markdown source" })).toBeHidden();
+    await expect(page.getByText("Use the M3 bolts.", { exact: true })).toBeVisible();
 
     // It shows up as a card back on the Documents tab.
     await page.goto(`/?c=${col}&v=docs`);
@@ -178,8 +179,29 @@ test.describe("Model attachments", () => {
     await page.goto(`/models/${modelId}`);
     await collapseNavigationSidebar(page);
     await page.getByRole("tab", { name: /^Files(?: \d+)?$/ }).click();
-    await expect(page.getByText(/No attachments yet\./)).toBeVisible();
-    await page.screenshot({ path: info.outputPath("model-files-empty.png") });
+    const pane = page.getByRole("region", { name: /^Attachments/ });
+    const dropzone = pane.getByRole("button", { name: /Drop files here or click to upload/ });
+    await expect(dropzone).toBeVisible();
+    await dropzone.screenshot({ path: info.outputPath("attachments-dropzone.png") });
+    const picker = page.waitForEvent("filechooser");
+    await dropzone.click();
+    expect((await picker).isMultiple()).toBe(true);
+    const keyboardPicker = page.waitForEvent("filechooser");
+    await dropzone.press("Enter");
+    expect((await keyboardPicker).isMultiple()).toBe(true);
+    const addAttachment = pane.getByRole("button", { name: "Add attachment", exact: true });
+    await addAttachment.click();
+    const attachmentMenu = page.getByRole("menu").filter({
+      has: page.getByRole("menuitem", { name: "Attach file", exact: true }),
+    });
+    await expect(attachmentMenu).toHaveAttribute("data-state", "open");
+    await attachmentMenu.screenshot({
+      animations: "disabled",
+      path: info.outputPath("attachments-menu.png"),
+    });
+    await expect(attachmentMenu).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await page.keyboard.press("Escape");
+    await expect(addAttachment).toBeFocused();
     const modelUrl = page.url();
 
     const videoBytes = Buffer.from([0, 0, 0, 24, 102, 116, 121, 112]);
@@ -187,18 +209,38 @@ test.describe("Model attachments", () => {
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aEioAAAAASUVORK5CYII=",
       "base64",
     );
-    const pane = page.getByRole("region", { name: /^Attachments/ });
-    for (const [name, mimeType, buffer] of [
-      ["assembly.pdf", "application/pdf", minimalPdf()],
-      ["reference.png", "image/png", photo],
-      ["build.mp4", "video/mp4", videoBytes],
-    ] as const) {
-      const selection = page.waitForEvent("filechooser");
-      await pane.getByRole("button", { name: "Add attachment", exact: true }).click();
-      await page.getByRole("menuitem", { name: "Attach file", exact: true }).click();
-      await (await selection).setFiles({ name, mimeType, buffer });
-      await expect(pane.getByRole("link", { name: new RegExp(name.split(".")[0]!) })).toBeVisible();
-    }
+    const files = await page.evaluateHandle(
+      ({ pdf, image }) => {
+        const transfer = new DataTransfer();
+        transfer.items.add(
+          new File([new Uint8Array(pdf)], "assembly.pdf", { type: "application/pdf" }),
+        );
+        transfer.items.add(
+          new File([new Uint8Array(image)], "reference.png", { type: "image/png" }),
+        );
+        return transfer;
+      },
+      { pdf: Array.from(minimalPdf()), image: Array.from(photo) },
+    );
+    await dropzone.dispatchEvent("dragenter", { dataTransfer: files });
+    await expect(pane.getByText("Drop files to attach", { exact: true })).toBeVisible();
+    await pane
+      .getByRole("button", { name: /Drop files to attach/ })
+      .dispatchEvent("dragover", { dataTransfer: files });
+    await pane
+      .getByRole("button", { name: /Drop files to attach/ })
+      .dispatchEvent("drop", { dataTransfer: files });
+    await files.dispose();
+    await expect(pane.getByRole("link", { name: /assembly/ })).toBeVisible();
+    await expect(pane.getByRole("link", { name: /reference/ })).toBeVisible();
+
+    const selection = page.waitForEvent("filechooser");
+    await addAttachment.click();
+    await page.getByRole("menuitem", { name: "Attach file", exact: true }).click();
+    await (
+      await selection
+    ).setFiles({ name: "build.mp4", mimeType: "video/mp4", buffer: videoBytes });
+    await expect(pane.getByRole("link", { name: /build/ })).toBeVisible();
 
     await page.reload();
     await expect(pane.getByRole("link", { name: /assembly/ })).toBeVisible();
@@ -241,6 +283,11 @@ test.describe("Model attachments", () => {
     await page
       .getByPlaceholder(/Write markdown/)
       .fill("## Parts\n\n| Part | Count |\n| --- | --- |\n| Bolt | 4 |");
+    const livePreview = page.getByRole("region", { name: "Live preview", exact: true });
+    await expect(livePreview.getByRole("cell", { name: "Bolt" })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Markdown source" })).toBeVisible();
+    await expect(page.getByText("Unsaved changes", { exact: true })).toBeVisible();
+    await page.screenshot({ path: info.outputPath("editor-live-preview.png") });
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page).toHaveURL(/\/documents\/\d+$/);
     await page.getByRole("link", { name: "Back to model", exact: true }).click();

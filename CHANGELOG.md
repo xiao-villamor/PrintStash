@@ -18,6 +18,7 @@
 
 ### Added
 
+- Model attachments accept file drops and clicks on the empty upload area, and the Markdown editor shows a live preview beside the draft.
 - Model attachments open in an in-app reader. Write Markdown directly on a model and export it using the browser’s Save as PDF dialog.
 
 - The 3D viewer uses the saved material color of single-color 3MF projects when the file provides one.
