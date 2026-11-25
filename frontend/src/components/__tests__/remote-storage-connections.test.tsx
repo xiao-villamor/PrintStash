@@ -472,7 +472,7 @@ describe("RemoteStorageConnections ownership recovery", () => {
         "GET /api/v1/storage-connections": json({ detail: "unavailable" }, 503),
       },
     });
-    const region = screen.getByRole("region", { name: "Remote storage" });
+    const region = screen.getByRole("group", { name: "Connections" });
     expect(await within(region).findByRole("alert")).toHaveTextContent(
       "Connections could not be loaded.",
     );
@@ -632,7 +632,7 @@ describe("RemoteStorageConnections authoritative lifetimes", () => {
       },
     });
     expect(await screen.findByText("Workshop storage")).toBeVisible();
-    const region = screen.getByRole("region", { name: "Remote storage" });
+    const region = screen.getByRole("group", { name: "Connections" });
     expect(within(region).getByRole("alert")).toHaveTextContent(
       "Storage providers could not be loaded.",
     );

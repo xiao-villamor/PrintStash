@@ -356,13 +356,14 @@ describe("ProviderConnectionsPanel", () => {
   it("preserves a failed disconnect confirmation", async () => {
     vi.mocked(api.disconnectProvider).mockRejectedValue(new Error("failed"));
     renderPanel();
-    await userEvent.click(await screen.findByRole("button", { name: "Disconnect" }));
+    const disconnect = await screen.findByRole("button", { name: "Disconnect" });
+    await userEvent.click(disconnect);
     const dialog = screen.getByRole("dialog");
     await userEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
     await waitFor(() => expect(screen.getByRole("alert")).toBeVisible());
     expect(dialog).toBeVisible();
     expect(within(dialog).getByText(/failed/)).toBeVisible();
-    expect(screen.getByText("Connected", { exact: true })).toBeVisible();
+    expect(disconnect).toBeVisible();
   });
 
   it("preserves a failed revocation confirmation", async () => {
@@ -394,12 +395,12 @@ describe("ProviderConnectionsPanel", () => {
       void client.refetchQueries({ queryKey: ["provider-accounts", "connections"] });
     });
     await userEvent.click(within(dialog).getByRole("button", { name: "Connect Cults" }));
-    await screen.findByText("Connected", { exact: true });
+    await screen.findByRole("button", { name: "Disconnect" });
     await act(async () => {
       stale.resolve([]);
       await stale.promise;
     });
-    expect(screen.getByText("Connected", { exact: true })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Disconnect" })).toBeVisible();
     expect(client.getQueryData(["provider-accounts", "connections"])).toEqual([
       { provider: "cults", connected: true, updated_at: "2026-08-24T01:00:00Z" },
     ]);

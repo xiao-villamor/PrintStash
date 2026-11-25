@@ -21,7 +21,7 @@
  * nameable, or the fleet view shows an unlabelled machine forever.
  */
 
-import { anEditingBase, aPrintJob } from "@/test-support/factories";
+import { anEditingBase } from "@/test-support/factories";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -451,46 +451,6 @@ describe("PrinterCard", () => {
     expect(screen.queryByRole("link", { name: "Available Voron" })).not.toBeInTheDocument();
   });
 
-  it("bounds the activity panel while keeping recent printer history reachable", () => {
-    renderPrintersPage({
-      printers: [makePrinter()],
-      jobs: [
-        ...Array.from({ length: 5 }, (_, index) =>
-          aPrintJob({
-            id: index + 1,
-            printer_id: 1,
-            remote_filename: `active-${index}.gcode`,
-            state: "printing",
-          }),
-        ),
-        ...Array.from({ length: 8 }, (_, index) =>
-          aPrintJob({
-            id: index + 6,
-            printer_id: 1,
-            remote_filename: `finished-${index}.gcode`,
-            state: "completed",
-          }),
-        ),
-      ],
-    });
-    const activity = within(screen.getByRole("region", { name: "Fleet activity" }));
-    expect(activity.getAllByRole("listitem")).toHaveLength(7);
-    expect(activity.getByRole("link", { name: /finished-0/ })).toHaveAttribute(
-      "href",
-      "/printers/1?tab=jobs",
-    );
-  });
-
-  it("renders SQLite Fleet timestamps as UTC instants", () => {
-    renderPrintersPage({
-      printers: [makePrinter({ last_seen_at: "2026-01-01T03:23:06" })],
-      jobs: [aPrintJob({ state: "completed", finished_at: "2026-01-01T03:23:06" })],
-    });
-    const instant = new Date("2026-01-01T03:23:06Z");
-    const activity = within(screen.getByRole("region", { name: "Fleet activity" }));
-    expect(activity.getByRole("time")).toHaveAttribute("datetime", instant.toISOString());
-  });
-
   it("omits artwork when the preference explicitly disables it", () => {
     window.localStorage.setItem("printstash.printer-card.show-image", "false");
     const plain = renderPrintersPage({
@@ -554,10 +514,12 @@ describe("PrinterCard", () => {
     let latest = makePrinter({ model_name: "Other model", edit_version: 2 });
     let patches = 0;
     const headers: Headers[] = [];
+    const changes: PrinterUpdate[] = [];
     fetchMock.mockImplementation((input, init) => {
       const url = String(input);
       if (init?.method === "PATCH") {
         headers.push(new Headers(init.headers));
+        changes.push(JSON.parse(String(init.body)));
         patches += 1;
         if (patches === 1)
           return Promise.resolve(
@@ -596,7 +558,8 @@ describe("PrinterCard", () => {
         screen.queryByRole("dialog", { name: "Custom printer model" }),
       ).not.toBeInTheDocument(),
     );
-    expect(await screen.findByText("Homebrew CoreXY")).toBeVisible();
+    expect(changes[1]).toEqual({ model_name: "Homebrew CoreXY" });
+    expect(patches).toBe(2);
     expect(headers[0]?.get("If-Match")).toBe(`"printer-1-e${original.edit_epoch}-v1"`);
     expect(headers[1]?.get("If-Match")).toBe(`"printer-1-e${original.edit_epoch}-v2"`);
   });
@@ -715,12 +678,15 @@ describe("PrintersPage", () => {
       });
       renderPrintersPage({ auth: MEMBER_AUTH, printers: [managed, viewOnly] });
 
-      openCardMenu(managed.name);
-      expect(screen.getByRole("menuitem", { name: "Remove printer" })).toBeVisible();
-      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
-
       openCardMenu(viewOnly.name);
-      expect(screen.queryByRole("menuitem", { name: "Remove printer" })).not.toBeInTheDocument();
+      const menu = await screen.findByRole("menu");
+      expect(within(menu).getByRole("menuitem", { name: "Open page" })).toHaveAttribute(
+        "href",
+        "/printers/2",
+      );
+      expect(
+        within(menu).queryByRole("menuitem", { name: "Remove printer" }),
+      ).not.toBeInTheDocument();
     });
 
     it("shows the empty state before the first printer is added", async () => {

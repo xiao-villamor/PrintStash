@@ -5,7 +5,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { Outlet, useLocation } from "@tanstack/react-router";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { multipartDetailOptions } from "@/features/library/multipart";
 import { clearLogin } from "@/lib/auth-store";
@@ -21,6 +21,8 @@ import {
   type RenderAppOptions,
 } from "@/test-support/render";
 import type { CollectionRead, MultipartModelRead } from "@/types";
+
+afterEach(() => vi.unstubAllGlobals());
 
 function renderApp(ui: ReactElement, options: RenderAppOptions = {}) {
   return renderApplication(ui, {
@@ -1011,6 +1013,7 @@ describe("MultipartModelDetailPage", () => {
   });
 
   it("saves an external image as the set cover", async () => {
+    vi.stubGlobal("IntersectionObserver", undefined);
     const user = userEvent.setup();
     const detail = aMultipart({
       part_count: 1,
@@ -1042,7 +1045,7 @@ describe("MultipartModelDetailPage", () => {
     await waitFor(() => expect(requestsWithMethod("PUT")).toHaveLength(1));
     expect(JSON.parse(requestsWithMethod("PUT")[0].body).cover_image_url).toBe(coverImageUrl);
     expect(await screen.findByTitle("Custom cover image")).toBeVisible();
-    expect(screen.getByRole("img", { name: "Desk organiser" })).toHaveAttribute(
+    expect(await screen.findByRole("img", { name: "Desk organiser" })).toHaveAttribute(
       "src",
       coverImageUrl,
     );
