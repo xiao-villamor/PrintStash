@@ -3612,7 +3612,9 @@ describe("SettingsPanel", () => {
       await user.click(screen.getByRole("button", { name: "Reset metrics" }));
 
       expect(await screen.findByText("Card metrics reset.")).toBeInTheDocument();
-      expect(screen.getByRole("combobox", { name: "Metric 1" })).not.toHaveValue("material");
+      const first = screen.getByRole("combobox", { name: "Metric 1" });
+      expect(first).toHaveValue("print_time");
+      expect(first).toHaveAccessibleDescription("1h 24m");
     });
   });
 

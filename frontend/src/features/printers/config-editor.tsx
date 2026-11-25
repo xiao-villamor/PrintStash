@@ -374,7 +374,7 @@ function ConfigFileWorkspace({
                 </p>
               </div>
               <div
-                className="printer-config-editor rounded-lg border bg-background font-mono text-sm focus-within:ring-2 focus-within:ring-ring"
+                className="printer-config-editor rounded-lg border bg-field-surface font-mono text-sm focus-within:ring-2 focus-within:ring-ring"
                 style={editorStyle}
               >
                 <div

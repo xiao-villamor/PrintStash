@@ -85,7 +85,7 @@ export function LibraryFindBar({
             onClose();
           }
         }}
-        className="h-8 w-56 rounded-md border border-input bg-background px-2.5 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="h-8 w-56 rounded-md border border-input bg-field-surface px-2.5 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
       <span
         role="status"

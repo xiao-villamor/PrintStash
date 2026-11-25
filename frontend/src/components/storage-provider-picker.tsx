@@ -256,7 +256,7 @@ export function StorageProviderPicker(props: {
               <select
                 className={cn(
                   inputClasses,
-                  "bg-surface-container-lowest font-sans normal-case tracking-normal text-on-surface focus-visible:ring-ring",
+                  "bg-field-surface font-sans normal-case tracking-normal text-on-surface focus-visible:ring-ring",
                 )}
                 value={props.providerId}
                 disabled={props.disabled}

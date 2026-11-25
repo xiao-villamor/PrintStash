@@ -127,7 +127,7 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
                 <label className="space-y-1 text-sm">
                   {t("auditSchedule.cadence")}
                   <select
-                    className="w-full rounded-md border border-input bg-background p-2"
+                    className="w-full rounded-md border border-input bg-field-surface p-2"
                     value={policy.cadence}
                     onChange={(event) =>
                       setPolicy({
@@ -144,7 +144,7 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
                   <label className="space-y-1 text-sm">
                     {t("auditSchedule.weekday")}
                     <select
-                      className="w-full rounded-md border border-input bg-background p-2"
+                      className="w-full rounded-md border border-input bg-field-surface p-2"
                       value={policy.weekday}
                       onChange={(event) =>
                         setPolicy({ ...policy, weekday: Number(event.target.value) })
@@ -254,7 +254,7 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
                   <label className="space-y-1 text-sm">
                     {t("auditSchedule.notifications")}
                     <select
-                      className="w-full rounded-md border border-input bg-background p-2"
+                      className="w-full rounded-md border border-input bg-field-surface p-2"
                       value={policy.notification_threshold ?? "warning"}
                       onChange={(event) => {
                         const value = event.target.value;

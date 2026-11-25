@@ -676,7 +676,7 @@
   "Adds a brand-neutral printer visual above each card.": "Adds a brand-neutral printer visual above each card.",
   "Automatically promote a revision to known-good after its first successful print. A manual failed/archived verdict is never overridden.": "Automatically promote a revision to known-good after its first successful print. A manual failed/archived verdict is never overridden.",
   "Currency used to display cost figures in statistics and filament pricing.": "Currency used to display cost figures in statistics and filament pricing.",
-  "Choose which 3 stats appear on each model card in the grid.": "Choose which 3 stats appear on each model card in the grid.",
+  "Select a sample value to change the metric shown on your model cards.": "Select a sample value to change the metric shown on your model cards.",
   "Choose which metadata fields appear on model detail pages.": "Choose which metadata fields appear on model detail pages.",
   "Soft-deleted models stay restorable until the retention window expires.": "Soft-deleted models stay restorable until the retention window expires.",
   "Restore models or remove them permanently from storage.": "Restore models or remove them permanently from storage.",

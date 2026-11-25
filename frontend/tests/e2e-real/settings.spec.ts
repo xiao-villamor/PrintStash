@@ -1009,6 +1009,27 @@ test.describe("settings", () => {
     await expect(page.getByText(keyName)).toHaveCount(0);
   });
 
+  test("edits a metric from its sample value on the model card", async ({ page }, testInfo) => {
+    await page.goto("/settings?section=design");
+    await collapseNavigationSidebar(page);
+    const card = page.getByRole("article", { name: "Example bracket", exact: true });
+    const first = card.getByRole("combobox", { name: "Metric 1", exact: true });
+    await expect(first).toHaveAccessibleDescription("1h 24m");
+    await card.evaluate((element) => element.scrollIntoView({ block: "center" }));
+    await page.screenshot({ path: testInfo.outputPath("metric-card.png") });
+
+    // The displayed sample value is a hit target for its native picker.
+    await first.click({ position: { x: 24, y: 12 } });
+    await expect.poll(() => first.evaluate((select) => select.matches(":open"))).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("metric-picker.png") });
+    await first.getByRole("option", { name: "Material", exact: true }).click();
+    await expect(first).toHaveAccessibleDescription("PLA");
+
+    await page.reload();
+    await expect(first).toHaveValue("material");
+    await expect(first).toHaveAccessibleDescription("PLA");
+  });
+
   test("change display currency persists", async ({ page }) => {
     await page.goto("/settings");
     await page.getByRole("button", { name: "Appearance" }).click();

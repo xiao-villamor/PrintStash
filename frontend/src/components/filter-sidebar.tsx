@@ -1505,7 +1505,7 @@ export function FilterSidebarContent({
                         setTagFilter(e.target.value);
                         setShowAllTags(false);
                       }}
-                      className="w-full pl-7 pr-2 py-1.5 text-sm border border-border rounded bg-muted text-foreground font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-primary transition-colors"
+                      className="w-full pl-7 pr-2 py-1.5 text-sm border border-border rounded bg-field-surface text-foreground font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-primary transition-colors"
                     />
                     {tagFilter && (
                       <button
@@ -1780,7 +1780,7 @@ export function FilterSidebar(props: FilterSidebarProps) {
             </span>
             <input
               data-tree-filter
-              className={`block w-full min-w-0 pl-7 pr-6 border border-border rounded text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring ${props.collectionsOnly ? "h-[34px] bg-card text-xs" : "py-1.5 text-sm bg-muted"}`}
+              className={`block w-full min-w-0 pl-7 pr-6 border border-border rounded text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring ${props.collectionsOnly ? "h-[34px] bg-field-surface text-xs" : "py-1.5 text-sm bg-field-surface"}`}
               placeholder={
                 props.collectionsOnly ? uiText("Filter collections") : uiText("Filter outliner...")
               }

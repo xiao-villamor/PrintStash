@@ -429,7 +429,7 @@ export function SearchGenerationControls({
               <label className="space-y-1 text-sm">
                 {t("aiSearch.indexDimension")}
                 <select
-                  className="block w-full rounded-md border border-input bg-background p-2"
+                  className="block w-full rounded-md border border-input bg-field-surface p-2"
                   value={dimension}
                   onChange={(event) => setDimension(Number(event.target.value))}
                 >
@@ -444,7 +444,7 @@ export function SearchGenerationControls({
               <label className="space-y-1 text-sm">
                 {t("aiSearch.quantization")}
                 <select
-                  className="block w-full rounded-md border border-input bg-background p-2"
+                  className="block w-full rounded-md border border-input bg-field-surface p-2"
                   value={quantization}
                   onChange={(event) => {
                     const value = event.target.value;
@@ -460,7 +460,7 @@ export function SearchGenerationControls({
               <label className="space-y-1 text-sm">
                 {t("aiSearch.backend")}
                 <select
-                  className="block w-full rounded-md border border-input bg-background p-2"
+                  className="block w-full rounded-md border border-input bg-field-surface p-2"
                   value={indexBackend}
                   onChange={(event) => {
                     const value = event.target.value;

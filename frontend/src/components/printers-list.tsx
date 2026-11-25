@@ -395,7 +395,7 @@ export function PrintersPage() {
                     <select
                       value={selectedGroup ?? ""}
                       onChange={(event) => setSelectedGroup(event.target.value || null)}
-                      className="h-8 w-37.5 min-w-0 rounded-md border border-input bg-card px-2.5 text-sm text-foreground"
+                      className="h-8 w-37.5 min-w-0 rounded-md border border-input bg-field-surface px-2.5 text-sm text-foreground"
                     >
                       <option value="">{uiText("All groups")}</option>
                       {printerGroups.map(([name]) => (

@@ -676,7 +676,7 @@
   "Adds a brand-neutral printer visual above each card.": "Añade una imagen neutral sobre cada tarjeta.",
   "Automatically promote a revision to known-good after its first successful print. A manual failed/archived verdict is never overridden.": "Marca automáticamente una revisión como válida tras su primera impresión correcta. Nunca sustituye un estado manual fallido o archivado.",
   "Currency used to display cost figures in statistics and filament pricing.": "Moneda usada para costes en estadísticas y precios de filamento.",
-  "Choose which 3 stats appear on each model card in the grid.": "Elige las 3 estadísticas visibles en cada tarjeta de modelo.",
+  "Select a sample value to change the metric shown on your model cards.": "Selecciona un valor de ejemplo para cambiar la métrica de tus tarjetas de modelo.",
   "Choose which metadata fields appear on model detail pages.": "Elige los metadatos visibles en las páginas de modelo.",
   "Soft-deleted models stay restorable until the retention window expires.": "Los modelos eliminados se pueden restaurar hasta que venza la retención.",
   "Restore models or remove them permanently from storage.": "Restaura modelos o elimínalos permanentemente del almacenamiento.",

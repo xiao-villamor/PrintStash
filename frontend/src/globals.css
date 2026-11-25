@@ -45,6 +45,7 @@
     --preview-image-matte: #eef0f3;
     --dialog-shadow: rgb(16 24 40 / 0.12);
     --input: #8190a3;
+    --field-surface: var(--card);
     --ring: #4d6f9b;
     --radius: 6px;
     --radius-popover: 8px;
@@ -159,6 +160,7 @@
     --plate: #252c37;
     --dialog-shadow: rgb(0 0 0 / 0.5);
     --input: #697b92;
+    --field-surface: var(--surface-container-high);
     --ring: #7896bc;
 
     --primary-hover: #5276a5;
@@ -256,6 +258,24 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
+  }
+
+  :where(
+    input:not(
+      [type="checkbox"],
+      [type="radio"],
+      [type="range"],
+      [type="file"],
+      [type="color"],
+      [type="button"],
+      [type="submit"],
+      [type="reset"],
+      [type="image"]
+    ),
+    select,
+    textarea
+  ) {
+    background-color: var(--field-surface);
   }
 
   select {

@@ -6,7 +6,7 @@ import {
 } from "@/lib/settings-sections";
 import { SettingsNav, type SettingsNavGroup } from "@/components/settings-nav";
 import { SettingsToc } from "@/components/settings-toc";
-import { CardMetricsPreview, ThemeTiles } from "@/components/settings-appearance-parts";
+import { CardMetricsEditor, ThemeTiles } from "@/components/settings-appearance-parts";
 
 import { useContentReveal } from "@/lib/use-content-reveal";
 import { StorageConnectionReview } from "@/components/storage-connection-review";
@@ -179,10 +179,9 @@ import {
   writeMetadataPreferences,
 } from "@/lib/metadata-preferences";
 import {
-  CARD_METRIC_OPTIONS,
   CardMetricId,
-  CardMetrics,
   DEFAULT_CARD_METRICS,
+  cardMetricsInDisplayOrder,
   readCardMetrics,
   writeCardMetrics,
 } from "@/lib/card-metrics";
@@ -191,6 +190,7 @@ import { localeDefinitions, SUPPORTED_LOCALES, useI18n, type MessageKey } from "
 import "./settings-panel.css";
 import {
   SettingsCard,
+  SettingsGroupHead,
   SettingsEmptyRow,
   SettingsNotice,
   SettingsChoiceCards,
@@ -348,7 +348,6 @@ const BTN_ICON = buttonVariants({ variant: "outline", size: "icon-sm" });
 // destructive token, like Remove and Revoke elsewhere in Settings.
 const BTN_DANGER = SETTINGS_BUTTON_DANGER;
 const INPUT = SETTINGS_FIELD;
-const APPEARANCE_SELECT = cn(INPUT, "bg-card dark:bg-surface-container-high");
 
 function formatBytes(bytes: number | null | undefined): string {
   if (bytes == null) return "...";
@@ -1698,7 +1697,7 @@ export function SettingsPanel() {
   }
 
   function updateCardMetric(slot: 0 | 1 | 2, id: CardMetricId) {
-    const next: CardMetrics = [cardMetrics[0], cardMetrics[1], cardMetrics[2]];
+    const next = cardMetricsInDisplayOrder(cardMetrics);
     next[slot] = id;
     setCardMetrics(next);
     writeCardMetrics(next);
@@ -5381,7 +5380,7 @@ export function SettingsPanel() {
                           preferenceCommand.blocked ||
                           backupPolicy.isPending
                         }
-                        className={APPEARANCE_SELECT}
+                        className={INPUT}
                       >
                         {CURRENCY_OPTIONS.map((opt) => (
                           <option key={opt.code} value={opt.code}>
@@ -5394,48 +5393,28 @@ export function SettingsPanel() {
                 </SettingsCard>
 
                 {/* Card metrics picker */}
-                <SettingsCard
-                  title={uiText("Model card metrics")}
-                  description={uiText(
-                    "Choose which 3 stats appear on each model card in the grid.",
-                  )}
-                  action={
-                    <button type="button" onClick={resetCardMetrics} className={BTN_SECONDARY}>
-                      {uiText("Reset metrics")}
-                    </button>
-                  }
+                <section
+                  className="settings-card scroll-mt-4"
+                  role="group"
+                  aria-label={uiText("Model card metrics")}
                 >
-                  <div className="flex flex-col gap-6 py-4 lg:flex-row lg:items-start">
-                    <div className="min-w-0 flex-1">
-                      {([0, 1, 2] as const).map((slot) => (
-                        <label key={slot} className="settings-preference-row">
-                          <span>{uiText("Metric {value1}", { value1: String(slot + 1) })}</span>
-                          <select
-                            value={cardMetrics[slot]}
-                            onChange={(event) => {
-                              const option = CARD_METRIC_OPTIONS.find(
-                                (item) => item.id === event.target.value,
-                              );
-                              if (option) updateCardMetric(slot, option.id);
-                            }}
-                            className={APPEARANCE_SELECT}
-                          >
-                            {CARD_METRIC_OPTIONS.map((opt) => (
-                              <option
-                                key={opt.id}
-                                value={opt.id}
-                                disabled={cardMetrics.some((id, i) => i !== slot && id === opt.id)}
-                              >
-                                {opt.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      ))}
-                    </div>
-                    <CardMetricsPreview metrics={cardMetrics} />
-                  </div>
-                </SettingsCard>
+                  <SettingsGroupHead
+                    placement="outside"
+                    title={uiText("Model card metrics")}
+                    description={uiText(
+                      "Select a sample value to change the metric shown on your model cards.",
+                    )}
+                    action={
+                      <button type="button" onClick={resetCardMetrics} className={BTN_SECONDARY}>
+                        {uiText("Reset metrics")}
+                      </button>
+                    }
+                  />
+                  <CardMetricsEditor
+                    metrics={cardMetricsInDisplayOrder(cardMetrics)}
+                    onChange={updateCardMetric}
+                  />
+                </section>
 
                 <SettingsCard
                   title={uiText("Model metadata")}

@@ -256,7 +256,7 @@ export function SearchFilterControls({
           <label className="block space-y-1 text-sm">
             {uiText("Filter")}
             <select
-              className="h-10 w-full border border-input bg-background px-3 text-sm"
+              className="h-10 w-full border border-input bg-field-surface px-3 text-sm"
               value={addKey}
               onChange={(event) => {
                 setAddKey(event.target.value);
@@ -333,7 +333,7 @@ export function SearchFilterControls({
               {uiText("Filter value")}
               {choiceValues(addKey).length ? (
                 <select
-                  className="h-10 w-full border border-input bg-background px-3"
+                  className="h-10 w-full border border-input bg-field-surface px-3"
                   value={addValue}
                   onChange={(event) => setAddValue(event.target.value)}
                 >
@@ -376,7 +376,7 @@ export function SearchFilterControls({
             {editing?.key.includes("duration") && ` (${t("aiSearch.seconds")})`}
             {editing?.key === "print_outcome" || editing?.key === "printed" ? (
               <select
-                className="block w-full rounded-md border border-input bg-background p-2"
+                className="block w-full rounded-md border border-input bg-field-surface p-2"
                 value={editValue}
                 onChange={(event) => setEditValue(event.target.value)}
               >

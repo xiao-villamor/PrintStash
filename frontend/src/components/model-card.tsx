@@ -28,6 +28,7 @@ import type { GalleryDragSource } from "@/components/model-gallery-drag";
 
 import {
   CARD_METRIC_STORAGE_KEY,
+  cardMetricsInDisplayOrder,
   CardMetricId,
   CardMetrics,
   readCardMetrics,
@@ -202,10 +203,7 @@ function ModelCardInner({
       ? null
       : (revision?.revision_status ?? model.recommended_revision_status);
   const ps = model.print_summary;
-  const factMetrics: readonly CardMetricId[] =
-    metrics.join(",") === "layer_height,print_time,filament_weight"
-      ? ["print_time", "filament_weight", "layer_height"]
-      : metrics;
+  const factMetrics = cardMetricsInDisplayOrder(metrics);
   const canEditTags = model.effective_role === "edit" || model.effective_role === "admin";
   // A plain click already opens the page when no inspector takes it.
   const opensPage = Boolean(onInspect) && !selectable;

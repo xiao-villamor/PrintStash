@@ -48,7 +48,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
 
-const selectClass = "h-10 w-full rounded-md border border-input bg-background px-3 text-sm";
+const selectClass = "h-10 w-full rounded-md border border-input bg-field-surface px-3 text-sm";
 function denied(error: Error | null) {
   return error instanceof ApiError && [401, 403, 404].includes(error.status);
 }

@@ -21,7 +21,7 @@ import { MachineMaterials } from "@/components/printer-machine";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const selectClassName =
-  "h-10 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-disabled disabled:opacity-50";
+  "h-10 w-full rounded-md border border-input bg-field-surface px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-disabled disabled:opacity-50";
 
 /** Whether a manual feed is loaded with filament, known empty, or unreported. */
 type SlotState = "loaded" | "empty" | "unknown";
@@ -522,7 +522,7 @@ function MaterialEditor({
                 </label>
                 <label className="block space-y-2 text-[13px] font-medium">
                   {uiText("Color")}
-                  <div className="flex h-10 items-center gap-3 border border-input bg-card px-3">
+                  <div className="flex h-10 items-center gap-3 border border-input bg-field-surface px-3">
                     <input
                       type="color"
                       aria-label={uiText("Color")}

@@ -27,7 +27,8 @@
 - Saved views actions open beside the sidebar's three-dot button. An empty list offers the action to save the current view.
 - Fleet cards use the latest print status automatically. The routing map animates active prints alongside queued routes.
 - Fleet cards keep their height when a print starts or finishes.
-- Appearance uses lighter field surfaces for currency and model card metrics in both themes.
+- Text fields, textareas and selectors use the same field surface throughout the app in both themes.
+- Change Model card metrics directly on the example card and see the new sample value immediately.
 
 ### Performance
 

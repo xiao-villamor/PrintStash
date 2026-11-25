@@ -123,7 +123,7 @@ export function NewMultipartModelModal({
               onChange={(event) => setDescription(event.target.value)}
               placeholder={t("multipart.descriptionPlaceholder")}
               rows={1}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="w-full rounded-md border border-input bg-field-surface px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </label>
         </div>

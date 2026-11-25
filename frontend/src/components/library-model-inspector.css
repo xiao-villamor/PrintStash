@@ -541,7 +541,7 @@ details.library-inspector-section > summary {
 .library-inspector-workspace select {
   border-color: transparent;
   border-radius: var(--radius);
-  background-color: color-mix(in srgb, var(--foreground) 8%, transparent);
+  background-color: var(--field-surface);
 }
 .library-inspector-workspace select:hover {
   background-color: color-mix(in srgb, var(--foreground) 12%, transparent);

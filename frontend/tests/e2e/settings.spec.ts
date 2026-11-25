@@ -133,21 +133,18 @@ test.describe("settings route", () => {
     await expect.poll(() => probes).toBe(answered + 1);
   });
   for (const theme of ["light", "dark"] as const) {
-    test(`uses the Appearance field surface in ${theme} mode`, async ({ page }, testInfo) => {
+    test(`uses one field surface across forms in ${theme} mode`, async ({ page }, testInfo) => {
       await page.addInitScript((value) => localStorage.setItem("printstash.theme", value), theme);
       await page.goto("/settings?section=design");
       await collapseNavigationSidebar(page);
+      const token = theme === "dark" ? "--surface-container-high" : "--card";
       const fields = [
         page.getByLabel("Display currency"),
         page.getByRole("combobox", { name: "Metric 1", exact: true }),
         page.getByRole("combobox", { name: "Metric 2", exact: true }),
         page.getByRole("combobox", { name: "Metric 3", exact: true }),
       ];
-      await expect(fields[0]).toBeEnabled();
-      await fields[3].scrollIntoViewIfNeeded();
-      await page.screenshot({ path: testInfo.outputPath(`appearance-${theme}.png`) });
-      const token = theme === "dark" ? "--surface-container-high" : "--card";
-      for (const field of fields) {
+      async function checkFill(field: (typeof fields)[number]) {
         const { actual, expected } = await field.evaluate((element, surface) => {
           const style = getComputedStyle(element);
           const canvas = document.createElement("canvas").getContext("2d")!;
@@ -156,6 +153,25 @@ test.describe("settings route", () => {
         }, token);
         expect(actual).toBe(expected);
       }
+
+      await expect(fields[0]).toBeEnabled();
+      await page
+        .getByRole("article", { name: "Example bracket", exact: true })
+        .evaluate((element) => element.scrollIntoView({ block: "center" }));
+      await page.screenshot({ path: testInfo.outputPath(`appearance-${theme}.png`) });
+      for (const field of fields) await checkFill(field);
+
+      await page.goto("/settings?section=sso");
+      const issuer = page.getByLabel("Issuer URL", { exact: true });
+      await expect(issuer).toBeEnabled();
+      await page.screenshot({ path: testInfo.outputPath(`sso-${theme}.png`) });
+      await checkFill(issuer);
+      await checkFill(page.getByLabel("Client secret", { exact: true }));
+
+      await page.goto("/printers");
+      await page.getByRole("button", { name: "Add printer", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Add printer", exact: true });
+      await checkFill(dialog.getByLabel("Notes (optional)", { exact: true }));
     });
   }
 

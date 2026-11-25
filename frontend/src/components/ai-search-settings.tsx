@@ -148,7 +148,7 @@ function SettingsForm({
             <label className="block space-y-1 text-sm">
               {t("aiSearch.sparseModel")}
               <select
-                className="block w-full rounded-md border border-input bg-background p-2"
+                className="block w-full rounded-md border border-input bg-field-surface p-2"
                 value={draft.sparse_model_id ?? ""}
                 onChange={(event) =>
                   setDraft({
@@ -216,7 +216,7 @@ function SettingsForm({
             <label className="space-y-1 text-sm">
               {t("aiSearch.lexicalBackend")}
               <select
-                className="block w-full rounded-md border border-input bg-background p-2"
+                className="block w-full rounded-md border border-input bg-field-surface p-2"
                 value={draft.lexical_backend}
                 onChange={(event) =>
                   setDraft({
@@ -316,7 +316,7 @@ function SettingsForm({
           <label className="mt-3 block space-y-1 text-sm">
             {t("aiSearch.chatEndpoint")}
             <select
-              className="block w-full rounded-md border border-input bg-background p-2"
+              className="block w-full rounded-md border border-input bg-field-surface p-2"
               value={draft.chat_endpoint_id ?? ""}
               onChange={(event) => {
                 const endpoint = initial.endpoints.find(

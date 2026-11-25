@@ -117,7 +117,7 @@ export function ViewerToolbar({
             <select
               aria-label={uiText("Screenshot resolution")}
               title={uiText("Screenshot resolution")}
-              className="h-9 rounded-md border border-border bg-card px-2 text-xs text-card-foreground"
+              className="h-9 rounded-md border border-border bg-field-surface px-2 text-xs text-foreground"
               value={screenshotScale}
               disabled={!viewerReady}
               onChange={(event) => {

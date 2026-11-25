@@ -244,7 +244,7 @@ export function LibrarySearch({
           autoComplete="off"
           spellCheck={false}
           aria-label={t("aiSearch.searchLibrary")}
-          className={`block h-9 w-full rounded border border-input bg-card py-2 pl-9 ${inputPadding} text-[13px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring [&::-webkit-search-cancel-button]:hidden`}
+          className={`block h-9 w-full rounded border border-input bg-field-surface py-2 pl-9 ${inputPadding} text-[13px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring [&::-webkit-search-cancel-button]:hidden`}
           placeholder={t(aiActive ? "aiSearch.describeModel" : "Search Models, files and tags")}
           value={value}
           onChange={(event) => changeValue(event.target.value)}

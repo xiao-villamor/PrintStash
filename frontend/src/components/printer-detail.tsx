@@ -1468,7 +1468,7 @@ export function PrinterSettings({
         className={
           compact
             ? inputClasses
-            : "w-full resize-y rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-disabled disabled:opacity-50"
+            : "w-full resize-y rounded-md border border-input bg-field-surface px-3 py-2 text-sm text-foreground ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-disabled disabled:opacity-50"
         }
       />
     </Field>
