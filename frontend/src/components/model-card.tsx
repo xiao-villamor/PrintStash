@@ -24,6 +24,7 @@ import { useModelPreviewCard } from "@/lib/use-model-preview-card";
 import { Localized } from "@/components/ui/localized";
 import "./library-items.css";
 import { MODEL_DND_MIME, captureModelDrag } from "@/lib/model-dnd";
+import { setModelDragImage } from "@/lib/model-drag-image";
 
 import {
   CARD_METRIC_STORAGE_KEY,
@@ -241,17 +242,27 @@ function ModelCardInner({
             data-favorites={favorites || undefined}
             data-selected={selected || undefined}
             data-inspected={inspected || undefined}
+            data-dragging={dragging || undefined}
             draggable={draggable}
             onDragStart={
               draggable
                 ? (e) => {
                     e.dataTransfer.setData(MODEL_DND_MIME, JSON.stringify(captureModelDrag(model)));
                     e.dataTransfer.effectAllowed = "move";
+                    setModelDragImage(
+                      e.dataTransfer,
+                      e.currentTarget,
+                      displayModelName(model.name),
+                    );
+                    preview.clearHover();
                     setDragging(true);
                   }
                 : undefined
             }
-            onDragEnd={() => setDragging(false)}
+            onDragEnd={() => {
+              preview.clearHover();
+              setDragging(false);
+            }}
             className={`${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} library-model-card group group/selection-card relative flex h-full flex-col min-w-0 bg-card border rounded-lg transition-[color,background-color,border-color,opacity,scale] duration-press ease-out active:scale-[0.99] motion-reduce:active:scale-100 overflow-hidden ${
               draggable ? "cursor-grab active:cursor-grabbing" : ""
             } ${dragging ? "opacity-40" : ""} ${
@@ -262,6 +273,7 @@ function ModelCardInner({
           >
             {onToggleSelect && (
               <LibraryCardSelection
+                className="library-model-card-selection"
                 selecting={selectable}
                 checked={selected}
                 onChange={() => onToggleSelect(model.id)}

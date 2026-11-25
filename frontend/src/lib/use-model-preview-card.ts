@@ -34,6 +34,10 @@ export function useModelPreviewCard(
   const view = preview.selected === "cover" ? null : preview.displayed;
   const image = views.find((candidate) => candidate.id === view?.id);
   const imageKind = image?.image_kind ?? (image ? "render" : coverImageKind(previews, size));
+  function clearHover() {
+    setHovered(false);
+    preview.cancelIntent();
+  }
   // Pointer travel between the image and its overlaid controls is one hover.
   function leave(event: { currentTarget: Element; relatedTarget: EventTarget | null }) {
     const next = event.relatedTarget;
@@ -45,8 +49,7 @@ export function useModelPreviewCard(
       next.closest("[data-model-preview], [data-model-preview-controls]") !== null
     )
       return;
-    setHovered(false);
-    preview.cancelIntent();
+    clearHover();
   }
   function enter() {
     if (hovered) return;
@@ -59,6 +62,7 @@ export function useModelPreviewCard(
     view,
     imageKind,
     hovered,
+    clearHover,
     enter,
     leave,
     open,

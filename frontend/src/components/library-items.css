@@ -24,16 +24,16 @@
     opacity: 0;
   }
   .library-preview-controls[data-hovered] .library-preview-reveal,
-  .library-model-card:focus-within .library-preview-reveal {
+  .library-model-card:has(:focus-visible) .library-preview-reveal {
     opacity: 1;
   }
-  .library-model-card:not(:focus-within)
+  .library-model-card:not(:has(:focus-visible))
     .library-preview-controls:not([data-hovered])
     :is(.library-preview-arrow, .library-preview-views, .library-card-open-page) {
     pointer-events: none;
   }
 }
-.library-model-card:focus-within .library-preview-reveal {
+.library-model-card:has(:focus-visible) .library-preview-reveal {
   transition: none;
 }
 @media (prefers-reduced-motion: reduce) {
@@ -116,7 +116,7 @@
   opacity: 0;
 }
 .library-model-card[data-favorites]:hover [data-library-card-tags],
-.library-model-card[data-favorites]:focus-within [data-library-card-tags] {
+.library-model-card[data-favorites]:has(:focus-visible) [data-library-card-tags] {
   opacity: 1;
 }
 
@@ -237,15 +237,19 @@
     transition: opacity var(--duration-press) var(--ease-out);
   }
   .library-model-card:hover .library-card-revision-actions,
-  .library-model-card:focus-within .library-card-revision-actions {
+  .library-model-card:has(:focus-visible) .library-card-revision-actions {
     opacity: 1;
     pointer-events: auto;
   }
   /* The result ends in an ellipsis instead of being cut by the actions. */
   .library-model-card:hover .library-card-result,
-  .library-model-card:focus-within .library-card-result {
+  .library-model-card:has(:focus-visible) .library-card-result {
     padding-right: 68px;
   }
+}
+.library-model-card[data-dragging]
+  :is(.library-preview-controls, .library-model-card-selection, .library-card-revision-actions) {
+  visibility: hidden;
 }
 .library-model-card:has(.library-preview[data-image-kind="photo"])
   > div

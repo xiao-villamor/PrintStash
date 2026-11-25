@@ -21,7 +21,7 @@ export function LibraryCardSelection({
         "absolute left-1.5 top-1.5 z-10 transition-opacity duration-fast",
         !selecting &&
           !checked &&
-          "[@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:pointer-events-none group-hover/selection-card:opacity-100 group-hover/selection-card:pointer-events-auto group-focus-within/selection-card:opacity-100 group-focus-within/selection-card:pointer-events-auto",
+          "[@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:pointer-events-none group-hover/selection-card:opacity-100 group-hover/selection-card:pointer-events-auto group-has-[:focus-visible]/selection-card:opacity-100 group-has-[:focus-visible]/selection-card:pointer-events-auto",
         className,
       )}
     >

@@ -1,7 +1,7 @@
 /** Collection card context actions persist through the real API. */
 import { randomUUID } from "node:crypto";
 import { expect, test } from "./helpers";
-import { collapseNavigationSidebar, stlFor } from "./util";
+import { collapseNavigationSidebar, modelCard, stlFor, uploadModel } from "./util";
 import type { DerivativeRead, ModelRead } from "../../src/types/models";
 
 const coverImage = Buffer.from(
@@ -10,6 +10,40 @@ const coverImage = Buffer.from(
 );
 
 test.describe("collection card", () => {
+  test("moves a gallery card into a collection using a native drag", async ({ page }) => {
+    const name = `e2e-gallery-move-${randomUUID().slice(0, 8)}`;
+    const folder = `${name}-folder`;
+    const created = await page.request.post("/api/v1/collections", { data: { name: folder } });
+    expect(created.status()).toBe(201);
+    const { id } = await created.json();
+    let modelId: string | undefined;
+    try {
+      await uploadModel(page, name);
+      const source = modelCard(page, name);
+      const href = await source.getAttribute("href");
+      modelId = href?.match(/\/models\/(\d+)/)?.[1];
+      if (!modelId) throw new Error("Missing Model card destination");
+      await collapseNavigationSidebar(page);
+
+      const target = page.getByRole("main").locator(`[data-collection-path="${folder}"]`);
+      await source.locator("[data-model-preview]").dragTo(target);
+      await expect(page.getByText("Moved", { exact: true })).toBeVisible();
+      const moved = await page.request.get(`/api/v1/models/${modelId}`);
+      expect(moved.status()).toBe(200);
+      expect((await moved.json()).collection).toBe(folder);
+
+      await target.getByRole("button", { name: new RegExp(`^${folder}\\b`) }).click();
+      await page.reload();
+      await expect(modelCard(page, name)).toBeVisible();
+    } finally {
+      if (modelId) {
+        expect((await page.request.delete(`/api/v1/models/${modelId}`)).status()).toBe(204);
+        expect((await page.request.delete(`/api/v1/models/${modelId}/purge`)).status()).toBe(200);
+      }
+      expect((await page.request.delete(`/api/v1/collections/${id}`)).status()).toBe(204);
+    }
+  });
+
   test("renames a collection from its card", async ({ page }) => {
     const original = `e2e-rename-${randomUUID().slice(0, 8)}`;
     const renamed = `${original}-renamed`;

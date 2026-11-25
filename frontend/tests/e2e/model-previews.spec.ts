@@ -1,9 +1,11 @@
 /** Issue #434: real browser input, request scheduling and decoded-image replacement. */
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { writeFile } from "node:fs/promises";
 import { aModelListItem } from "../../src/test-support/factories";
 import type { ArtifactPreviews, ModelPreviews } from "../../src/types/previews";
 import { NO_PREVIEWS } from "../../src/types/previews";
 import { useMockApi } from "./_setup";
+import { collapseNavigationSidebar } from "../e2e-real/util";
 
 declare global {
   interface Window {
@@ -96,6 +98,54 @@ function secondaries(paths: string[]) {
 }
 
 test.describe("Model preview browsing", () => {
+  test("uses a compact preview for a gallery drag", async ({ page }, testInfo) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("printstash.theme", "dark");
+      const setDragImage = DataTransfer.prototype.setDragImage;
+      DataTransfer.prototype.setDragImage = function (element, x, y) {
+        if (element instanceof HTMLCanvasElement) {
+          document.body.dataset.dragImage = element.toDataURL();
+          document.body.dataset.dragImageSize = `${element.width}x${element.height}`;
+        }
+        setDragImage.call(this, element, x, y);
+      };
+    });
+    const { card } = await library(page);
+    await collapseNavigationSidebar(page);
+    const heading = page.getByRole("main").getByRole("heading", { name: "All Models" });
+    await card.locator("[data-model-preview]").dragTo(heading);
+
+    const body = page.locator("body");
+    await expect(body).toHaveAttribute("data-drag-image-size", /^\d+x48$/);
+    const size = await body.getAttribute("data-drag-image-size");
+    expect(Number(size?.split("x")[0])).toBeLessThan(160);
+    const data = await page.locator("body").getAttribute("data-drag-image");
+    expect(data).toMatch(/^data:image\/png;base64,/);
+    await writeFile(
+      testInfo.outputPath("model-drag-preview.png"),
+      Buffer.from(data?.split(",")[1] ?? "", "base64"),
+    );
+  });
+
+  test("hides gallery controls after cancelling a focused card drag", async ({ page }) => {
+    const { card, next } = await library(page);
+    await collapseNavigationSidebar(page);
+    const navigation = card.locator("[data-preview-navigation]");
+    await card.locator("[data-model-preview]").hover();
+    await next.click();
+    await expect(next).toBeFocused();
+    await expect(navigation).toHaveCSS("opacity", "1");
+
+    const heading = page.getByRole("main").getByRole("heading", { name: "All Models" });
+    await card.locator("[data-model-preview]").dragTo(heading);
+
+    await expect(navigation).toHaveCSS("opacity", "0");
+    await expect(card.getByRole("checkbox", { name: "Select Bracket 1" }).locator("..")).toHaveCSS(
+      "opacity",
+      "0",
+    );
+  });
+
   test("browses all five flat-model views from the card", async ({ page }) => {
     const { card, next } = await library(page, planar);
     await card.hover();
