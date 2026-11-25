@@ -2741,10 +2741,7 @@ export function SettingsPanel() {
         />
 
         {!trashPage && (
-          <div
-            ref={settingsTabsRef}
-            className="settings-tabs border-b border-border pb-3 lg:hidden"
-          >
+          <div ref={settingsTabsRef} className="border-b border-border pb-3 lg:hidden">
             <TabBar
               tabs={visibleSettingsSections.map((section) => {
                 const Icon = section.icon;

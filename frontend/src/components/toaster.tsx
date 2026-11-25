@@ -11,11 +11,13 @@ export function Toaster() {
       position="bottom-right"
       dir={localeDefinitions[locale].direction}
       containerAriaLabel={uiText("Notifications")}
-      className="!bottom-20 md:!bottom-4 group toast"
+      closeButton
+      gap={8}
+      className="printstash-toaster !bottom-20 md:!bottom-4"
       toastOptions={{
         closeButtonAriaLabel: uiText("Close"),
         style: {
-          fontFamily: "var(--font-mono), monospace",
+          fontFamily: "var(--font-sans), sans-serif",
           fontSize: "13px",
           borderRadius: "var(--radius-popover)",
           border: "1px solid var(--outline-variant)",

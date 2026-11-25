@@ -8,7 +8,8 @@
 - Keep the Model details title and actions clear while scrolling past the image preview. Show G-code in the full Model page and give its toolbar and layer controls dedicated space.
 - Open the Library details preview without briefly showing the cover during loading.
 - Round sidebar highlights, workspace menu highlights, and image preview indicators. Soften preview arrows with a filled background. Match Library loading cards to the current card design.
-- Keep the Settings header and navigation in place while the current panel scrolls. Use a shorter, inset scrollbar and align the paired Overview cards.
+- Keep the Settings header in place. Scroll the sidebar options and the current panel independently. Use a shorter, inset scrollbar and align the paired Overview cards.
+- Group identical confirmation notices, dismiss them sooner, and provide a visible close button.
 - Let each browser show or hide the view name and position on Model cards.
 - Label the AI Search toggle and give the Library search field a neutral focus border.
 - Give dark Library cards a neutral hover border and a shadow that follows the rounded corners. Use the same tighter corners on Models, Multipart Models, and their loading cards.

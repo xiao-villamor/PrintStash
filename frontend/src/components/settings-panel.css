@@ -507,7 +507,7 @@
   gap: 2px;
 }
 
-/* The route frame and navigation stay still while the current panel scrolls. */
+/* The route frame stays still while the options and current panel scroll. */
 div:has(> .settings-page) {
   overflow: clip;
   scrollbar-gutter: auto;
@@ -522,22 +522,6 @@ div:has(> .settings-page) {
 
 .settings-layout {
   min-height: 0;
-}
-
-/* Use the fixed tab strip if the vertical navigation cannot fit. */
-@media (width >= 64rem) and (height < 54rem) {
-  .settings-tabs {
-    display: block;
-  }
-
-  .settings-layout {
-    display: flex;
-  }
-
-  .settings-layout > .settings-nav,
-  .settings-layout > aside {
-    display: none;
-  }
 }
 
 .settings-page {
@@ -557,6 +541,14 @@ div:has(> .settings-page) {
 
 .settings-frame > :not(.settings-layout) {
   flex: none;
+}
+
+.settings-nav-options {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: none;
 }
 
 .settings-main {

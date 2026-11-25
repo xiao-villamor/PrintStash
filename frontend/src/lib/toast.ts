@@ -4,8 +4,8 @@
  * Thin toast wrapper over the ``sonner`` library.
  *
  * RULES:
- * - ``toast.error`` for API errors and failures → red, auto-dismiss after 5 s.
- * - ``toast.success`` for confirmations (saved, deleted, sent) → green, 3 s.
+ * - ``toast.error`` for API errors and failures → auto-dismiss after 6 s.
+ * - ``toast.success`` for confirmations → one visible copy, auto-dismiss after 2.5 s.
  * - ``toast.warning`` for auth-related nudges → amber, 5 s.
  * - ``toast`` (neutral) for one-off info messages.
  *
@@ -81,9 +81,9 @@ export const toast = {
     sonner.error(msg, { duration: 6000 });
   },
 
-  /** Show a green success toast. */
+  /** Confirm the operation without adding duplicate messages to the stack. */
   success(message: string): void {
-    sonner.success(message, { duration: 3000 });
+    sonner.success(message, { id: `confirmation:${message}`, duration: 2500 });
   },
 
   successAction(message: string, label: string, onClick: () => void, id?: string): void {

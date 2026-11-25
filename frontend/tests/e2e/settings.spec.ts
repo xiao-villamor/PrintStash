@@ -66,6 +66,37 @@ test.describe("settings route", () => {
     expect(await title.boundingBox()).toEqual(originalTitle);
   });
 
+  test("scrolls the Settings options independently in a short desktop window", async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 1920, height: 800 });
+    await page.goto("/settings?section=design");
+    await collapseNavigationSidebar(page);
+
+    const navigation = page.getByRole("navigation", { name: "Settings sections" });
+    const search = navigation.getByRole("searchbox", { name: "Search settings" });
+    const back = navigation.getByRole("button", { name: "Back to library" });
+    const about = navigation.getByRole("button", { name: "About", exact: true });
+    const content = page.locator(".settings-main");
+    await expect(search).toBeInViewport();
+    await expect(about).not.toBeInViewport();
+    const originalSearch = await search.boundingBox();
+    const originalBack = await back.boundingBox();
+    const originalContentScroll = await content.evaluate((element) => element.scrollTop);
+
+    await navigation.getByRole("button", { name: "Library sources", exact: true }).hover();
+    await page.mouse.wheel(0, 650);
+
+    await expect(about).toBeInViewport({ ratio: 1 });
+    await expect(navigation.locator(".settings-nav-options")).toHaveCSS("scrollbar-width", "none");
+    expect(await search.boundingBox()).toEqual(originalSearch);
+    expect(await back.boundingBox()).toEqual(originalBack);
+    expect(await content.evaluate((element) => element.scrollTop)).toBe(originalContentScroll);
+    await page.screenshot({ path: testInfo.outputPath("settings-options-scrolled.png") });
+    await about.click();
+    await expect(page).toHaveURL(/section=about/);
+  });
+
   test("keeps the active settings section visible at the bottom of the overview", async ({
     page,
   }, testInfo) => {
@@ -100,7 +131,7 @@ test.describe("settings route", () => {
     await page.screenshot({ path: testInfo.outputPath("overview-scrollbar.png") });
   });
 
-  test("aligns Overview cards and export actions side by side", async ({ page }, testInfo) => {
+  test("aligns the paired Overview groups", async ({ page }, testInfo) => {
     await page.goto("/settings?section=overview");
     await collapseNavigationSidebar(page);
     const overviewPairs = page.locator(".settings-overview-pair");
@@ -592,7 +623,7 @@ test.describe("settings route", () => {
   test("preview settings persist quality choices and queue image recreation", async ({ page }) => {
     await page.goto("/settings?section=previews");
 
-    await page.getByLabel("Preview quality").selectOption("detail");
+    await page.getByRole("radio", { name: "High detail · 2×" }).click();
     await expect
       .poll(() => page.evaluate(() => localStorage.getItem("printstash.preview.preferences:v1")))
       .toContain('"previewQuality":"detail"');
@@ -601,7 +632,7 @@ test.describe("settings route", () => {
       page.waitForRequest(
         (request) => request.url().includes("/api/v1/config") && request.method() === "PUT",
       ),
-      page.getByLabel("Model image quality").selectOption("1280"),
+      page.getByRole("radio", { name: "High · 1280 × 960" }).click(),
     ]);
 
     await Promise.all([
@@ -613,6 +644,30 @@ test.describe("settings route", () => {
       page.getByRole("button", { name: "Recreate all images" }).click(),
     ]);
     await expect(page.getByText("Model preview recreation queued.")).toBeVisible();
+  });
+
+  test("a repeated preview save confirmation can be closed immediately", async ({
+    page,
+  }, testInfo) => {
+    await page.goto("/settings?section=previews");
+    await collapseNavigationSidebar(page);
+    const quality = page.getByRole("radiogroup", { name: "Preview quality" });
+    await quality.getByRole("radio", { name: "High detail · 2×" }).click();
+    await quality.getByRole("radio", { name: "Performance · 1×" }).click();
+
+    const notifications = page.getByRole("region", { name: /^Notifications/ });
+    const message = notifications.getByText("Preview settings saved for this browser.", {
+      exact: true,
+    });
+    await expect(message).toHaveCount(1);
+    const close = notifications.getByRole("button", { name: "Close", exact: true });
+    await expect(close).toBeInViewport();
+    await close.hover();
+    await page.screenshot({ path: testInfo.outputPath("preview-confirmation.png") });
+    await close.click();
+    await expect(message).toHaveCount(0, { timeout: 1200 });
+    await page.reload();
+    await expect(quality.getByRole("radio", { name: "Performance · 1×" })).toBeChecked();
   });
 
   test("settings warns administrators when a newer release is available", async ({ page }) => {
