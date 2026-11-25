@@ -406,7 +406,7 @@ path outside a persistent mount loses state on container replacement.
 ### Background work
 
 The image's SQLite notification adapter is on by default. The image build
-applies an exact-source-checked patch to the locked DBOS 3.5.0 SDK and sets
+applies an exact-source-checked patch to the locked DBOS 3.7.0 SDK and sets
 `VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS=true`; startup verifies the patch's
 manifest and adapter hash, and an incompatible or missing patch refuses to
 start. A build with `--build-arg PRINTSTASH_DBOS_NOTIFICATIONS=false` keeps the

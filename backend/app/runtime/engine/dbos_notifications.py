@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-PATCH_VERSION = 3
+PATCH_VERSION = 4
 RECOVERY_SECONDS = 30.0
 RETRY_INITIAL_SECONDS = 0.25
 RETRY_MAX_SECONDS = 2.0
@@ -143,7 +143,7 @@ def verify_patch() -> None:
     try:
         manifest = json.loads((root / MANIFEST).read_text())
         valid = (
-            importlib.metadata.version("dbos") == "3.5.0"
+            importlib.metadata.version("dbos") == manifest["dbos_version"] == "3.7.0"
             and manifest["patch_version"] == PATCH_VERSION
             and set(manifest["files"]) == PATCH_FILES
             and manifest["adapter_sha256"]

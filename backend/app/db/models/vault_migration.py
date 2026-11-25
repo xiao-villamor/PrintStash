@@ -1,8 +1,8 @@
 """Durable migration plans, exact copy proofs and the active Vault epoch."""
 
-from datetime import datetime
 from uuid import uuid4
 
+from pydantic import NaiveDatetime
 from sqlalchemy import BigInteger, CheckConstraint, Column, Text, UniqueConstraint
 from sqlmodel import Field
 
@@ -18,7 +18,7 @@ class VaultGeneration(SQLModel, table=True):
     epoch: str = Field(default="0", max_length=64)
     activation_run_id: str | None = Field(default=None, max_length=64)
     manifest_sha256: str | None = Field(default=None, max_length=64)
-    first_write_at: datetime | None = None
+    first_write_at: NaiveDatetime | None = None
 
 
 class VaultMigrationRun(SQLModel, table=True):
@@ -42,10 +42,10 @@ class VaultMigrationRun(SQLModel, table=True):
     backup_summary_json: str = Field(
         default="{}", sa_column=Column(Text, nullable=False)
     )
-    expires_at: datetime
-    created_at: datetime = Field(default_factory=utcnow)
-    activated_at: datetime | None = None
-    cleanup_after: datetime | None = None
+    expires_at: NaiveDatetime
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    activated_at: NaiveDatetime | None = None
+    cleanup_after: NaiveDatetime | None = None
     error_code: str | None = Field(default=None, max_length=128)
     cleanup_findings: str = Field(default="[]", sa_column=Column(Text, nullable=False))
     journal_nonce: str = Field(
@@ -63,8 +63,8 @@ class VaultMigrationRun(SQLModel, table=True):
     phase_history_json: str = Field(
         default="[]", sa_column=Column(Text, nullable=False)
     )
-    started_at: datetime | None = None
-    last_activity_at: datetime = Field(default_factory=utcnow)
+    started_at: NaiveDatetime | None = None
+    last_activity_at: NaiveDatetime = Field(default_factory=utcnow)
     retryable: bool = False
     cleanup_outcome: str | None = Field(default=None, max_length=32)
     pre_audit_id: int | None = Field(default=None, foreign_key="vault_audit_runs.id")
@@ -93,7 +93,7 @@ class VaultMigrationObject(SQLModel, table=True):
     source_receipt: str | None = Field(default=None, sa_column=Column(Text))
     destination_receipt: str | None = Field(default=None, sa_column=Column(Text))
     state: str = Field(default="pending", max_length=32, index=True)
-    verified_at: datetime | None = None
+    verified_at: NaiveDatetime | None = None
     error_code: str | None = Field(default=None, max_length=128)
     retryable: bool = False
     baseline: bool = True

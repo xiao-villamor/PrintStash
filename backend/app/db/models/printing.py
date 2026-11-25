@@ -1,9 +1,9 @@
 """Printers, materials, print history and multipart manufacturing records."""
 
-from datetime import datetime
 from typing import ClassVar, Optional
 from uuid import uuid4
 
+from pydantic import NaiveDatetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -66,8 +66,8 @@ class FilamentProfile(SQLModel, table=True):
     density_g_cm3: Optional[float] = None
     diameter_mm: Optional[float] = None
 
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class PrinterProfile(SQLModel, table=True):
@@ -89,8 +89,8 @@ class PrinterProfile(SQLModel, table=True):
     nozzle_diameter_mm: Optional[float] = None
     notes: Optional[str] = None
 
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 for _profile in (FilamentProfile, PrinterProfile):
@@ -172,7 +172,7 @@ class Printer(SQLModel, table=True):
         sa_column=Column(Boolean, nullable=False, server_default="0", index=True),
     )
     drain_reason: Optional[str] = Field(default=None, max_length=512)
-    drain_updated_at: Optional[datetime] = None
+    drain_updated_at: Optional[NaiveDatetime] = None
     provider_material_sync_enabled: bool = Field(
         default=True,
         sa_column=Column(Boolean, nullable=False, server_default="1"),
@@ -184,15 +184,15 @@ class Printer(SQLModel, table=True):
 
     # Cached liveness info (refreshed by the live-state worker).
     status: PrinterStatus = Field(default=PrinterStatus.UNKNOWN, index=True)
-    last_seen_at: Optional[datetime] = None
+    last_seen_at: Optional[NaiveDatetime] = None
     last_error: Optional[str] = Field(default=None, max_length=512)
 
-    deleted_at: Optional[datetime] = Field(default=None, index=True)
+    deleted_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 # Read the settings version and database history together, without per-row queries.
@@ -220,11 +220,11 @@ class PrinterTool(SQLModel, table=True):
             SAEnum(MaterialSource), nullable=False, server_default="MANUAL"
         ),
     )
-    observed_at: Optional[datetime] = None
+    observed_at: Optional[NaiveDatetime] = None
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class PrinterMaterialSlot(SQLModel, table=True):
@@ -264,11 +264,11 @@ class PrinterMaterialSlot(SQLModel, table=True):
     spool_id: Optional[int] = Field(default=None, index=True)
     spool_name: Optional[str] = Field(default=None, max_length=256)
     spool_filament_id: Optional[int] = Field(default=None, index=True)
-    observed_at: Optional[datetime] = Field(default=None, index=True)
+    observed_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class PrintBatch(SQLModel, table=True):
@@ -303,8 +303,8 @@ class PrintBatch(SQLModel, table=True):
     )
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class PrintJob(SQLModel, table=True):
@@ -358,7 +358,7 @@ class PrintJob(SQLModel, table=True):
         ),
     )
     material_override_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    material_override_at: Optional[datetime] = None
+    material_override_at: Optional[NaiveDatetime] = None
     operator_gate_state: OperatorGateState = Field(
         default=OperatorGateState.NOT_REQUIRED,
         sa_column=Column(
@@ -369,10 +369,10 @@ class PrintJob(SQLModel, table=True):
         ),
     )
     operator_decided_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    operator_decided_at: Optional[datetime] = None
+    operator_decided_at: Optional[NaiveDatetime] = None
     provider_job_id: Optional[str] = Field(default=None, max_length=255, index=True)
     blocked_reason: Optional[str] = Field(default=None, max_length=255)
-    dispatch_claimed_at: Optional[datetime] = Field(default=None, index=True)
+    dispatch_claimed_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     dispatch_attempts: int = Field(
         default=0, sa_column=Column(Integer, nullable=False, server_default="0")
     )
@@ -412,7 +412,7 @@ class PrintJob(SQLModel, table=True):
     # Rows absorbed by the Bambu identity repair remain for audit/rollback and
     # are excluded by the live() scope. The survivor is intentionally the
     # earliest row in the identity group.
-    dedupe_absorbed_at: Optional[datetime] = Field(default=None, index=True)
+    dedupe_absorbed_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     dedupe_survivor_id: Optional[int] = Field(default=None, index=True)
 
     # Measured outcome, captured from Moonraker when the print finishes.
@@ -442,14 +442,14 @@ class PrintJob(SQLModel, table=True):
     # without a live Spoolman call at the finishing tick.
     spool_filament_id: Optional[int] = Field(default=None, index=True)
 
-    deleted_at: Optional[datetime] = Field(default=None, index=True)
+    deleted_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    started_at: Optional[datetime] = None
-    finished_at: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    started_at: Optional[NaiveDatetime] = None
+    finished_at: Optional[NaiveDatetime] = None
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class PrinterMaintenanceWindow(SQLModel, table=True):
@@ -457,15 +457,15 @@ class PrinterMaintenanceWindow(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     printer_id: int = Field(foreign_key="printers.id", index=True)
-    starts_at: datetime = Field(index=True)
-    ends_at: datetime = Field(index=True)
+    starts_at: NaiveDatetime = Field(index=True)
+    ends_at: NaiveDatetime = Field(index=True)
     reason: Optional[str] = Field(default=None, max_length=512)
-    deleted_at: Optional[datetime] = Field(default=None, index=True)
+    deleted_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class PrinterMaintenanceLog(SQLModel, table=True):
@@ -473,17 +473,17 @@ class PrinterMaintenanceLog(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     printer_id: int = Field(foreign_key="printers.id", index=True)
-    performed_at: datetime = Field(default_factory=utcnow, index=True)
+    performed_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
     category: str = Field(max_length=64, index=True)
     note: str = Field(max_length=4096)
     counter_value: Optional[float] = None
     counter_unit: Optional[str] = Field(default=None, max_length=32)
-    deleted_at: Optional[datetime] = Field(default=None, index=True)
+    deleted_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class PrinterFile(SQLModel, table=True):
@@ -498,11 +498,11 @@ class PrinterFile(SQLModel, table=True):
     size_bytes: Optional[int] = None
     sha256: Optional[str] = Field(default=None, max_length=64, index=True)
     matched_by: str = Field(default="external", max_length=32, index=True)
-    modified_at: Optional[datetime] = None
-    last_seen_at: datetime = Field(default_factory=utcnow, index=True)
-    missing_since: Optional[datetime] = Field(default=None, index=True)
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    modified_at: Optional[NaiveDatetime] = None
+    last_seen_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
+    missing_since: Optional[NaiveDatetime] = Field(default=None, index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class MultipartBuild(SQLModel, table=True):
@@ -520,12 +520,12 @@ class MultipartBuild(SQLModel, table=True):
     name: str = Field(max_length=255)
     object_quantity: int = Field(default=1)
     version: int = Field(default=0)
-    archived_at: datetime | None = Field(default=None)
+    archived_at: NaiveDatetime | None = Field(default=None)
     created_by: int | None = Field(
         default=None, foreign_key="users.id", ondelete="SET NULL"
     )
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class MultipartBuildPart(SQLModel, table=True):
@@ -543,8 +543,8 @@ class MultipartBuildPart(SQLModel, table=True):
     selected_model_id: int | None = Field(default=None)
     selected_choice_id: int | None = Field(default=None)
     revision_id: int | None = Field(default=None)
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class MultipartBuildAttempt(SQLModel, table=True):
@@ -568,9 +568,9 @@ class MultipartBuildAttempt(SQLModel, table=True):
     confirmed_by: int | None = Field(
         default=None, foreign_key="users.id", ondelete="SET NULL"
     )
-    confirmed_at: datetime | None = Field(default=None)
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    confirmed_at: NaiveDatetime | None = Field(default=None)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class MultipartBuildConfirmation(SQLModel, table=True):
@@ -589,4 +589,4 @@ class MultipartBuildConfirmation(SQLModel, table=True):
     idempotency_key: str = Field(max_length=128)
     requested_version: int
     valid_units: int
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)

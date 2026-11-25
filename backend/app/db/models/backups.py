@@ -1,8 +1,8 @@
 """Backup runs, destination results, retry attempts and garbage-collection runs."""
 
-from datetime import datetime
 from typing import Optional
 
+from pydantic import NaiveDatetime
 from sqlalchemy import (
     BigInteger,
     Column,
@@ -43,7 +43,7 @@ class GcRun(SQLModel, table=True):
     )
     digest: str = Field(max_length=64, index=True)
     retention_days: int
-    cutoff_at: datetime = Field(index=True)
+    cutoff_at: NaiveDatetime = Field(index=True)
     resource_count: int = 0
     candidate_pool_count: int = 0
     key_count: int = 0
@@ -51,13 +51,13 @@ class GcRun(SQLModel, table=True):
     scheduled: bool = False
     requested_by: Optional[int] = Field(default=None, foreign_key="users.id")
     approved_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    approved_at: Optional[datetime] = Field(default=None, index=True)
-    quarantine_until: Optional[datetime] = Field(default=None, index=True)
+    approved_at: Optional[NaiveDatetime] = Field(default=None, index=True)
+    quarantine_until: Optional[NaiveDatetime] = Field(default=None, index=True)
     backup_id: Optional[str] = Field(default=None, max_length=255)
     backup_source_ref: Optional[str] = Field(default=None, max_length=64)
     backup_provider_ref: Optional[str] = Field(default=None, max_length=64)
     backup_archive_sha256: Optional[str] = Field(default=None, max_length=64)
-    backup_verified_at: Optional[datetime] = None
+    backup_verified_at: Optional[NaiveDatetime] = None
     active_provider_ref: Optional[str] = Field(default=None, max_length=64)
     active_identity_evidence: Optional[str] = Field(
         default=None, sa_column=Column(Text, nullable=True)
@@ -67,9 +67,9 @@ class GcRun(SQLModel, table=True):
     )
     restore_generation: str = Field(default="", max_length=64)
     last_error: Optional[str] = Field(default=None, max_length=255)
-    created_at: datetime = Field(default_factory=utcnow, index=True)
-    updated_at: datetime = Field(default_factory=utcnow)
-    completed_at: Optional[datetime] = None
+    created_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
+    completed_at: Optional[NaiveDatetime] = None
 
 
 class GcItem(SQLModel, table=True):
@@ -86,10 +86,10 @@ class GcItem(SQLModel, table=True):
     run_id: int = Field(foreign_key="gc_runs.id", index=True, ondelete="CASCADE")
     resource_kind: str = Field(max_length=32, index=True)
     resource_id: int = Field(index=True)
-    deleted_at_snapshot: datetime
+    deleted_at_snapshot: NaiveDatetime
     key_count: int = 0
     size_bytes: int = Field(default=0, sa_column=Column(BigInteger, nullable=False))
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class BackupRun(SQLModel, table=True):
@@ -111,8 +111,8 @@ class BackupRun(SQLModel, table=True):
     storage_backend: str = Field(max_length=64)
     app_version: str = Field(max_length=64)
     error_code: Optional[str] = Field(default=None, max_length=128)
-    created_at: datetime = Field(default_factory=utcnow, index=True)
-    finished_at: Optional[datetime] = None
+    created_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
+    finished_at: Optional[NaiveDatetime] = None
 
 
 class BackupDestinationResult(SQLModel, table=True):
@@ -137,10 +137,10 @@ class BackupDestinationResult(SQLModel, table=True):
     )
     outcome: str = Field(default="pending", max_length=16, index=True)
     error_code: Optional[str] = Field(default=None, max_length=128)
-    published_at: Optional[datetime] = None
-    verified_at: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    published_at: Optional[NaiveDatetime] = None
+    verified_at: Optional[NaiveDatetime] = None
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class BackupRetryAttempt(SQLModel, table=True):
@@ -155,5 +155,5 @@ class BackupRetryAttempt(SQLModel, table=True):
     archive_sha256: Optional[str] = Field(default=None, max_length=64)
     outcome: str = Field(default="running", max_length=16)
     error_code: Optional[str] = Field(default=None, max_length=128)
-    created_at: datetime = Field(default_factory=utcnow)
-    finished_at: Optional[datetime] = None
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    finished_at: Optional[NaiveDatetime] = None

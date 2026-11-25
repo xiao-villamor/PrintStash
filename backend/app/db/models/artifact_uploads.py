@@ -1,8 +1,8 @@
 """Durable ownership and progress for resumable Artifact uploads."""
 
-from datetime import datetime
 from typing import ClassVar, Optional
 
+from pydantic import NaiveDatetime
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
@@ -93,9 +93,9 @@ class ArtifactUploadSession(SQLModel, table=True):
         ),
     )
     version: int = Field(default=0)
-    expires_at: datetime = Field(index=True)
-    created_at: datetime = Field(default_factory=utcnow, index=True)
-    updated_at: datetime = Field(default_factory=utcnow, index=True)
+    expires_at: NaiveDatetime = Field(index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
 
 
 class ArtifactUploadPart(SQLModel, table=True):
@@ -130,4 +130,4 @@ class ArtifactUploadPart(SQLModel, table=True):
     size_bytes: int = Field(sa_column=Column(BigInteger, nullable=False))
     sha256: str = Field(max_length=64)
     provider_receipt_json: Optional[str] = Field(default=None, sa_column=Column(Text))
-    created_at: datetime = Field(default_factory=utcnow, index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow, index=True)

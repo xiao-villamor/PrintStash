@@ -1,8 +1,8 @@
 """Human-editable generated text is separate from every library description."""
 
-from datetime import datetime
 from typing import ClassVar
 
+from pydantic import NaiveDatetime
 from sqlalchemy import CheckConstraint, Column, Index, Text, UniqueConstraint
 from sqlmodel import Field
 
@@ -80,9 +80,9 @@ class SubjectCaption(SQLModel, table=True):
     )
     attempts: int = 0
     error_code: str | None = Field(default=None, max_length=64)
-    retry_after: datetime | None = None
+    retry_after: NaiveDatetime | None = None
     lease_token: str | None = Field(default=None, max_length=32)
-    lease_expires_at: datetime | None = None
+    lease_expires_at: NaiveDatetime | None = None
     job_id: str | None = Field(default=None, max_length=64)
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)

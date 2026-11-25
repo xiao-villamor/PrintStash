@@ -1,8 +1,8 @@
 """Pending imports, accepted ingest requests and staged-upload ownership."""
 
-from datetime import datetime
 from typing import ClassVar, Optional
 
+from pydantic import NaiveDatetime
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
@@ -92,8 +92,8 @@ class InboxItemResult(SQLModel, table=True):
     )
     error_code: Optional[str] = Field(default=None, max_length=128)
     retryable: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class IngestRequest(SQLModel, table=True):
@@ -144,7 +144,7 @@ class IngestRequest(SQLModel, table=True):
     # page's files, a collection's members), read back by the selection that
     # follows it. Durable, so any process can serve the selection.
     manifest_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class StagingLease(SQLModel, table=True):
@@ -218,8 +218,8 @@ class StagingLease(SQLModel, table=True):
     )
     destination_key: Optional[str] = Field(default=None, max_length=2048)
     receipt_json: Optional[str] = Field(default=None, sa_column=Column(Text))
-    expires_at: datetime = Field(index=True)
-    created_at: datetime = Field(default_factory=utcnow, index=True)
+    expires_at: NaiveDatetime = Field(index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
 
 
 class InboxItem(SQLModel, table=True):
@@ -282,9 +282,9 @@ class InboxItem(SQLModel, table=True):
     error_code: Optional[str] = Field(default=None, max_length=128)
     retryable: bool = Field(default=False, index=True)
     attempt_count: int = Field(default=0)
-    created_at: datetime = Field(default_factory=utcnow, index=True)
-    updated_at: datetime = Field(default_factory=utcnow, index=True)
-    completed_at: Optional[datetime] = None
+    created_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
+    completed_at: Optional[NaiveDatetime] = None
     completion: Optional[InboxItemCompletion] = Field(
         default=None, sa_column=Column(String(16), nullable=True)
     )
@@ -325,9 +325,9 @@ class CaptureUploadSlot(SQLModel, table=True):
     )
     storage_key: Optional[str] = Field(default=None, max_length=2048, unique=True)
     receipt_json: Optional[str] = Field(default=None, sa_column=Column(Text))
-    uploaded_at: Optional[datetime] = Field(default=None, index=True)
-    created_at: datetime = Field(default_factory=utcnow, index=True)
-    updated_at: datetime = Field(default_factory=utcnow, index=True)
+    uploaded_at: Optional[NaiveDatetime] = Field(default=None, index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
 
 
 class IngestionEntry(SQLModel, table=True):
@@ -407,5 +407,5 @@ class IngestionEntry(SQLModel, table=True):
     )
     error_code: Optional[str] = Field(default=None, max_length=128)
     retryable: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)

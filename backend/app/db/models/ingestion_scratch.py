@@ -1,8 +1,8 @@
 """Durable custody of disposable ingest workspaces, distinct from input leases."""
 
-from datetime import datetime
 from enum import StrEnum
 
+from pydantic import NaiveDatetime
 from sqlalchemy import BigInteger, CheckConstraint, Column, ForeignKey, Index, String
 from sqlmodel import Field
 
@@ -106,5 +106,5 @@ class IngestionScratchWindow(SQLModel, table=True):
     )
     inode: int | None = Field(default=None, sa_column=Column(BigInteger, nullable=True))
     transferred_path: str | None = Field(default=None, max_length=2048)
-    available_at: datetime = Field(index=True)
-    created_at: datetime = Field(default_factory=utcnow)
+    available_at: NaiveDatetime = Field(index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)

@@ -1,6 +1,5 @@
 """Models, Artifacts, taxonomies, multipart compositions and saved library views."""
 
-from datetime import datetime
 from sys import float_info
 from typing import Any, ClassVar, List, Optional
 
@@ -10,6 +9,7 @@ from printstash_core.mesh.measurements import (
     VolumeState,
     VolumeUnavailableCause,
 )
+from pydantic import NaiveDatetime
 from sqlalchemy import (
     JSON,
     BigInteger,
@@ -148,7 +148,7 @@ class Metadata(SQLModel, table=True):
     )
     triangle_count: Optional[int] = None
 
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
     file: Optional["File"] = Relationship(back_populates="file_metadata")
 
@@ -168,8 +168,8 @@ class ArtifactMaterialRequirement(SQLModel, table=True):
     tool_index: int = Field(default=0)
     material_type: Optional[str] = Field(default=None, max_length=64)
     color_hex: Optional[str] = Field(default=None, max_length=16)
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class FilePlate(SQLModel, table=True):
@@ -274,16 +274,16 @@ class File(SQLModel, table=True):
     # Last time discovery read and hashed the source bytes. Metadata-only scans
     # remain cheap, while a rotating weekly sweep still catches content changes
     # on appliances that preserve both size and mtime.
-    source_verified_at: Optional[datetime] = Field(default=None, index=True)
+    source_verified_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     ingestion_key: Optional[str] = Field(
         default=None, max_length=64, unique=True, index=True
     )
     thumbnail_path: Optional[str] = Field(default=None, max_length=2048)
     # Durable demand: scans never convert unopened mesh previews.
-    viewer_requested_at: Optional[datetime] = Field(default=None, index=True)
+    viewer_requested_at: Optional[NaiveDatetime] = Field(default=None, index=True)
 
-    uploaded_at: datetime = Field(default_factory=utcnow, index=True)
-    deleted_at: Optional[datetime] = Field(default=None, index=True)
+    uploaded_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
+    deleted_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")
     purge_token: Optional[str] = Field(default=None, max_length=64, index=True)
 
@@ -326,12 +326,12 @@ class Collection(SQLModel, table=True):
         default=None, sa_column=Column(JSON(none_as_null=True), nullable=True)
     )
 
-    deleted_at: Optional[datetime] = Field(default=None, index=True)
+    deleted_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")
     purge_token: Optional[str] = Field(default=None, max_length=64, index=True)
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class Tag(SQLModel, table=True):
@@ -340,11 +340,11 @@ class Tag(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(max_length=64, unique=True, index=True)
     slug: str = Field(max_length=64, unique=True, index=True)
-    deleted_at: Optional[datetime] = Field(default=None, index=True)
+    deleted_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class ModelTagLink(SQLModel, table=True):
@@ -429,7 +429,7 @@ class PartGroup(SQLModel, table=True):
     name: str = Field(max_length=128)
     name_key: str = Field(max_length=128)
     sort_order: int = Field(default=0)
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class PartOption(SQLModel, table=True):
@@ -494,7 +494,7 @@ class PartOption(SQLModel, table=True):
     name_key: str = Field(max_length=128)
     sort_order: int = Field(default=0)
     is_default: bool = Field(default=False)
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class ModelStar(SQLModel, table=True):
@@ -508,7 +508,7 @@ class ModelStar(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="users.id", index=True, ondelete="CASCADE")
     model_id: int = Field(foreign_key="models.id", index=True, ondelete="CASCADE")
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class SavedView(SQLModel, table=True):
@@ -523,8 +523,8 @@ class SavedView(SQLModel, table=True):
     user_id: int = Field(foreign_key="users.id", index=True, ondelete="CASCADE")
     name: str = Field(max_length=128)
     filters_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class Model(SQLModel, table=True):
@@ -560,13 +560,13 @@ class Model(SQLModel, table=True):
     thumbnail_path: Optional[str] = Field(default=None, max_length=512)
     thumbnail_file_id: Optional[int] = Field(default=None, foreign_key="files.id")
 
-    deleted_at: Optional[datetime] = Field(default=None, index=True)
+    deleted_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")
     purge_token: Optional[str] = Field(default=None, max_length=64, index=True)
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow, index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
 
     files: List[File] = Relationship(
         back_populates="model",
@@ -639,10 +639,10 @@ class MultipartModel(SQLModel, table=True):
     cover_size_bytes: Optional[int] = Field(default=None, ge=0)
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow, index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
 
-    deleted_at: Optional[datetime] = Field(default=None, index=True)
+    deleted_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")
     purge_token: Optional[str] = Field(default=None, max_length=64, index=True)
 
@@ -664,7 +664,7 @@ class MultipartModelStar(SQLModel, table=True):
     multipart_model_id: int = Field(
         foreign_key="multipart_models.id", index=True, ondelete="CASCADE"
     )
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class MultipartPart(SQLModel, table=True):
@@ -697,8 +697,8 @@ class MultipartPart(SQLModel, table=True):
     name: str = Field(max_length=128)
     name_key: str = Field(max_length=128)
     sort_order: int = Field(default=0)
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class MultipartModelChoice(SQLModel, table=True):
@@ -758,7 +758,7 @@ class MultipartModelChoice(SQLModel, table=True):
     )
     label: Optional[str] = Field(default=None, max_length=128)
     sort_order: int = Field(default=0)
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class Document(SQLModel, table=True):
@@ -799,13 +799,13 @@ class Document(SQLModel, table=True):
     size_bytes: Optional[int] = None
     sha256: Optional[str] = Field(default=None, max_length=64)
 
-    deleted_at: Optional[datetime] = Field(default=None, index=True)
+    deleted_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")
     purge_token: Optional[str] = Field(default=None, max_length=64, index=True)
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow, index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
 
 
 class LibraryRevision(SQLModel, table=True):
