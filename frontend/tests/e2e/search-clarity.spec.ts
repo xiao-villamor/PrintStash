@@ -7,6 +7,34 @@ import { useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("search clarity", () => {
+  for (const [theme, fill] of [
+    ["light", "rgb(16, 24, 40)"],
+    ["dark", "rgb(237, 241, 247)"],
+  ] as const) {
+    test(`makes active AI search distinct in the ${theme} theme`, async ({ page }) => {
+      await page.addInitScript(
+        (selectedTheme) => localStorage.setItem("printstash.theme", selectedTheme),
+        theme,
+      );
+      await page.route("**/api/v1/search/status", (route) =>
+        route.fulfill({ json: searchStatus({ enabled: true, semantic_ready: true }) }),
+      );
+      await page.goto("/search?mode=lexical");
+      const ai = page.getByRole("button", { name: "AI Search", exact: true });
+      await expect(ai).toHaveText("AI Search");
+      await expect(ai).not.toHaveCSS("background-color", fill);
+      await ai.click();
+
+      await expect(ai).toHaveText("AI Search on");
+      await expect(ai).toHaveAttribute("aria-pressed", "true");
+      await expect(ai).toHaveCSS("background-color", fill);
+      await expect(page.getByRole("searchbox", { name: "Search library" })).toHaveAttribute(
+        "placeholder",
+        "Describe a model",
+      );
+    });
+  }
+
   test("keeps labeled search actions in the focused field", async ({ page }, testInfo) => {
     await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
     await page.route("**/api/v1/search/status", (route) =>
@@ -29,7 +57,7 @@ test.describe("search clarity", () => {
     }));
     expect(focusedBorder.actual).toBe(focusedBorder.neutral);
     await expect(page.getByRole("button", { name: "AI Search", exact: true })).toHaveText(
-      "AI Search",
+      "AI Search on",
       { timeout: 1000 },
     );
     const field = await input.boundingBox();
@@ -124,10 +152,12 @@ test.describe("search clarity", () => {
       route.fulfill({ json: searchResponse({ items, outcome: "results" }) }),
     );
     await page.goto("/search?q=divider");
-    await expect(page.getByText("30 results shown")).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "Search options" }).getByRole("status"),
+    ).toHaveText("30 results");
     await expect(page.getByRole("group", { name: "Result types" })).toBeVisible();
     const ai = page.getByRole("button", { name: "AI Search", exact: true });
-    await expect(ai).toHaveText("AI Search");
+    await expect(ai).toHaveText("AI Search on");
     await expect(ai).toHaveAttribute("aria-pressed", "true");
     const results = page.getByRole("list", { name: "Search results" });
     await expect(results.getByRole("listitem")).toHaveCount(30);

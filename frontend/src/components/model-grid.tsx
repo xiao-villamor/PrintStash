@@ -1,6 +1,5 @@
 "use client";
 
-import { FILTER_SELECT } from "@/lib/filter-input";
 import { LibraryStatusFilters } from "@/components/library-status-filters";
 import { CollectionHeaderTags } from "@/components/collection-header-tags";
 import "./library-header.css";
@@ -3299,7 +3298,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           <div className="library-display-controls ml-auto flex min-w-0 flex-wrap items-center gap-2">
             <select
               aria-label={uiText("Sort models")}
-              className={cn(FILTER_SELECT, "library-toolbar-sort w-32 max-w-full")}
+              className="library-toolbar-sort h-8 w-32 max-w-full cursor-pointer rounded-md border border-transparent bg-surface-container-high px-2 text-xs text-foreground transition-colors duration-press hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               value={sortKey}
               onChange={(event) => {
                 const option = SORT_OPTIONS.find((item) => item.value === event.target.value);

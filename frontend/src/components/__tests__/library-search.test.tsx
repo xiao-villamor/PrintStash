@@ -157,7 +157,10 @@ describe("LibrarySearch", () => {
       },
     });
     await userEvent.setup().type(screen.getByRole("searchbox"), "bracket");
-    expect(await screen.findByRole("button", { name: "AI Search" })).toBeDisabled();
+    const ai = await screen.findByRole("button", { name: "AI Search" });
+    expect(ai).toBeDisabled();
+    expect(ai).toHaveAttribute("aria-pressed", "false");
+    expect(ai.textContent).toBe("AI Search");
   });
   it("disables cached capabilities after a failed refresh", async () => {
     const app = searchBox({
@@ -196,10 +199,9 @@ describe("LibrarySearch", () => {
     expect(ai).toHaveAttribute("aria-pressed", "true");
     await user.click(ai);
     expect(screen.getByTestId("location")).toHaveTextContent("/search?q=bracket&mode=lexical");
-    expect(screen.getByRole("button", { name: "AI Search" })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
+    const keywordToggle = screen.getByRole("button", { name: "AI Search" });
+    expect(keywordToggle).toHaveAttribute("aria-pressed", "false");
+    expect(keywordToggle.textContent).toBe("AI Search");
   });
   it("switches keyword results back to AI", async () => {
     const user = userEvent.setup();

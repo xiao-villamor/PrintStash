@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Camera, Folder, History, Library, Search, Sparkles, X, XCircle } from "lucide-react";
+import {
+  Camera,
+  Check,
+  Folder,
+  History,
+  Library,
+  Search,
+  Sparkles,
+  X,
+  XCircle,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -116,6 +126,7 @@ export function LibrarySearch({
   const aiReady = aiEnabled && capability?.semantic_ready === true;
   const effectiveMode = aiReady ? mode : "lexical";
   const aiActive = effectiveMode === "hybrid";
+  const AiModeIcon = aiActive ? Check : Sparkles;
   const showAi = sidebar || aiEnabled;
   const showCamera = !sidebar && visualReady;
 
@@ -260,11 +271,11 @@ export function LibrarySearch({
                     ? "aiSearch.turnOffAi"
                     : "aiSearch.submitAi",
               )}
-              className={`h-7 gap-1.5 px-2 ${aiActive ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
+              className="h-7 gap-1.5 px-2 text-muted-foreground aria-pressed:bg-inverse-surface aria-pressed:font-semibold aria-pressed:text-inverse-on-surface aria-pressed:hover:bg-inverse-surface aria-pressed:hover:text-inverse-on-surface"
               onClick={toggleAi}
             >
-              <Sparkles className="size-3.5" aria-hidden />
-              {t("aiSearch.settingsTitle")}
+              <AiModeIcon className="size-3.5" aria-hidden />
+              {t(aiActive ? "aiSearch.activeLabel" : "aiSearch.settingsTitle")}
             </Button>
           )}
           {showCamera && (

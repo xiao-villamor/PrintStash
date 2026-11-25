@@ -1625,6 +1625,13 @@ test.describe("model detail route", () => {
     await expect(dialog).toHaveCount(0);
   });
 
+  test("opens the revision cost estimate from Print", async ({ page }) => {
+    await page.goto("/models/1");
+    await selectModelDetailTab(page, "Cost estimate");
+
+    await expect(page.getByRole("tabpanel", { name: "Cost estimate" })).toBeVisible();
+  });
+
   test("keeps an inspected revision independent of its recommendation", async ({ page }) => {
     const first = aRevision({
       id: 11,

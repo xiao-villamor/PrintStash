@@ -91,12 +91,47 @@ test.describe("OpenDesign shell", () => {
     await expect(page.getByRole("menu")).toHaveCSS("border-radius", "8px");
   });
 
-  test("uses the control radius on the native sort select", async ({ page }) => {
+  for (const theme of ["light", "dark"] as const) {
+    test(`uses a neutral toolbar surface for sorting in the ${theme} theme`, async ({ page }) => {
+      await page.addInitScript(
+        (selectedTheme) => localStorage.setItem("printstash.theme", selectedTheme),
+        theme,
+      );
+      await page.goto("/");
+      await collapseNavigationSidebar(page);
+      const sort = page.getByRole("combobox", { name: "Sort models" });
+
+      await expect(sort).toHaveCSS("border-radius", "6px");
+      await expect(sort).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
+      await expect(sort).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    });
+  }
+
+  test("applies a keyboard sort after reopening the Library", async ({ page }) => {
+    await page.goto("/?sort=date-desc");
+    const sort = page.getByRole("combobox", { name: "Sort models" });
+
+    await sort.press("Space");
+    await expect.poll(() => sort.evaluate((element) => element.matches(":open"))).toBe(true);
+    await page.getByRole("option", { name: "Oldest", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/sort=date-asc/);
+
     await page.goto("/");
-    await expect(page.getByRole("combobox", { name: "Sort models" })).toHaveCSS(
-      "border-radius",
-      "6px",
-    );
+    await expect(sort).toHaveValue("date-asc");
+  });
+
+  test("returns focus to sorting after dismissing the picker", async ({ page }) => {
+    await page.goto("/?sort=date-desc");
+    const sort = page.getByRole("combobox", { name: "Sort models" });
+
+    await sort.click();
+    await expect.poll(() => sort.evaluate((element) => element.matches(":open"))).toBe(true);
+    await page.keyboard.press("Escape");
+
+    await expect.poll(() => sort.evaluate((element) => element.matches(":open"))).toBe(false);
+    await expect(sort).toBeFocused();
+    await expect(sort).toHaveValue("date-desc");
   });
 
   test("uses the floating radius on the native select picker", async ({ page }) => {

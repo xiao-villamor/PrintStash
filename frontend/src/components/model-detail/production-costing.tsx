@@ -311,7 +311,7 @@ export function ProductionCosting({
   if (!file)
     return (
       <section className="space-y-3">
-        <h2 className="text-base font-semibold">{uiText("Costing")}</h2>
+        <h2 className="text-base font-semibold">{uiText("Cost estimate")}</h2>
         <p className="text-sm text-muted-foreground">
           {uiText("Add an STL or G-code file to estimate production costs.")}
         </p>

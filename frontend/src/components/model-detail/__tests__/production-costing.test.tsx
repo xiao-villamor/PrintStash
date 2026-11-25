@@ -9,6 +9,24 @@ import { json, renderApp } from "@/test-support/render";
 import type { ArtifactCostingRead } from "@/types/production-costing";
 
 describe("ProductionCosting", () => {
+  it("labels the empty cost estimate consistently", () => {
+    renderApp(
+      <ProductionCosting
+        modelId={1}
+        files={[]}
+        initialFileId={null}
+        jobs={[]}
+        canEdit
+        admin={false}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Cost estimate" })).toBeVisible();
+    expect(
+      screen.getByText("Add an STL or G-code file to estimate production costs."),
+    ).toBeVisible();
+  });
+
   it("renders an empty production breakdown for a zero-cost estimate", async () => {
     const receipt: ArtifactCostingRead = {
       ...anEditingBase(),
