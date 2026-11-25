@@ -92,7 +92,7 @@ export function LibraryEmptyCollection({
 }) {
   useUiLocale();
   return (
-    <div className="flex flex-1 items-center justify-center px-4 py-12 sm:px-6">
+    <div className="flex flex-1 items-center justify-center px-4 pb-36 pt-12 sm:px-6">
       <section
         aria-labelledby="empty-collection-title"
         className="flex w-full max-w-xl flex-col items-center gap-5 rounded-lg border border-dashed border-border-strong bg-card/40 px-8 py-10 text-center"
