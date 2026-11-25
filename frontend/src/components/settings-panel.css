@@ -223,9 +223,17 @@
 .settings-main
   :is(button, a, label)[class*="inline-flex"]:not([aria-label]):not([title]):not(
     :has(.sr-only)
-  ):not([class*="w-8"]):not([class*="w-9"]):not([class*="w-10"])
+  ):not([class*="w-8"]):not([class*="w-9"]):not([class*="w-10"]):not([data-trash-page] *)
   > svg:not(.animate-spin) {
   display: none;
+}
+
+/* The Trash page keeps the rounded control language of the rest of the app. */
+.settings-main [data-trash-page] select,
+.settings-main
+  [data-trash-page]
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]) {
+  border-radius: var(--radius);
 }
 
 .settings-main [role="switch"] {

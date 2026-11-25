@@ -2653,6 +2653,25 @@ describe("SettingsPanel", () => {
       expect(await screen.findByText("Trash is empty.")).toBeVisible();
     });
 
+    it("shows how long each trashed item has left", async () => {
+      const day = 86_400_000;
+      const inDays = (days: number) => new Date(Date.now() + days * day).toISOString();
+      renderSettings({
+        at: "/settings?section=trash",
+        routes: {
+          "GET /api/v1/models/trash": json([
+            { ...TRASHED_MODEL, id: 7, name: "Soon gone", expires_at: inDays(1.5) },
+            { ...TRASHED_MODEL, id: 8, name: "Later gone", expires_at: inDays(20.5) },
+            { ...TRASHED_MODEL, id: 9, name: "Overdue", expires_at: inDays(-2) },
+          ]),
+        },
+      });
+
+      expect(await screen.findByText("2 days left")).toBeVisible();
+      expect(screen.getByText("21 days left")).toBeVisible();
+      expect(screen.getByText("Expires today")).toBeVisible();
+    });
+
     it("offers no bulk action until a model is ticked", async () => {
       renderSettings({
         at: "/settings?section=trash",

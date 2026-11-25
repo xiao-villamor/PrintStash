@@ -8,6 +8,8 @@
 
 ### Changed
 
+- The Trash page uses rounded surfaces and icons on its actions, shows how many days each deleted item has left (the last three days in the destructive tone), and has an illustrated empty state.
+
 - An empty collection now shows an illustration, one Upload files action and a drop hint, instead of also offering Import from URL and Connect folder or NAS, which add to the library rather than to that collection.
 
 - Printers: each printer card now has a right-click menu (or Shift+F10) with Open page, Edit connection, Set model and Remove printer, replacing the card footer and the Manage printers tab. The fleet summary sits under the tabs, jobs that are printing animate on the routing graph, the Profiles page, slicer configurations and their dialogs follow the new surface style, and the printer detail page shows the printer photo and its status in the header, uses status pills in Files, Jobs and Diagnostics, and groups Settings into section cards with a section list, switches and a sticky save bar. The dark theme uses a softer destructive red.

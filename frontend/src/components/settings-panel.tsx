@@ -95,6 +95,7 @@ import {
   Eraser,
   Eye,
   Gpu,
+  Hourglass,
   Files,
   FolderSync,
   Coins,
@@ -113,6 +114,8 @@ import {
   ShieldCheck,
   RefreshCw,
   RotateCcw,
+  Save,
+  Settings as SettingsIcon,
   Trash2,
   Search,
   Server,
@@ -466,6 +469,25 @@ function useDeadlineReached(deadline: string | null): boolean {
   }, [deadline]);
 
   return deadline !== null && reachedDeadline === deadline;
+}
+
+/** How long a trashed item has left; the last days take the destructive tone. */
+function TrashExpiry({ expiresAt }: { expiresAt: string | null | undefined }) {
+  useUiLocale();
+  if (!expiresAt) return null;
+  const days = Math.ceil((Date.parse(expiresAt) - Date.now()) / 86_400_000);
+  if (Number.isNaN(days)) return null;
+  return (
+    <span
+      className={cn(
+        "mt-1.5 inline-flex h-5.5 items-center gap-1.5 rounded-full bg-foreground/10 px-2.5 text-xs font-medium",
+        days <= 3 ? "text-destructive" : "text-foreground/80",
+      )}
+    >
+      <Clock className="size-3" aria-hidden="true" />
+      {days <= 0 ? uiText("Expires today") : uiText("{value1} days left", { value1: String(days) })}
+    </span>
+  );
 }
 
 export function SettingsPanel() {
@@ -2006,8 +2028,10 @@ export function SettingsPanel() {
     : null;
 
   const reviewExpiredButton = (
-    <button
+    <Button
       type="button"
+      variant="outline"
+      size="sm"
       onClick={() => setPurgeExpiredOpen(true)}
       disabled={
         !user?.is_superuser ||
@@ -2018,10 +2042,10 @@ export function SettingsPanel() {
         gcRead.isPending ||
         (gcPlan !== null && ["preview", "quarantined", "finalizing"].includes(gcPlan.state))
       }
-      className={BTN_SECONDARY}
     >
+      <Hourglass className="size-3.5" aria-hidden="true" />
       {trashBusy === "gc" ? uiText("Preparing") : uiText("Review expired")}
-    </button>
+    </Button>
   );
 
   const trashCleanupDetails =
@@ -2163,14 +2187,16 @@ export function SettingsPanel() {
     activeSection === "trash" ? (
       <form
         aria-label={uiText("Trash retention")}
-        className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 text-[13px] sm:px-5"
+        className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3.5 text-[13px] sm:px-5"
         onSubmit={(event) => {
           event.preventDefault();
           if (!saveTrashRetentionDisabled) saveTrashRetention();
         }}
       >
-        <Trash2 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-        <label htmlFor="trash-retention-days" className="text-foreground">
+        <span className="grid size-8 shrink-0 place-items-center rounded-md bg-foreground/10 text-muted-foreground">
+          <Trash2 className="size-4" aria-hidden />
+        </span>
+        <label htmlFor="trash-retention-days" className="font-medium text-foreground">
           {uiText("Keep deleted items for")}
         </label>
         <input
@@ -2192,7 +2218,7 @@ export function SettingsPanel() {
           disabled={
             !user?.is_superuser || !remoteConfigData || remoteConfig.isError || trashRetentionBusy
           }
-          className={cn(INPUT, "w-20 font-mono")}
+          className={cn(INPUT, "w-20 rounded-md font-mono")}
         />
         <span className="text-foreground">{uiText("days")}</span>
         <span id="trash-retention-hint" className="text-xs text-muted-foreground">
@@ -2214,7 +2240,14 @@ export function SettingsPanel() {
             disabled={saveTrashRetentionDisabled || trashRetentionDraft === null}
             className={BTN_PRIMARY}
           >
-            {trashRetentionBusy ? uiText("Saving") : uiText("Save retention")}
+            {trashRetentionBusy ? (
+              uiText("Saving")
+            ) : (
+              <>
+                <Save className="size-3.5" aria-hidden="true" />
+                {uiText("Save retention")}
+              </>
+            )}
           </button>
         </span>
       </form>
@@ -2287,8 +2320,8 @@ export function SettingsPanel() {
         description={uiText("multipart.trashHelp")}
       >
         {trashItems.length > 0 && (
-          <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3 text-xs text-muted-foreground sm:px-5">
-            <span className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3 border-b border-border bg-foreground/[0.03] px-4 py-3 text-xs text-muted-foreground sm:px-5">
+            <span className="flex items-center gap-3 font-medium text-foreground">
               <Checkbox
                 checked={selectedTrash.length === trashItems.length}
                 onChange={toggleAllTrash}
@@ -2316,6 +2349,7 @@ export function SettingsPanel() {
                   disabled={trashBusy !== null}
                   className={BTN_SECONDARY}
                 >
+                  <RotateCcw className="size-3.5" aria-hidden="true" />
                   {uiText("Restore selected")}
                 </button>
                 <button
@@ -2324,12 +2358,13 @@ export function SettingsPanel() {
                   disabled={trashBusy !== null}
                   className={BTN_DANGER}
                 >
+                  <Trash2 className="size-3.5" aria-hidden="true" />
                   {uiText("Delete selected")}
                 </button>
               </span>
             )}
             {trashItems.some((item) => item.kind === "model") && (
-              <span className="ml-auto font-mono tabular-nums">
+              <span className="ml-auto rounded-full bg-foreground/10 px-2.5 py-1 font-mono tabular-nums text-foreground/80">
                 {t("Known model storage: {size}", {
                   size: formatBytes(
                     trashItems.reduce(
@@ -2354,7 +2389,17 @@ export function SettingsPanel() {
               {uiText("settings.trashLoadFailed")}
             </p>
           ) : trashItems.length === 0 ? (
-            <p className="p-4 sm:p-5 text-sm text-muted-foreground">{uiText("Trash is empty.")}</p>
+            <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+              <span className="grid size-14 place-items-center rounded-lg border border-dashed border-border-strong bg-foreground/[0.04] text-muted-foreground">
+                <Trash2 className="size-6" aria-hidden="true" />
+              </span>
+              <div className="space-y-1">
+                <p className="text-base font-semibold text-foreground">{uiText("Trash is empty.")}</p>
+                <p className="mx-auto max-w-sm text-sm text-muted-foreground">
+                  {uiText("Deleted models wait here until the retention window ends.")}
+                </p>
+              </div>
+            </div>
           ) : (
             trashItems.map((item) => (
               <div
@@ -2383,7 +2428,7 @@ export function SettingsPanel() {
                   <ProtectedThumbnail
                     path={item.kind === "model" ? item.thumbnail_url : null}
                     alt=""
-                    className="flex h-10 w-10 items-center justify-center bg-muted text-muted-foreground"
+                    className="flex size-12 items-center justify-center overflow-hidden rounded-md border border-border bg-muted text-muted-foreground"
                     imageClassName="h-full w-full object-cover"
                     placeholder={<Boxes className="h-5 w-5" aria-hidden />}
                   />
@@ -2404,6 +2449,7 @@ export function SettingsPanel() {
                       }),
                     ].join(" · ")}
                   </p>
+                  <TrashExpiry expiresAt={item.expires_at} />
                 </div>
                 <div
                   className={cn(
@@ -2417,6 +2463,7 @@ export function SettingsPanel() {
                     disabled={trashBusy !== null}
                     className={BTN_SECONDARY}
                   >
+                    <RotateCcw className="size-3.5" aria-hidden="true" />
                     {uiText("Restore")}
                   </button>
                   <button
@@ -2425,6 +2472,7 @@ export function SettingsPanel() {
                     disabled={trashBusy !== null}
                     className={BTN_DANGER}
                   >
+                    <Trash2 className="size-3.5" aria-hidden="true" />
                     {uiText("Delete")}
                   </button>
                 </div>
@@ -2637,10 +2685,15 @@ export function SettingsPanel() {
             trashPage ? (
               <>
                 <Button size="sm" variant="outline" onClick={loadTrash} disabled={trashLoading}>
+                  <RefreshCw
+                    className={cn("size-3.5", trashLoading && "animate-spin")}
+                    aria-hidden="true"
+                  />
                   {t("Refresh")}
                 </Button>
                 {reviewExpiredButton}
                 <Button size="sm" variant="outline" onClick={() => changeSection("overview")}>
+                  <SettingsIcon className="size-3.5" aria-hidden="true" />
                   {t("settings.title")}
                 </Button>
               </>
@@ -5530,11 +5583,17 @@ export function SettingsPanel() {
                 )}
                 {trashPage ? (
                   <>
-                    <div className="overflow-hidden border border-border bg-card">
+                    <div
+                      data-trash-page
+                      className="overflow-hidden rounded-lg border border-border bg-card"
+                    >
                       {trashRetentionBar}
                       {trashCleanupDetails}
                     </div>
-                    <div className="overflow-hidden border border-border bg-card">
+                    <div
+                      data-trash-page
+                      className="overflow-hidden rounded-lg border border-border bg-card"
+                    >
                       {trashItemsCard}
                     </div>
                   </>
