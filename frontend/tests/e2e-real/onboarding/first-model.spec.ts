@@ -34,8 +34,8 @@ test.describe("Browser onboarding", () => {
         const confirmationRow = await page
           .getByLabel("Confirmar contraseña", { exact: true })
           .boundingBox();
-        expect(confirmationRow!.y).toBeGreaterThanOrEqual(passwordRow!.y + passwordRow!.height);
-        expect(confirmationRow!.x).toBe(passwordRow!.x);
+        expect(confirmationRow!.y).toBe(passwordRow!.y);
+        expect(confirmationRow!.x).toBeGreaterThanOrEqual(passwordRow!.x + passwordRow!.width);
         expect(confirmationRow!.width).toBe(passwordRow!.width);
       }
       const progress = await page
@@ -126,9 +126,11 @@ test.describe("Browser onboarding", () => {
       await expect(page.getByLabel("Root", { exact: true })).toHaveCount(0);
       await page.screenshot({ path: testInfo.outputPath("storage-mobile.png"), fullPage: true });
       await page.setViewportSize({ width: 1280, height: 900 });
-      await page.getByRole("button", { name: "Check storage" }).press("Enter");
-      await expect(page.getByText("Storage ready", { exact: true })).toBeVisible();
-      await page.screenshot({ path: testInfo.outputPath("storage-desktop.png"), fullPage: true });
+      await page.getByRole("button", { name: "Continue", exact: true }).press("Enter");
+      await expect(
+        page.getByRole("heading", { name: "Review before creating your account" }),
+      ).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath("review-desktop.png"), fullPage: true });
       let accountRequests = 0;
       if (loseResponse) {
         // Keep routing enabled until the context closes. Removing a one-use
@@ -144,7 +146,6 @@ test.describe("Browser onboarding", () => {
           });
         });
       }
-      await page.getByRole("button", { name: "Continue", exact: true }).click();
       await page.getByRole("button", { name: "Create account" }).press("Enter");
       if (loseResponse) {
         await page.getByRole("button", { name: "Sign in", exact: true }).press("Enter");
