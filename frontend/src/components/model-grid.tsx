@@ -36,11 +36,6 @@ import {
   LIBRARY_INSPECTOR_MAX_WIDTH,
   LIBRARY_INSPECTOR_MIN_WIDTH,
 } from "@/components/use-inspector-motion";
-import {
-  INSPECTOR_LAYOUT_WILL_CHANGE_EVENT,
-  PANE_MOVING_EVENT,
-  PANE_SETTLED_EVENT,
-} from "@/components/use-collections-pane-motion";
 import { LibraryItemLink } from "@/features/library/navigation";
 import { useModelOpenIntent } from "@/features/library/model-detail";
 import { useLibraryEntry, type LibraryEntry } from "@/features/library/navigation-state";
@@ -339,29 +334,12 @@ function CollectionStrip({
   total: number;
   overview: boolean;
   resetKey: string;
-  children: (
-    limit: number | null,
-    onColumns: (columns: number) => void,
-    extraColumns: number,
-  ) => ReactNode;
+  children: (limit: number | null, onColumns: (columns: number) => void) => ReactNode;
 }) {
   useUiLocale();
   const [expandedFor, setExpandedFor] = useState<string | null>(null);
   const [rowSize, setRowSize] = useState(4);
   const expanded = expandedFor === resetKey;
-  // Both panes move the grid on its resting tracks. Keep one extra
-  // collection beyond the clipped edge until the pane settles.
-  const [extra, setExtra] = useState(0);
-  useEffect(() => {
-    const moving = () => setExtra(1);
-    const settled = () => setExtra(0);
-    window.addEventListener(PANE_MOVING_EVENT, moving);
-    window.addEventListener(PANE_SETTLED_EVENT, settled);
-    return () => {
-      window.removeEventListener(PANE_MOVING_EVENT, moving);
-      window.removeEventListener(PANE_SETTLED_EVENT, settled);
-    };
-  }, []);
   // How many collections the resting row leaves out, so "N more" fades in or
   // out together with the pane motion rather than after it.
   const hidden = Math.max(0, total - rowSize);
@@ -391,11 +369,7 @@ function CollectionStrip({
           </Button>
         </div>
       )}
-      {children(
-        overview || expanded ? null : rowSize + extra,
-        setRowSize,
-        overview || expanded ? 0 : extra,
-      )}
+      {children(overview || expanded ? null : rowSize, setRowSize)}
     </>
   );
 }
@@ -2385,9 +2359,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const inspectorOpener = useRef<HTMLElement | null>(null);
   const setInspector = useCallback(
     (intent: InspectorIntent) => {
-      const wasOpen = libraryInspectorIntents.get(inspectorScope)?.open ?? false;
-      if (intent.open !== wasOpen && !window.matchMedia("(prefers-reduced-motion: reduce)").matches)
-        window.dispatchEvent(new Event(INSPECTOR_LAYOUT_WILL_CHANGE_EVENT));
       libraryInspectorIntents.set(inspectorScope, intent);
       while (libraryInspectorIntents.size > 20)
         libraryInspectorIntents.delete(libraryInspectorIntents.keys().next().value!);
@@ -4035,7 +4006,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       overview={false}
                       resetKey={selectedCollection ?? ""}
                     >
-                      {(limit, onColumns, extraColumns) => (
+                      {(limit, onColumns) => (
                         <LibraryItems
                           items={Array.from(
                             { length: Math.min(reservedCollections, limit ?? reservedCollections) },
@@ -4054,7 +4025,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           minCardWidth={300}
                           virtualize={false}
                           onColumnsChange={onColumns}
-                          extraColumns={extraColumns}
                         />
                       )}
                     </CollectionStrip>
@@ -4071,7 +4041,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       overview={collectionOverview}
                       resetKey={displayedPath ?? ""}
                     >
-                      {(limit, onColumns, extraColumns) => (
+                      {(limit, onColumns) => (
                         <LibraryItems
                           key={`collections:${displayedPath ?? ""}`}
                           items={
@@ -4152,7 +4122,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           keepCollectionCardWidth={!collectionOverview}
                           minCardWidth={collectionOverview ? undefined : 300}
                           onColumnsChange={onColumns}
-                          extraColumns={extraColumns}
                         />
                       )}
                     </CollectionStrip>

@@ -610,7 +610,7 @@ test.describe("motion and layering", () => {
       expect(motions.length > 0).toBe(moves);
       if (moves) {
         expect(motions[0].transforms[0]).not.toBe(motions[0].transforms.at(-1));
-        expect(motions[0].duration).toBe(300);
+        expect(motions[0].duration).toBe(200);
       }
     });
   }

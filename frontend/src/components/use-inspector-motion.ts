@@ -1,10 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
-import {
-  PANE_SETTLED_EVENT,
-  announcePaneMotion,
-  dockMotion,
-} from "@/components/use-collections-pane-motion";
+import { dockMotion } from "@/components/use-collections-pane-motion";
 
 export const LIBRARY_INSPECTOR_MIN_WIDTH = 320;
 export const LIBRARY_INSPECTOR_MAX_WIDTH = 800;
@@ -33,7 +29,6 @@ export function useInspectorMotion(open: boolean, onSettled?: () => void) {
     const target = open ? 0 : 1;
     let animation: Animation | null = null;
     let settled = false;
-    let announced = false;
     const paint = () =>
       element.style.setProperty("--inspector-displacement", String(position.current));
     const settle = () => {
@@ -45,7 +40,6 @@ export function useInspectorMotion(open: boolean, onSettled?: () => void) {
       element.style.removeProperty("will-change");
       if (!open) setPresent(false);
       onSettled?.();
-      if (announced) window.dispatchEvent(new Event(PANE_SETTLED_EVENT));
     };
     const onPreference = () => {
       if (reduced.matches) settle();
@@ -70,10 +64,6 @@ export function useInspectorMotion(open: boolean, onSettled?: () => void) {
       { duration: spring.duration * 1000, easing: "linear", fill: "both" },
     );
     animation.onfinish = settle;
-    // The inspector has already reserved or released its column. Carry cards
-    // from their painted position along the inspector's progress.
-    announcePaneMotion(spring, target, null);
-    announced = true;
     reduced.addEventListener("change", onPreference);
     return () => {
       reduced.removeEventListener("change", onPreference);

@@ -31,40 +31,13 @@ export function dockMotion(element: Element, from: number, velocity: number, tar
 
 /** Re-measure layouts after a dock width is committed. */
 export const PANE_SETTLED_EVENT = "printstash:pane-settled";
-/** Both docks carry the grid to its resting tracks during the pane motion. */
+/** Projects the sidebar's final width before its shell starts sliding. */
 export const PANE_MOVING_EVENT = "printstash:pane-moving";
-/** Capture the painted grid before React changes the right dock's padding. */
-export const INSPECTOR_LAYOUT_WILL_CHANGE_EVENT = "printstash:inspector-layout-will-change";
-
-export interface PaneMotion {
-  targetSidebarWidth: number | null;
-  durationMs: number;
-  /** Normalised progress 0→1 at evenly spaced times across `durationMs`. */
-  progress: readonly number[];
-}
 
 export class PaneMovingEvent extends Event {
-  constructor(readonly motion: PaneMotion) {
+  constructor(readonly targetSidebarWidth: number) {
     super(PANE_MOVING_EVENT);
   }
-}
-
-export function announcePaneMotion(
-  motion: ReturnType<typeof dockMotion>,
-  target: number,
-  targetSidebarWidth: number | null,
-) {
-  const from = motion.samples[0]!.position;
-  const span = target - from;
-  window.dispatchEvent(
-    new PaneMovingEvent({
-      targetSidebarWidth,
-      durationMs: motion.duration * 1000,
-      progress: motion.samples.map((sample) =>
-        Math.abs(span) < 1e-6 ? 1 : (sample.position - from) / span,
-      ),
-    }),
-  );
 }
 
 function setMoving(moving: boolean) {
@@ -76,7 +49,7 @@ function setMoving(moving: boolean) {
   }
 }
 
-/** Move the shell edge with the workspace while cards glide to their final tracks. */
+/** Move the shell edge with the workspace while the grid uses the sidebar's final width. */
 export function useCollectionsPaneMotion(open: boolean) {
   const viewport = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -120,7 +93,7 @@ export function useCollectionsPaneMotion(open: boolean) {
       else {
         body.style.visibility = "visible";
         setMoving(true);
-        announcePaneMotion(motion, target, targetWidth);
+        window.dispatchEvent(new PaneMovingEvent(targetWidth));
         const timing = {
           duration: motion.duration * 1000,
           easing: "linear",

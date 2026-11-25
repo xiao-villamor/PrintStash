@@ -7,8 +7,7 @@ useMockApi();
 
 declare global {
   interface Window {
-    /** Starting transforms of card animations, recorded by the glide test. */
-    cardGlides: string[];
+    paneCardAnimations: number;
   }
 }
 
@@ -123,7 +122,7 @@ test.describe("Library inline inspector", () => {
     });
   }
 
-  test("glides reflowed cards beside either panel", async ({ page }) => {
+  test("reflows cards without individual animations beside either panel", async ({ page }) => {
     const models = Array.from({ length: 92 }, (_, index) =>
       aModelListItem({ id: index + 1, name: `Part ${index + 1}` }),
     );
@@ -139,32 +138,31 @@ test.describe("Library inline inspector", () => {
       }),
     );
     await page.addInitScript(() => {
-      window.cardGlides = [];
-      const glides = window.cardGlides;
+      window.paneCardAnimations = 0;
       const animate = Element.prototype.animate;
       Element.prototype.animate = function (...args) {
-        const result = animate.apply(this, args);
-        const [frames] = args;
-        if (this.matches("main [data-library-key]") && Array.isArray(frames))
-          glides.push(String(frames[0]?.transform ?? "none"));
-        return result;
+        if (this.matches("main [data-library-key]")) window.paneCardAnimations++;
+        return animate.apply(this, args);
       };
     });
     await page.goto("/?type=all&sort=date-desc");
     await expect(page.getByRole("heading", { name: "Part 92", exact: true })).toBeVisible();
+    const details = page.getByRole("button", { name: "Show or hide details", exact: true });
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+    const drawer = page.locator("#model-drawer");
 
-    const glided = () =>
-      page.evaluate(
-        () => window.cardGlides.filter((start) => start.startsWith("translate(")).length,
-      );
+    await details.click();
+    await expect(drawer).toBeVisible();
+    await details.click();
+    await expect(drawer).toBeHidden();
+    await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+    await page.waitForFunction(() => !document.documentElement.hasAttribute("data-pane-moving"));
+    await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "true");
+    await page.waitForFunction(() => !document.documentElement.hasAttribute("data-pane-moving"));
 
-    // Both panels carry the cards the same way: neither may jump them.
-    await page.getByRole("button", { name: "Show or hide details", exact: true }).click();
-    await expect.poll(glided).toBeGreaterThan(0);
-    await page.waitForFunction(() => document.documentElement.dataset.paneMoving === undefined);
-    const afterDetails = await glided();
-    await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
-    await expect.poll(glided).toBeGreaterThan(afterDetails);
+    expect(await page.evaluate(() => window.paneCardAnimations)).toBe(0);
   });
 
   test("returns from the explicit full page to the same inspector", async ({ page }) => {

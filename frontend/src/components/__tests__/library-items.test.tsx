@@ -4,11 +4,7 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useMemo, useRef, useState } from "react";
 import { LibraryItems } from "@/components/library-items";
-import {
-  INSPECTOR_LAYOUT_WILL_CHANGE_EVENT,
-  PANE_SETTLED_EVENT,
-  PaneMovingEvent,
-} from "@/components/use-collections-pane-motion";
+import { PANE_SETTLED_EVENT, PaneMovingEvent } from "@/components/use-collections-pane-motion";
 import type { LibraryReadingRenderer } from "@/features/library/reading-position";
 
 let width = 1000;
@@ -136,16 +132,11 @@ describe("LibraryItems", () => {
     document.documentElement.dataset.paneMoving = "";
 
     act(() => {
-      window.dispatchEvent(
-        new PaneMovingEvent({
-          targetSidebarWidth: 0,
-          durationMs: 200,
-          progress: [0, 0.5, 1],
-        }),
-      );
+      window.dispatchEvent(new PaneMovingEvent(0));
     });
 
     expect(grid().style.gridTemplateColumns).toBe("repeat(4, 300px)");
+    expect(flights.size).toBe(0);
   });
 
   it("preserves collection card width when the sidebar changes how many columns fit", () => {
@@ -190,104 +181,5 @@ describe("LibraryItems", () => {
     });
     await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
     expect(scroller.scrollTop).toBe(0);
-  });
-
-  it("keeps cards in place when inspector padding temporarily moves the grid", () => {
-    render(<Grid />);
-    const card = screen.getByText("Card 0").closest("[data-library-key]")!;
-    vi.spyOn(card, "getBoundingClientRect").mockImplementation(
-      () =>
-        new DOMRect(
-          0,
-          width === 1250 && grid().style.gridTemplateColumns === "repeat(3, 322px)" ? 191 : 307,
-          300,
-          200,
-        ),
-    );
-
-    act(() => {
-      window.dispatchEvent(new Event(INSPECTOR_LAYOUT_WILL_CHANGE_EVENT));
-      width = 1250;
-      window.dispatchEvent(
-        new PaneMovingEvent({
-          targetSidebarWidth: null,
-          durationMs: 200,
-          progress: [0, 0.5, 1],
-        }),
-      );
-    });
-
-    expect(flights.has("item:0")).toBe(false);
-  });
-
-  it("omits animations for cards that stay below the viewport", () => {
-    render(<Grid />);
-    const card = screen.getByText("Card 0").closest("[data-library-key]")!;
-    const scroller = grid().closest("[data-library-renderer]")!.parentElement!;
-    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1000, 800));
-    vi.spyOn(card, "getBoundingClientRect").mockImplementation(
-      () => new DOMRect(0, width === 1000 ? 1400 : 1100, 300, 200),
-    );
-
-    act(() => {
-      window.dispatchEvent(new Event(INSPECTOR_LAYOUT_WILL_CHANGE_EVENT));
-      width = 1250;
-      window.dispatchEvent(
-        new PaneMovingEvent({
-          targetSidebarWidth: null,
-          durationMs: 200,
-          progress: [0, 0.5, 1],
-        }),
-      );
-    });
-
-    expect(flights.has("item:0")).toBe(false);
-  });
-
-  it("carries a card that wraps a row in behind its new neighbour, without crossing the grid", () => {
-    // Cards sit on the grid's current tracks (16 px gap), 200 px tall.
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-      function (this: HTMLElement) {
-        const key = this.dataset.libraryKey;
-        if (!key) return new DOMRect(0, 0, width, 800);
-        const [, columns, track] = (
-          /repeat\((\d+), (\d+)px\)/.exec(grid()?.style.gridTemplateColumns ?? "") ?? [0, 4, 300]
-        ).map(Number);
-        const index = Number(key.slice("item:".length));
-        const pitch = track! + 16;
-        return new DOMRect(
-          (index % columns!) * pitch,
-          Math.floor(index / columns!) * 216,
-          track,
-          200,
-        );
-      },
-    );
-    width = 1250;
-    render(<Grid />);
-    expect(grid().style.gridTemplateColumns).toBe("repeat(4, 300px)");
-    width = 1000;
-    act(() => {
-      window.dispatchEvent(
-        new PaneMovingEvent({
-          targetSidebarWidth: null,
-          durationMs: 200,
-          progress: [0, 0.5, 1],
-        }),
-      );
-    });
-    expect(grid().style.gridTemplateColumns).toBe("repeat(3, 322px)");
-
-    // 4 → 3 columns: card 5 keeps row 1 and slides one cell right.
-    expect(flights.get("item:5")?.[0]).toMatchObject({ transform: "translate(-360px, 0px)" });
-    // Card 3 wraps into the next row from beyond the left edge.
-    expect(flights.get("item:3")?.[0]).toMatchObject({
-      transform: "translate(-316px, 0px)",
-      opacity: 0,
-    });
-    expect(flights.get("item:3")?.[1]).toMatchObject({ opacity: 1 });
-    expect(flights.get("item:3")?.at(-1)).toMatchObject({ transform: "translate(0px, 0px)" });
-    // Cards that keep their cell stay still.
-    expect(flights.has("item:0")).toBe(false);
   });
 });

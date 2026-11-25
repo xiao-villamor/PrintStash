@@ -10,11 +10,9 @@ import {
 } from "react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import {
-  INSPECTOR_LAYOUT_WILL_CHANGE_EVENT,
   PANE_MOVING_EVENT,
   PANE_SETTLED_EVENT,
   PaneMovingEvent,
-  type PaneMotion,
 } from "@/components/use-collections-pane-motion";
 import {
   libraryReadingSelector,
@@ -37,16 +35,6 @@ const SINGLE_COLUMN_MAX = 400;
 /** One width scale for collection and Model rows, independent of item count. */
 function preferredCardWidth(compact: boolean) {
   return compact ? COMPACT_CARD_WIDTH : CARD_WIDTH;
-}
-
-function fadeIn(progress: readonly number[], last: number): Keyframe[] {
-  return progress.map((value, index) => ({ offset: index / last, opacity: value }));
-}
-
-function touchesViewport(card: DOMRect, viewport: DOMRect) {
-  // A grid can be measured before its host has received a layout box.
-  if (viewport.height === 0) return true;
-  return card.bottom > viewport.top && card.top < viewport.bottom;
 }
 
 function fittingColumns(width: number, track: number, gap: number) {
@@ -89,9 +77,6 @@ interface LibraryItemsProps<T> {
   /** A production-build comparison can disable the renderer without changing cards or data. */
   virtualize?: boolean;
   className?: string;
-  /** Columns rendered beyond the measured ones, clipped at the row's edge (e.g.
-   *  a collection the moving pane is about to uncover). Tracks keep their width. */
-  extraColumns?: number;
   /** Narrowest card for this list when its cards are wider than model cards. */
   minCardWidth?: number;
   /** Reports how many cards fit one row, e.g. to show a single row of collections. */
@@ -117,7 +102,6 @@ export function LibraryItems<T>({
   inspectorDockLocked = false,
   preferredInspectorWidth = null,
   appliedInspectorCustomWidth = false,
-  extraColumns = 0,
   minCardWidth,
   onColumnsChange,
 }: LibraryItemsProps<T>) {
@@ -145,26 +129,7 @@ export function LibraryItems<T>({
   const focusRestore = useRef<{ key: string; index: number } | null>(null);
   const restore = useRef<{ key: string; offset: number } | null>(null);
   const readyGeometry = useRef<typeof geometry | null>(null);
-  // Card positions captured when the pane starts moving, consumed after the
-  // grid commits its resting tracks. Flights are the running card motions.
-  const flip = useRef<{
-    before: Map<string, { x: number; y: number; visible: boolean }>;
-    motion: PaneMotion;
-    /** The columns and cell pitch the captured positions were laid out in. */
-    columns: number;
-    pitch: number;
-    keys: readonly string[];
-  } | null>(null);
-  const painted = useRef<{ columns: number; pitch: number; keys: readonly string[] }>({
-    columns: 1,
-    pitch: 0,
-    keys: [],
-  });
-  const inspectorOrigin = useRef<Map<string, { x: number; y: number; visible: boolean }> | null>(
-    null,
-  );
   const sidebarTarget = useRef<number | null>(null);
-  const flights = useRef<Animation[]>([]);
   const gap = layout === "list" ? 0 : compact ? 8 : 16;
   const preferredWidth = minCardWidth ?? preferredCardWidth(compact);
   const track = geometry.track || preferredWidth;
@@ -172,7 +137,7 @@ export function LibraryItems<T>({
   // Larger snapshots bound their DOM while retaining the same row/card identities.
   const virtual =
     virtualize && items.length > NATIVE_RENDER_LIMIT && "ResizeObserver" in globalThis;
-  const columns = layout === "list" ? 1 : geometry.columns + extraColumns;
+  const columns = layout === "list" ? 1 : geometry.columns;
   useLayoutEffect(() => {
     if (geometry.width > 0) onColumnsChange?.(layout === "list" ? 1 : geometry.columns);
   }, [layout, geometry.columns, geometry.width, onColumnsChange]);
@@ -392,48 +357,19 @@ export function LibraryItems<T>({
     });
     observer.observe(node);
     observer.observe(scroll);
-    const snapshot = () => {
-      const viewport = scroll.getBoundingClientRect();
-      const cards = new Map<string, { x: number; y: number; visible: boolean }>();
-      for (const card of node.querySelectorAll<HTMLElement>("[data-library-key]")) {
-        const bounds = card.getBoundingClientRect();
-        cards.set(card.dataset.libraryKey!, {
-          x: bounds.left - viewport.left,
-          y: bounds.top,
-          visible: touchesViewport(bounds, viewport),
-        });
-      }
-      return cards;
-    };
-    const captureInspectorOrigin = () => {
-      if (node.clientWidth > 0) inspectorOrigin.current = snapshot();
-    };
     const settled = () => {
-      if ("paneMoving" in document.documentElement.dataset) return;
       sidebarTarget.current = null;
-      inspectorOrigin.current = null;
-      flip.current = null;
       measure();
     };
     const moving = (event: Event) => {
-      if (!(event instanceof PaneMovingEvent) || node.clientWidth === 0) return;
-      const { motion } = event;
-      // A sidebar transition also moves the workspace. Card offsets are
-      // relative to the workspace so that movement contributes only once.
-      const before =
-        motion.targetSidebarWidth === null ? (inspectorOrigin.current ?? snapshot()) : snapshot();
-      if (motion.targetSidebarWidth === null) inspectorOrigin.current = null;
-      else sidebarTarget.current = motion.targetSidebarWidth;
-      for (const flight of flights.current) flight.cancel();
-      flights.current = [];
-      flip.current = { before, motion, ...painted.current };
+      if (!(event instanceof PaneMovingEvent)) return;
+      sidebarTarget.current = event.targetSidebarWidth;
       measure(true);
     };
-    window.addEventListener(INSPECTOR_LAYOUT_WILL_CHANGE_EVENT, captureInspectorOrigin);
+    window.addEventListener(PANE_SETTLED_EVENT, settled);
     window.addEventListener(PANE_MOVING_EVENT, moving);
     return () => {
       window.removeEventListener(PANE_SETTLED_EVENT, settled);
-      window.removeEventListener(INSPECTOR_LAYOUT_WILL_CHANGE_EVENT, captureInspectorOrigin);
       window.removeEventListener(PANE_MOVING_EVENT, moving);
       observer.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
@@ -493,113 +429,25 @@ export function LibraryItems<T>({
       virtualizer.measureElement(row);
   }, [columns, track, compact, layout, virtual, virtualizer]);
 
-  // The layout as painted: a pane motion captures it as the cards' origin,
-  // and the reflow below reads it after the resting tracks commit.
-  useLayoutEffect(() => {
-    painted.current = { columns, pitch: track + gap, keys };
-  }, [columns, track, gap, keys]);
-
-  // Pane-driven reflow: keep the reading anchor, then fly every card from its
-  // captured position to its new cell along the pane's own progress curve.
-  useLayoutEffect(() => {
-    const pending = flip.current;
-    flip.current = null;
-    const node = root.current;
-    const scroll = scrollRef.current;
-    if (!pending || !node || !scroll) return;
-    const saved = restore.current;
-    restore.current = null;
-    if (saved) {
-      const anchor = node.querySelector<HTMLElement>(
-        `[data-library-key="${CSS.escape(saved.key)}"]`,
-      );
-      if (anchor)
-        scroll.scrollTop +=
-          anchor.getBoundingClientRect().top - scroll.getBoundingClientRect().top - saved.offset;
-    }
-    const focused = focusRestore.current;
-    focusRestore.current = null;
-    if (focused)
-      node
-        .querySelector<HTMLElement>(`[data-library-key="${CSS.escape(focused.key)}"]`)
-        ?.querySelectorAll<HTMLElement>("button,a,input,[tabindex]")
-        [focused.index]?.focus({ preventScroll: true });
-    const { progress, durationMs } = pending.motion;
-    const { columns, keys } = painted.current;
-    const indexes = new Map(keys.map((key, index) => [key, index]));
-    const last = progress.length - 1;
-    if (last < 1 || durationMs <= 0) return;
-    const viewport = scroll.getBoundingClientRect();
-    for (const card of node.querySelectorAll<HTMLElement>("[data-library-key]")) {
-      const after = card.getBoundingClientRect();
-      const key = card.dataset.libraryKey!;
-      const before = pending.before.get(key);
-      // Offscreen cards can commit instantly. Avoid allocating compositor
-      // animations for every loaded card on the input frame.
-      if (!before?.visible && !touchesViewport(after, viewport)) continue;
-      const index = indexes.get(key);
-      let keyframes: Keyframe[];
-      if (before && index !== undefined) {
-        // A card that wraps one row would cross the grid diagonally. It
-        // instead rides its new row like a conveyor: it starts where it would
-        // sit if its old row continued, just past the edge, right behind
-        // the neighbour it follows, so no cell empties and nothing crosses.
-        const rows = Math.floor(index / pending.columns) - Math.floor(index / Math.max(1, columns));
-        const wraps = rows !== 0;
-        if (Math.abs(rows) > 1) {
-          keyframes = fadeIn(progress, last);
-        } else {
-          const dx =
-            before.x - (after.left - viewport.left) + rows * pending.columns * pending.pitch;
-          const dy = wraps ? 0 : before.y - after.top;
-          if (!wraps && Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
-          // Transform only: it runs on the compositor. Animating width would
-          // relayout every card on every frame of the pane motion.
-          keyframes = progress.map((value, index) => {
-            const frame: Keyframe = {
-              offset: index / last,
-              transform: `translate(${dx * (1 - value)}px, ${dy * (1 - value)}px)`,
-            };
-            // Entering past the grid edge, it becomes visible as it arrives.
-            if (wraps) frame.opacity = Math.min(1, value * 2);
-            return frame;
-          });
-        }
-      } else {
-        // Newly rendered cards (e.g. a row the reflow brings into view) fade in.
-        keyframes = fadeIn(progress, last);
-      }
-      flights.current.push(card.animate(keyframes, { duration: durationMs, easing: "linear" }));
-    }
-  }, [geometry, scrollRef]);
-  useEffect(
-    () => () => {
-      for (const flight of flights.current) flight.cancel();
-    },
-    [],
-  );
-
   useLayoutEffect(() => {
     const saved = restore.current;
-    if (!saved) return;
-    const index = keys.indexOf(saved.key);
-    if (index < 0) {
-      restore.current = null;
-      return;
-    }
-    if (virtual) {
+    if (!saved && !focusRestore.current) return;
+    const index = saved ? keys.indexOf(saved.key) : -1;
+    if (virtual && saved && index >= 0) {
       setRevealed(saved.key);
       virtualizer.scrollToIndex(Math.floor(index / columns), { align: "start" });
     }
     const frame = requestAnimationFrame(() => {
-      const node = root.current?.querySelector<HTMLElement>(
-        `[data-library-key="${CSS.escape(saved.key)}"]`,
-      );
-      const scroll = scrollRef.current;
-      virtualizer.cancelScroll();
-      if (node && scroll)
-        scroll.scrollTop +=
-          node.getBoundingClientRect().top - scroll.getBoundingClientRect().top - saved.offset;
+      if (saved) {
+        const node = root.current?.querySelector<HTMLElement>(
+          `[data-library-key="${CSS.escape(saved.key)}"]`,
+        );
+        const scroll = scrollRef.current;
+        virtualizer.cancelScroll();
+        if (node && scroll)
+          scroll.scrollTop +=
+            node.getBoundingClientRect().top - scroll.getBoundingClientRect().top - saved.offset;
+      }
       const focused = focusRestore.current;
       if (focused) {
         root.current
