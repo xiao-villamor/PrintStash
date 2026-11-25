@@ -15,7 +15,9 @@
 - Keep keyboard focus in Collections when opening or closing Model details from the tree.
 - Let each browser show or hide the view name and position on Model cards.
 - Show a compact status label when AI Search is on. Use a neutral Library search focus border and consistent filled dropdowns with rounded menus.
-- Keep reusable pricing templates in Profiles and show the rates applied to each Model revision. Put one-off estimate inputs under a separate control.
+- Anchor dropdowns below their controls when there is room, with upward placement near the viewport edge.
+- Keep reusable pricing templates in Profiles and show the rates applied to each Model revision. Use a separate editing view for one-off estimate inputs.
+- Let cost estimates use printers with a linked cost profile. Prefer the printer recorded for that revision or an unambiguous match from the G-code.
 - Give dark Library cards a neutral hover border and a shadow that follows the rounded corners. Use the same tighter corners on Models, Multipart Models, and their loading cards.
 - Show all AI Search preparation steps with the current step highlighted. Put location choices in view when changing setup and use the shared Settings layout for readiness, index checks, and actions. Open search types, servers, and technical settings as dedicated views.
 - Give the multi-plate tray its own row and keep the selected plate visible when switching views. Improve lighting on dark filament.

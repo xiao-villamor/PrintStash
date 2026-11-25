@@ -82,6 +82,8 @@ Primary actions and selected controls are deliberately different:
 - Single-choice selects and picker buttons use `surface-container-high` with
   a transparent border at rest. Use the shared `dropdown-field` class on custom
   picker buttons. Keyboard focus uses the standard focus outline.
+- Dropdowns open below their trigger when they fit. Open above when there is
+  insufficient room below.
 - Orange belongs to `warning` or explicitly tertiary/status content. It is not
   an action or selection color.
 

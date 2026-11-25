@@ -4,8 +4,15 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { ProductionCosting } from "@/components/model-detail/production-costing";
-import { aMetadata, anEditingBase, aRevision } from "@/test-support/factories";
+import {
+  aMetadata,
+  aModelPrintJob,
+  anEditingBase,
+  aPrinter,
+  aRevision,
+} from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
+import type { ModelPrintJobRead, PrinterRead } from "@/types";
 import type { ArtifactCostingRead } from "@/types/production-costing";
 
 describe("ProductionCosting", () => {
@@ -89,7 +96,7 @@ describe("ProductionCosting", () => {
 
     const form = within(await screen.findByRole("form", { name: "Production estimate" }));
     expect(form.getByRole("button", { name: "Save estimate" })).toBeVisible();
-    expect(form.getByRole("link", { name: "Printer costs in Profiles" })).toHaveAttribute(
+    expect(form.getByRole("link", { name: "Manage profiles" })).toHaveAttribute(
       "href",
       "/profiles?tab=printers",
     );
@@ -183,7 +190,7 @@ describe("ProductionCosting", () => {
     );
 
     const form = within(await screen.findByRole("form", { name: "Production estimate" }));
-    await waitFor(() => expect(form.getByLabelText("Printer profile")).toHaveValue("5"));
+    await waitFor(() => expect(form.getByLabelText("Printer or cost profile")).toHaveValue("5"));
     const price = form.getByLabelText("Cost per kg (USD)");
     await waitFor(() => expect(price).toHaveValue(rate));
     const save = form.getByRole("button", { name: "Save estimate" });
@@ -199,8 +206,143 @@ describe("ProductionCosting", () => {
     expect(save).toBeDisabled();
     await user.type(price, "40");
     expect(finalPrice().getByText("$5.00")).toBeVisible();
-    await user.selectOptions(form.getByLabelText("Printer profile"), "");
+    await user.selectOptions(form.getByLabelText("Printer or cost profile"), "");
     expect(finalPrice().getByText("$4.00")).toBeVisible();
+  });
+
+  describe("printer assignment", () => {
+    const previousPrinter = aPrinter({
+      id: 12,
+      name: "Lab printer",
+      model_name: "MK4",
+      cost_profile_id: 5,
+    });
+    const otherPrinter = aPrinter({
+      id: 13,
+      name: "Spare printer",
+      model_name: "MK4",
+      cost_profile_id: 5,
+    });
+    const unlinked = aPrinter({ id: 14, name: "Unlinked printer", model_name: "MK4" });
+    const expenses = {
+      acquisition_cost: 100,
+      lifetime_hours: 100,
+      lifetime_maintenance: 0,
+      power_watts: 0,
+      electricity_per_kwh: 0,
+      extra_per_hour: 0,
+    };
+
+    function openEstimate(printers: PrinterRead[], jobs: ModelPrintJobRead[] = []) {
+      renderApp(
+        <ProductionCosting
+          modelId={1}
+          files={[aRevision({ id: 2, metadata: aMetadata({ printer_model: "MK4" }) })]}
+          initialFileId={2}
+          jobs={jobs}
+          canEdit
+          admin
+        />,
+        {
+          routes: {
+            "GET /api/v1/files/2/production-cost": json({
+              ...anEditingBase(),
+              currency: "USD",
+              estimate: null,
+              costs: null,
+            }),
+            "GET /api/v1/printers": json(printers),
+            "GET /api/v1/printer-profiles": json([
+              { id: 5, name: "Workshop", printer_model: "MK4", expenses },
+            ]),
+            "GET /api/v1/filament-profiles": json([]),
+            "GET /api/v1/pricing-templates": json([]),
+          },
+        },
+      );
+    }
+
+    it("prefers the linked printer recorded for the current revision", async () => {
+      openEstimate(
+        [previousPrinter, otherPrinter],
+        [
+          aModelPrintJob({ file_id: 1, state: "completed", printer_id: otherPrinter.id }),
+          aModelPrintJob({ file_id: 2, state: "completed", printer_id: previousPrinter.id }),
+        ],
+      );
+      const field = await screen.findByRole("combobox", { name: "Printer or cost profile" });
+      await waitFor(() => expect(field).toHaveValue("printer-12"));
+    });
+
+    it("selects the unique linked printer matching the G-code", async () => {
+      openEstimate([previousPrinter, unlinked]);
+      const field = await screen.findByRole("combobox", { name: "Printer or cost profile" });
+      await waitFor(() => expect(field).toHaveValue("printer-12"));
+      expect(within(field).queryByRole("option", { name: "Unlinked printer" })).toBeNull();
+    });
+
+    it("keeps a recorded unlinked printer distinct from another machine of the same model", async () => {
+      openEstimate(
+        [previousPrinter, unlinked],
+        [aModelPrintJob({ file_id: 2, state: "completed", printer_id: unlinked.id })],
+      );
+      const field = await screen.findByRole("combobox", { name: "Printer or cost profile" });
+      await within(field).findByRole("option", { name: "Lab printer" });
+      expect(field).toHaveValue("5");
+    });
+
+    it("asks for a choice when linked printers match the same model", async () => {
+      openEstimate([
+        previousPrinter,
+        otherPrinter,
+        aPrinter({ id: 15, name: "No usable profile", model_name: "MK4", cost_profile_id: 6 }),
+      ]);
+      const field = await screen.findByRole("combobox", { name: "Printer or cost profile" });
+      await within(field).findByRole("option", { name: "Spare printer" });
+      expect(field).toHaveValue("");
+      expect(within(field).queryByRole("option", { name: "No usable profile" })).toBeNull();
+      await userEvent.setup().selectOptions(field, "printer-13");
+      expect(field).toHaveValue("printer-13");
+      expect(screen.getByText("Machine costs from Workshop.")).toBeVisible();
+    });
+  });
+
+  it("keeps manual inputs when returning to the cost sources", async () => {
+    renderApp(
+      <ProductionCosting
+        modelId={1}
+        files={[aRevision({ id: 2 })]}
+        initialFileId={2}
+        jobs={[]}
+        canEdit
+        admin={false}
+      />,
+      {
+        routes: {
+          "GET /api/v1/files/2/production-cost": json({
+            ...anEditingBase(),
+            currency: "USD",
+            estimate: null,
+            costs: null,
+          }),
+          "GET /api/v1/printer-profiles": json([]),
+          "GET /api/v1/filament-profiles": json([]),
+          "GET /api/v1/pricing-templates": json([]),
+        },
+      },
+    );
+    const form = within(await screen.findByRole("form", { name: "Production estimate" }));
+    const user = userEvent.setup();
+    expect(form.queryByRole("combobox", { name: "Pricing template" })).toBeNull();
+    expect(form.getByRole("combobox", { name: "Printer or cost profile" })).toBeDisabled();
+    await user.click(form.getByRole("button", { name: "Edit inputs" }));
+    const pieces = form.getByRole("spinbutton", { name: "Pieces per print" });
+    await user.clear(pieces);
+    await user.type(pieces, "5");
+    expect(form.queryByRole("combobox", { name: "Printer or cost profile" })).toBeNull();
+    await user.click(form.getByRole("button", { name: "Cost sources" }));
+    await user.click(form.getByRole("button", { name: "Edit inputs" }));
+    expect(form.getByRole("spinbutton", { name: "Pieces per print" })).toHaveValue(5);
   });
 
   it("keeps the draft after a concurrent estimate edit", async () => {
@@ -233,7 +375,7 @@ describe("ProductionCosting", () => {
 
     const user = userEvent.setup();
     const form = within(await screen.findByRole("form", { name: "Production estimate" }));
-    await user.click(form.getByText("Adjust estimate inputs"));
+    await user.click(form.getByRole("button", { name: "Edit inputs" }));
     await user.type(form.getByLabelText("Estimated time per copy"), "30");
     await user.type(form.getByLabelText("Material name"), "PETG");
     await user.type(form.getByLabelText("Filament per copy"), "10");

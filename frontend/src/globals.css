@@ -313,6 +313,15 @@
 
     select:not([multiple]):not([size])::picker(select) {
       appearance: base-select;
+      inset: auto;
+      position-area: block-end span-inline-end;
+      position-try-fallbacks:
+        flip-inline,
+        flip-block,
+        flip-block flip-inline;
+      position-try-order: normal;
+      align-self: start;
+      justify-self: start;
       min-width: anchor-size(width);
       max-height: min(20rem, 60vh);
       margin: 4px 0;
@@ -443,12 +452,6 @@
 
 @supports (appearance: base-select) {
   select.upload-store-in::picker(select) {
-    inset: auto;
-    position-area: block-end span-inline-end;
-    position-try-fallbacks: flip-block;
-    position-try-order: normal;
-    align-self: start;
-    justify-self: start;
     width: anchor-size(width);
     min-width: 0;
     max-height: min(280px, 60dvh);

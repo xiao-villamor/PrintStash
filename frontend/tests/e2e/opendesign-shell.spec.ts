@@ -143,6 +143,36 @@ test.describe("OpenDesign shell", () => {
     ).toBe("8px");
   });
 
+  test("anchors the sort picker below when it fits", async ({ page }) => {
+    await page.goto("/");
+    const sort = page.getByRole("combobox", { name: "Sort models" });
+    await sort.evaluate((element) => {
+      element.style.position = "fixed";
+      element.style.insetBlockStart = "60vh";
+      element.style.insetInlineStart = "50vw";
+    });
+    await sort.press("Space");
+    await expect.poll(() => sort.evaluate((element) => element.matches(":open"))).toBe(true);
+    const trigger = await sort.boundingBox();
+    const first = await sort.getByRole("option").first().boundingBox();
+    expect(first!.y).toBeGreaterThanOrEqual(trigger!.y + trigger!.height);
+  });
+
+  test("opens the sort picker upward at the viewport edge", async ({ page }) => {
+    await page.goto("/");
+    const sort = page.getByRole("combobox", { name: "Sort models" });
+    await sort.evaluate((element) => {
+      element.style.position = "fixed";
+      element.style.insetBlockEnd = "4px";
+      element.style.insetInlineStart = "50vw";
+    });
+    await sort.press("Space");
+    await expect.poll(() => sort.evaluate((element) => element.matches(":open"))).toBe(true);
+    const trigger = await sort.boundingBox();
+    const first = await sort.getByRole("option").first().boundingBox();
+    expect(first!.y + first!.height).toBeLessThanOrEqual(trigger!.y);
+  });
+
   test("the phone navigation remains usable at 320 pixels", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 700 });
     await page.goto("/");

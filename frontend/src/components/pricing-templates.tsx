@@ -12,7 +12,6 @@ import {
 } from "@/features/library/model-detail";
 import { pricingPageSize } from "@/lib/api/production-costing";
 import { formatPercent } from "@/lib/format";
-import { Link } from "@/lib/link";
 import { uiText } from "@/lib/locale";
 import { getSessionVersion } from "@/lib/session-transport";
 import { toast } from "@/lib/toast";
@@ -48,55 +47,58 @@ function usePricingTemplatePage() {
   return { query, rows, navigation, returnToFirstPage: () => setOffset(0) };
 }
 
-export function PricingTemplatePicker({ onApply }: { onApply: (rates: PricingRates) => void }) {
+export function PricingTemplatePicker({
+  rates,
+  onApply,
+}: {
+  rates: PricingRates | null;
+  onApply: (rates: PricingRates) => void;
+}) {
   const id = useId();
   const [selected, select] = useState("");
   const { query, rows, navigation } = usePricingTemplatePage();
-  const template = rows.find((row) => row.id === selected);
+
+  if (query.isError) {
+    return (
+      <p role="alert" className="col-span-2 text-sm text-destructive">
+        {uiText("Could not load pricing templates.")}
+      </p>
+    );
+  }
+  if (rows.length === 0 && !navigation) return null;
+  const applied = rows.find(
+    (row) =>
+      row.id === selected &&
+      row.margin_percent === rates?.margin_percent &&
+      row.tax_percent === rates?.tax_percent,
+  );
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-end gap-2">
-        <FormField className="min-w-48 flex-1" label={uiText("Pricing template")} htmlFor={id}>
-          <select
-            id={id}
-            className={inputClasses}
-            value={template?.id ?? ""}
-            disabled={query.isPending || query.isError || rows.length === 0}
-            onChange={(event) => select(event.target.value)}
-          >
-            <option value="">{uiText("Select a template")}</option>
-            {rows.map((row) => (
-              <option key={row.id} value={row.id}>
-                {row.name}
-              </option>
-            ))}
-          </select>
-        </FormField>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={!template}
-          onClick={() => {
-            if (template) onApply(template);
+    <div className="col-span-2 space-y-2">
+      <FormField label={uiText("Pricing template")} htmlFor={id}>
+        <select
+          id={id}
+          className={inputClasses}
+          value={applied?.id ?? ""}
+          disabled={query.isPending || rows.length === 0}
+          onChange={(event) => {
+            const template = rows.find((row) => row.id === event.target.value);
+            if (!template) return;
+            select(template.id);
+            onApply(template);
           }}
         >
-          {uiText("Apply template")}
-        </Button>
-      </div>
+          <option value="" disabled>
+            {uiText("Select a template")}
+          </option>
+          {rows.map((row) => (
+            <option key={row.id} value={row.id}>
+              {row.name}
+            </option>
+          ))}
+        </select>
+      </FormField>
       {navigation}
-      {query.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {uiText("Could not load pricing templates.")}
-        </p>
-      )}
-      <Link
-        href="/profiles?tab=pricing"
-        className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
-      >
-        {uiText("Pricing templates in Profiles")}
-      </Link>
     </div>
   );
 }

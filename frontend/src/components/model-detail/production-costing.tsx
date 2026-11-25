@@ -29,7 +29,7 @@ import { summarizePrintEstimate } from "./print-estimate";
 import {
   embeddedRatePerKg,
   matchFilamentPreset,
-  matchPrinterPreset,
+  matchingPrinterPresets,
   previewPieceCosts,
 } from "./costing-defaults";
 import { PricingTemplatePicker } from "@/components/pricing-templates";
@@ -529,6 +529,8 @@ function EstimateForm({
   const [estimatePlate] = useState(() => (row.estimate ? undefined : plate));
   const [initialDraft] = useState(() => makeDraft(file, row, estimatePlate, fileEstimate));
   const [draft, setDraft] = useState(initialDraft);
+  const [editingInputs, setEditingInputs] = useState(false);
+  const [manualPrinterChoice, setManualPrinterChoice] = useState<string | null>(null);
   const [nextKey, setNextKey] = useState(draft.materials.length);
   // Where each material's rate came from, until the reader types over it.
   const [rateOrigins, setRateOrigins] = useState<Record<number, { value: string; label: string }>>(
@@ -538,7 +540,7 @@ function EstimateForm({
   const sameCurrency = currency === row.currency;
   const filamentProfiles = useQuery(filamentProfilesOptions()).data ?? [];
   const printerProfiles = useQuery(printerProfilesOptions()).data ?? [];
-  const printers = usePrinters({ enabled: admin && !row.estimate && jobs.length > 0 });
+  const printers = usePrinters({ enabled: admin && sameCurrency });
   const spoolman = useSpoolmanStatus({ enabled: admin });
   const spools = useSpools({ enabled: admin && spoolman.data?.enabled === true }).data ?? [];
   const measured = jobs.find(
@@ -563,22 +565,40 @@ function EstimateForm({
         },
       ]);
   const suggestedRate = pickedFilament?.cost_per_kg ?? embeddedRate;
-  const printerId = jobs.find(
+  const lastPrinterId = jobs.find(
     (job) => job.file_id === file.id && job.state === "completed",
   )?.printer_id;
-  const linkedProfileId = printers.data?.find(
-    (printer) => printer.id === printerId,
-  )?.cost_profile_id;
+  const profileChoices = printerProfiles.flatMap((profile) =>
+    profile.expenses
+      ? [{ ...profile, value: String(profile.id), profile, expenses: profile.expenses }]
+      : [],
+  );
+  const linkedPrinters = (admin ? (printers.data ?? []) : []).flatMap((device) => {
+    const choice = profileChoices.find(({ id }) => id === device.cost_profile_id);
+    if (!choice) return [];
+    return [
+      {
+        ...choice,
+        id: device.id,
+        value: `printer-${device.id}`,
+        name: device.name,
+        printer_model: device.model_name ?? device.detected_model ?? choice.printer_model,
+      },
+    ];
+  });
+  const model = metadata?.printer_model ?? file.metadata?.printer_model;
+  const nozzle = metadata?.nozzle_diameter_mm ?? file.metadata?.nozzle_diameter_mm;
+  const linkedMatches =
+    lastPrinterId == null ? matchingPrinterPresets(linkedPrinters, model, nozzle) : [];
+  const matches = linkedMatches.length
+    ? linkedMatches
+    : matchingPrinterPresets(profileChoices, model, nozzle);
   const pickedPrinter =
-    printerProfiles.find((profile) => profile.id === linkedProfileId && profile.expenses) ??
-    matchPrinterPreset(
-      printerProfiles,
-      metadata?.printer_model ?? file.metadata?.printer_model,
-      metadata?.nozzle_diameter_mm ?? file.metadata?.nozzle_diameter_mm,
-    );
+    linkedPrinters.find(({ id }) => id === lastPrinterId) ??
+    (matches.length === 1 ? matches[0] : undefined);
   const printer =
     draft.printer === undefined
-      ? sameCurrency && pickedPrinter?.expenses
+      ? sameCurrency && pickedPrinter
         ? { name: pickedPrinter.name, expenses: pickedPrinter.expenses }
         : null
       : draft.printer;
@@ -599,10 +619,16 @@ function EstimateForm({
       : row.estimate
         ? uiText("Saved estimate")
         : null;
-  const costedPrinters = printerProfiles.filter((item) => item.expenses);
-  const matchedPrinter = printer
-    ? costedPrinters.find((item) => item.name === printer.name)
-    : undefined;
+  const printerChoices = [...linkedPrinters, ...profileChoices];
+  const savedChoices = printerChoices.filter((choice) => choice.name === printer?.name);
+  const selectedPrinter =
+    draft.printer === undefined
+      ? pickedPrinter
+      : manualPrinterChoice === null
+        ? savedChoices.length === 1
+          ? savedChoices[0]
+          : undefined
+        : printerChoices.find(({ value }) => value === manualPrinterChoice);
 
   function updateMaterial(key: number, patch: Partial<MaterialDraft>) {
     setDraft((old) => ({
@@ -639,182 +665,164 @@ function EstimateForm({
         <InspectorSection
           title={`${uiText("Production estimate")} · ${revisionLabel(file)}`}
           actions={
-            measured && duration != null ? (
-              <Button
-                type="button"
-                size="xs"
-                variant="ghost"
-                onClick={() => {
-                  setDraft((old) => ({
-                    ...old,
-                    minutes: String(duration / 60),
-                    materials:
-                      old.materials.length === 1 && measured.filament_used_g != null
-                        ? old.materials.map((line) => ({
-                            ...line,
-                            grams: String(measured.filament_used_g),
-                          }))
-                        : old.materials,
-                  }));
-                }}
-              >
-                {uiText("Use latest print measurements")} · {measured.printer_name}
-              </Button>
-            ) : undefined
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={() => setEditingInputs(!editingInputs)}
+            >
+              {uiText(editingInputs ? "Cost sources" : "Edit inputs")}
+            </Button>
           }
         >
           <SoftCard className="divide-y-0">
-            <div className="grid grid-cols-2 items-start gap-3 p-4">
-              <FormField
-                className="col-span-2"
-                label={uiText("Printer profile")}
-                hint={
-                  draft.printer === undefined && printer
-                    ? uiText("From the {value1} preset", { value1: printer.name })
-                    : undefined
-                }
-              >
-                <select
-                  className={inputClasses}
-                  value={matchedPrinter ? String(matchedPrinter.id) : printer ? "current" : ""}
-                  disabled={!sameCurrency}
-                  onChange={(event) => {
-                    if (event.target.value === "") {
-                      setDraft({ ...draft, printer: null });
-                      return;
-                    }
-                    const profile = costedPrinters.find(
-                      (item) => item.id === Number(event.target.value),
-                    );
-                    if (profile?.expenses)
+            <div hidden={editingInputs}>
+              <div className="grid grid-cols-2 items-start gap-3 p-4">
+                <FormField
+                  className="col-span-2"
+                  label={uiText("Printer or cost profile")}
+                  hint={
+                    printer && selectedPrinter && (!row.estimate || manualPrinterChoice)
+                      ? uiText("Machine costs from {value1}.", {
+                          value1: selectedPrinter.profile.name,
+                        })
+                      : printer
+                        ? uiText("Saved estimate")
+                        : undefined
+                  }
+                >
+                  <select
+                    className={inputClasses}
+                    value={printer ? (selectedPrinter?.value ?? "current") : ""}
+                    disabled={!sameCurrency || (printerChoices.length === 0 && !printer)}
+                    onChange={(event) => {
+                      if (event.target.value === "") {
+                        setManualPrinterChoice(null);
+                        setDraft({ ...draft, printer: null });
+                        return;
+                      }
+                      const choice = printerChoices.find(
+                        ({ value }) => value === event.target.value,
+                      );
+                      if (!choice) return;
+                      setManualPrinterChoice(choice.value);
                       setDraft({
                         ...draft,
-                        printer: { name: profile.name, expenses: profile.expenses },
+                        printer: { name: choice.name, expenses: choice.expenses },
                       });
-                  }}
-                >
-                  <option value="">
-                    {printer
-                      ? uiText("Exclude machine expenses")
-                      : uiText("Choose a saved printer profile")}
-                  </option>
-                  {printer && !matchedPrinter && <option value="current">{printer.name}</option>}
-                  {costedPrinters.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </select>
-              </FormField>
-              <p className="col-span-2 text-sm text-muted-foreground">
-                <Link
-                  href={`/profiles?tab=printers${matchedPrinter ? `&profile=${matchedPrinter.id}` : ""}`}
-                  className="underline underline-offset-4 hover:text-foreground"
-                >
-                  {uiText("Printer costs in Profiles")}
-                </Link>
-              </p>
-              {materials.map((line) => (
-                <div key={line.key} className="col-span-2 space-y-1.5">
-                  <p className="text-sm text-foreground">
-                    {line.name || uiText("Filament")}
-                    {line.grams && ` · ${formatGrams(Number(line.grams))}`}
-                    {line.rate &&
-                      ` · ${uiText("{value1} {value2}/kg", {
-                        value1: formatNumber(Number(line.rate), { maximumFractionDigits: 4 }),
-                        value2: currency,
-                      })}`}
-                  </p>
-                  {rateOrigins[line.key] ? (
-                    <p className="text-sm text-muted-foreground">{rateOrigins[line.key].label}</p>
-                  ) : line.autoRate && pickedFilament ? (
-                    <p className="text-sm text-muted-foreground">
-                      {uiText("From the {value1} preset", { value1: pickedFilament.name })}
+                    }}
+                  >
+                    <option value="">{uiText("No machine costs")}</option>
+                    {printer && !selectedPrinter && <option value="current">{printer.name}</option>}
+                    {linkedPrinters.length > 0 && (
+                      <optgroup label={uiText("Printers with cost profiles")}>
+                        {linkedPrinters.map(({ value, name }) => (
+                          <option key={value} value={value}>
+                            {name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {profileChoices.length > 0 && (
+                      <optgroup label={uiText("Saved printer profiles")}>
+                        {profileChoices.map(({ value, name }) => (
+                          <option key={value} value={value}>
+                            {name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                </FormField>
+                {materials.map((line) => (
+                  <div key={line.key} className="col-span-2 space-y-1.5">
+                    <p className="text-sm text-foreground">
+                      {line.name || uiText("Filament")}
+                      {line.grams && ` · ${formatGrams(Number(line.grams))}`}
+                      {line.rate &&
+                        ` · ${uiText("{value1} {value2}/kg", {
+                          value1: formatNumber(Number(line.rate), { maximumFractionDigits: 4 }),
+                          value2: currency,
+                        })}`}
                     </p>
-                  ) : null}
-                  {sameCurrency && (filamentProfiles.length > 0 || spools.length > 0) && (
-                    <FormField className="col-span-2" label={uiText("Filament preset or spool")}>
-                      <select
-                        className={inputClasses}
-                        value={
-                          rateOrigins[line.key]?.value ??
-                          (line.autoRate && pickedFilament ? `preset-${pickedFilament.id}` : "")
-                        }
-                        onChange={(event) => {
-                          const option = event.target.value;
-                          const spool = spools.find((item) => option === `spool-${item.id}`);
-                          const profile = filamentProfiles.find(
-                            (item) => option === `preset-${item.id}`,
-                          );
-                          if (spool) {
-                            updateMaterial(line.key, {
-                              name:
-                                [
-                                  spool.vendor_name,
-                                  spool.filament_name ?? spool.name,
-                                  spool.material,
-                                ]
-                                  .filter(Boolean)
-                                  .join(" ") || uiText("Filament"),
-                              rate: spool.cost_per_kg == null ? "" : String(spool.cost_per_kg),
-                              spoolId: spool.id,
-                            });
-                            setRateOrigins((old) => ({
-                              ...old,
-                              [line.key]: {
-                                value: option,
-                                label: uiText("From Spoolman spool #{id}", { id: spool.id }),
-                              },
-                            }));
-                          } else if (profile) {
-                            updateMaterial(line.key, {
-                              name: [profile.name, profile.material_type]
-                                .filter(Boolean)
-                                .join(" · "),
-                              rate: profile.cost_per_kg == null ? "" : String(profile.cost_per_kg),
-                              spoolId: null,
-                            });
-                            setRateOrigins((old) => ({
-                              ...old,
-                              [line.key]: {
-                                value: option,
-                                label: uiText("From the {value1} preset", { value1: profile.name }),
-                              },
-                            }));
+                    {sameCurrency && (filamentProfiles.length > 0 || spools.length > 0) && (
+                      <FormField className="col-span-2" label={uiText("Filament preset or spool")}>
+                        <select
+                          className={inputClasses}
+                          value={
+                            rateOrigins[line.key]?.value ??
+                            (line.autoRate && pickedFilament ? `preset-${pickedFilament.id}` : "")
                           }
-                        }}
-                      >
-                        <option value="" disabled>
-                          {uiText("Select a preset or spool")}
-                        </option>
-                        {filamentProfiles.map((item) => (
-                          <option key={`preset-${item.id}`} value={`preset-${item.id}`}>
-                            {item.name}
+                          onChange={(event) => {
+                            const option = event.target.value;
+                            const spool = spools.find((item) => option === `spool-${item.id}`);
+                            const profile = filamentProfiles.find(
+                              (item) => option === `preset-${item.id}`,
+                            );
+                            if (spool) {
+                              updateMaterial(line.key, {
+                                name:
+                                  [
+                                    spool.vendor_name,
+                                    spool.filament_name ?? spool.name,
+                                    spool.material,
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" ") || uiText("Filament"),
+                                rate: spool.cost_per_kg == null ? "" : String(spool.cost_per_kg),
+                                spoolId: spool.id,
+                              });
+                              setRateOrigins((old) => ({
+                                ...old,
+                                [line.key]: {
+                                  value: option,
+                                  label: uiText("From Spoolman spool #{id}", { id: spool.id }),
+                                },
+                              }));
+                            } else if (profile) {
+                              updateMaterial(line.key, {
+                                name: [profile.name, profile.material_type]
+                                  .filter(Boolean)
+                                  .join(" · "),
+                                rate:
+                                  profile.cost_per_kg == null ? "" : String(profile.cost_per_kg),
+                                spoolId: null,
+                              });
+                              setRateOrigins((old) => ({
+                                ...old,
+                                [line.key]: {
+                                  value: option,
+                                  label: uiText("From the {value1} preset", {
+                                    value1: profile.name,
+                                  }),
+                                },
+                              }));
+                            }
+                          }}
+                        >
+                          <option value="" disabled>
+                            {uiText("Select a preset or spool")}
                           </option>
-                        ))}
-                        {spools.map((item) => (
-                          <option key={`spool-${item.id}`} value={`spool-${item.id}`}>
-                            #{item.id} ·{" "}
-                            {[item.filament_name ?? item.name, item.material, item.location]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          </option>
-                        ))}
-                      </select>
-                    </FormField>
-                  )}
-                </div>
-              ))}
-              <p className="col-span-2 text-sm text-muted-foreground">
-                <Link
-                  href="/profiles?tab=filaments"
-                  className="underline underline-offset-4 hover:text-foreground"
-                >
-                  {uiText("Filament costs in Profiles")}
-                </Link>
-              </p>
-              <div className="col-span-2">
+                          {filamentProfiles.map((item) => (
+                            <option key={`preset-${item.id}`} value={`preset-${item.id}`}>
+                              {item.name}
+                            </option>
+                          ))}
+                          {spools.map((item) => (
+                            <option key={`spool-${item.id}`} value={`spool-${item.id}`}>
+                              #{item.id} ·{" "}
+                              {[item.filament_name ?? item.name, item.material, item.location]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </option>
+                          ))}
+                        </select>
+                      </FormField>
+                    )}
+                  </div>
+                ))}
                 <PricingTemplatePicker
+                  rates={rates}
                   onApply={(value) =>
                     setDraft({
                       ...draft,
@@ -823,18 +831,47 @@ function EstimateForm({
                     })
                   }
                 />
-              </div>
-              {!estimate && (
                 <p className="col-span-2 text-sm text-muted-foreground">
-                  {uiText("Choose saved rates or complete the missing estimate inputs below.")}
+                  <Link
+                    href={`/profiles?tab=printers${selectedPrinter ? `&profile=${selectedPrinter.profile.id}` : ""}`}
+                    className="underline underline-offset-4 hover:text-foreground"
+                  >
+                    {uiText("Manage profiles")}
+                  </Link>
                 </p>
-              )}
+                {!estimate && (
+                  <p className="col-span-2 text-sm text-muted-foreground">
+                    {uiText("Choose saved rates or edit the missing inputs.")}
+                  </p>
+                )}
+              </div>
             </div>
-            <details className="border-t border-border">
-              <summary className="rounded-md px-4 py-3 text-sm font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
-                {uiText("Adjust estimate inputs")}
-              </summary>
-              <div className="grid grid-cols-2 items-start gap-3 p-4 pt-2">
+            <div hidden={!editingInputs}>
+              {measured && duration != null && (
+                <div className="px-4 pt-3">
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => {
+                      setDraft((old) => ({
+                        ...old,
+                        minutes: String(duration / 60),
+                        materials:
+                          old.materials.length === 1 && measured.filament_used_g != null
+                            ? old.materials.map((line) => ({
+                                ...line,
+                                grams: String(measured.filament_used_g),
+                              }))
+                            : old.materials,
+                      }));
+                    }}
+                  >
+                    {uiText("Use latest print measurements")}
+                  </Button>
+                </div>
+              )}
+              <div className="grid grid-cols-2 items-start gap-3 p-4">
                 <FormField
                   label={uiText("Estimated time per copy")}
                   hint={[uiText("Minutes"), fileOrigin].filter(Boolean).join(" · ")}
@@ -1007,7 +1044,7 @@ function EstimateForm({
                   </FormField>
                 </div>
               </div>
-            </details>
+            </div>
           </SoftCard>
         </InspectorSection>
         {messages}

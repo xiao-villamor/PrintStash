@@ -33,14 +33,16 @@ export function matchFilamentPreset(
   return matches.length === 1 && matches[0]?.cost_per_kg != null ? matches[0] : undefined;
 }
 
-export function matchPrinterPreset(
-  profiles: PrinterProfileRead[],
+export function matchingPrinterPresets<
+  T extends Pick<PrinterProfileRead, "name" | "printer_model" | "nozzle_diameter_mm">,
+>(
+  profiles: readonly T[],
   printerModel: string | null | undefined,
   nozzle: number | null | undefined,
 ) {
   const model = normalize(printerModel);
-  if (!model) return undefined;
-  const compatible = (profile: PrinterProfileRead) =>
+  if (!model) return [];
+  const compatible = (profile: T) =>
     nozzle == null || profile.nozzle_diameter_mm == null || profile.nozzle_diameter_mm === nozzle;
   const exact = profiles.filter(
     (profile) => normalize(profile.name) === model && compatible(profile),
@@ -52,8 +54,7 @@ export function matchPrinterPreset(
       );
   const sameNozzle =
     nozzle == null ? [] : matches.filter((profile) => profile.nozzle_diameter_mm === nozzle);
-  const candidates = sameNozzle.length ? sameNozzle : matches;
-  return candidates.length === 1 && candidates[0]?.expenses ? candidates[0] : undefined;
+  return sameNozzle.length ? sameNozzle : matches;
 }
 
 export function embeddedRatePerKg(
