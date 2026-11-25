@@ -97,6 +97,15 @@ test.describe("printer Files and Jobs", () => {
         "href",
         `/models/${modelId}`,
       );
+      const explorer = page.getByRole("region", { name: "Printer files" });
+      const unusedWidth = await explorer.evaluate((element) => {
+        const container = element.parentElement;
+        if (!container) throw new Error("The explorer must have a container");
+        return container.clientWidth - element.getBoundingClientRect().width;
+      });
+      expect(unusedWidth).toBeLessThanOrEqual(1);
+      const originalFilename = fileInspector.getByText("Original filename", { exact: true });
+      await expect(originalFilename).toBeVisible();
       const [label, value] = await fileInspector
         .locator("dl > div")
         .first()

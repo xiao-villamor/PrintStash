@@ -6,10 +6,6 @@
   color: var(--card-foreground);
 }
 
-.printer-explorer-inventory {
-  max-width: 90rem;
-}
-
 .printer-explorer-header,
 .printer-explorer-toolbar {
   display: flex;
@@ -64,7 +60,7 @@
 }
 
 .printer-explorer-files {
-  grid-template-columns: clamp(160px, 16%, 224px) minmax(0, 1fr) clamp(260px, 25%, 352px);
+  grid-template-columns: clamp(160px, 15%, 224px) minmax(0, 1fr) clamp(320px, 25%, 420px);
 }
 
 .printer-explorer-jobs {
@@ -151,8 +147,16 @@
   width: auto;
 }
 
-.printer-explorer-files .printer-explorer-table th:not(:first-child) {
-  width: 1%;
+.printer-explorer-files .printer-explorer-table th:nth-child(2) {
+  width: 7rem;
+}
+
+.printer-explorer-files .printer-explorer-table th:nth-child(3) {
+  width: 9rem;
+}
+
+.printer-explorer-files .printer-explorer-table th:nth-child(4) {
+  width: 12rem;
 }
 
 .printer-explorer-files .printer-explorer-table td:nth-child(n + 2) {
@@ -209,7 +213,6 @@
 
 .printer-explorer-details dd {
   overflow-wrap: anywhere;
-  text-align: start;
 }
 
 .printer-explorer-actions {
