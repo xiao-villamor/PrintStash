@@ -149,7 +149,7 @@ interface BedSize {
 }
 
 const DETAIL_SIDEBAR_STORAGE_KEY = "ps-model-detail-inspector-preferred-width";
-const DETAIL_PRIMARY_TABS = ["overview", "files", "revisions", "history"] as const;
+const DETAIL_PRIMARY_TABS = ["overview", "files", "documentation", "revisions", "history"] as const;
 const PRINT_DETAIL_SECTIONS = ["revisions", "settings", "costing"] as const;
 const DETAIL_SIDEBAR_MIN_WIDTH = 400;
 const DETAIL_SIDEBAR_MAX_WIDTH = 1100;
@@ -419,7 +419,8 @@ function ModelDetailPresentation({
   const printJobs = canViewPrinters ? (printJobQuery.data ?? []) : [];
   const activeTab =
     (!canViewPrinters && requestedTab === "history") ||
-    (!canEditModel && requestedTab === "similar")
+    (!canEditModel && requestedTab === "similar") ||
+    (!auth.isAuthenticated && requestedTab === "documentation")
       ? "overview"
       : requestedTab;
   const activePrimary = modelDetailParent(activeTab);
@@ -745,27 +746,28 @@ function ModelDetailPresentation({
     () => sortedFiles.filter((f) => f.file_type !== "gcode"),
     [sortedFiles],
   );
-  const tabItems = DETAIL_PRIMARY_TABS.filter((tab) => tab !== "history" || canViewPrinters).map(
-    (key) => {
-      const count =
-        key === "files"
-          ? sourceFiles.length
-          : key === "revisions"
-            ? gcodeFiles.length
-            : key === "history"
-              ? printJobs.length
-              : 0;
-      return {
-        key,
-        label: (
-          <>
-            {modelDetailSectionLabel(key)}
-            {count > 0 && <span className="model-detail-tab-count"> {count}</span>}
-          </>
-        ),
-      };
-    },
-  );
+  const tabItems = DETAIL_PRIMARY_TABS.filter(
+    (tab) =>
+      (tab !== "history" || canViewPrinters) && (tab !== "documentation" || auth.isAuthenticated),
+  ).map((key) => {
+    const count =
+      key === "files"
+        ? sourceFiles.length
+        : key === "revisions"
+          ? gcodeFiles.length
+          : key === "history"
+            ? printJobs.length
+            : 0;
+    return {
+      key,
+      label: (
+        <>
+          {modelDetailSectionLabel(key)}
+          {count > 0 && <span className="model-detail-tab-count"> {count}</span>}
+        </>
+      ),
+    };
+  });
 
   const recommendedGcode = gcodeFiles.find((f) => f.is_recommended) ?? null;
   const inspectedGcode = inspectedRevision(
@@ -1604,7 +1606,7 @@ function ModelDetailPresentation({
                   selectTab(tab);
                 }}
                 showIndicator={false}
-                className="model-detail-tab-list w-fit gap-0.5 rounded-lg border border-border bg-card p-0.75"
+                className="model-detail-tab-list w-fit max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-card p-0.75"
                 tabClassName="model-detail-tab-label relative h-7.5 rounded-md px-2.5 py-0 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                 activeTabClassName="bg-foreground/12 text-foreground"
               />
@@ -1905,10 +1907,11 @@ function ModelDetailPresentation({
                           : undefined
                       }
                     />
-                    {auth.isAuthenticated && (
-                      <DocumentBrowser key={model.id} modelId={model.id} canCreate={canEditModel} />
-                    )}
                   </div>
+                )}
+
+                {activeTab === "documentation" && (
+                  <DocumentBrowser key={model.id} modelId={model.id} canCreate={canEditModel} />
                 )}
 
                 {activeTab === "history" && canViewPrinters && printJobQuery.isError && (

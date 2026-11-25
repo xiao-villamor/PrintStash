@@ -158,7 +158,7 @@ export default function DocumentDetailPage({
   const canEdit = !accessDenied && canEditDoc(doc, !!user?.is_superuser);
   const backHref =
     doc?.model_id != null
-      ? `/models/${doc.model_id}?tab=files`
+      ? `/models/${doc.model_id}?tab=documentation`
       : doc?.collection
         ? `/?c=${encodeURIComponent(doc.collection)}&v=docs`
         : "/?v=docs";

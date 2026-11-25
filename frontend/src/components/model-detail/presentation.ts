@@ -22,6 +22,7 @@ export type TabKey =
   | "costing"
   | "revisions"
   | "files"
+  | "documentation"
   | "history"
   | "similar";
 
@@ -29,6 +30,7 @@ export type TabKey =
 export const DETAIL_SECTIONS = [
   "overview",
   "files",
+  "documentation",
   "revisions",
   "settings",
   "costing",
@@ -43,6 +45,8 @@ export function modelDetailSectionLabel(section: TabKey) {
       return uiText("Overview");
     case "files":
       return uiText("Files");
+    case "documentation":
+      return uiText("modelDetail.documentation");
     case "revisions":
       return uiText("modelDetail.print");
     case "history":

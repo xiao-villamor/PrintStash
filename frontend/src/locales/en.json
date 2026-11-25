@@ -6014,6 +6014,7 @@
   "Work type": "Work type",
   "Retry {name}": "Retry {name}",
   "modelDetail.print": "Print",
+  "modelDetail.documentation": "Documentation",
   "modelDetail.activity": "Activity",
   "modelDetail.printSections": "Print sections",
   "modelDetail.printStatus": "Print status",
