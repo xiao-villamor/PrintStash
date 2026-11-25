@@ -70,7 +70,7 @@ describe("README logo", () => {
   });
 
   it("renders the slogan as README text", () => {
-    expect(readme).toContain("### Save what worked. Print it again.");
+    expect(readme).toContain("### From import to print, with costs in view.");
   });
 
   describe.each(["light", "dark"])("in %s mode", (theme) => {

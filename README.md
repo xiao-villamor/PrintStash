@@ -2,9 +2,9 @@
 
 <a href="screenshots/printstash-logo-dark.gif#gh-dark-mode-only"><img src="screenshots/printstash-logo-dark.gif" alt="PrintStash logo" height="160" /></a><a href="screenshots/printstash-logo-light.gif#gh-light-mode-only"><img src="screenshots/printstash-logo-light.gif" alt="PrintStash logo" height="160" /></a>
 
-### Save what worked. Print it again.
+### From import to print, with costs in view.
 
-A self-hosted library for 3D models, G-code revisions, slicer settings, and print history.
+Import models, save slicer settings, manage prints, and estimate costs in one self-hosted library.
 
 [![Release](https://img.shields.io/github/v/release/xiao-villamor/PrintStash?style=flat&label=Release&labelColor=252c36&color=414b5b)](https://github.com/xiao-villamor/PrintStash/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/xiao-villamor/PrintStash/ci.yml?branch=main&style=flat&label=CI&labelColor=252c36)](https://github.com/xiao-villamor/PrintStash/actions/workflows/ci.yml)
