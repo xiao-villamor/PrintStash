@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Upgrades from 0.13 or earlier preserve legacy `generic` background job records and translate them to the current upload job kind before installing the job-kind constraint.
+
 - Bambu LAN connects on Python 3.14 with bundled Bambu CA certificates that lack the Key Usage extension.
 
 - PostgreSQL library browsing works when none of the requested Models have an automatic thumbnail.
