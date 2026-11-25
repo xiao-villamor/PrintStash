@@ -33,10 +33,10 @@ import {
 } from "@/features/library/reading-position";
 import { LibraryItems, type LibraryInspectorDock } from "@/components/library-items";
 import {
+  INSPECTOR_WILL_MOVE_EVENT,
   LIBRARY_INSPECTOR_MAX_WIDTH,
   LIBRARY_INSPECTOR_MIN_WIDTH,
 } from "@/components/use-inspector-motion";
-import { PaneMovingEvent } from "@/components/use-collections-pane-motion";
 import { LibraryItemLink } from "@/features/library/navigation";
 import { useModelOpenIntent } from "@/features/library/model-detail";
 import { useLibraryEntry, type LibraryEntry } from "@/features/library/navigation-state";
@@ -2364,7 +2364,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const setInspector = useCallback(
     (intent: InspectorIntent) => {
       if (intent.open !== (libraryInspectorIntents.get(inspectorScope)?.open ?? false))
-        window.dispatchEvent(new PaneMovingEvent(null));
+        window.dispatchEvent(new Event(INSPECTOR_WILL_MOVE_EVENT));
       libraryInspectorIntents.set(inspectorScope, intent);
       while (libraryInspectorIntents.size > 20)
         libraryInspectorIntents.delete(libraryInspectorIntents.keys().next().value!);

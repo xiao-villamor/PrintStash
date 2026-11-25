@@ -395,16 +395,14 @@ Hide only when the motion reaches the closed position. Switching Models keeps th
 panel stationary. Closed panels become inert immediately. Closing details returns
 focus to the opener, the inspected Model card if it was remounted, or the Details button.
 
-Both docks use the same smooth cubic ease over the fast timing (200 ms), with
-inherited velocity on interruption. Opening or closing either dock commits the
-Library grid's final tracks before the pane moves. At the click, the library
-captures visible cards before the dock changes layout. Cards on the same row
-move from those positions using a compositor transform when their destination
-is at most one cell away. Cards that wrap or move farther briefly fade in
-their destination cells. Card reflow uses the dock curve.
-The collapsed Collections strip uses the same track count for its layout and
-its card limit, so it keeps its height as the dock moves.
-The Collections shell edge and workspace move together.
+Model details captures visible card positions before the dock changes layout.
+Nearby cards on the same row ease into place. Cards that wrap or move farther
+briefly fade into their destination cells. The selected model stays visually anchored.
+
+The Collections sidebar uses a workspace slide. Its shell edge and the
+workspace move together, with card tracks held for the duration of the slide.
+The grid fits the final workspace width once the sidebar settles.
+The collapsed Collections strip limits cards to its current column count.
 The inner outliner keeps its intrinsic width, clipped and anchored to the moving edge.
 Retain the outliner DOM, filter, expansion and scroll state while closed; make it
 inert immediately and hide its contents only at rest. Drag resizing remains 1:1,

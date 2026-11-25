@@ -2,6 +2,9 @@ import { useLayoutEffect, useRef, useState } from "react";
 
 import { dockMotion } from "@/components/use-collections-pane-motion";
 
+/** Capture the grid before Details changes the workspace width. */
+export const INSPECTOR_WILL_MOVE_EVENT = "printstash:inspector-will-move";
+
 export const LIBRARY_INSPECTOR_MIN_WIDTH = 320;
 export const LIBRARY_INSPECTOR_MAX_WIDTH = 800;
 
@@ -14,7 +17,7 @@ const VELOCITY_SETTLED = 0.03;
 
 /** Compositor keyframes keep moving while the 3D preview initializes. Presence
  * follows completion, and reversals inherit the presentation and its velocity.
- * Both docks share the same curve and duration. */
+ * The dock and its card reflow share their timing. */
 export function useInspectorMotion(open: boolean, onSettled?: () => void) {
   const panel = useRef<HTMLElement>(null);
   const position = useRef(1);

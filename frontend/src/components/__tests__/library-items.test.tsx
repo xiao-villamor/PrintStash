@@ -4,7 +4,7 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useMemo, useRef, useState } from "react";
 import { LibraryItems } from "@/components/library-items";
-import { PANE_SETTLED_EVENT, PaneMovingEvent } from "@/components/use-collections-pane-motion";
+import { PANE_SETTLED_EVENT } from "@/components/use-collections-pane-motion";
 import type { LibraryReadingRenderer } from "@/features/library/reading-position";
 
 let width = 1000;
@@ -123,34 +123,24 @@ describe("LibraryItems", () => {
     expect(screen.getByText("Card 5").closest("[data-library-key]")).toBe(card);
   });
 
-  it("commits the resting columns as Collections starts closing", () => {
-    render(
-      <>
-        <aside data-collections-pane />
-        <Grid />
-      </>,
-    );
-    const sidebar = document.querySelector<HTMLElement>("[data-collections-pane]")!;
-    vi.spyOn(sidebar, "offsetWidth", "get").mockReturnValue(250);
+  it("keeps Collections tracks fixed while the workspace is moving", () => {
+    render(<Grid />);
     document.documentElement.dataset.paneMoving = "";
+    width = 1250;
 
-    act(() => {
-      window.dispatchEvent(new PaneMovingEvent(0));
-    });
+    act(() => window.dispatchEvent(new Event(PANE_SETTLED_EVENT)));
 
-    expect(grid().style.gridTemplateColumns).toBe("repeat(4, 300px)");
+    expect(grid().style.gridTemplateColumns).toBe("repeat(3, 322px)");
     expect(flights.size).toBe(0);
   });
 
-  it("keeps a collapsed strip on one row when a pane narrows its tracks", () => {
+  it("keeps a collapsed strip on one row after its tracks narrow", () => {
     width = 1250;
     render(<Grid singleRow />);
     expect(screen.getByRole("link", { name: "Card 3" })).toBeVisible();
-    document.documentElement.dataset.paneMoving = "";
+    width = 1000;
 
-    act(() => {
-      window.dispatchEvent(new PaneMovingEvent(250));
-    });
+    act(() => window.dispatchEvent(new Event(PANE_SETTLED_EVENT)));
 
     expect(grid().style.gridTemplateColumns).toBe("repeat(3, 322px)");
     expect(screen.queryByRole("link", { name: "Card 3" })).toBeNull();

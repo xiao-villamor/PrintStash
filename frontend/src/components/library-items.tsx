@@ -9,11 +9,7 @@ import {
   type RefObject,
 } from "react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import {
-  PANE_MOVING_EVENT,
-  PANE_SETTLED_EVENT,
-  PaneMovingEvent,
-} from "@/components/use-collections-pane-motion";
+import { PANE_SETTLED_EVENT } from "@/components/use-collections-pane-motion";
 import {
   libraryReadingSelector,
   type LibraryReadingRenderer,
@@ -22,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { durationToken } from "@/lib/css-time";
 import {
   clampInspectorWidth,
+  INSPECTOR_WILL_MOVE_EVENT,
   LIBRARY_INSPECTOR_MAX_WIDTH,
   LIBRARY_INSPECTOR_MIN_WIDTH,
 } from "./use-inspector-motion";
@@ -146,7 +143,6 @@ export function LibraryItems<T>({
   const focusRestore = useRef<{ key: string; index: number } | null>(null);
   const restore = useRef<{ key: string; offset: number } | null>(null);
   const readyGeometry = useRef<typeof geometry | null>(null);
-  const sidebarTarget = useRef<number | null>(null);
   const paneCards = useRef<PaneCardSnapshot | null>(null);
   const cardAnimations = useRef<Animation[]>([]);
   const snapshotExpiry = useRef<number | null>(null);
@@ -216,21 +212,11 @@ export function LibraryItems<T>({
     const node = root.current;
     const scroll = scrollRef.current;
     if (!node || !scroll) return;
-    const measure = (paneMotion = false) => {
-      if (node.clientWidth === 0) return;
-      const sidebarMoving = "paneMoving" in document.documentElement.dataset;
-      if (sidebarMoving && !paneMotion) return;
-      const sidebarWidth =
-        sidebarMoving || keepCollectionCardWidth
-          ? (document.querySelector<HTMLElement>("[data-collections-pane]")?.offsetWidth ?? 0)
-          : 0;
-      const restingSidebarWidth = sidebarMoving
-        ? (sidebarTarget.current ?? sidebarWidth)
-        : sidebarWidth;
-      const measuredWidth = Math.max(
-        1,
-        Math.round(node.clientWidth + sidebarWidth - restingSidebarWidth),
-      );
+    const measure = () => {
+      const measuredWidth = node.clientWidth;
+      // Collections carries the existing grid with the workspace. Keep its
+      // tracks pinned until the shell finishes moving.
+      if (measuredWidth === 0 || "paneMoving" in document.documentElement.dataset) return;
       // The scroll surface docks the inspector with right padding. Recover the
       // closed width, including when the Collections pane targets a new width.
       const style =
@@ -241,7 +227,9 @@ export function LibraryItems<T>({
       // A scrollbar can appear as the cards rewrap. The outer frame tells us
       // whether the closed layout itself changed or just the open grid did.
       const scrollbarWidth = scroll.offsetWidth - scroll.clientWidth;
-      const collectionsPaneWidth = keepCollectionCardWidth ? restingSidebarWidth : 0;
+      const collectionsPaneWidth = keepCollectionCardWidth
+        ? (document.querySelector<HTMLElement>("[data-collections-pane]")?.offsetWidth ?? 0)
+        : 0;
       const closedFrameWidth = measuredWidth + dockWidth + scrollbarWidth;
       const inset = style?.getPropertyValue("--library-inspector-inset");
       const gutter = style?.getPropertyValue("--library-inspector-gutter");
@@ -394,12 +382,8 @@ export function LibraryItems<T>({
     });
     observer.observe(node);
     observer.observe(scroll);
-    const settled = () => {
-      sidebarTarget.current = null;
-      measure();
-    };
-    const moving = (event: Event) => {
-      if (!(event instanceof PaneMovingEvent)) return;
+    const movingInspector = () => {
+      if ("paneMoving" in document.documentElement.dataset) return;
       if (layout === "grid" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
         const viewport = scroll.getBoundingClientRect();
         const { columns, track, width, keys } = paintedGrid.current;
@@ -420,16 +404,12 @@ export function LibraryItems<T>({
           paneCards.current = null;
         });
       }
-      if (event.targetSidebarWidth !== null) {
-        sidebarTarget.current = event.targetSidebarWidth;
-        measure(true);
-      }
     };
-    window.addEventListener(PANE_SETTLED_EVENT, settled);
-    window.addEventListener(PANE_MOVING_EVENT, moving);
+    window.addEventListener(PANE_SETTLED_EVENT, measure);
+    window.addEventListener(INSPECTOR_WILL_MOVE_EVENT, movingInspector);
     return () => {
-      window.removeEventListener(PANE_SETTLED_EVENT, settled);
-      window.removeEventListener(PANE_MOVING_EVENT, moving);
+      window.removeEventListener(PANE_SETTLED_EVENT, measure);
+      window.removeEventListener(INSPECTOR_WILL_MOVE_EVENT, movingInspector);
       observer.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
     };

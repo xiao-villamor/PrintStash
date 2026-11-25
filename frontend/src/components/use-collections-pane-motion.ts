@@ -31,15 +31,6 @@ export function dockMotion(element: Element, from: number, velocity: number, tar
 
 /** Re-measure layouts after a dock width is committed. */
 export const PANE_SETTLED_EVENT = "printstash:pane-settled";
-/** Signals a dock change before the library's resting tracks are committed. */
-export const PANE_MOVING_EVENT = "printstash:pane-moving";
-
-export class PaneMovingEvent extends Event {
-  constructor(readonly targetSidebarWidth: number | null) {
-    super(PANE_MOVING_EVENT);
-  }
-}
-
 function setMoving(moving: boolean) {
   const root = document.documentElement;
   if (moving) root.dataset.paneMoving = "";
@@ -49,7 +40,7 @@ function setMoving(moving: boolean) {
   }
 }
 
-/** Move the shell edge with the workspace while the grid uses the sidebar's final width. */
+/** Move the shell edge with the workspace with the workspace and fit the grid when it settles. */
 export function useCollectionsPaneMotion(open: boolean) {
   const viewport = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -93,7 +84,6 @@ export function useCollectionsPaneMotion(open: boolean) {
       else {
         body.style.visibility = "visible";
         setMoving(true);
-        window.dispatchEvent(new PaneMovingEvent(targetWidth));
         const timing = {
           duration: motion.duration * 1000,
           easing: "linear",

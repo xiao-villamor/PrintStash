@@ -12,7 +12,7 @@
 
 ### Changed
 
-- Opening or closing Collections or Model details reflows visible cards on the pane’s timing. Cards that move more than one cell fade into place. The collapsed Collections strip keeps its height during the transition. Closing Model details returns focus to a card or control in the library.
+- Collections moves the workspace as one surface and fits the grid after the slide. Model details uses a separate reflow for nearby and wrapping cards. Closing Model details returns focus to a card or control in the library.
 
 - The Trash page uses rounded surfaces and icons on its actions, shows how many days each deleted item has left (the last three days in the destructive tone), and has an illustrated empty state.
 

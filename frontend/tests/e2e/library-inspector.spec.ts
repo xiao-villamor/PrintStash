@@ -123,7 +123,7 @@ test.describe("Library inline inspector", () => {
     });
   }
 
-  test("animates visible cards on both pane transitions", async ({ page }) => {
+  test("animates visible cards only on Details transitions", async ({ page }) => {
     const models = Array.from({ length: 92 }, (_, index) =>
       aModelListItem({ id: index + 1, name: `Part ${index + 1}` }),
     );
@@ -187,12 +187,12 @@ test.describe("Library inline inspector", () => {
     const beforeClosingSidebar = await animations();
     await sidebar.click();
     await expect(sidebar).toHaveAttribute("aria-expanded", "false");
-    await expect.poll(animations).toBeGreaterThan(beforeClosingSidebar);
     await page.waitForFunction(() => !document.documentElement.hasAttribute("data-pane-moving"));
-    const beforeOpeningSidebar = await animations();
+    expect(await animations()).toBe(beforeClosingSidebar);
     await sidebar.click();
     await expect(sidebar).toHaveAttribute("aria-expanded", "true");
-    await expect.poll(animations).toBeGreaterThan(beforeOpeningSidebar);
+    await page.waitForFunction(() => !document.documentElement.hasAttribute("data-pane-moving"));
+    expect(await animations()).toBe(beforeClosingSidebar);
     expect(await page.evaluate(() => window.paneCardsCrossingCells)).toEqual([]);
   });
 
