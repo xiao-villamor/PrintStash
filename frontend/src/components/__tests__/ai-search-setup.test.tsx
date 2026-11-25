@@ -16,6 +16,8 @@ import { aJob } from "@/test-support/factories";
 const enabled = searchSettings({ enabled: true, local_models_enabled: true });
 function setup(options: RenderAppOptions = {}) {
   return renderApp(<AiSearchSettings />, {
+    at: "/settings?section=ai-search",
+    routePath: "/settings",
     ...options,
     routes: {
       "GET /api/v1/config/ai-search": json(searchConfiguration()),
@@ -597,11 +599,9 @@ describe("AiSearchSetup", () => {
   });
   it("keeps guided setup available while visiting technical settings", async () => {
     setup();
-    await userEvent.click(await screen.findByRole("button", { name: "Technical settings" }));
+    await userEvent.click(await screen.findByRole("link", { name: "Technical settings" }));
     expect(await screen.findByRole("checkbox", { name: "Enable AI Search" })).toBeVisible();
-    await userEvent.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }),
-    );
+    await userEvent.click(screen.getByRole("link", { name: "Back to AI Search" }));
     expect(
       await screen.findByRole("heading", { name: "Where should AI Search run?" }),
     ).toBeVisible();

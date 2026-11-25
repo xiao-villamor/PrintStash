@@ -10,7 +10,7 @@
 - Round sidebar highlights, workspace menu highlights, and image preview indicators. Soften preview arrows with a filled background. Match Library loading cards to the current card design.
 - Label the AI Search toggle and give the Library search field a neutral focus border.
 - Give dark Library cards a neutral hover border and a shadow that follows the rounded corners. Use the same tighter corners on Models, Multipart Models, and their loading cards.
-- Show all AI Search preparation steps with the current step highlighted. Put location choices in view when changing setup and use the shared Settings layout for readiness, index checks, and actions.
+- Show all AI Search preparation steps with the current step highlighted. Put location choices in view when changing setup and use the shared Settings layout for readiness, index checks, and actions. Open search types, servers, and technical settings as dedicated views.
 - Give the multi-plate tray its own row and keep the selected plate visible when switching views. Improve lighting on dark filament.
 - Align the model's Print actions and add space to attachment rows.
 

@@ -112,4 +112,25 @@ test.describe("AI Search preparation", () => {
     await expect(dialog).toBeHidden();
     await expect(page.getByRole("button", { name: "Change setup" })).toBeFocused();
   });
+  for (const { action, url, heading } of [
+    { action: "Manage indexes", url: /ai-view=indexes/, heading: "Search types" },
+    { action: "Manage servers", url: /ai-view=servers$/, heading: "Connect an AI server" },
+    { action: "Add a server", url: /ai-view=servers&server=new/, heading: "Add a server" },
+    { action: "Technical settings", url: /ai-view=technical/, heading: "Technical settings" },
+  ]) {
+    test(`opens ${action} as a reloadable Settings view`, async ({ page }) => {
+      await serveSearch(page, aSearchGeneration({ state: "active" }));
+      await page.goto("/settings?section=ai-search");
+      await collapseNavigationSidebar(page);
+
+      await page.getByRole("link", { name: action, exact: true }).click();
+
+      await expect(page).toHaveURL(url);
+      await page.reload();
+      await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await page.getByRole("link", { name: "Back to AI Search" }).click();
+      await expect(page.getByRole("link", { name: action, exact: true })).toBeVisible();
+    });
+  }
 });

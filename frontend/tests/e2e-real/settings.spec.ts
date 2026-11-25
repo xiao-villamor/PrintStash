@@ -168,7 +168,7 @@ const storageInsightsExample: StorageInventoryReport = {
 };
 
 async function openAiSearchSettings(page: Page) {
-  const ready = page.getByRole("button", { name: "Technical settings", exact: true });
+  const ready = page.getByRole("link", { name: "Technical settings", exact: true });
   for (let attempt = 0; attempt < 3; attempt++) {
     await page.goto("/settings?section=ai-search", { waitUntil: "domcontentloaded" });
     try {
@@ -861,10 +861,8 @@ test.describe("settings", () => {
       for (const width of [1280, 390]) {
         await page.setViewportSize({ width, height: 1000 });
         await openAiSearchSettings(page);
-        await page.getByRole("button", { name: /^(Start|Change) setup$/ }).click();
-        const setup = page.getByRole("dialog", { name: "AI Search setup", exact: true });
-        const location = setup.getByRole("combobox", { name: "Location", exact: true });
-        await expect(location).toBeVisible();
+        const setup = page.getByRole("group", { name: "AI Search setup", exact: true });
+        await expect(setup.getByRole("button", { name: "Use this machine" })).toBeVisible();
         await page.evaluate(
           (dark) => document.documentElement.classList.toggle("dark", dark),
           theme === "dark",
@@ -874,21 +872,20 @@ test.describe("settings", () => {
           fullPage: true,
           animations: "disabled",
         });
-        await location.selectOption("local");
-        await expect(setup.getByText(/Your library text stays here/)).toBeVisible();
+        await setup.getByRole("button", { name: "Use this machine" }).click();
+        await expect(setup.getByText("On this machine", { exact: true })).toBeVisible();
         expect(
           await page.evaluate(() => document.documentElement.scrollWidth - innerWidth),
         ).toBeLessThanOrEqual(0);
-        await location.selectOption("server");
+        await setup.getByRole("button", { name: "Change location" }).click();
+        await setup.getByRole("button", { name: "Connect another server" }).click();
         await expect(setup.getByRole("form", { name: "Inference server" })).toBeVisible();
-        await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
-        await page.getByRole("button", { name: "Technical settings", exact: true }).click();
+        await page.getByRole("link", { name: "Technical settings", exact: true }).click();
         await expect(
           page.getByRole("checkbox", { name: "Enable AI Search", exact: true }),
         ).toBeVisible();
-        await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
-        await page.getByRole("button", { name: /^(Start|Change) setup$/ }).click();
-        await expect(setup.getByRole("combobox", { name: "Location", exact: true })).toBeVisible();
+        await page.getByRole("link", { name: "Back to AI Search" }).click();
+        await expect(setup.getByRole("button", { name: "Use this machine" })).toBeVisible();
       }
     }
   });
@@ -897,11 +894,11 @@ test.describe("settings", () => {
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: 900 });
       await openAiSearchSettings(page);
-      await expect(page.getByRole("button", { name: "Manage indexes", exact: true })).toBeVisible({
+      await expect(page.getByRole("link", { name: "Manage indexes", exact: true })).toBeVisible({
         timeout: 45_000,
       });
-      await page.getByRole("button", { name: "Manage indexes", exact: true }).click();
-      await expect(page.getByRole("dialog", { name: "Search types" })).toBeVisible();
+      await page.getByRole("link", { name: "Manage indexes", exact: true }).click();
+      await expect(page.getByRole("group", { name: "Search types" })).toBeVisible();
       await expect(page.getByRole("heading", { name: "Search currently in use" })).toBeVisible({
         timeout: 45_000,
       });
@@ -936,12 +933,12 @@ test.describe("settings", () => {
       });
       await page.getByRole("button", { name: "Back to search choices" }).click();
       await expect(page.getByRole("button", { name: "Build new index" })).toBeVisible();
-      await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
-      await page.getByRole("button", { name: "Manage servers", exact: true }).click();
+      await page.getByRole("link", { name: "Back to AI Search" }).click();
+      await page.getByRole("link", { name: "Manage servers", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Connect an AI server" })).toBeVisible();
       await page
-        .getByRole("dialog", { name: "AI servers", exact: true })
-        .getByRole("button", { name: "Add a server", exact: true })
+        .getByRole("group", { name: "Connect an AI server", exact: true })
+        .getByRole("link", { name: "Add a server", exact: true })
         .click();
       await expect(page.getByRole("form", { name: "Inference server" })).toBeVisible();
       await page.getByRole("textbox", { name: "Server URL" }).scrollIntoViewIfNeeded();
@@ -950,8 +947,8 @@ test.describe("settings", () => {
         fullPage: true,
         animations: "disabled",
       });
-      await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
-      await page.getByRole("button", { name: "Technical settings", exact: true }).click();
+      await page.getByRole("link", { name: "Back to AI Search" }).click();
+      await page.getByRole("link", { name: "Technical settings", exact: true }).click();
       await expect(page.getByLabel("Keyword ranking weight")).toBeVisible();
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth - innerWidth),
@@ -963,24 +960,21 @@ test.describe("settings", () => {
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: 800 });
       await openAiSearchSettings(page);
-      await expect(
-        page.getByRole("button", { name: "Technical settings", exact: true }),
-      ).toBeVisible({ timeout: 45_000 });
-      await page.getByRole("button", { name: "Technical settings", exact: true }).click();
+      await expect(page.getByRole("link", { name: "Technical settings", exact: true })).toBeVisible(
+        { timeout: 45_000 },
+      );
+      await page.getByRole("link", { name: "Technical settings", exact: true }).click();
       await page
         .getByRole("checkbox", { name: "Enable AI Search", exact: true })
         .scrollIntoViewIfNeeded();
-      const back = page.getByRole("dialog").getByRole("button", { name: "Close", exact: true });
+      const back = page.getByRole("link", { name: "Back to AI Search" });
       await expect(back).toBeInViewport();
       await page.screenshot({
         path: testInfo.outputPath(`advanced-${width}.png`),
         animations: "disabled",
       });
       await back.click();
-      await page.getByRole("button", { name: /^(Start|Change) setup$/ }).click();
-      const locationHeading = page
-        .getByRole("dialog", { name: "AI Search setup", exact: true })
-        .getByRole("combobox", { name: "Location", exact: true });
+      const locationHeading = page.getByRole("heading", { name: "Where should AI Search run?" });
       await locationHeading.scrollIntoViewIfNeeded();
       await expect(locationHeading).toBeInViewport();
       await page.screenshot({
