@@ -63,10 +63,6 @@
   }
 }
 
-.printer-settings-context {
-  padding: 0 18px 12px;
-}
-
 .printer-service-subhead {
   padding-top: 12px;
   border-top: 1px solid var(--border);

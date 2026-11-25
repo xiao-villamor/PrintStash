@@ -84,6 +84,8 @@ import {
 } from "@/components/printer-controls";
 import { PrinterConsole } from "./printer-console";
 import { MachineIdentity, MachineMaterials } from "@/components/printer-machine";
+import { PrinterStatusBadge } from "@/components/printer-status-badge";
+import { Switch } from "@/components/ui/switch";
 import {
   PREHEAT_PRESETS,
   printerControlAvailability,
@@ -878,14 +880,15 @@ function PrinterDetailView({
           <PageHeader
             title={printer.name}
             description={
-              <>
+              <span className="inline-flex flex-wrap items-center gap-2">
+                <PrinterStatusBadge status={printer.status} />
                 {providerLabel(printer)} · {connectionLabel}
                 {printer.capabilities.support_level === "beta" && (
-                  <span className="ml-2 inline-flex rounded-full bg-foreground/10 px-2 py-0.5 text-2xs font-medium text-foreground/80">
+                  <span className="inline-flex rounded-full bg-foreground/10 px-2 py-0.5 text-2xs font-medium text-foreground/80">
                     {uiText("Beta")}
                   </span>
                 )}
-              </>
+              </span>
             }
             actions={
               activeTab === "materials" ||
@@ -1232,7 +1235,6 @@ export function PrinterSettings({
   const hintId = useId();
   const compact = modalActions !== undefined;
   const Field = compact ? FormField : SettingsField;
-  const setup = useMachineSetup(initialPrinter.id, !compact);
   useEffect(() => {
     active.current = true;
 
@@ -1286,6 +1288,22 @@ export function PrinterSettings({
     secret !== "" ||
     providerMaterialSync !== printer.provider_material_sync_enabled ||
     operatorReleaseRequired !== printer.operator_release_required;
+  const sectionDirty = {
+    identity:
+      name.trim() !== printer.name ||
+      modelName !== (printer.model_name ?? "") ||
+      group !== (printer.group ?? ""),
+    costing: costProfile !== (printer.cost_profile_id ?? null),
+    connection:
+      address !== providerAddress(printer) ||
+      serial !== (printer.bambu_serial ?? "") ||
+      username !== (printer.prusalink_username ?? "") ||
+      mainboardId !== (printer.elegoo_centauri_mainboard_id ?? "") ||
+      secret !== "" ||
+      providerMaterialSync !== printer.provider_material_sync_enabled,
+    scheduling: operatorReleaseRequired !== printer.operator_release_required,
+    notes: notes !== (printer.notes ?? ""),
+  };
   const saving = command.busy;
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -1386,7 +1404,17 @@ export function PrinterSettings({
     }
   }
 
-  const materialSyncField = (
+  const materialSyncField = !compact ? (
+    <SettingsToggle
+      title={uiText("Provider material sync")}
+      description={uiText(
+        "Import supported AMS or active-Spoolman state. Turn off to use manual state exclusively.",
+      )}
+      checked={providerMaterialSync}
+      onChange={setProviderMaterialSync}
+      disabled={!canEdit || saving}
+    />
+  ) : (
     <label className="flex items-start gap-3">
       <Checkbox
         checked={providerMaterialSync}
@@ -1465,47 +1493,54 @@ export function PrinterSettings({
 
   return (
     <Localized>
-      <div className={compact ? undefined : "printer-desk printer-settings-desk"}>
+      <div className={compact ? undefined : "printer-settings-layout"}>
         {!compact && (
-          <aside className="min-w-0">
-            <MachineIdentity
-              printer={initialPrinter}
-              status={connectionLabel ?? knownUiText(initialPrinter.status)}
-              nozzle={setup.nozzle}
-            />
-            <dl className="printer-machine-facts printer-settings-context">
-              <div>
-                <dt>{uiText("Scheduling")}</dt>
-                <dd>
-                  {uiText(
-                    initialPrinter.drain_mode ? "Soft drain active" : "Accepting scheduled work",
+          <nav aria-label={uiText("Settings sections")} className="printer-settings-nav">
+            {(
+              [
+                ["identity", uiText("Identity & routing"), true],
+                ["connection", uiText("Connection"), true],
+                ["costing", uiText("Print costing"), canEdit],
+                ["scheduling", uiText("Scheduling & release"), true],
+                ["notes", uiText("Operator notes"), true],
+              ] as const
+            )
+              .filter(([, , shown]) => shown)
+              .map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() =>
+                    document
+                      .getElementById(`printer-settings-${key}`)
+                      ?.scrollIntoView({ block: "start" })
+                  }
+                >
+                  {label}
+                  {sectionDirty[key] && (
+                    <span
+                      role="img"
+                      aria-label={uiText("Unsaved changes")}
+                      className="size-1.5 shrink-0 rounded-full bg-primary"
+                    />
                   )}
-                </dd>
-              </div>
-              <div>
-                <dt>{uiText("Operator release")}</dt>
-                <dd>
-                  {uiText(initialPrinter.operator_release_required ? "Required" : "Optional")}
-                </dd>
-              </div>
-            </dl>
-          </aside>
+                </button>
+              ))}
+          </nav>
         )}
         <form
           id={modalActions?.formId}
           ref={form}
           onSubmit={save}
-          className={compact ? "divide-y divide-border" : "min-w-0 divide-y divide-border"}
+          className={compact ? "divide-y divide-border" : "min-w-0 space-y-4"}
         >
-          {!compact && (
-            <header className="printer-settings-actions">
-              <h2 className="mr-auto text-sm font-semibold">{uiText("Printer settings")}</h2>
-              <span role="status" className="text-xs text-muted-foreground">
-                {uiText(saveLabel)}
-              </span>
-            </header>
-          )}
-          <PrinterSettingsSection compact={compact} columns title={uiText("Identity & routing")}>
+          <PrinterSettingsSection
+            compact={compact}
+            columns
+            id="identity"
+            title={uiText("Identity & routing")}
+            description={uiText("How this printer is named and grouped in the fleet.")}
+          >
             <Field label={uiText("Name")}>
               <Input
                 value={name}
@@ -1549,7 +1584,12 @@ export function PrinterSettings({
             </Field>
           </PrinterSettingsSection>
           {canEdit && (
-            <PrinterSettingsSection compact={compact} title={uiText("Print costing")}>
+            <PrinterSettingsSection
+              compact={compact}
+              id="costing"
+              title={uiText("Print costing")}
+              description={uiText("Used to estimate production cost for prints on this machine.")}
+            >
               <div className="col-span-full grid items-start gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
                 <div className="min-w-0 space-y-2">
                   <Field label={uiText("Cost profile")}>
@@ -1626,6 +1666,7 @@ export function PrinterSettings({
           <PrinterSettingsSection
             compact={compact}
             columns
+            id="connection"
             title={uiText("Connection")}
             description={providerLabel(printer)}
             action={
@@ -1713,7 +1754,9 @@ export function PrinterSettings({
           </PrinterSettingsSection>
           <PrinterSettingsSection
             compact={compact}
+            id="scheduling"
             title={uiText("Scheduling & release")}
+            description={uiText("Control when the dispatcher may send new work here.")}
             action={
               !compact &&
               onMaintenance && (
@@ -1725,31 +1768,36 @@ export function PrinterSettings({
           >
             {compact && notesField}
             {compact && materialSyncField}
-            <label className="flex items-start gap-3">
-              <Checkbox
+            {!compact ? (
+              <SettingsToggle
+                title={uiText("Require operator release")}
+                description={uiText(
+                  "After a managed print completes, block scheduling until an operator releases or holds the printer.",
+                )}
                 checked={operatorReleaseRequired}
                 onChange={setOperatorReleaseRequired}
                 disabled={!canEdit || saving}
-                className="mt-0.5 shrink-0"
               />
-              <span>
-                <span
-                  className={cn(
-                    "block font-medium text-foreground",
-                    compact ? "text-field" : "text-sm",
-                  )}
-                >
-                  {uiText("Require operator release")}
+            ) : (
+              <label className="flex items-start gap-3">
+                <Checkbox
+                  checked={operatorReleaseRequired}
+                  onChange={setOperatorReleaseRequired}
+                  disabled={!canEdit || saving}
+                  className="mt-0.5 shrink-0"
+                />
+                <span>
+                  <span className="block text-field font-medium text-foreground">
+                    {uiText("Require operator release")}
+                  </span>
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    {uiText(
+                      "After a managed print completes, block scheduling until an operator releases or holds the printer.",
+                    )}
+                  </span>
                 </span>
-                <span
-                  className={cn("block text-xs text-muted-foreground", compact ? "mt-1" : "mt-0.5")}
-                >
-                  {uiText(
-                    "After a managed print completes, block scheduling until an operator releases or holds the printer.",
-                  )}
-                </span>
-              </span>
-            </label>
+              </label>
+            )}
             {!canEdit && (
               <p className="text-xs text-warning">{uiText("Sign in to edit printer settings.")}</p>
             )}
@@ -1760,15 +1808,30 @@ export function PrinterSettings({
             )}
           </PrinterSettingsSection>
           {!compact && (
-            <PrinterSettingsSection compact={false} title={uiText("Operator notes")}>
+            <PrinterSettingsSection
+              compact={false}
+              id="notes"
+              title={uiText("Operator notes")}
+              description={uiText("Visible to everyone who can see this printer.")}
+            >
               {notesField}
             </PrinterSettingsSection>
           )}
           {modalActions ? (
             modalActions.target && createPortal(actions, modalActions.target)
           ) : (
-            <div className="printer-settings-actions">
-              <div className="ml-auto flex flex-wrap gap-2">{actions}</div>
+            <div className="printer-settings-bar">
+              <span role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "size-2 shrink-0 rounded-full",
+                    dirty ? "bg-primary" : "bg-muted-foreground/40",
+                  )}
+                />
+                {uiText(saveLabel)}
+              </span>
+              <div className="flex flex-wrap gap-2">{actions}</div>
             </div>
           )}
           <PrinterSettingsReview
@@ -1794,6 +1857,7 @@ export function PrinterSettings({
 function PrinterSettingsSection({
   compact,
   columns,
+  id,
   title,
   description,
   action,
@@ -1801,32 +1865,70 @@ function PrinterSettingsSection({
 }: {
   compact: boolean;
   columns?: boolean;
+  id: string;
   title: string;
   description?: string;
   action?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  if (!compact) {
+    return (
+      <section id={`printer-settings-${id}`} className="printer-settings-card">
+        <header>
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold">{title}</h2>
+            {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
+          </div>
+          {action}
+        </header>
+        <div className="printer-settings-fields">{children}</div>
+      </section>
+    );
+  }
   return (
-    <section className={compact ? "space-y-3 py-4 first:pt-0 last:pb-0" : "printer-desk-section"}>
-      <div
-        className={
-          compact ? "flex flex-wrap items-baseline justify-between gap-2" : "printer-desk-heading"
-        }
-      >
+    <section className="space-y-3 py-4 first:pt-0 last:pb-0">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-sm font-semibold">{title}</h2>
         {action ||
           (description && <span className="text-xs text-muted-foreground">{description}</span>)}
       </div>
-      <div
-        className={
-          compact
-            ? cn("grid gap-x-4 gap-y-3", columns && "sm:grid-cols-2")
-            : "printer-settings-fields"
-        }
-      >
-        {children}
-      </div>
+      <div className={cn("grid gap-x-4 gap-y-3", columns && "sm:grid-cols-2")}>{children}</div>
     </section>
+  );
+}
+
+/** A setting that is on or off: its meaning on the left, the switch on the right. */
+function SettingsToggle({
+  title,
+  description,
+  checked,
+  onChange,
+  disabled,
+}: {
+  title: string;
+  description: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+}) {
+  const descriptionId = useId();
+  return (
+    <div className="flex max-w-2xl items-start justify-between gap-6">
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-foreground">{title}</div>
+        <p id={descriptionId} className="mt-0.5 max-w-prose text-xs text-muted-foreground">
+          {description}
+        </p>
+      </div>
+      <Switch
+        checked={checked}
+        onChange={onChange}
+        label={title}
+        descriptionId={descriptionId}
+        stateLabels={null}
+        disabled={disabled}
+      />
+    </div>
   );
 }
 

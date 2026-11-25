@@ -76,26 +76,78 @@
   font-weight: 550;
 }
 
-.printer-settings-desk {
+.printer-settings-layout {
+  display: grid;
   align-items: start;
-  gap: 14px;
-  border: 0;
-  border-radius: 0;
-  overflow: visible;
-  background: transparent;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.printer-settings-desk > aside,
-.printer-settings-desk > form {
+.printer-settings-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.printer-settings-nav button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: var(--radius);
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-align: left;
+}
+
+.printer-settings-nav button:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.printer-settings-nav button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.printer-settings-card {
+  scroll-margin-top: 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-popover);
-  overflow: hidden;
   background: var(--card);
 }
 
-.printer-settings-desk .printer-desk-section {
+.printer-settings-card > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 12px;
-  padding: 14px 18px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.printer-settings-card > .printer-settings-fields {
+  padding: 18px 20px;
+}
+
+.printer-settings-bar {
+  position: sticky;
+  bottom: 16px;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-popover);
+  background: var(--card);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--foreground) 10%, transparent);
 }
 
 .printer-settings-fields {
@@ -110,30 +162,24 @@
   grid-column: 1 / -1;
 }
 
-.printer-settings-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 14px 20px;
-}
-
 @media (min-width: 1024px) {
   .printer-desk {
     grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
   }
 
-  .printer-settings-desk {
-    grid-template-columns: 292px minmax(0, 1fr);
+  .printer-settings-layout {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+
+  .printer-settings-nav {
+    position: sticky;
+    top: 16px;
+    flex-direction: column;
   }
 
   .printer-desk > * + * {
     border-top: 0;
     border-inline-start: 1px solid var(--border);
-  }
-
-  .printer-settings-desk > form {
-    border-top: 1px solid var(--border);
   }
 }
 
