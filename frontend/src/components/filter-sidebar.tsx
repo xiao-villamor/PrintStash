@@ -8,6 +8,7 @@ import {
 } from "@/lib/use-outliner-restoration";
 
 import { useCollectionsPane } from "@/lib/collections-pane-context";
+import { OUTLINER_KEYBOARD_ROW } from "@/lib/keyboard-commands";
 import { TreeCount } from "@/components/tree-count";
 import { captureModelDrag, type ModelDrag } from "@/lib/model-dnd";
 import { knownUiText } from "@/lib/locale";
@@ -680,7 +681,7 @@ function CollectionTreeRow({
               onPointerLeave={() => onIntent?.(null)}
               onBlur={() => onIntent?.(null)}
               onClick={() => onSelect(node.path, node.id)}
-              className={`flex min-h-7 flex-1 min-w-0 items-center gap-1.5 text-left text-sm font-medium truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${moving ? "cursor-wait" : ctx.dragEnabled ? "cursor-grab active:cursor-grabbing" : ""}`}
+              className={`flex min-h-7 flex-1 min-w-0 items-center gap-1.5 text-left text-sm font-medium truncate ${moving ? "cursor-wait" : ctx.dragEnabled ? "cursor-grab active:cursor-grabbing" : ""}`}
               aria-description={`${node.display_path} · ${uiText("counts.items", { count: node.subtree_entry_count })}`}
               data-outliner-collection={node.path}
               {...attributes}
@@ -706,7 +707,7 @@ function CollectionTreeRow({
               <button
                 type="button"
                 onClick={() => setConfirming(true)}
-                className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-colors hover:bg-muted hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring group-hover/row:opacity-100 group-focus-within/row:opacity-100"
+                className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-colors hover:bg-muted hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring group-hover/row:opacity-100"
                 title={uiText("Delete collection")}
                 aria-label={uiText("Delete collection")}
               >
@@ -771,6 +772,7 @@ function DroppableAllModels({
             aria-label={isExpanded ? uiText("Collapse") : uiText("Expand")}
             aria-expanded={isExpanded}
             onClick={onToggleExpand}
+            data-tree-toggle
           >
             <ChevronRight aria-hidden className={`size-4 ${isExpanded ? "rotate-90" : ""}`} />
           </Button>
@@ -783,6 +785,7 @@ function DroppableAllModels({
           aria-current={selected ? "page" : undefined}
           aria-busy={receiving || undefined}
           onClick={onClick}
+          data-outliner-root
         >
           <FolderOpen aria-hidden className="size-4 shrink-0" />
           <span className="truncate">{target.name}</span>
@@ -840,11 +843,7 @@ export function FilterSidebarContent({
     let focused: HTMLElement | null = null;
     function updateStops() {
       if (!content) return;
-      const rows = [
-        ...content.querySelectorAll<HTMLElement>(
-          "[data-outliner-collection], [data-outliner-entry]",
-        ),
-      ];
+      const rows = [...content.querySelectorAll<HTMLElement>(OUTLINER_KEYBOARD_ROW)];
       const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       const current =
         rows.find((row) => row === active) ??
@@ -855,9 +854,7 @@ export function FilterSidebarContent({
     }
     function focus(event: FocusEvent) {
       if (event.target instanceof HTMLElement)
-        focused = event.target.closest<HTMLElement>(
-          "[data-outliner-collection], [data-outliner-entry]",
-        );
+        focused = event.target.closest<HTMLElement>(OUTLINER_KEYBOARD_ROW);
       updateStops();
     }
     updateStops();
@@ -1197,35 +1194,37 @@ export function FilterSidebarContent({
             )
               return;
             const target = event.target instanceof HTMLElement ? event.target : null;
-            const row = target?.closest<HTMLElement>(
-              "[data-outliner-collection], [data-outliner-entry]",
-            );
+            const row = target?.closest<HTMLElement>(OUTLINER_KEYBOARD_ROW);
             if (!row || !contentRef.current) return;
             const rows = [
-              ...contentRef.current.querySelectorAll<HTMLElement>(
-                "[data-outliner-collection], [data-outliner-entry]",
-              ),
+              ...contentRef.current.querySelectorAll<HTMLElement>(OUTLINER_KEYBOARD_ROW),
             ];
             const index = rows.indexOf(row);
             const node = row.closest<HTMLElement>("[data-tree-node]");
-            const toggle = node?.querySelector<HTMLButtonElement>("[data-tree-toggle]");
+            const root = rows.find((entry) => entry.hasAttribute("data-outliner-root"));
+            const toggle = row.parentElement?.querySelector<HTMLButtonElement>(
+              ":scope > [data-tree-toggle]",
+            );
             let next: HTMLElement | undefined | null;
             if (event.key === "ArrowDown") next = rows[Math.min(index + 1, rows.length - 1)];
             else if (event.key === "ArrowUp") next = rows[Math.max(index - 1, 0)];
             else if (event.key === "Home") next = rows[0];
             else if (event.key === "End") next = rows.at(-1);
             else if (event.key === "ArrowRight") {
-              if (!row.dataset.outlinerCollection) return;
               if (toggle?.getAttribute("aria-expanded") === "false") toggle.click();
-              else if (node?.contains(rows[index + 1] ?? null)) next = rows[index + 1];
+              else if (
+                row === root ||
+                (row.dataset.outlinerCollection && node?.contains(rows[index + 1] ?? null))
+              )
+                next = rows[index + 1];
             } else if (event.key === "ArrowLeft") {
-              if (!row.dataset.outlinerCollection)
-                next = node?.querySelector<HTMLElement>("[data-outliner-collection]");
-              else if (toggle?.getAttribute("aria-expanded") === "true") toggle.click();
-              else
-                next = node?.parentElement
-                  ?.closest("[data-tree-node]")
-                  ?.querySelector<HTMLElement>("[data-outliner-collection]");
+              if (toggle?.getAttribute("aria-expanded") === "true") toggle.click();
+              else if (row !== root) {
+                const parent = row.dataset.outlinerCollection
+                  ? node?.parentElement?.closest("[data-tree-node]")
+                  : node;
+                next = parent?.querySelector<HTMLElement>("[data-outliner-collection]") ?? root;
+              }
             } else if (
               event.key === "F2" &&
               !navigationOnly &&

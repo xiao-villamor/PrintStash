@@ -2,6 +2,8 @@ import { getSessionVersion } from "@/lib/session-transport";
 
 export const OPEN_KEYBOARD_SHORTCUTS = "printstash:keyboard-shortcuts";
 export const CLOSE_SEARCH_SUGGESTIONS = "printstash:close-search-suggestions";
+export const OUTLINER_KEYBOARD_ROW =
+  "[data-outliner-root], [data-outliner-collection], [data-outliner-entry]";
 let renameRequest: { path: string; session: number; sourceHref: string } | null = null;
 
 export function requestCollectionRename(path: string) {

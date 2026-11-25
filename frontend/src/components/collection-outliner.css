@@ -24,3 +24,14 @@
 .collections-sidebar .collection-tree-row[data-current] [data-tree-count] {
   color: var(--foreground);
 }
+
+.collection-tree-row > :is([data-outliner-root], [data-outliner-collection]):focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.collection-tree-row:has(> :is([data-outliner-root], [data-outliner-collection]):focus-visible),
+[data-outliner-entry]:focus-visible {
+  outline: 1px solid var(--muted-foreground);
+  outline-offset: -1px;
+}

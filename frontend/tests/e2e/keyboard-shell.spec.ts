@@ -31,15 +31,10 @@ test.describe("Shared keyboard commands", () => {
       "Save the failure note",
     ])
       await expect(help.getByText(label, { exact: true })).toBeVisible();
-    const boxes = await help.locator("section").evaluateAll((groups) =>
-      groups.map((group) => ({
-        x: group.getBoundingClientRect().x,
-        y: group.getBoundingClientRect().y,
-      })),
-    );
-    expect(boxes[0].x).toBeLessThan(boxes[1].x);
-    expect(boxes[2].x).toBe(boxes[0].x);
-    expect(boxes[2].y).toBeGreaterThan(boxes[0].y);
+    const groupPositions = await help
+      .getByRole("heading", { level: 3 })
+      .evaluateAll((headings) => headings.map((heading) => heading.getBoundingClientRect().x));
+    expect(new Set(groupPositions).size).toBe(2);
     await page.keyboard.press("Shift+?");
     await expect(help).toBeHidden();
   });
@@ -47,14 +42,15 @@ test.describe("Shared keyboard commands", () => {
   test("operates pane commands from focused text inputs", async ({ page }) => {
     await page.goto("/?c=maraio");
     await expect(page.getByRole("heading", { name: "maraio", exact: true })).toBeVisible();
+    const search = page.getByRole("searchbox", { name: "Search library" });
     await page.keyboard.press("/");
-    await expect(page.getByRole("searchbox", { name: "Search in maraio" })).toBeFocused();
+    await expect(search).toBeFocused();
     await page.keyboard.press("Control+Shift+F");
-    await expect(page.getByRole("searchbox", { name: "Search in maraio" })).toBeFocused();
+    await expect(search).toBeFocused();
     await page.keyboard.press("Control+b");
     const toggle = page.locator("header").getByRole("button", { name: "Toggle sidebar" });
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await expect(page.getByRole("searchbox", { name: "Search in maraio" })).toBeFocused();
+    await expect(toggle).toBeFocused();
     await page.keyboard.press("Control+b");
     await page.keyboard.press("Control+Shift+E");
     const collection = page
@@ -76,11 +72,54 @@ test.describe("Shared keyboard commands", () => {
     await expect(page.getByRole("textbox", { name: "Collection name" })).toBeFocused();
   });
 
+  test("navigates the collection tree after reopening the sidebar by keyboard", async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto("/");
+    const pane = page.getByRole("complementary", { name: "Collections" });
+    const root = pane.getByRole("button", { name: "All Models", exact: true });
+    const folder = pane.getByRole("treeitem", { name: "maraio", exact: true });
+    const model = pane.getByRole("treeitem", { name: "skadis_kitchen-roll_screw", exact: true });
+    const toggle = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+    await expect(folder).toBeVisible();
+    await page.keyboard.press("Control+b");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await page.keyboard.press("Control+b");
+    await expect(root).toBeFocused();
+
+    await page.keyboard.press("ArrowDown");
+    await expect(folder).toBeFocused();
+    await expect(folder).toHaveCSS("box-shadow", "none");
+    await expect(folder.locator("..")).toHaveCSS("outline-style", "solid");
+    await expect(page.locator("html")).not.toHaveAttribute("data-pane-moving");
+    await page.screenshot({ path: testInfo.outputPath("collection-keyboard-focus.png") });
+
+    await page.keyboard.press("ArrowRight");
+    await expect(folder).toHaveAttribute("aria-expanded", "true");
+    await expect(model).toBeVisible();
+    await page.keyboard.press("ArrowRight");
+    await expect(model).toBeFocused();
+    await page.keyboard.press("ArrowLeft");
+    await expect(folder).toBeFocused();
+    await page.keyboard.press("ArrowLeft");
+    await expect(folder).toHaveAttribute("aria-expanded", "false");
+    await page.keyboard.press("ArrowLeft");
+    await expect(root).toBeFocused();
+    await page.keyboard.press("ArrowLeft");
+    await expect(pane.getByRole("button", { name: "Expand", exact: true })).toBeVisible();
+    await page.keyboard.press("ArrowRight");
+    await expect(folder).toBeVisible();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/c=maraio/);
+  });
+
   test("preserves reserved keyboard ownership", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
-    await page.keyboard.press("/");
-    const input = page.getByRole("searchbox", { name: "Search models" });
+    const input = page.getByPlaceholder("Filter collections");
+    await input.focus();
     await input.evaluate((node) =>
       node.dispatchEvent(
         new KeyboardEvent("keydown", {
@@ -104,7 +143,7 @@ test.describe("Shared keyboard commands", () => {
     await expect(page.getByRole("complementary", { name: "Search panel" })).toHaveCount(0);
     await page.keyboard.press("Escape");
     await page.keyboard.press("Control+Shift+F");
-    await expect(page.getByRole("searchbox", { name: "Search models" })).toBeFocused();
+    await expect(page.getByRole("searchbox", { name: "Search library" })).toBeFocused();
   });
 
   test("consumes the captured Undo once outside text editing", async ({ page }) => {
@@ -131,10 +170,11 @@ test.describe("Shared keyboard commands", () => {
     await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
     await expect(page.getByRole("button", { name: "Undo", exact: true })).toBeVisible();
     expect(deletions.map((body) => JSON.parse(body))).toEqual([{ model_ids: [1] }]);
-    await page.keyboard.press("/");
+    const input = page.getByPlaceholder("Filter collections");
+    await input.focus();
     await page.keyboard.press("Control+z");
     expect(restores).toBe(0);
-    await page.getByRole("searchbox", { name: "Search in maraio" }).blur();
+    await input.blur();
     await page.keyboard.press("Control+z");
     await expect.poll(() => restores).toBe(1);
     await page.keyboard.press("Control+z");

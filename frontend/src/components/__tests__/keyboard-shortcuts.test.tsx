@@ -44,6 +44,17 @@ function renderShortcuts({ modal = false }: { modal?: boolean } = {}) {
       <Controls />
       <CollectionsPaneHost />
       <LibraryCollectionsPane>
+        <button type="button" data-outliner-root>
+          All Models
+        </button>
+        <button
+          type="button"
+          role="treeitem"
+          data-outliner-collection="other"
+          aria-selected="false"
+        >
+          Other folder
+        </button>
         <button type="button" role="treeitem" data-outliner-collection="parts" aria-selected="true">
           Parts
         </button>
@@ -108,7 +119,7 @@ describe("KeyboardShortcuts", () => {
       expect(screen.getByRole("searchbox", { name: "Search library" })).toHaveFocus(),
     );
   });
-  it("focuses the collection tree rather than its filter", async () => {
+  it("focuses the selected folder when opening Collections", async () => {
     renderShortcuts();
     screen.getByRole("textbox", { name: "Global search" }).focus();
     command("KeyE", { key: "E", ctrlKey: true, shiftKey: true });
