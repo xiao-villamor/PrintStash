@@ -313,6 +313,15 @@
 
 .library-model-card {
   container-type: inline-size;
+  isolation: isolate;
+}
+
+/* An image on its own compositing layer can escape its parent's rounded clip, so the
+   preview rounds its own top corners (one pixel inside the card's border). */
+.library-model-card .library-preview {
+  border-start-start-radius: calc(var(--radius-popover) - 1px);
+  border-start-end-radius: calc(var(--radius-popover) - 1px);
+  isolation: isolate;
 }
 /* Keep the selected surface opaque beneath the overlapping revision actions. */
 .library-model-card[data-selected]:not([data-favorites]) {
