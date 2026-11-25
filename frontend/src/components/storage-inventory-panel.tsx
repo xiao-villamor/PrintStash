@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
   ArrowLeft,
   Box,
   ChevronRight,
+  ChevronDown,
   Clock3,
   Cloud,
   Database,
@@ -94,6 +95,8 @@ function PlacesSplit({ here, remote, locale }: { here: number; remote: number; l
 }
 
 export function StorageInventoryPanel() {
+  const [measurementDetailsOpen, setMeasurementDetailsOpen] = useState(false);
+  const measurementDetailsId = useId();
   const { locale, t } = useI18n();
   const modelPageSize = useMediaQuery("(min-width: 640px)")
     ? DESKTOP_MODEL_PAGE_SIZE
@@ -491,7 +494,7 @@ export function StorageInventoryPanel() {
           <div className="grid border-b lg:grid-cols-2">
             <section
               aria-labelledby="storage-by-purpose-title"
-              className="border-b py-4 lg:border-b-0 lg:border-r"
+              className="min-w-0 border-b py-4 lg:border-b-0 lg:border-r lg:pe-6"
             >
               <div className="flex items-center gap-2">
                 <Box className="h-4 w-4 text-muted-foreground" aria-hidden />
@@ -539,7 +542,7 @@ export function StorageInventoryPanel() {
                 {t("Based on recorded file sizes. Shared files may appear in more than one total.")}
               </p>
             </section>
-            <section aria-labelledby="storage-history-title" className="py-4">
+            <section aria-labelledby="storage-history-title" className="min-w-0 py-4 lg:ps-6">
               <div className="flex items-center gap-2">
                 <TrendingUp className="h-4 w-4 text-muted-foreground" aria-hidden />
                 <h3 id="storage-history-title" className="text-sm font-semibold">
@@ -615,13 +618,31 @@ export function StorageInventoryPanel() {
               )}
             </section>
           </div>
-          <details className="border-b">
-            <summary className="cursor-action px-4 py-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              {t("Measurement details")}
-            </summary>
-            <div className="grid border-t lg:grid-cols-2">
-              <section className="py-4 lg:border-r">
-                <h3 className="text-sm font-semibold">{t("Files by type")}</h3>
+          <section aria-labelledby="measurement-details-title" className="border-b pt-4">
+            <h3 id="measurement-details-title" className="pb-4">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-controls={measurementDetailsId}
+                aria-expanded={measurementDetailsOpen}
+                onClick={() => setMeasurementDetailsOpen((open) => !open)}
+              >
+                {t("Measurement details")}
+                {measurementDetailsOpen ? (
+                  <ChevronDown className="size-4" aria-hidden />
+                ) : (
+                  <ChevronRight className="size-4" aria-hidden />
+                )}
+              </Button>
+            </h3>
+            <div
+              id={measurementDetailsId}
+              className={measurementDetailsOpen ? "grid lg:grid-cols-2" : "hidden"}
+              hidden={!measurementDetailsOpen}
+            >
+              <section className="min-w-0 py-4 lg:border-r lg:pe-6">
+                <h4 className="text-xs font-medium text-muted-foreground">{t("Files by type")}</h4>
                 <div className="mt-2 divide-y divide-border">
                   {current.buckets
                     .filter((bucket) => bucket.logical_bytes > 0)
@@ -652,7 +673,7 @@ export function StorageInventoryPanel() {
                   )}
                 </div>
               </section>
-              <section className="px-4 py-4 text-xs sm:px-5">
+              <section className="min-w-0 py-4 text-xs lg:ps-6">
                 <dl className="grid gap-3 sm:grid-cols-2">
                   <div>
                     <dt className="text-muted-foreground">{t("Logical references")}</dt>
@@ -713,7 +734,7 @@ export function StorageInventoryPanel() {
                 </p>
               </section>
             </div>
-          </details>
+          </section>
           <section
             className="flex h-[36rem] flex-col border-t px-4 py-4 sm:h-[28rem] sm:px-5"
             aria-labelledby="collection-storage-title"

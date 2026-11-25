@@ -7,8 +7,32 @@ import {
   aTag,
 } from "../../src/test-support/factories";
 import { useMockApi } from "./_setup";
+import { collapseNavigationSidebar } from "../e2e-real/util";
 
 useMockApi();
+
+test.describe("Library filter visibility", () => {
+  test("opens the filter picker immediately after dismissal", async ({ page }) => {
+    await page.goto("/");
+    await collapseNavigationSidebar(page);
+    const toggle = page.getByRole("button", { name: "Filters", exact: true });
+    const dialog = page.getByRole("dialog", { name: "Filter Models", exact: true });
+    const search = dialog.getByRole("searchbox");
+    await toggle.click();
+    await expect(search).toBeFocused();
+    await expect(dialog).toHaveAttribute("data-state", "open");
+    await search.fill("not a matching value");
+    await search.press("Escape");
+    await expect(toggle).toBeFocused();
+    await expect(dialog).toHaveCount(0);
+    await toggle.click();
+    await expect(search).toBeFocused();
+    await expect(search).toHaveValue("");
+    await dialog.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(toggle).toBeFocused();
+  });
+});
+
 test.describe("Library filters and card actions", () => {
   test.use({ viewport: { width: 1440, height: 900 } });
   const modelName = "Workshop bracket with a deliberately long model name";

@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Background,
+  getViewportForBounds,
   Handle,
   Position,
   ReactFlow,
   useReactFlow,
+  useStoreApi,
   ReactFlowProvider,
   type Connection,
   type Edge,
@@ -47,6 +49,7 @@ type Station = Node<
     chosen: boolean;
     image?: string;
     held?: boolean;
+    printerStatus?: Machine["status"];
     printing?: boolean;
     progress?: number | null;
     remaining?: number | null;
@@ -67,6 +70,7 @@ function strategyLabel(strategy: RoutingStrategy) {
       : uiText("Default printer");
 }
 function machineState(row: Machine) {
+  if (row.status === "error") return uiText("Error");
   if (row.maintenance) return uiText("Maintenance");
   if (row.pending_operator_release) return uiText("Operator release required");
   if (row.drain_mode) return uiText("Draining");
@@ -84,6 +88,7 @@ function StationNode({ data }: NodeProps<Station>) {
       data-kind={data.kind}
       data-chosen={data.chosen}
       data-held={data.held}
+      data-printer-status={data.printerStatus}
       data-printing={data.printing}
     >
       {data.kind !== "job" && data.kind !== "inlet" && (
@@ -143,6 +148,8 @@ interface Props {
 }
 function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
   const flow = useReactFlow();
+  const store = useStoreApi();
+  const manualCamera = useRef(false);
   const artwork = usePrinterArtworkPreference();
   const [selected, setSelected] = useState("");
   const [page, setPage] = useState(0);
@@ -160,7 +167,47 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
       !r.maintenance,
   );
   const running = rows.filter((r) => r.status === "printing" || r.status === "paused");
-  const rowCount = Math.max(1, visible.length, rows.length);
+  const activeRoute = running.length > 0;
+  const queueLanes = visible.length + Number(activeRoute);
+  const rowCount = Math.max(1, queueLanes, rows.length);
+  const visibleLanes = Math.max(1, queueLanes);
+  const stationCount = visibleLanes * 2 + rows.length;
+
+  useEffect(() => {
+    if (manualCamera.current) return;
+    // React Flow measures new stations after committing them to the DOM.
+    let frame: number | undefined;
+    function fitMeasuredStations() {
+      const { nodeLookup, width, height, minZoom, panZoom } = store.getState();
+      if (!width || !height || !panZoom || nodeLookup.size !== stationCount) return;
+      if (
+        !Array.from(nodeLookup.values()).every(({ measured }) => measured.width && measured.height)
+      )
+        return;
+      unsubscribe();
+      frame = requestAnimationFrame(() => {
+        if (manualCamera.current) return;
+        const bounds = flow.getNodesBounds(flow.getNodes());
+        void flow.setViewport(
+          getViewportForBounds(
+            bounds,
+            width,
+            height,
+            minZoom,
+            fitOptions.maxZoom,
+            fitOptions.padding,
+          ),
+        );
+      });
+    }
+    const unsubscribe = store.subscribe(fitMeasuredStations);
+    fitMeasuredStations();
+    return () => {
+      unsubscribe();
+      if (frame !== undefined) cancelAnimationFrame(frame);
+    };
+  }, [flow, stationCount, store]);
+
   const ypos = (index: number, count: number) => ((rowCount - count) / 2 + index) * 142;
   function node(
     id: string,
@@ -204,35 +251,35 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
             : "routing-link-assigned",
     });
   }
-  if (!visible.length) {
-    const tracked = running.filter((row) => row.current_job_id != null);
-    const input = tracked.length ? "running" : "inlet";
-    node(input, 0, ypos(0, 1), {
+  if (activeRoute || !visible.length) {
+    const input = activeRoute ? "running" : "inlet";
+    const y = ypos(0, visibleLanes);
+    node(input, 0, y, {
       kind: "inlet",
       label: uiText("Queue input"),
-      title: tracked.length ? uiText("Active jobs") : uiText("No queued jobs"),
-      detail: tracked.length
-        ? uiText("{count} running", { count: tracked.length })
+      title: activeRoute ? uiText("Active jobs") : uiText("No queued jobs"),
+      detail: activeRoute
+        ? uiText("{count} running", { count: running.length })
         : uiText("Add a saved Revision"),
     });
-    node("dispatcher", 325, ypos(0, 1), {
+    node("dispatcher", 325, y, {
       kind: "rule",
       label: uiText("Routing"),
       title: uiText("Farm dispatcher"),
-      detail: tracked.length ? uiText("Dispatched to printer") : uiText("Waiting for queued work"),
+      detail: activeRoute ? uiText("Dispatched to printer") : uiText("Waiting for queued work"),
     });
     edge(
       input,
       "dispatcher",
-      !tracked.length,
+      !activeRoute,
       false,
-      tracked.some((row) => row.status === "printing"),
+      running.some((row) => row.status === "printing"),
     );
-    for (const row of rows)
+    for (const row of visible.length > 0 ? running : rows)
       edge(
         "dispatcher",
         "printer-" + row.printer_id,
-        !tracked.includes(row),
+        !running.includes(row),
         false,
         row.status === "printing",
       );
@@ -240,15 +287,16 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
   visible.forEach((job, index) => {
     const id = "job-" + job.id;
     const rule = "rule-" + job.id;
+    const y = ypos(index + Number(activeRoute), queueLanes);
     const target = "printer-" + job.printer_id;
     const chosen = selected === id || selected === rule || selected === target;
-    node(id, 0, ypos(index, visible.length), {
+    node(id, 0, y, {
       kind: "job",
       label: uiText("Queued job") + " · #" + job.id,
       title: dispatchName(job.remote_filename),
       detail: uiText("Priority") + " · " + knownUiText(job.priority ?? "normal"),
     });
-    node(rule, 325, ypos(index, visible.length), {
+    node(rule, 325, y, {
       kind: "rule",
       label: uiText("Routing rule"),
       title: strategyLabel(job.routing_strategy),
@@ -270,6 +318,7 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
     const active = row.status === "printing" || row.status === "paused";
     node("printer-" + row.printer_id, 650, ypos(index, rows.length), {
       kind: "printer",
+      printerStatus: row.status,
       label: machineState(row),
       title: row.name,
       detail: row.current_job_name
@@ -325,6 +374,9 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
             preventScrolling={false}
             onConnect={connect}
             isValidConnection={canConnect}
+            onMoveStart={(event) => {
+              if (event) manualCamera.current = true;
+            }}
             onPaneClick={() => setSelected("")}
           >
             <Background gap={19} size={1} color="var(--border)" />
@@ -345,7 +397,10 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
               variant="ghost"
               size="icon"
               aria-label={uiText("Zoom out")}
-              onClick={() => void flow.zoomOut()}
+              onClick={() => {
+                manualCamera.current = true;
+                void flow.zoomOut();
+              }}
             >
               <Minus />
             </Button>
@@ -353,7 +408,10 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
               variant="ghost"
               size="icon"
               aria-label={uiText("Fit map")}
-              onClick={() => void flow.fitView(fitOptions)}
+              onClick={() => {
+                manualCamera.current = false;
+                void flow.fitView(fitOptions);
+              }}
             >
               <Focus />
             </Button>
@@ -361,7 +419,10 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
               variant="ghost"
               size="icon"
               aria-label={uiText("Zoom in")}
-              onClick={() => void flow.zoomIn()}
+              onClick={() => {
+                manualCamera.current = true;
+                void flow.zoomIn();
+              }}
             >
               <Plus />
             </Button>
@@ -433,7 +494,9 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
             <>
               <dl>
                 <dt>{uiText("Routing")}</dt>
-                <dd>{machineState(selectedPrinter)}</dd>
+                <dd data-printer-status={selectedPrinter.status}>
+                  {machineState(selectedPrinter)}
+                </dd>
                 <dt>{uiText("Current job")}</dt>
                 <dd>
                   {selectedPrinter.current_job_name
@@ -502,7 +565,7 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
                     <Printer3D size={16} />
                     <span>
                       <strong>{row.name}</strong>
-                      <small>{machineState(row)}</small>
+                      <small data-printer-status={row.status}>{machineState(row)}</small>
                     </span>
                     <ChevronRight size={15} />
                   </button>

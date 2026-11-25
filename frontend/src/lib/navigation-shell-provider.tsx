@@ -1,17 +1,23 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { NavigationShellContext } from "./navigation-shell";
+import { NavigationShellContext, type SavedViewsRequest } from "./navigation-shell";
 
 /** Carries a rail request across routes without moving ownership of saved views. */
 export function NavigationShellProvider({ children }: { children: ReactNode }) {
-  const [savedViewsRequested, setRequested] = useState(false);
+  const [savedViewsRequest, setRequested] = useState<SavedViewsRequest | null>(null);
   const [savedViewsOpen, setSavedViewsOpen] = useState(false);
   const [savedViewsHost, attachSavedViews] = useState<HTMLDivElement | null>(null);
   const [savedViewsAvailable, setSavedViewsAvailable] = useState(false);
-  const requestSavedViews = useCallback(() => setRequested(true), []);
-  const consumeSavedViewsRequest = useCallback(() => setRequested(false), []);
+  const requestSavedViews = useCallback((anchor?: HTMLElement) => {
+    setRequested((current) => {
+      if (!anchor) return { kind: "rail" };
+      if (current?.kind === "sidebar" && current.anchor === anchor) return null;
+      return { kind: "sidebar", anchor };
+    });
+  }, []);
+  const consumeSavedViewsRequest = useCallback(() => setRequested(null), []);
   const value = useMemo(
     () => ({
-      savedViewsRequested,
+      savedViewsRequest,
       savedViewsOpen,
       savedViewsHost,
       savedViewsAvailable,
@@ -22,7 +28,7 @@ export function NavigationShellProvider({ children }: { children: ReactNode }) {
       setSavedViewsOpen,
     }),
     [
-      savedViewsRequested,
+      savedViewsRequest,
       savedViewsOpen,
       savedViewsHost,
       savedViewsAvailable,

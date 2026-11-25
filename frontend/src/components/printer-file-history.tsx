@@ -501,13 +501,15 @@ export function PrinterFiles({
               {selected ? (
                 <>
                   <p className="printer-explorer-title">{printerFileTitle(selected)}</p>
-                  <p className="break-all font-mono text-xs">{selected.remote_filename}</p>
+                  <p className="wrap-anywhere font-mono text-xs">{selected.remote_filename}</p>
+                  <dl className="mt-3 space-y-1 text-xs">
+                    <dt className="text-muted-foreground">{uiText("Original filename")}</dt>
+                    <dd className="wrap-anywhere">
+                      {selected.original_filename ?? uiText("Not recorded")}
+                    </dd>
+                  </dl>
                   <Details
                     fields={[
-                      [
-                        uiText("Original filename"),
-                        selected.original_filename ?? uiText("Not recorded"),
-                      ],
                       [uiText("Model"), selected.model_name ?? "—"],
                       ...(selected.plate_index != null
                         ? [[uiText("Plate"), String(selected.plate_index)] as const]

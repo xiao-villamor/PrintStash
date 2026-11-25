@@ -1,10 +1,125 @@
 /** Collection edits must work against the shared preview API without response overrides. */
 import { expect, test } from "@playwright/test";
 import { useMockApi } from "./_setup";
+import { collapseNavigationSidebar } from "../e2e-real/util";
+import { aCollectionNode, aModelListItem } from "../../src/test-support/factories";
 
 useMockApi();
 
 test.describe("Collection header preview", () => {
+  test("edits New collection at the end of the collection cards", async ({ page }, testInfo) => {
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
+    await page.goto("/");
+    await collapseNavigationSidebar(page);
+    const main = page.getByRole("main");
+    const cards = main.getByRole("region", { name: "Collections", exact: true });
+    const create = cards.getByRole("button", { name: "New collection", exact: true });
+    await expect(main.getByRole("button", { name: "New collection", exact: true })).toHaveCount(1);
+    await expect(create).toBeVisible();
+    await expect(cards.locator("[data-library-key]").last()).toContainText("New collection");
+    await cards.screenshot({ path: testInfo.outputPath("new-collection-card.png") });
+    await create.click();
+    const name = cards.getByRole("textbox", { name: "Collection name" });
+    await expect(name).toBeFocused();
+    await expect(name).toHaveCSS("border-top-style", "dashed");
+    await expect(name).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(name).toHaveCSS("box-shadow", "none");
+    await expect(page.getByRole("dialog", { name: "New collection" })).toHaveCount(0);
+    const submit = cards.getByRole("button", { name: "Create collection" });
+    await expect(submit).toBeDisabled();
+
+    let writes = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/v1/collections"
+      ) {
+        writes++;
+      }
+    });
+    await name.fill("A".repeat(101));
+    await expect(cards.getByRole("alert")).toHaveText("Use 100 characters or fewer.");
+    await expect(name).toHaveAttribute("aria-invalid", "true");
+    await expect(submit).toBeDisabled();
+    await name.press("Enter");
+    await expect(name).toBeVisible();
+    expect(writes).toBe(0);
+    await cards.screenshot({ path: testInfo.outputPath("new-collection-validation.png") });
+
+    await name.fill("A".repeat(100));
+    await expect(cards.getByRole("alert")).toHaveCount(0);
+    await expect(submit).toBeEnabled();
+    await name.press("Escape");
+    await expect(create).toBeFocused();
+    await create.click();
+    await expect(name).toHaveValue("");
+  });
+
+  test("aligns the collection row with the gallery columns", async ({ page }, testInfo) => {
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
+    await page.route("**/api/v1/collections/children?**", (route) =>
+      route.fulfill({
+        json: {
+          items: Array.from({ length: 8 }, (_, index) => {
+            const slug = `folder-${index + 1}`;
+            return aCollectionNode({
+              id: index + 2,
+              parent_id: null,
+              name: `Folder ${index + 1}`,
+              slug,
+              path: slug,
+              model_count: 0,
+            });
+          }),
+          next_cursor: null,
+        },
+      }),
+    );
+    await page.route("**/api/v1/models/browse?**", (route) =>
+      route.fulfill({
+        json: {
+          items: Array.from({ length: 8 }, (_, index) => ({
+            kind: "model",
+            model: aModelListItem({ id: index + 1, name: `Model ${index + 1}` }),
+          })),
+          total: 8,
+          next_cursor: null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      }),
+    );
+    await page.goto("/");
+    await collapseNavigationSidebar(page);
+    const main = page.getByRole("main");
+    const cards = main.getByRole("region", { name: "Collections", exact: true });
+    const disclosure = cards.getByRole("button", { name: /^\d+ more$/ });
+    const create = cards.getByRole("button", { name: "New collection", exact: true });
+    await expect(disclosure).toBeVisible();
+    await expect(create).toBeVisible();
+    await expect
+      .poll(async () => {
+        const button = await disclosure.boundingBox();
+        const card = await create.boundingBox();
+        if (!button || !card) return false;
+        const grid = await main.locator("article.library-model-card").evaluateAll((articles) => {
+          const [first, ...others] = articles.map((article) => article.getBoundingClientRect());
+          if (!first) return null;
+          const firstRow = [first, ...others.filter((rect) => Math.abs(rect.top - first.top) < 2)];
+          return { width: first.width, right: Math.max(...firstRow.map((rect) => rect.right)) };
+        });
+        return (
+          grid &&
+          Math.abs(button.x + button.width - card.x - card.width) < 2 &&
+          Math.abs(card.width - grid.width) < 2 &&
+          Math.abs(card.x + card.width - grid.right) < 2 &&
+          card.y - (button.y + button.height) >= 8
+        );
+      })
+      .toBe(true);
+    await main.screenshot({ path: testInfo.outputPath("collection-disclosure-spacing.png") });
+  });
+
   test("persists consecutive inline tags through the preview API", async ({ page }) => {
     await page.goto("/?c=maraio");
     const opener = page.getByRole("button", { name: "Add tag", exact: true });

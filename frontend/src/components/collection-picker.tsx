@@ -78,7 +78,7 @@ export function CollectionPicker({
             onChange={(event) => setQuery(event.target.value)}
             placeholder={uiText("Find destination...")}
             aria-label={uiText("Find destination")}
-            className="h-9 border-0 bg-transparent pl-8 text-field shadow-none focus-visible:ring-inset focus-visible:ring-offset-0"
+            className="h-9 border-0 pl-8 text-field shadow-none focus-visible:ring-inset focus-visible:ring-offset-0"
           />
         </div>
         <div

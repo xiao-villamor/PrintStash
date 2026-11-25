@@ -272,6 +272,48 @@ describe("FilterSidebar", () => {
       destinationRect.mockRestore();
     }
   });
+
+  it("keeps model drag feedback visible until the move settles", async () => {
+    const user = userEvent.setup();
+    const move = Promise.withResolvers<void>();
+    const onMoveModel = vi.fn<NonNullable<FilterSidebarProps["onMoveModel"]>>(() => move.promise);
+    renderSidebar({
+      collections: [
+        ...TREE,
+        aCollection({ id: 4, name: "Games", path: "toys/games", parent_id: 3 }),
+      ],
+      models: [aOutlinerModel({ id: 1, name: "Test model" })],
+      onMoveModel,
+    });
+    await openFolder(user, "Parts");
+    const source = await screen.findByRole("treeitem", { name: "Test model" });
+    const destination = await folderRow("Toys");
+    const sourceRect = vi
+      .spyOn(source, "getBoundingClientRect")
+      .mockReturnValue(new DOMRect(0, 0, 100, 20));
+    const destinationRect = vi
+      .spyOn(destination, "getBoundingClientRect")
+      .mockReturnValue(new DOMRect(0, 100, 100, 20));
+    try {
+      fireEvent.mouseDown(source, { button: 0, buttons: 1, clientX: 10, clientY: 10 });
+      fireEvent.mouseMove(document, { buttons: 1, clientX: 20, clientY: 10 });
+      fireEvent.mouseMove(document, { buttons: 1, clientX: 20, clientY: 110 });
+      expect(await screen.findByRole("treeitem", { name: "Games" })).toBeVisible();
+      fireEvent.mouseUp(document, { button: 0, clientX: 20, clientY: 110 });
+
+      expect(await screen.findByText("Moving Test model to Toys…")).toBeVisible();
+      expect(source).toHaveAttribute("aria-busy", "true");
+      expect(onMoveModel).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }), "toys");
+      await act(async () => move.resolve());
+      expect(screen.queryByText("Moving Test model to Toys…")).toBeNull();
+      expect(source).not.toHaveAttribute("aria-busy");
+    } finally {
+      move.resolve();
+      sourceRect.mockRestore();
+      destinationRect.mockRestore();
+    }
+  });
+
   describe("the folder tree", () => {
     it.each([
       { label: "folders only", models: [] },

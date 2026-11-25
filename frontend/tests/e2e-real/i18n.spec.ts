@@ -17,14 +17,14 @@ test.describe("localization", () => {
     page,
   }) => {
     await page.goto("/settings");
-    await expect(page.getByRole("button", { name: "Trash" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Appearance", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 
     await page.getByRole("button", { name: /^Language:/ }).click();
     await page.getByRole("menuitemradio", { name: "Español" }).click();
     await expect(page.locator("html")).toHaveAttribute("lang", "es");
     await expect(page.getByRole("heading", { name: "Ajustes" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Papelera" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Apariencia", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Resumen" })).toBeVisible();
 
     // The profile menu's navigation links translate too.
@@ -38,13 +38,13 @@ test.describe("localization", () => {
     await page.keyboard.press("Escape");
 
     await page.reload();
-    await expect(page.getByRole("button", { name: "Papelera" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Apariencia", exact: true })).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("lang", "es");
 
     // Restore English so specs that assert on English copy later in this worker
     // aren't affected.
     await page.getByRole("button", { name: /^Idioma:/ }).click();
     await page.getByRole("menuitemradio", { name: "English" }).click();
-    await expect(page.getByRole("button", { name: "Trash" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Appearance", exact: true })).toBeVisible();
   });
 });

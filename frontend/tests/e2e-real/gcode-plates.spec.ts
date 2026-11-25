@@ -3,7 +3,7 @@ import { selectModelDetailTab } from "../model-detail-navigation";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { test, expect } from "./helpers";
-import { collapseNavigationSidebar, openModelPage, uploadGcodeModel } from "./util";
+import { collapseNavigationSidebar, openModelPage, uploadGcodeModel, uploadModel } from "./util";
 import type { Locator, Page } from "@playwright/test";
 import type { PrintJobRead } from "@/types";
 
@@ -115,7 +115,123 @@ sys.stdout.buffer.write(original)`,
   );
 }
 
+function namedPlateProject(name: string, count: number, sliced: boolean): Buffer {
+  const backend = resolve("../backend");
+  return execFileSync(
+    resolve(backend, ".venv/bin/python"),
+    [
+      "-c",
+      `import io, math, sys, zipfile
+from xml.etree import ElementTree as ET
+from tests.fixtures.three_mf_projects import build_multi_plate_project, build_sliced_project
+marker, count, sliced = sys.argv[1], int(sys.argv[2]), sys.argv[3] == 'true'
+columns = math.ceil(math.sqrt(count))
+project = io.BytesIO(build_multi_plate_project(
+    marker=marker, names=tuple(f'Part {i+1}' for i in range(count)),
+    placements=tuple((128 + i % columns * 307.2, 128 - i // columns * 307.2) for i in range(count)),
+))
+if sliced:
+    gcode = build_sliced_project(marker=marker, plate_numbers=tuple(range(1, count+1)))
+    sliced_project = io.BytesIO()
+    with zipfile.ZipFile(project) as mesh, zipfile.ZipFile(io.BytesIO(gcode)) as source, zipfile.ZipFile(sliced_project, 'w') as target:
+        slice_info = ET.Element('config')
+        for member in mesh.namelist():
+            content = mesh.read(member)
+            if member == 'Metadata/model_settings.config':
+                config = ET.fromstring(content)
+                for i, plate in enumerate(config.findall('plate'), 1):
+                    ET.SubElement(plate, 'metadata', key='gcode_file', value=f'Metadata/plate_{i}.gcode')
+                    info = ET.SubElement(slice_info, 'plate')
+                    ET.SubElement(info, 'metadata', key='index', value=str(i))
+                    ET.SubElement(info, 'object', id=str(i))
+                content = ET.tostring(config)
+            target.writestr(member, content)
+        for member in source.namelist():
+            target.writestr(member, source.read(member))
+        target.writestr('Metadata/slice_info.config', ET.tostring(slice_info))
+    project = sliced_project
+sys.stdout.buffer.write(project.getvalue())`,
+      name,
+      String(count),
+      String(sliced),
+    ],
+    { cwd: backend },
+  );
+}
+
 test.describe("Sliced G-code plates", () => {
+  for (const count of [2, 9]) {
+    test(`keeps the selected plate visible with ${count} plates`, async ({ page }, testInfo) => {
+      const name = `e2e-plate-tray-${count}-${Date.now()}`;
+      await page.emulateMedia({ colorScheme: "dark" });
+      await uploadModel(page, name, {
+        meshFile: {
+          name: `${name}.3mf`,
+          mimeType: "model/3mf",
+          buffer: namedPlateProject(name, count, false),
+        },
+        gcodeFile: {
+          name: `${name}.gcode.3mf`,
+          mimeType: "model/3mf",
+          buffer: namedPlateProject(name, count, true),
+        },
+      });
+      await openModelPage(page, name);
+      await collapseNavigationSidebar(page);
+      const modelId = Number(new URL(page.url()).pathname.split("/").pop());
+      const preview = page.getByRole("region", { name: "Preview", exact: true });
+      const source = preview.getByRole("group", { name: "Plates", exact: true });
+      const sliced = preview.getByRole("group", { name: "Sliced plates", exact: true });
+      const last = new RegExp(`^Plate ${String(count).padStart(2, "0")}\\b`);
+
+      async function assertTray(group: Locator) {
+        const canvas = (await preview.locator(".detail-preview-canvas").boundingBox())!;
+        const dock = (await preview.locator(".detail-viewer-dock").boundingBox())!;
+        const tray = (await group.boundingBox())!;
+        expect(canvas.y + canvas.height).toBeCloseTo(dock.y, 0);
+        expect(dock.y + dock.height).toBeCloseTo(tray.y, 0);
+        expect(tray.width).toBeCloseTo(dock.width, 0);
+        if (count > 2) {
+          expect(
+            await group
+              .locator(".model-plate-options")
+              .evaluate((list) => list.scrollHeight > list.clientHeight),
+          ).toBe(true);
+        }
+        const selected = group.getByRole("button", { name: last });
+        await expect(selected).toHaveAttribute("aria-pressed", "true");
+        await expect(selected).toBeInViewport({ ratio: 0.99 });
+      }
+
+      try {
+        const lastSourcePlate = source.getByRole("button", { name: last });
+        await expect(lastSourcePlate).toBeVisible();
+        await lastSourcePlate.click();
+        await expect(
+          preview.getByText("Selected plate mesh bounds", { exact: false }),
+        ).toBeVisible();
+        await assertTray(source);
+        await page.screenshot({ path: testInfo.outputPath("plates-mesh.png") });
+
+        const toolpath = page.waitForResponse(
+          (response) => response.url().includes(`/embedded-gcode?plate_index=${count}`),
+          { timeout: 25_000 },
+        );
+        await preview.getByRole("button", { name: "G-code", exact: true }).click();
+        expect((await toolpath).ok()).toBe(true);
+        await expect(preview.getByRole("spinbutton", { name: "Layer number" })).toHaveValue("2");
+        await assertTray(sliced);
+        await page.screenshot({ path: testInfo.outputPath("plates-gcode.png") });
+
+        await preview.getByRole("button", { name: "3D model", exact: true }).click();
+        await assertTray(source);
+      } finally {
+        expect((await page.request.delete(`/api/v1/models/${modelId}`)).status()).toBe(204);
+        expect((await page.request.delete(`/api/v1/models/${modelId}/purge`)).ok()).toBe(true);
+      }
+    });
+  }
+
   for (const viewport of [
     { width: 1280, height: 720, theme: "light" },
     { width: 1440, height: 1000, theme: "light" },

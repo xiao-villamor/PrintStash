@@ -113,9 +113,9 @@ test.describe("model library", () => {
       await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click(); // confirm
       await expect(modelCard(page, renamed)).toHaveCount(0);
 
-      // ── Restore from Settings → Trash ───────────────────────────────────────────
+      // ── Restore from Trash ─────────────────────────────────────────────────────
       await page.goto("/settings?section=trash");
-      const trash = page.getByRole("group", { name: "Deleted models and multipart sets" });
+      const trash = page.getByRole("region", { name: "Deleted models and multipart sets" });
       const trashedModel = trash.getByText(renamed, { exact: true });
       await expect(trashedModel).toBeVisible();
       const trashRow = trash

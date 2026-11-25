@@ -20,6 +20,7 @@ import type { EditingBase } from "@/types/editing";
 import { getSessionVersion } from "@/lib/session-transport";
 import { onAuthChange } from "@/lib/auth-store";
 import { parseApiError } from "@/lib/errors";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StorageProviderFields } from "@/components/storage-provider-fields";
@@ -508,7 +509,7 @@ export function StorageConfigCard({
               {currentProvider && (
                 <>
                   <dl className="settings-storage-summary">
-                    <div>
+                    <div className="settings-storage-fact">
                       <dt>
                         {t("Provider")}
                         <span className="settings-row-hint">
@@ -518,20 +519,32 @@ export function StorageConfigCard({
                       <dd className="is-text">{knownUiText(currentProvider.label)}</dd>
                     </div>
                     {cfg?.storage_tier && (
-                      <div>
+                      <div className="settings-storage-fact">
                         <dt>
                           {t("Storage safety")}
-                          {currentProvider.expected_tier !== "guarded" && (
-                            <span className="settings-row-hint">
-                              {knownUiText(currentProvider.expected_tier_note)}
-                            </span>
-                          )}
+                          {currentProvider.expected_tier !== "guarded" &&
+                            cfg.storage_tier === currentProvider.expected_tier && (
+                              <span className="settings-row-hint">
+                                {knownUiText(currentProvider.expected_tier_note)}
+                              </span>
+                            )}
                         </dt>
-                        <dd className="is-text">{knownUiText(cfg.storage_tier)}</dd>
+                        <dd className="is-text">
+                          <Badge
+                            variant="outline"
+                            className={
+                              cfg.storage_tier === "verified"
+                                ? "border-success/30 bg-success/15 text-success"
+                                : "border-warning/30 bg-warning/15 text-warning"
+                            }
+                          >
+                            {knownUiText(cfg.storage_tier)}
+                          </Badge>
+                        </dd>
                       </div>
                     )}
                     {locationFields.map((field) => (
-                      <div key={field.name}>
+                      <div key={field.name} className="settings-storage-location">
                         <dt>{field.label}</dt>
                         <dd>{field.value}</dd>
                       </div>

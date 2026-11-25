@@ -143,8 +143,8 @@ generic object sweep.
 ## Operator Workflow
 
 1. Create and verify an independent S3 backup.
-2. Open **Settings > Trash** and select **Review expired**.
-3. Inspect the count, key estimate, bytes, cutoff, provider and every item.
+2. Open **Trash** from the app navigation and select **Review expired**, then **Create preview**. The preview records the eligible batch and leaves the items and their expiry dates intact.
+3. Review the item list and estimated size. Dismiss the review if it has no candidates.
 4. Copy the displayed digest into the approval field. Do not approve if any
    candidate is unexpected.
 5. Confirm the plan enters `QUARANTINED` and record its deadline.

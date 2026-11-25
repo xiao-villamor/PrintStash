@@ -2,7 +2,15 @@
 
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowUpRight, Box, ChevronRight, Download, Loader2, MoreHorizontal } from "lucide-react";
+import {
+  ArrowUpRight,
+  Box,
+  ChevronRight,
+  Download,
+  Images,
+  Loader2,
+  MoreHorizontal,
+} from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { modelPrinterFilesOptions, useModelDetail } from "@/features/library/model-detail";
 import { downloadAuthenticatedFile, getAssetUrl, getModel, updateModel } from "@/lib/api";
@@ -11,7 +19,6 @@ import { useAuth } from "@/lib/auth-context";
 import { usePrinters } from "@/lib/queries";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import { useToolpathSources } from "@/lib/toolpath-preview";
 import {
   formatBytes,
   formatCalendarDate,
@@ -25,7 +32,7 @@ import { toast } from "@/lib/toast";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { MarkdownView } from "@/components/markdown-view";
-import { ProtectedThumbnail } from "@/components/protected-thumbnail";
+import { TabBar } from "@/components/ui/tabs";
 import { SendToButtons } from "@/components/model-detail/send-to-buttons";
 import { InspectorPreviewResize } from "./inspector-preview-resize";
 import {
@@ -33,17 +40,13 @@ import {
   useMeshGeometryMeasurement,
 } from "@/components/model-detail/use-mesh-geometry-facts";
 import { InspectorPreviewImages } from "@/components/model-preview";
-import { coverImageKind, NO_PREVIEWS } from "@/types/previews";
-import { ViewerModeSwitch, type InspectorViewerMode } from "@/components/viewer-mode-switch";
+import { coverImageKind, NO_PREVIEWS, publishedViews } from "@/types/previews";
 import { normalizeRecommendedGcodeFiles } from "@/components/model-detail/presentation";
 import { useRevisionUpdater } from "@/components/model-detail/use-revision-updater";
 import type { FileRead, MetadataRead, ModelRead } from "@/types";
 
 const STLViewer = lazy(() =>
   import("@/components/stl-viewer").then((m) => ({ default: m.STLViewer })),
-);
-const GcodePreview = lazy(() =>
-  import("@/components/model-detail/gcode-preview").then((m) => ({ default: m.GcodePreview })),
 );
 const meshTypes = new Set(["stl", "3mf", "obj", "step", "glb", "gltf", "ply", "3dm", "fbx"]);
 
@@ -151,14 +154,7 @@ export function InspectorContent({
     setDescriptionReviewed(null);
     setDescriptionReviewing(false);
   }
-  const [preview, setPreview] = useState<InspectorViewerMode | null>(null);
-  const [toolpathId, setToolpathId] = useState<number | null>(null);
-  const { sources: toolpathFiles, availability: toolpathAvailability } = useToolpathSources(
-    files,
-    active,
-  );
-  const toolpath =
-    toolpathFiles.find((item) => item.id === (toolpathId ?? file?.id)) ?? toolpathFiles[0];
+  const [preview, setPreview] = useState<"model" | "images" | null>(null);
   const [sourceId, setSourceId] = useState<number | null>(null);
   const [fileMenu, setFileMenu] = useState<number | null>(null);
   const viewer = useRef<HTMLDivElement>(null);
@@ -166,20 +162,14 @@ export function InspectorContent({
     (item) => meshTypes.has(item.file_type) && item.sliced_geometry !== "gcode_only",
   );
   const sourceFile = meshFiles.find((item) => item.id === sourceId) ?? meshFiles[0];
-  const gcodeOnly =
-    !sourceFile && toolpathFiles.some((item) => item.sliced_geometry === "gcode_only");
   const previews = model.previews ?? NO_PREVIEWS;
-  const coverKind = coverImageKind(previews, "full");
-  const photoCover = coverKind === "photo";
-  const hasImages = coverKind !== "render" || Boolean(previews.archive_images?.length);
-  const hasModel = Boolean(sourceFile) || !hasImages;
-  const defaultMode = gcodeOnly ? "gcode" : photoCover ? "images" : "model";
-  const viewerMode =
-    (preview === "images" && hasImages) ||
-    (preview === "gcode" && toolpath) ||
-    (preview === "model" && hasModel && !gcodeOnly)
-      ? preview
-      : defaultMode;
+  const hasImages = Boolean(
+    previews.large_cover_url || model.thumbnail_url || publishedViews(previews).length,
+  );
+  const imagesFirst = coverImageKind(previews, "full") === "photo";
+  const showImages =
+    !sourceFile || (hasImages && (preview === "images" || (!preview && imagesFirst)));
+  const canSwitchPreview = Boolean(sourceFile && hasImages);
   function download(item: FileRead) {
     void downloadAuthenticatedFile(
       `/api/v1/files/${item.id}/download`,
@@ -374,50 +364,55 @@ export function InspectorContent({
 
   return (
     <div className="library-inspector-body fade-in">
-      <div ref={viewer} className="relative">
+      <div ref={viewer} role="region" aria-label={uiText("Preview")} className="relative">
         {widthHandle}
+        {canSwitchPreview && (
+          <TabBar
+            tabs={[
+              {
+                key: "model",
+                label: (
+                  <>
+                    <Box className="size-4" aria-hidden />
+                    {uiText("3D model")}
+                  </>
+                ),
+              },
+              {
+                key: "images",
+                label: (
+                  <>
+                    <Images className="size-4" aria-hidden />
+                    {uiText("Images")}
+                  </>
+                ),
+              },
+            ]}
+            active={showImages ? "images" : "model"}
+            onChange={setPreview}
+            showIndicator={false}
+            className="mb-2 w-fit max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-muted p-0.5"
+            tabClassName="inline-flex h-8 items-center gap-1.5 px-2.5 text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            activeTabClassName="bg-primary/20 text-foreground"
+          />
+        )}
         <div
           className="library-inspector-preview library-preview"
+          role={canSwitchPreview ? "tabpanel" : undefined}
+          aria-label={canSwitchPreview ? uiText(showImages ? "Images" : "3D model") : undefined}
           style={{ height: previewSize.height }}
         >
-          <ViewerModeSwitch
-            compact
-            mode={viewerMode}
-            gcodeOnly={gcodeOnly}
-            hasModel={hasModel}
-            onChange={setPreview}
-            onImages={hasImages ? () => setPreview("images") : undefined}
-            hasGcode={toolpathAvailability === "available"}
-            availability={toolpathAvailability}
-          />
           <Suspense fallback={<Loader2 className="h-5 w-5 animate-spin" />}>
-            {viewerMode === "images" ? (
-              <InspectorPreviewImages
-                name={model.name}
-                cover={model.thumbnail_url}
-                previews={previews}
-              />
-            ) : viewerMode === "gcode" && toolpath ? (
-              <GcodePreview
-                files={toolpathFiles}
-                archiveImages={model.previews?.archive_images}
-                selectedFileId={toolpath.id}
-                onSelectFile={setToolpathId}
-                bedSizeFor={() => null}
-                viewerProps={{ screenshotName: model.slug }}
-              />
-            ) : sourceFile ? (
+            {!showImages && sourceFile ? (
               <STLViewer
                 url={getAssetUrl(`/api/v1/files/${sourceFile.id}/stl`)}
                 modelId={model.id}
               />
             ) : (
-              <ProtectedThumbnail
-                path={model.previews?.large_cover_url ?? model.thumbnail_url}
-                alt={model.name}
-                className="h-full w-full"
-                imageClassName="h-full w-full object-contain"
-                placeholder={<Box className="h-7 w-7 text-muted-foreground" />}
+              <InspectorPreviewImages
+                name={model.name}
+                cover={model.thumbnail_url}
+                previews={previews}
               />
             )}
           </Suspense>
@@ -724,7 +719,7 @@ export function InspectorContent({
         </summary>
         <ul className="library-inspector-files divide-y divide-border">
           {files.map((item) => {
-            const isToolpath = toolpathFiles.some((file) => file.id === item.id);
+            const canPreview = meshFiles.includes(item);
             return (
               <li key={item.id}>
                 <span className="library-inspector-file-type">{item.file_type.toUpperCase()}</span>
@@ -778,20 +773,15 @@ export function InspectorContent({
                     <Download className="h-4 w-4" aria-hidden />
                     {uiText("Download")}
                   </button>
-                  {(isToolpath || meshTypes.has(item.file_type)) && (
+                  {canPreview && (
                     <button
                       type="button"
                       role="menuitem"
                       className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
                       onClick={() => {
                         setFileMenu(null);
-                        if (isToolpath) {
-                          setToolpathId(item.id);
-                          setPreview("gcode");
-                        } else {
-                          setSourceId(item.id);
-                          setPreview("model");
-                        }
+                        setSourceId(item.id);
+                        setPreview("model");
                         viewer.current?.scrollIntoView({ block: "nearest" });
                       }}
                     >

@@ -364,7 +364,7 @@ export function SimilaritySettingsPanel({
           <div className="min-w-0 basis-full space-y-1 text-xs sm:basis-72">
             {t("similarity.scope")}
             <select
-              className="block w-full rounded-md border border-input bg-background p-2 text-sm"
+              className="block w-full rounded-md border border-input bg-field-surface p-2 text-sm"
               value={scopeValue}
               onChange={(event) => {
                 const value = event.target.value;

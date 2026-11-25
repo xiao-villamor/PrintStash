@@ -16855,7 +16855,10 @@
           "printstash_blue",
           "slate",
           "graphite",
-          "sand"
+          "sand",
+          "sage",
+          "clay",
+          "plum"
         ],
         "title": "PreviewLook",
         "type": "string"
@@ -27047,6 +27050,16 @@
             "schema": {
               "title": "User Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "remove",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Remove",
+              "type": "boolean"
             }
           }
         ],

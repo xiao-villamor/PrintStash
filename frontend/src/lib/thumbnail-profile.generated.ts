@@ -23,6 +23,9 @@ export const PREVIEW_LOOK_COLOURS = {
   slate: "#8E97A6",
   graphite: "#6E737C",
   sand: "#CDBCA8",
+  sage: "#89AD95",
+  clay: "#CB8770",
+  plum: "#A58BBF",
 } as const;
 /** Studio shading of generated images, in the camera frame (x right, y up, z to viewer). */
 export const PREVIEW_STUDIO = {
@@ -65,6 +68,30 @@ export const PREVIEW_STUDIO = {
     },
     sand: {
       albedo: [0.803921568627451, 0.7372549019607844, 0.6588235294117647],
+      key: 0.9,
+      fill: 0.26,
+      ambient: 0.26,
+      rim: 0.08,
+      specular: 0.12,
+    },
+    sage: {
+      albedo: [0.5372549019607843, 0.6784313725490196, 0.5843137254901961],
+      key: 0.9,
+      fill: 0.26,
+      ambient: 0.26,
+      rim: 0.08,
+      specular: 0.12,
+    },
+    clay: {
+      albedo: [0.796078431372549, 0.5294117647058824, 0.4392156862745098],
+      key: 0.9,
+      fill: 0.26,
+      ambient: 0.26,
+      rim: 0.08,
+      specular: 0.12,
+    },
+    plum: {
+      albedo: [0.6470588235294118, 0.5450980392156862, 0.7490196078431373],
       key: 0.9,
       fill: 0.26,
       ambient: 0.26,

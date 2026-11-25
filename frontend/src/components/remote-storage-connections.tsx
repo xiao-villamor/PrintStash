@@ -96,10 +96,7 @@ const REMOTE_CATEGORIES = [
   icon: typeof Cloud;
 }>;
 const FIELD_LABEL = "space-y-1.5 text-xs font-medium text-on-surface-variant";
-const SELECT = cn(
-  inputClasses,
-  "bg-surface-container-lowest text-on-surface focus-visible:ring-ring",
-);
+const SELECT = cn(inputClasses, "text-on-surface focus-visible:ring-ring");
 
 function isPurpose(value: string): value is StorageConnectionPurpose {
   return PURPOSES.some((purpose) => purpose === value);

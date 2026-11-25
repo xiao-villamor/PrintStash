@@ -1597,52 +1597,59 @@ function ModelDetailPresentation({
               <span className="absolute left-1/2 top-1/2 h-10 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-border transition-colors duration-press group-hover:bg-primary group-focus-visible:bg-primary" />
             </div>
 
-            <div className="model-detail-tabs shrink-0 overflow-x-auto border-b py-2">
-              <TabBar
-                tabs={tabItems}
-                active={activePrimary}
-                onChange={(tab) => {
-                  setCompareOrigin(null);
-                  selectTab(tab);
-                }}
-                showIndicator={false}
-                className="model-detail-tab-list w-fit max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-card p-0.75"
-                tabClassName="model-detail-tab-label relative h-7.5 rounded-md px-2.5 py-0 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                activeTabClassName="bg-foreground/12 text-foreground"
-              />
+            <div className="model-detail-tabs shrink-0">
+              <div className="border-b border-border-strong py-2">
+                <TabBar
+                  tabs={tabItems}
+                  active={activePrimary}
+                  onChange={(tab) => {
+                    setCompareOrigin(null);
+                    selectTab(tab);
+                  }}
+                  showIndicator={false}
+                  className="model-detail-tab-list w-full flex-wrap gap-0.5 rounded-lg border border-border bg-card p-0.75"
+                  tabClassName="model-detail-tab-label relative h-7.5 rounded-md px-2 py-0 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  activeTabClassName="bg-foreground/12 text-foreground"
+                />
+              </div>
             </div>
             {activePrimary === "revisions" && (
-              <div className="mx-5 flex flex-wrap items-center justify-between gap-2 border-b border-border py-2">
-                <nav
-                  aria-label={uiText("modelDetail.printSections")}
-                  className="inline-flex flex-wrap gap-0.5 rounded-lg border border-border bg-card p-0.75"
-                >
-                  {PRINT_DETAIL_SECTIONS.map((section) => (
-                    <Button
-                      key={section}
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      aria-current={section === activeTab ? "page" : undefined}
-                      className={
-                        section === activeTab
-                          ? "h-7.5 bg-foreground/12 px-2.5 text-foreground"
-                          : "h-7.5 px-2.5 text-muted-foreground"
-                      }
-                      onClick={() => {
-                        setCompareOrigin(null);
-                        openSection(section);
-                      }}
-                    >
-                      {section === "revisions"
-                        ? uiText("Revisions")
-                        : modelDetailSectionLabel(section)}
-                    </Button>
-                  ))}
-                </nav>
-                {hasGcode && canViewPrinters && (
-                  <RevisionDeliveryActions className="ms-auto" onSend={() => setSendOpen(true)} />
-                )}
+              <div className="model-detail-print-tabs shrink-0">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border py-2">
+                  <nav
+                    aria-label={uiText("modelDetail.printSections")}
+                    className="inline-flex flex-wrap gap-0.5 rounded-lg border border-border bg-card p-0.75"
+                  >
+                    {PRINT_DETAIL_SECTIONS.map((section) => (
+                      <Button
+                        key={section}
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-current={section === activeTab ? "page" : undefined}
+                        className={
+                          section === activeTab
+                            ? "h-7.5 bg-foreground/12 px-2.5 text-foreground"
+                            : "h-7.5 px-2.5 text-muted-foreground"
+                        }
+                        onClick={() => {
+                          setCompareOrigin(null);
+                          openSection(section);
+                        }}
+                      >
+                        {section === "revisions"
+                          ? uiText("Revisions")
+                          : modelDetailSectionLabel(section)}
+                      </Button>
+                    ))}
+                  </nav>
+                  {hasGcode && canViewPrinters && (
+                    <RevisionDeliveryActions
+                      className="ms-auto shrink-0"
+                      onSend={() => setSendOpen(true)}
+                    />
+                  )}
+                </div>
               </div>
             )}
             <div
@@ -1650,7 +1657,7 @@ function ModelDetailPresentation({
               role="tabpanel"
               tabIndex={0}
               aria-label={modelDetailSectionLabel(activeTab)}
-              className="model-detail-content focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring flex-1 min-h-0 overflow-y-auto p-4"
+              className="model-detail-content focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring flex-1 min-h-0 overflow-y-auto"
             >
               <div ref={detailTabBody} className="model-detail-tab-body space-y-4">
                 {activeTab === "overview" && (

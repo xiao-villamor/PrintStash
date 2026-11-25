@@ -236,12 +236,66 @@ export function ProviderConnectionsPanel({
   return (
     <div className="space-y-3">
       {loadFailure}
-      <ImportReadiness
-        devices={devices}
-        connections={connections}
-        checkedAt={Math.min(devicesQuery.dataUpdatedAt, connectionsQuery.dataUpdatedAt)}
-      />
-      <fieldset disabled={busy !== null || Boolean(loadError)} className="min-w-0">
+      <fieldset disabled={busy !== null || Boolean(loadError)} className="min-w-0 space-y-6">
+        <SettingsCard
+          title={t("settings.pairedBrowsers.title")}
+          description={t("settings.pairedBrowsers.description")}
+          action={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void createPairing()}
+              loading={busy === "pairing"}
+            >
+              {t("settings.pairedBrowsers.createCode")}
+            </Button>
+          }
+        >
+          <div className="space-y-4 px-4 pb-4 sm:px-5">
+            {pairing && (
+              <div className="border border-border bg-card p-3" role="status">
+                <p className="text-xs text-muted-foreground">
+                  {t("settings.pairedBrowsers.codeHelp")}
+                </p>
+                <code className="mt-2 block select-all break-all border border-border bg-background px-3 py-2 font-mono text-sm text-foreground">
+                  {pairing.code}
+                </code>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {t("settings.pairedBrowsers.expiresAt", {
+                    expiresAt: formatDate(pairing.expires_at),
+                  })}
+                </p>
+              </div>
+            )}
+            {devices.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t("settings.pairedBrowsers.empty")}</p>
+            ) : (
+              <div>
+                {devices.map((device) => (
+                  <BrowserDeviceRow
+                    key={device.id}
+                    device={device}
+                    busy={busy}
+                    onSave={saveDeviceName}
+                    onReview={reviewDevice}
+                    onRevoke={(device) => {
+                      setError("");
+                      setRevokeTarget(device);
+                    }}
+                    labels={{
+                      name: t("settings.pairedBrowsers.name", { name: device.name }),
+                      rename: t("settings.pairedBrowsers.rename", { name: device.name }),
+                      save: t("settings.pairedBrowsers.saveName"),
+                      revoke: t("settings.pairedBrowsers.revoke", { name: device.name }),
+                      revoked: t("settings.pairedBrowsers.revoked"),
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </SettingsCard>
+
         <SettingsCard
           title={t("settings.providerConnections.title")}
           description={t("settings.providerConnections.description")}
@@ -356,65 +410,6 @@ export function ProviderConnectionsPanel({
           </div>
         </SettingsCard>
 
-        <SettingsCard
-          title={t("settings.pairedBrowsers.title")}
-          description={t("settings.pairedBrowsers.description")}
-          action={
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void createPairing()}
-              loading={busy === "pairing"}
-            >
-              {t("settings.pairedBrowsers.createCode")}
-            </Button>
-          }
-        >
-          <div className="space-y-4 px-4 pb-4 sm:px-5">
-            {pairing && (
-              <div className="border border-border bg-card p-3" role="status">
-                <p className="text-xs text-muted-foreground">
-                  {t("settings.pairedBrowsers.codeHelp")}
-                </p>
-                <code className="mt-2 block select-all break-all border border-border bg-background px-3 py-2 font-mono text-sm text-foreground">
-                  {pairing.code}
-                </code>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {t("settings.pairedBrowsers.expiresAt", {
-                    expiresAt: formatDate(pairing.expires_at),
-                  })}
-                </p>
-              </div>
-            )}
-            {devices.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{t("settings.pairedBrowsers.empty")}</p>
-            ) : (
-              <div>
-                {devices.map((device) => (
-                  <BrowserDeviceRow
-                    key={device.id}
-                    device={device}
-                    busy={busy}
-                    onSave={saveDeviceName}
-                    onReview={reviewDevice}
-                    onRevoke={(device) => {
-                      setError("");
-                      setRevokeTarget(device);
-                    }}
-                    labels={{
-                      name: t("settings.pairedBrowsers.name", { name: device.name }),
-                      rename: t("settings.pairedBrowsers.rename", { name: device.name }),
-                      save: t("settings.pairedBrowsers.saveName"),
-                      revoke: t("settings.pairedBrowsers.revoke", { name: device.name }),
-                      revoked: t("settings.pairedBrowsers.revoked"),
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        </SettingsCard>
-
         <ConfirmModal
           open={disconnectTarget !== null}
           onClose={() => setDisconnectTarget(null)}
@@ -438,6 +433,11 @@ export function ProviderConnectionsPanel({
           busy={busy?.startsWith("revoke-") ?? false}
         />
       </fieldset>
+      <ImportReadiness
+        devices={devices}
+        connections={connections}
+        checkedAt={Math.min(devicesQuery.dataUpdatedAt, connectionsQuery.dataUpdatedAt)}
+      />
     </div>
   );
 }

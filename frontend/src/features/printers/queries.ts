@@ -353,6 +353,8 @@ export function usePrinterCatalogCommands() {
   };
 }
 
+export const FLEET_LIVE_REFRESH_MS = 2_000;
+
 /** Queue acknowledgements affect fleet summaries and the printer dashboard. */
 export function refreshFleet(client: QueryClient, session: number): void {
   if (session !== getSessionVersion()) return;

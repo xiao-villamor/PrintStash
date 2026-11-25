@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Open Trash from one workspace with an aligned selection header and a clearer review of expired items.
+- Keep the Model details title and actions clear while scrolling past the image preview. Show G-code in the full Model page and give its toolbar and layer controls dedicated space.
+- Give the multi-plate tray its own row and keep the selected plate visible when switching views. Improve lighting on dark filament.
+- Align the model's Print actions and add space to attachment rows.
+
 - Upgrades from 0.13 or earlier preserve legacy `generic` background job records and translate them to the current upload job kind before installing the job-kind constraint.
 
 - Bambu LAN connects on Python 3.14 with bundled Bambu CA certificates that lack the Key Usage extension.
@@ -18,9 +23,24 @@
 
 - Model details lead with the next print action, group revisions and production costs under Print, and keep source files, publication data, and recorded results in their own sections. Opening a source or profile preserves the return to the original library view. Overview shows the current revision, the estimate source, and the next print action. Tags save from the inline picker, and Prepare print carries over the selected preview plate.
 
+- Printer errors appear in red on the farm routing map, and the fleet summary uses color to distinguish ready printers from those needing attention. The printer file explorer keeps file facts and actions closer together on wide screens.
+- The Add printer dialog groups connection fields and labels optional model information. Account creation marks email optional, requires matching passwords, and lets administrators reveal both entries.
+- Vault administrators can delete accounts while preserving their activity history. Disabled accounts can also be deleted.
+- Browser extension setup explains how to finish connecting. Storage shows measurement details directly and gives the usage breakdown and history chart separate space.
+- Maintenance explains each check, shows what a running check is doing, and loads the findings behind the latest result.
+
+- Storage shows verification badges and a compact control for measurement details. Imports puts browser pairing beside extension setup and keeps upload capacity checks in the upload flow.
+- Model screenshots offer resolution in the viewer. Generated Model images have three additional colour choices, and Settings is available from the workspace menu.
+- Saved views actions open beside the sidebar's three-dot button. An empty list offers the action to save the current view.
+- Fleet cards use the latest print status automatically. The routing map animates active prints alongside queued routes.
+- Fleet cards keep their height when a print starts or finishes.
+- Text fields, textareas and selectors use the same field surface throughout the app in both themes.
+- Change Model card metrics directly on the example card and see the new sample value immediately.
+
 ### Performance
 
 - Model details shows the selected cover during opening and initializes the interactive body after the pane docks.
+- The Library filter picker opens and closes immediately without rerendering the gallery for the toggle.
 
 ### Changed
 
@@ -36,6 +56,7 @@
 
 ### Added
 
+- Fleet can show printer cards inside dotted frames labelled by their configured groups. The browser remembers the layout.
 - Model guides and attachments have their own Documentation tab.
 - Model attachments accept file drops and clicks on the empty upload area, and the Markdown editor shows a live preview beside the draft.
 - Model attachments open in an in-app reader. Write Markdown directly on a model and export it using the browser’s Save as PDF dialog.

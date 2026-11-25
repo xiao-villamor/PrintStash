@@ -415,7 +415,7 @@ function ArchiveReview({
                     <select
                       value={cover ?? ""}
                       onChange={(event) => setCover(event.target.value || null)}
-                      className="h-10 w-full rounded border border-input bg-background px-3 text-foreground"
+                      className="h-10 w-full rounded border border-input bg-field-surface px-3 text-foreground"
                     >
                       <option value="">{uiText("No selected cover")}</option>
                       {manifest.entries

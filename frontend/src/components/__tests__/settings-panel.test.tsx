@@ -230,9 +230,9 @@ describe("SettingsPanel", () => {
       renderSettings();
       const nav = await screen.findByRole("navigation", { name: "Settings sections" });
 
-      await user.click(within(nav).getByRole("button", { name: /Trash/ }));
+      await user.click(within(nav).getByRole("button", { name: "Appearance" }));
 
-      expect(await screen.findByText("Deleted models and multipart sets")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Appearance" })).toBeVisible();
     });
   });
 
@@ -422,6 +422,7 @@ describe("SettingsPanel", () => {
       await user.paste("maker");
       await user.click(screen.getByLabelText("Initial password"));
       await user.paste("Password123");
+      await user.type(screen.getByLabelText("Confirm password"), "Password123");
 
       await user.click(screen.getByRole("button", { name: "Create" }));
 
@@ -442,10 +443,11 @@ describe("SettingsPanel", () => {
       await openCreateUser();
       await user.click(screen.getByLabelText("Username"));
       await user.paste("maker");
-      await user.click(screen.getByLabelText("Email"));
+      await user.click(screen.getByLabelText("Email (optional)"));
       await user.paste("maker@example.test");
       await user.click(screen.getByLabelText("Initial password"));
       await user.paste("Password123");
+      await user.type(screen.getByLabelText("Confirm password"), "Password123");
 
       await user.click(screen.getByRole("button", { name: "Create" }));
 
@@ -468,8 +470,38 @@ describe("SettingsPanel", () => {
 
       await user.click(screen.getByLabelText("Initial password"));
       await user.paste("short");
+      await user.type(screen.getByLabelText("Confirm password"), "short");
 
       expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+    });
+
+    it("blocks a password confirmation that does not match", async () => {
+      renderSettings({ at: "/settings?section=access" });
+      await openCreateUser();
+      await userEvent.type(screen.getByLabelText("Username"), "maker");
+      await userEvent.type(screen.getByLabelText("Initial password"), "Password123");
+      await userEvent.type(screen.getByLabelText("Confirm password"), "Password124");
+
+      expect(screen.getByText("Passwords do not match.")).toBeVisible();
+      expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+    });
+
+    it("keeps the account when deletion fails", async () => {
+      const user = userEvent.setup();
+      renderSettings({
+        at: "/settings?section=access",
+        routes: {
+          "GET /api/v1/admin/users": json([aUser()]),
+          "DELETE /api/v1/admin/users/2?remove=true": json({ detail: "unavailable" }, 503),
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "More actions for maker" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Delete user…" }));
+      const dialog = screen.getByRole("dialog", { name: "Delete user" });
+      await user.click(within(dialog).getByRole("button", { name: "Delete user" }));
+
+      expect(await within(dialog).findByRole("alert")).toBeVisible();
+      expect(dialog).toBeVisible();
     });
 
     it("lists the users already in the vault", async () => {
@@ -2296,12 +2328,11 @@ describe("SettingsPanel", () => {
   });
 
   describe("retention configuration editing", () => {
-    it("returns from the Trash workspace to Settings", async () => {
-      const user = userEvent.setup();
-      renderSettings({ at: "/settings?section=trash" });
+    it("opens the standalone workspace from the legacy Trash settings link", async () => {
+      renderSettings({ at: "/settings?section=trash&view=settings" });
       expect(await screen.findByRole("heading", { name: "Trash" })).toBeVisible();
-      await user.click(screen.getByRole("button", { name: "Settings" }));
-      expect(await screen.findByRole("navigation", { name: "Settings sections" })).toBeVisible();
+      expect(screen.getByRole("form", { name: "Trash retention" })).toBeVisible();
+      expect(screen.queryByRole("navigation", { name: "Settings sections" })).toBeNull();
     });
     it("keeps retention editing unavailable to members", async () => {
       const app = renderSettings({ at: "/settings?section=trash", auth: memberSession() });
@@ -2485,7 +2516,7 @@ describe("SettingsPanel", () => {
         ),
       );
       expect(requestsWithMethod("DELETE")).toHaveLength(0);
-      expect(await screen.findByText("GC plan #12 · preview")).toBeVisible();
+      expect(await screen.findByText("Preview ready")).toBeVisible();
     });
 
     it("recovers a preview claimed after the trash section loaded", async () => {
@@ -2505,7 +2536,7 @@ describe("SettingsPanel", () => {
       await user.click(await screen.findByRole("button", { name: /Review expired/ }));
       await user.click(screen.getByRole("button", { name: "Create preview" }));
 
-      expect(await screen.findByText("GC plan #12 · preview")).toBeVisible();
+      expect(await screen.findByText("Preview ready")).toBeVisible();
       expect(screen.getByRole("button", { name: /Review expired/ })).toBeDisabled();
       expect(requestsWithMethod("DELETE")).toHaveLength(0);
     });
@@ -2523,7 +2554,7 @@ describe("SettingsPanel", () => {
       expect(
         await screen.findByText("This request could not be completed. Try again."),
       ).toBeVisible();
-      expect(screen.queryByText("GC plan #12 · preview")).not.toBeInTheDocument();
+      expect(screen.queryByText("Preview ready")).not.toBeInTheDocument();
     });
 
     it("aborts an active preview without issuing a destructive transition", async () => {
@@ -2544,7 +2575,7 @@ describe("SettingsPanel", () => {
         ),
       );
       expect(requestsWithMethod("DELETE")).toHaveLength(0);
-      expect(await screen.findByText("GC plan #12 · aborted")).toBeVisible();
+      expect(await screen.findByText("Review dismissed")).toBeVisible();
     });
 
     it("restores a model out of the trash", async () => {
@@ -2687,7 +2718,7 @@ describe("SettingsPanel", () => {
 
       expect(await screen.findByText("2 days left")).toBeVisible();
       expect(screen.getByText("21 days left")).toBeVisible();
-      expect(screen.getByText("Expires today")).toBeVisible();
+      expect(screen.getByText("Expired")).toBeVisible();
     });
 
     it("offers no bulk action until a model is ticked", async () => {
@@ -2747,7 +2778,7 @@ describe("SettingsPanel", () => {
         name: "Verify backup and quarantine",
       });
       expect(approve).toBeDisabled();
-      await user.click(screen.getByLabelText("Confirm GC plan digest"));
+      await user.click(screen.getByLabelText("Cleanup approval code"));
       await user.paste(GC_PLAN.digest);
       expect(approve).toBeEnabled();
       await user.click(approve);
@@ -2921,10 +2952,11 @@ describe("SettingsPanel", () => {
       expect(await screen.findByLabelText("Preview quality")).toBeInTheDocument();
     });
 
-    it("offers the screenshot resolution choices", async () => {
+    it("keeps capture resolution out of interactive preview preferences", async () => {
       renderSettings({ at: "/settings?section=previews" });
 
-      expect(await screen.findByLabelText("Screenshot resolution")).toBeInTheDocument();
+      await screen.findByLabelText("Preview quality");
+      expect(screen.queryByLabelText("Screenshot resolution")).not.toBeInTheDocument();
     });
 
     it("offers the model image quality choices", async () => {
@@ -3579,7 +3611,9 @@ describe("SettingsPanel", () => {
       await user.click(screen.getByRole("button", { name: "Reset metrics" }));
 
       expect(await screen.findByText("Card metrics reset.")).toBeInTheDocument();
-      expect(screen.getByRole("combobox", { name: "Metric 1" })).not.toHaveValue("material");
+      const first = screen.getByRole("combobox", { name: "Metric 1" });
+      expect(first).toHaveValue("print_time");
+      expect(first).toHaveAccessibleDescription("1h 24m");
     });
   });
 
@@ -3664,7 +3698,7 @@ describe("Settings account recovery", () => {
   });
   it("retires an owned extension handoff with its private session", async () => {
     const app = renderSettings({
-      at: "/settings?section=access",
+      at: "/settings?section=imports",
       routes: { "POST /api/v1/auth/api-keys": json(MINTED_KEY) },
     });
     await userEvent.click(await screen.findByRole("button", { name: "Set up extension" }));
@@ -3689,7 +3723,7 @@ describe("Settings account intent", () => {
       return store.call(this, key, value);
     });
     const app = renderSettings({
-      at: "/settings?section=access",
+      at: "/settings?section=imports",
       routes: {
         "POST /api/v1/auth/api-keys": json(MINTED_KEY),
       },
@@ -3711,6 +3745,9 @@ describe("Settings account intent", () => {
     const username = await screen.findByLabelText("Username");
     fireEvent.change(username, { target: { value: "retry-maker" } });
     fireEvent.change(screen.getByLabelText("Initial password"), {
+      target: { value: "FakePassword123" },
+    });
+    fireEvent.change(screen.getByLabelText("Confirm password"), {
       target: { value: "FakePassword123" },
     });
     await userEvent.click(screen.getByRole("button", { name: "Create" }));
@@ -3775,6 +3812,9 @@ describe("Settings account draft lifetime", () => {
     const username = await screen.findByLabelText("Username");
     fireEvent.change(username, { target: { value: "original-maker" } });
     fireEvent.change(screen.getByLabelText("Initial password"), {
+      target: { value: "FakePassword123" },
+    });
+    fireEvent.change(screen.getByLabelText("Confirm password"), {
       target: { value: "FakePassword123" },
     });
     await userEvent.click(screen.getByRole("button", { name: "Create" }));

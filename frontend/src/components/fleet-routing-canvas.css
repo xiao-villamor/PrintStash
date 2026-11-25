@@ -76,10 +76,26 @@
   background: color-mix(in srgb, var(--primary) 8%, var(--card));
 }
 .routing-station[data-kind="printer"] {
+  --port: var(--muted-foreground);
+}
+.routing-station[data-printer-status="ready"] {
   --port: var(--success);
+}
+.routing-station[data-printer-status="printing"] {
+  --port: var(--primary);
+}
+.routing-station[data-printer-status="paused"] {
+  --port: var(--warning);
 }
 .routing-station[data-held="true"] {
   --port: var(--warning);
+}
+.routing-station[data-printer-status="error"] {
+  --port: var(--destructive);
+}
+.routing-directory small[data-printer-status="error"],
+.routing-inspector dd[data-printer-status="error"] {
+  color: var(--destructive);
 }
 .routing-station:is(:hover, :focus-within, [data-chosen="true"]) {
   border-color: var(--port);

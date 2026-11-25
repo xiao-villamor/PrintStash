@@ -1,5 +1,4 @@
 .model-plate-picker {
-  grid-row: 4;
   min-width: 0;
   padding: 12px;
   border-top: 1px solid var(--border);
@@ -24,6 +23,10 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 8px;
+  max-height: 12rem;
+  padding: 2px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
 }
 .model-plate-choice {
   display: flex;

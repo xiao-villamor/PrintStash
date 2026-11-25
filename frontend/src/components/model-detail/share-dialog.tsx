@@ -164,7 +164,7 @@ export function ShareDialog({
                   max={365}
                   value={expiresInDays}
                   onChange={(e) => setExpiresInDays(Number(e.target.value))}
-                  className="w-40 h-9 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3"
+                  className="w-40 h-9 bg-field-surface text-foreground font-mono text-sm border border-outline-variant rounded px-3"
                 />
               </label>
               <ChoiceField<"off" | "on">
@@ -247,7 +247,7 @@ export function ShareDialog({
                 <input
                   readOnly
                   value={lastToken}
-                  className="flex-1 h-8 bg-surface-container-lowest text-on-surface font-mono text-2xs border border-outline-variant rounded px-2"
+                  className="flex-1 h-8 bg-field-surface text-foreground font-mono text-2xs border border-outline-variant rounded px-2"
                 />
                 <button
                   aria-label={uiText("Copy link")}

@@ -19,6 +19,7 @@
 import { expect, test } from "@playwright/test";
 
 import { useMockApi } from "./_setup";
+import { collapseNavigationSidebar } from "../e2e-real/util";
 
 useMockApi();
 
@@ -131,6 +132,49 @@ test.describe("settings route", () => {
     await card.getByRole("button", { name: "Check again" }).click();
     await expect.poll(() => probes).toBe(answered + 1);
   });
+  for (const theme of ["light", "dark"] as const) {
+    test(`uses one field surface across forms in ${theme} mode`, async ({ page }, testInfo) => {
+      await page.addInitScript((value) => localStorage.setItem("printstash.theme", value), theme);
+      await page.goto("/settings?section=design");
+      await collapseNavigationSidebar(page);
+      const token = theme === "dark" ? "--surface-container-high" : "--card";
+      const fields = [
+        page.getByLabel("Display currency"),
+        page.getByRole("combobox", { name: "Metric 1", exact: true }),
+        page.getByRole("combobox", { name: "Metric 2", exact: true }),
+        page.getByRole("combobox", { name: "Metric 3", exact: true }),
+      ];
+      async function checkFill(field: (typeof fields)[number]) {
+        const { actual, expected } = await field.evaluate((element, surface) => {
+          const style = getComputedStyle(element);
+          const canvas = document.createElement("canvas").getContext("2d")!;
+          canvas.fillStyle = style.backgroundColor;
+          return { actual: canvas.fillStyle, expected: style.getPropertyValue(surface).trim() };
+        }, token);
+        expect(actual).toBe(expected);
+      }
+
+      await expect(fields[0]).toBeEnabled();
+      await page
+        .getByRole("article", { name: "Example bracket", exact: true })
+        .evaluate((element) => element.scrollIntoView({ block: "center" }));
+      await page.screenshot({ path: testInfo.outputPath(`appearance-${theme}.png`) });
+      for (const field of fields) await checkFill(field);
+
+      await page.goto("/settings?section=sso");
+      const issuer = page.getByLabel("Issuer URL", { exact: true });
+      await expect(issuer).toBeEnabled();
+      await page.screenshot({ path: testInfo.outputPath(`sso-${theme}.png`) });
+      await checkFill(issuer);
+      await checkFill(page.getByLabel("Client secret", { exact: true }));
+
+      await page.goto("/printers");
+      await page.getByRole("button", { name: "Add printer", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Add printer", exact: true });
+      await checkFill(dialog.getByLabel("Notes (optional)", { exact: true }));
+    });
+  }
+
   test("persists a conditional preference in the browser fake", async ({ page }) => {
     await page.goto("/settings?section=design");
     const input = page.getByLabel("Display currency");
@@ -197,15 +241,39 @@ test.describe("settings route", () => {
     await expect(page.getByText("Archiving 4 of 10 files · continues in background")).toBeVisible();
   });
 
-  test("settings sections are deep-linkable and preserve navigation state", async ({ page }) => {
-    await page.goto("/settings?section=trash");
-    await expect(page.getByRole("heading", { name: "Trash retention" })).toBeVisible();
+  test("Trash has one workspace with an aligned selection header", async ({ page }, testInfo) => {
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
+    await page.goto("/settings?section=about");
+    await expect(page.getByRole("heading", { name: "Latest changes" })).toBeVisible();
+    const duplicate = page.getByRole("button", { name: "Trash", exact: true });
+    const duplicates = await duplicate.count();
+
+    await page.goto("/settings?section=trash&view=settings");
+    await collapseNavigationSidebar(page);
     await expect(page.getByText("Known model storage: 1.5 MB")).toBeVisible();
     await expect(page.getByText("1 deleted item")).toBeVisible();
-    await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: "About" }).click();
-    await expect(page).toHaveURL(/\/settings\?section=about$/);
-    await expect(page.getByRole("heading", { name: "Latest changes" })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("trash.png") });
+    expect(duplicates).toBe(0);
+    await expect(page.getByRole("button", { name: "Open Trash", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Trash", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await expect(page.getByLabel("Keep deleted items for")).toBeVisible();
+
+    const panel = page.getByRole("region", { name: "Deleted models and multipart sets" });
+    const toolbar = panel.getByRole("group", { name: "Trash selection" });
+    const selectAll = toolbar.getByRole("checkbox", { name: "Select all deleted items" });
+    const selectRow = panel.getByRole("checkbox", { name: /Select deleted model/ });
+    await expect(selectRow).toBeVisible();
+    const frame = await panel.boundingBox();
+    const bar = await toolbar.boundingBox();
+    const header = await selectAll.boundingBox();
+    const row = await selectRow.boundingBox();
+    if (!frame || !bar || !header || !row) throw new Error("Trash selection geometry is missing");
+    expect(bar.x - frame.x).toBe(1);
+    expect(bar.y - frame.y).toBe(1);
+    expect(header.x).toBe(row.x);
   });
 
   test("discovers an exact legacy S3 source for adoption", async ({ page }) => {
@@ -274,14 +342,17 @@ test.describe("settings route", () => {
     expect(narrowOverflow).toBeLessThanOrEqual(0);
   });
 
-  test("expired trash requires a durable preview before approval", async ({ page }) => {
+  test("expired trash requires a durable preview before approval", async ({ page }, testInfo) => {
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
     await page.goto("/settings?section=trash");
+    await collapseNavigationSidebar(page);
+    const trash = page.getByRole("region", { name: "Deleted models and multipart sets" });
+    await expect(trash.getByText("Expired", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Review expired" }).click();
 
-    const dialog = page.getByRole("dialog", { name: "Create a safe GC preview?" });
-    await expect(dialog).toContainText(
-      "This only records a bounded candidate plan. It does not delete catalog rows or storage bytes.",
-    );
+    const dialog = page.getByRole("dialog", { name: "Review expired items?" });
+    await expect(dialog).toContainText("Their expiry dates stay the same.");
+    await page.screenshot({ path: testInfo.outputPath("trash-review-dialog.png") });
     const previewRequest = page.waitForRequest((candidate) => {
       const url = new URL(candidate.url());
       return candidate.method() === "POST" && url.pathname === "/api/v1/admin/gc";
@@ -289,12 +360,18 @@ test.describe("settings route", () => {
     await dialog.getByRole("button", { name: "Create preview" }).click();
     await previewRequest;
 
-    await expect(page.getByText("GC plan #7 · preview")).toBeVisible();
-    await expect(page.getByText("no backup bound")).toBeVisible();
+    const cleanup = page.getByRole("region", { name: "Trash cleanup" });
+    await expect(cleanup.getByText("Preview ready")).toBeVisible();
+    await expect(
+      cleanup.getByRole("list", { name: "Items in this cleanup preview" }),
+    ).toContainText("Retired bracket");
+    await expect(trash.getByText("Expired", { exact: true })).toBeVisible();
+    await expect(cleanup.getByText("Awaiting backup verification")).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("trash-cleanup-preview.png") });
     await expect(page.getByText("Nothing was deleted.")).toBeVisible();
     const approve = page.getByRole("button", { name: "Verify backup and quarantine" });
     await expect(approve).toBeDisabled();
-    await page.getByLabel("Confirm GC plan digest").fill("a".repeat(64));
+    await page.getByLabel("Cleanup approval code").fill("a".repeat(64));
 
     const approvalRequest = page.waitForRequest((candidate) => {
       const url = new URL(candidate.url());
@@ -302,17 +379,23 @@ test.describe("settings route", () => {
     });
     await approve.click();
     await approvalRequest;
-    await expect(page.getByText("GC plan #7 · quarantined")).toBeVisible();
+    await expect(cleanup.getByText("Recovery period", { exact: true })).toBeVisible();
     await expect(page.getByText("backup verified", { exact: true })).toBeVisible();
   });
 
   test("settings prepares a one-time browser extension setup", async ({ page }) => {
     await page.goto("/settings?section=access");
 
+    await expect(page.getByRole("button", { name: "Set up extension" })).toHaveCount(0);
+    await page.goto("/settings?section=imports");
+    await expect(page.getByRole("link", { name: "Install Chrome extension" })).toHaveAttribute(
+      "href",
+      /^https:\/\/chromewebstore\.google\.com\//,
+    );
     await page.getByRole("button", { name: "Set up extension" }).click();
 
-    const apiKeys = page.getByRole("group", { name: "API keys" });
-    await expect(apiKeys.getByRole("status")).toHaveText("Setup prepared");
+    const extension = page.getByRole("group", { name: "Browser extension" });
+    await expect(extension.getByRole("status")).toContainText("Setup prepared");
     await expect(page.getByRole("button", { name: "Set up extension" })).toHaveCount(0);
     await expect(
       page.getByText(
@@ -329,10 +412,77 @@ test.describe("settings route", () => {
     expect(setup).toContain('"apiKey":"psk_browser_setup_secret"');
   });
 
+  test("keeps Maintenance retry actions clear when its reads fail", async ({ page }) => {
+    let historyAvailable = false;
+    await page.route("**/api/v1/maintenance/audits", (route) =>
+      historyAvailable
+        ? route.fulfill({ json: [] })
+        : route.fulfill({ status: 503, json: { detail: "unavailable" } }),
+    );
+    await page.route(/\/api\/v1\/(maintenance\/audit-policies|backups\/sources)(\?|$)/, (route) =>
+      route.fulfill({ status: 503, json: { detail: "unavailable" } }),
+    );
+    await page.goto("/settings?section=maintenance");
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
+    if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+
+    for (const [section, message] of [
+      ["Latest results", "Check history could not be loaded."],
+      ["Automatic checks", "Automatic checks could not be loaded."],
+      ["Check a backup", "Backup sources could not be loaded."],
+    ]) {
+      const panel = page.getByRole("group", { name: section, exact: true });
+      const text = panel.getByText(message, { exact: true });
+      const retry = panel.getByRole("button", { name: /Retry/ });
+      await expect(text).toBeVisible();
+      await expect(retry).toBeVisible();
+      const [label, button] = await Promise.all([text.boundingBox(), retry.boundingBox()]);
+      if (!label || !button) throw new Error("Error text and Retry must be visible");
+      expect(button.x - label.x - label.width).toBeGreaterThanOrEqual(12);
+    }
+    await expect(page.getByText("Check history could not be loaded.", { exact: true })).toHaveCount(
+      1,
+    );
+    historyAvailable = true;
+    await page.getByRole("button", { name: "Retry check history" }).click();
+    await expect(page.getByText("No checks yet. Start with a quick check.")).toBeVisible();
+  });
+
+  test("separates the notification controls from the channel heading", async ({ page }) => {
+    await page.route("**/api/v1/notifications", (route) =>
+      route.fulfill({
+        json: { enabled: false, channels: [], edit_epoch: "test", edit_version: 1 },
+      }),
+    );
+    await page.route("**/api/v1/notifications/deliveries?**", (route) =>
+      route.fulfill({ json: [] }),
+    );
+    await page.goto("/settings?section=notifications");
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
+    if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+    const master = page.getByRole("group", { name: "Notifications", exact: true });
+    const channels = page.getByRole("heading", { name: "Channels", exact: true });
+    await expect(master).toBeVisible();
+    await expect(channels).toBeVisible();
+    const [masterBox, channelBox] = await Promise.all([
+      master.boundingBox(),
+      channels.boundingBox(),
+    ]);
+    if (!masterBox || !channelBox) throw new Error("Both notification sections must be visible");
+    expect(channelBox.y - masterBox.y - masterBox.height).toBeGreaterThanOrEqual(24);
+  });
+
   test("settings creates a temporary browser pairing code", async ({ page }) => {
     await page.goto("/settings?section=imports");
 
-    await expect(page.getByRole("heading", { name: "Provider connections" })).toBeVisible();
+    const pairing = page.getByRole("heading", { name: "Paired browsers" });
+    const providers = page.getByRole("heading", { name: "Provider connections" });
+    await expect(pairing).toBeVisible();
+    await expect(providers).toBeVisible();
+    expect((await pairing.boundingBox())!.y).toBeLessThan((await providers.boundingBox())!.y);
+    await expect(page.getByText("Staging capacity", { exact: true })).toHaveCount(0);
     await page.getByRole("button", { name: "Create pairing code" }).click();
     await expect(page.getByText("PAIR-1234")).toBeVisible();
     await expect(page.getByText(/Expires at/)).toBeVisible();
@@ -356,7 +506,6 @@ test.describe("settings route", () => {
     await page.goto("/settings?section=previews");
 
     await page.getByLabel("Preview quality").selectOption("detail");
-    await page.getByLabel("Screenshot resolution").selectOption("3");
     await expect
       .poll(() => page.evaluate(() => localStorage.getItem("printstash.preview.preferences:v1")))
       .toContain('"previewQuality":"detail"');

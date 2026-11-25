@@ -6,7 +6,11 @@ import { withSessionRequest } from "@/lib/session-transport";
 /** Taxonomy writes affect choices, counts and labels; browse snapshots refresh deliberately. */
 export function useTaxonomyCommands(overrides?: Pick<typeof api, "createCollection">) {
   const client = useQueryClient();
-  async function change<T>(kind: "tags" | "collections", write: () => Promise<T>): Promise<T> {
+  async function change<T>(
+    kind: "tags" | "collections",
+    write: () => Promise<T>,
+    { refreshInPlace = false } = {},
+  ): Promise<T> {
     return withSessionRequest(async (request) => {
       const value = await write();
       request.assertCurrent();
@@ -19,8 +23,16 @@ export function useTaxonomyCommands(overrides?: Pick<typeof api, "createCollecti
       ];
       await Promise.all(keys.map((queryKey) => client.cancelQueries({ queryKey })));
       request.assertCurrent();
-      for (const queryKey of keys) void client.invalidateQueries({ queryKey });
-      void client.resetQueries({ queryKey: queryKeys.outliner });
+      const projections = keys.map((queryKey) => client.invalidateQueries({ queryKey }));
+      if (refreshInPlace) {
+        await Promise.all([
+          ...projections,
+          client.invalidateQueries({ queryKey: queryKeys.outliner }),
+        ]);
+        request.assertCurrent();
+      } else {
+        void client.resetQueries({ queryKey: queryKeys.outliner });
+      }
       return value;
     });
   }
@@ -52,7 +64,7 @@ export function useTaxonomyCommands(overrides?: Pick<typeof api, "createCollecti
     deleteCollection: (...args: Parameters<typeof api.deleteCollection>) =>
       change("collections", () => api.deleteCollection(...args)),
     moveCollection: (...args: Parameters<typeof api.moveCollection>) =>
-      change("collections", () => api.moveCollection(...args)),
+      change("collections", () => api.moveCollection(...args), { refreshInPlace: true }),
     renameCollection: (...args: Parameters<typeof api.renameCollection>) =>
       change("collections", () => api.renameCollection(...args)),
     setCollectionCover: (...args: Parameters<typeof api.setCollectionCover>) =>

@@ -1,5 +1,6 @@
 "use client";
 
+import { useLayoutEffect, useRef } from "react";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
@@ -37,6 +38,16 @@ export function PlatePicker({
   notice?: string;
 }) {
   useUiLocale();
+  const choices = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const list = choices.current;
+    const active = list?.querySelector('[aria-pressed="true"]');
+    if (!list || !active) return;
+    const viewport = list.getBoundingClientRect();
+    const button = active.getBoundingClientRect();
+    if (button.top < viewport.top) list.scrollTop += button.top - viewport.top;
+    if (button.bottom > viewport.bottom) list.scrollTop += button.bottom - viewport.bottom;
+  }, [selected, plates.length]);
   return (
     <Localized>
       <div role="group" aria-label={groupLabel ?? uiText("Plates")} className="model-plate-picker">
@@ -60,7 +71,7 @@ export function PlatePicker({
           )}
         </div>
         {notice && <p className="mb-2 text-xs text-muted-foreground">{notice}</p>}
-        <div className="model-plate-options">
+        <div ref={choices} className="model-plate-options">
           {plates.map((plate) => (
             <Button
               key={plate.number}

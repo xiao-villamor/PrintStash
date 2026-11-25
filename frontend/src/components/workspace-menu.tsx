@@ -1,5 +1,7 @@
 "use client";
 
+import { useCollectionsPane } from "@/lib/collections-pane-context";
+
 import {
   BarChart3,
   ExternalLink,
@@ -40,6 +42,7 @@ export function WorkspaceMenu({
   const theme = useThemeMode();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const pane = useCollectionsPane();
   const themeOptions: { mode: ThemeMode; text: string }[] = [
     { mode: "light", text: uiText("Light") },
     { mode: "dark", text: uiText("Dark") },
@@ -82,8 +85,7 @@ export function WorkspaceMenu({
       </div>
       {items.map((item) => {
         const target = new URL(item.href, window.location.origin);
-        const dedicatedTrash =
-          searchParams.get("section") === "trash" && searchParams.get("view") !== "settings";
+        const dedicatedTrash = searchParams.get("section") === "trash";
         const active =
           pathname === target.pathname &&
           (target.search
@@ -107,8 +109,9 @@ export function WorkspaceMenu({
               )
                 return;
               event.preventDefault();
+              if (item.href === "/settings") pane?.dismissTool();
               onNavigate();
-              router.push(item.href);
+              if (item.href !== "/settings" || !active) router.push(item.href);
             }}
             className={`flex min-h-9 items-center gap-2.5 px-2.5 text-[13px] hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${active ? "bg-accent text-accent-foreground" : "text-foreground"}`}
           >

@@ -98,8 +98,8 @@ interface LibraryItemsProps<T> {
   minCardWidth?: number;
   /** Keep a collapsed collection strip to one row during the layout commit. */
   singleRow?: boolean;
-  /** Reports how many cards fit one row, e.g. to show a single row of collections. */
-  onColumnsChange?: (columns: number) => void;
+  /** Reports how many cards fit in a row and the width of its tracks. */
+  onColumnsChange?: (columns: number, rowWidth: number) => void;
 }
 
 /** Render loaded pages only. Pagination, order and selection remain owned by ModelBrowser. */
@@ -176,8 +176,12 @@ export function LibraryItems<T>({
   const virtual =
     virtualize && displayedItems.length > NATIVE_RENDER_LIMIT && "ResizeObserver" in globalThis;
   useLayoutEffect(() => {
-    if (geometry.width > 0) onColumnsChange?.(layout === "list" ? 1 : geometry.columns);
-  }, [layout, geometry.columns, geometry.width, onColumnsChange]);
+    if (geometry.width > 0)
+      onColumnsChange?.(
+        columns,
+        layout === "list" ? geometry.width : columns * track + (columns - 1) * gap,
+      );
+  }, [layout, columns, geometry.width, track, gap, onColumnsChange]);
   const keys = useMemo(() => displayedItems.map(itemKey), [displayedItems, itemKey]);
   const pinnedIndex = pinned === null ? -1 : keys.indexOf(pinned);
   const pinnedRow = pinnedIndex < 0 ? null : Math.floor(pinnedIndex / columns);

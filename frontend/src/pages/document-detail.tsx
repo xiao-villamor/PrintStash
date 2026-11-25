@@ -486,7 +486,7 @@ export default function DocumentDetailPage({
               disabled={saving}
               value={draftName}
               onChange={(e) => setDraftName(e.target.value)}
-              className="min-w-40 flex-1 rounded-md border border-transparent bg-background/60 px-2.5 py-1.5 text-base font-semibold text-foreground hover:border-border focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="min-w-40 flex-1 rounded-md border border-transparent bg-field-surface px-2.5 py-1.5 text-base font-semibold text-foreground hover:border-border focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           ) : (
             <h1 className="min-w-0 flex-1 break-words text-base font-semibold text-foreground">
@@ -615,7 +615,7 @@ export default function DocumentDetailPage({
                       placeholder={uiText(
                         "# Document\n\nWrite markdown. Paste or drop images to embed them.",
                       )}
-                      className="min-h-0 w-full flex-1 resize-none bg-transparent px-5 py-4 font-mono text-sm leading-6 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-6"
+                      className="min-h-0 w-full flex-1 resize-none bg-field-surface px-5 py-4 font-mono text-sm leading-6 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-6"
                     />
                   </section>
                   <section

@@ -114,7 +114,7 @@ export function OptionPicker<T extends string | number>(props: OptionPickerProps
             aria-expanded={open}
             aria-describedby={`${id}-selection`}
             disabled={disabled}
-            className="w-full min-w-0 justify-between border-input bg-background font-normal"
+            className="w-full min-w-0 justify-between border-input bg-field-surface font-normal"
             onClick={() => toggle(!open)}
           >
             <span

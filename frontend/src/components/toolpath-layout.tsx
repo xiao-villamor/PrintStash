@@ -39,15 +39,18 @@ export function ToolpathLayout({
             }
             active={active}
             onChange={setSelected}
-            className="toolpath-control-tabs"
-            tabClassName="flex-1 min-h-9 px-3 text-xs font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-            activeTabClassName="text-foreground"
+            showIndicator={false}
+            className="toolpath-control-tabs gap-0.5 rounded-md border border-border bg-muted p-0.5"
+            tabClassName="min-h-8 flex-1 rounded-sm px-2.5 text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            activeTabClassName="bg-card text-foreground shadow-xs"
           />
-          <div role="tabpanel" aria-label={uiText("Layers")} hidden={active !== "layers"}>
-            {layers}
-          </div>
-          <div role="tabpanel" aria-label={uiText("View")} hidden={active !== "view"}>
-            {view}
+          <div className="toolpath-control-content">
+            <div role="tabpanel" aria-label={uiText("Layers")} hidden={active !== "layers"}>
+              {layers}
+            </div>
+            <div role="tabpanel" aria-label={uiText("View")} hidden={active !== "view"}>
+              {view}
+            </div>
           </div>
         </aside>
       </div>

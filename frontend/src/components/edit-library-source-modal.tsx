@@ -113,7 +113,7 @@ export function EditLibrarySourceModal({
         <label className="flex flex-col gap-1 text-xs text-muted-foreground">
           {uiText("Collection layout")}
           <select
-            className="w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            className="w-full rounded border border-border bg-field-surface px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             aria-label={uiText("Collection layout")}
             value={layout}
             onChange={(event) => setLayout(parseLayout(event.target.value))}

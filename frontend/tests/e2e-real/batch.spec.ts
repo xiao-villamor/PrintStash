@@ -86,8 +86,7 @@ test.describe("batch actions", () => {
     // e2e backend is wiped per run, so the only exact-"Delete" buttons here are the
     // two trash rows. Purge sequentially, waiting for the row count to drop each
     // time (robust against ordering and the busy-disable between clicks).
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Trash" }).click();
+    await page.goto("/settings?section=trash");
     const purgeButtons = page.getByRole("button", { name: "Delete", exact: true });
     await expect(purgeButtons).toHaveCount(2);
     await purgeButtons.first().click();

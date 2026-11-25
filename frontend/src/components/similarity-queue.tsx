@@ -303,7 +303,7 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
         <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
           {t("similarity.allClasses")}
           <select
-            className="block w-full rounded-md border border-input bg-background p-2 text-sm"
+            className="block w-full rounded-md border border-input bg-field-surface p-2 text-sm"
             value={filters.evidence_class ?? ""}
             onChange={(event) =>
               setFilters({
@@ -322,7 +322,7 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
         <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
           {t("similarity.current")}
           <select
-            className="block w-full rounded-md border border-input bg-background p-2 text-sm"
+            className="block w-full rounded-md border border-input bg-field-surface p-2 text-sm"
             value={filters.freshness ?? ""}
             onChange={(event) =>
               setFilters({
@@ -363,7 +363,7 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
           <div className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
             {t("similarity.collection")}
             <select
-              className="block rounded-md border border-input bg-background p-2 text-sm"
+              className="block rounded-md border border-input bg-field-surface p-2 text-sm"
               aria-label={t("similarity.collection")}
               value={choosingCollection ? "pick" : (filters.collection_id ?? "")}
               onChange={(event) => {
@@ -404,7 +404,7 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
         <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
           {t("similarity.allFormats")}
           <select
-            className="block rounded-md border border-input bg-background p-2 text-sm"
+            className="block rounded-md border border-input bg-field-surface p-2 text-sm"
             value={filters.file_type ?? ""}
             onChange={(event) => setFilters({ file_type: event.target.value || undefined })}
           >
@@ -419,7 +419,7 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
         <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
           {t("similarity.allSources")}
           <select
-            className="block rounded-md border border-input bg-background p-2 text-sm"
+            className="block rounded-md border border-input bg-field-surface p-2 text-sm"
             value={filters.source ?? ""}
             onChange={(event) =>
               setFilters({

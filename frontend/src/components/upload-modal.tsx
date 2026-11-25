@@ -771,7 +771,7 @@ export function UploadModal({
                     onChange={(e) => setModelName(e.target.value)}
                     className={
                       onboarding
-                        ? "upload-field h-10 w-full border border-input bg-card px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                        ? "upload-field h-10 w-full border border-input bg-field-surface px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                         : "upload-field"
                     }
                     placeholder={

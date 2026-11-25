@@ -1,7 +1,7 @@
 /** One toolpath at a time, from an ordinary Revision or a sliced 3MF plate. */
 import { lazy, Suspense, useCallback, useLayoutEffect, useState, type ComponentType } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { ChevronDown, Loader2 } from "lucide-react";
 import { createPortal } from "react-dom";
 import type { ViewerControls } from "@/components/stl-viewer";
 import type { GcodeViewerProps } from "@/components/gcode-viewer";
@@ -142,21 +142,31 @@ export function GcodePreview({
   const sourceControls = sources.length > 1 && (
     <div className="toolpath-section toolpath-sources">
       <label className="toolpath-field">
-        <span className="sr-only">{uiText("G-code file")}</span>
-        <select
-          value={file.id}
-          onChange={(event) => {
-            const id = Number(event.target.value);
-            setSelectedFile(id);
-            onSelectFile?.(id);
-          }}
-        >
-          {sources.map((source) => (
-            <option key={source.id} value={source.id}>
-              {source.original_filename}
-            </option>
-          ))}
-        </select>
+        <span className="toolpath-section-title">{uiText("G-code file")}</span>
+        <span className="relative block min-w-0">
+          <select
+            title={file.original_filename}
+            value={file.id}
+            onChange={(event) => {
+              const id = Number(event.target.value);
+              setSelectedFile(id);
+              onSelectFile?.(id);
+            }}
+          >
+            {sources.map((source) => (
+              <option key={source.id} value={source.id}>
+                {source.original_filename}
+              </option>
+            ))}
+          </select>
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 flex items-center gap-2 px-3 text-xs"
+          >
+            <span className="min-w-0 flex-1 truncate">{file.original_filename}</span>
+            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+          </span>
+        </span>
       </label>
     </div>
   );

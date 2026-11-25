@@ -44,12 +44,6 @@ export function ImportReadiness({
       value: uiText("Not checked"),
       tone: "idle",
     },
-    {
-      label: uiText("Staging capacity"),
-      hint: uiText("Checked when reserving an upload"),
-      value: uiText("Not checked"),
-      tone: "idle",
-    },
   ];
   return (
     <SettingsCard

@@ -68,10 +68,11 @@ test.describe("printers", () => {
     await expect(page.getByRole("heading", { name: "Printers" })).toBeVisible();
 
     await page.getByRole("button", { name: "Add printer" }).click();
-    await page
-      .getByRole("dialog", { name: "Add printer", exact: true })
-      .getByLabel("Name", { exact: true })
-      .fill(name);
+    const setup = page.getByRole("dialog", { name: "Add printer", exact: true });
+    await expect(setup.getByRole("heading", { name: "Connection" })).toBeVisible();
+    await expect(setup.getByText("Printer model (optional)")).toBeVisible();
+    await setup.getByLabel("Name", { exact: true }).fill(name);
+    await setup.getByLabel("Notes (optional)").fill("A printer for visual review");
     await page.getByPlaceholder("http://printer.local:7125").fill("http://127.0.0.1:13");
     await page.getByRole("button", { name: "Add printer" }).last().click();
 

@@ -615,6 +615,7 @@ describe("Configured Vault migration entry", () => {
     const safety = screen.getByText("Storage safety", { selector: "dt" }).nextElementSibling;
     expect(safety).toBeVisible();
     expect(safety).toHaveTextContent("Verified");
+    expect(safety?.firstElementChild).toHaveClass("text-success");
     expect(screen.getByText("/data/files")).toBeVisible();
     expect(screen.getByText("/data/thumbs")).toBeVisible();
     expect(screen.queryByText("Verified on local filesystems with working hardlinks.")).toBeNull();

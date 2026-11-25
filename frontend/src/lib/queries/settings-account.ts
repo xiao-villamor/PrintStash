@@ -10,6 +10,7 @@ import {
   updateAdminUser,
   resetAdminUserPassword,
   deactivateAdminUser,
+  removeAdminUser,
 } from "@/lib/api/auth";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { onAuthChange } from "@/lib/auth-store";
@@ -118,10 +119,11 @@ export type AdminUserCommand = AccountGesture &
     | { kind: "update"; id: number; payload: UserUpdate }
     | { kind: "password"; id: number; password: string }
     | { kind: "deactivate"; id: number }
+    | { kind: "remove"; id: number }
   );
 type AdminPendingCommand =
   | { kind: "create" }
-  | { kind: "update" | "password" | "deactivate"; id: number };
+  | { kind: "update" | "password" | "deactivate" | "remove"; id: number };
 type AdminCommandState =
   | { status: "idle" | "success" }
   | { status: "pending"; command: AdminPendingCommand }
@@ -172,13 +174,19 @@ export function useAdminUserCommand(): AdminCommandOwner {
       await client.cancelQueries({ queryKey: key });
       requireSessionVersion(command.session);
       let row: UserRead | null;
-      if (command.kind === "deactivate") {
-        await deactivateAdminUser(command.id);
+      if (command.kind === "deactivate" || command.kind === "remove") {
+        if (command.kind === "remove") await removeAdminUser(command.id);
+        else await deactivateAdminUser(command.id);
         requireSessionVersion(command.session);
         await client.cancelQueries({ queryKey: key });
         requireSessionVersion(command.session);
-        // DELETE deactivates and returns204, so its updated DTO needs one authoritative read.
-        void client.invalidateQueries({ queryKey: key });
+        if (command.kind === "remove") {
+          client.setQueryData<UserRead[]>(key, (rows) =>
+            rows?.filter((row) => row.id !== command.id),
+          );
+        } else {
+          void client.invalidateQueries({ queryKey: key });
+        }
         row = null;
       } else {
         row =

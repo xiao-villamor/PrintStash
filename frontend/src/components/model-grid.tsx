@@ -4,10 +4,12 @@ import { FILTER_SELECT } from "@/lib/filter-input";
 import { LibraryStatusFilters } from "@/components/library-status-filters";
 import { CollectionHeaderTags } from "@/components/collection-header-tags";
 import "./library-header.css";
-import { LibraryCollectionGroup } from "@/components/library-collection-group";
 import { LibraryEmptyCollection } from "@/components/library-empty-collection";
+import { LibraryFilterControl } from "@/components/library-filter-control";
 import { LibraryFindBar } from "@/components/library-find-bar";
 import { LibraryCollectionsRegion } from "@/components/library-collections-region";
+import { ModelGalleryDrag } from "@/components/model-gallery-drag";
+import { NewCollectionCard } from "@/components/new-collection-card";
 
 import { arrivingKeys, entryKeys } from "@/lib/library-arrivals";
 import { FOLDER_ENTRANCE_MS } from "@/lib/folder-transition";
@@ -98,6 +100,7 @@ import {
   useMemo,
   useState,
   useRef,
+  startTransition,
   type CSSProperties,
   type ReactNode,
 } from "react";
@@ -149,7 +152,7 @@ import {
 } from "@/features/library/url";
 import { MobileFilterDrawer } from "@/components/mobile-filter-drawer";
 import { StructuredFilters } from "@/components/structured-filters";
-import { LibraryFilterPicker, type LibraryFilterField } from "@/components/library-filter-picker";
+import type { LibraryFilterField } from "@/components/library-filter-picker";
 import type { UploadMode } from "@/components/upload-modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -179,7 +182,6 @@ import {
   ChevronDown,
   MoreHorizontal,
   ListChecks,
-  SlidersHorizontal,
   ScanSearch,
   FolderTree,
   Boxes,
@@ -321,6 +323,7 @@ type MenuTriggerSize = "xs" | "sm";
 type MenuTriggerVariant = "outline" | "ghost";
 
 const COMPACT_COLLECTION_HEIGHT = 84;
+const COLLECTION_NAME_LIMIT = 100;
 
 /**
  * One row of collections above the models, expandable per folder. It owns its
@@ -329,25 +332,40 @@ const COMPACT_COLLECTION_HEIGHT = 84;
 function CollectionStrip({
   total,
   overview,
+  hasCreateCard = false,
   resetKey,
   children,
 }: {
   total: number;
   overview: boolean;
+  hasCreateCard?: boolean;
   resetKey: string;
-  children: (singleRow: boolean, onColumns: (columns: number) => void) => ReactNode;
+  children: (
+    singleRow: boolean,
+    onColumns: (columns: number, rowWidth: number) => void,
+    visibleCount: number,
+  ) => ReactNode;
 }) {
   useUiLocale();
   const [expandedFor, setExpandedFor] = useState<string | null>(null);
-  const [rowSize, setRowSize] = useState(4);
+  const [{ columns: rowSize, width: rowWidth }, setRowFit] = useState({ columns: 4, width: 0 });
+  const updateRowFit = useCallback((columns: number, width: number) => {
+    setRowFit((previous) =>
+      previous.columns === columns && previous.width === width ? previous : { columns, width },
+    );
+  }, []);
   const expanded = expandedFor === resetKey;
   // How many collections the resting row leaves out, so "N more" fades in or
   // out together with the pane motion rather than after it.
-  const hidden = Math.max(0, total - rowSize);
+  const visibleInRow = hasCreateCard ? Math.max(1, rowSize - 1) : rowSize;
+  const hidden = Math.max(0, total - visibleInRow);
   return (
     <>
       {!overview && (
-        <div className="mb-1 flex min-h-5 items-center justify-between gap-3">
+        <div
+          className="mb-2.5 flex min-h-5 items-center justify-between gap-3"
+          style={rowWidth > 0 ? { maxWidth: rowWidth } : undefined}
+        >
           <h2 className="text-xs font-medium text-foreground">
             {uiText("Collections")} <span className="font-mono font-normal">{total}</span>
           </h2>
@@ -370,7 +388,11 @@ function CollectionStrip({
           </Button>
         </div>
       )}
-      {children(!overview && !expanded, setRowSize)}
+      {children(
+        !overview && !expanded && (!hasCreateCard || rowSize > 1),
+        updateRowFit,
+        overview || expanded ? total : visibleInRow,
+      )}
     </>
   );
 }
@@ -690,8 +712,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [displayOpen, setDisplayOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const toolbarMenuOpener = useRef<HTMLElement | null>(null);
-  const filtersOpener = useRef<HTMLButtonElement>(null);
-  const [filtersExpanded, setFiltersExpanded] = useState<boolean | null>(null);
+  const [filterPickerRevision, setFilterPickerRevision] = useState(0);
   // Documents still need the collection snapshot, but have no
   // Model placeholder to measure. Keep their existing bounded browse read.
   if (pageSize === null && docView === "docs") setPageSize(UNMEASURED_PAGE_SIZE);
@@ -928,7 +949,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   const applySavedView = useCallback(
     (view: SavedViewRead) => {
-      setFiltersExpanded(null);
+      setFilterPickerRevision((revision) => revision + 1);
       setActiveSavedViewId(view.id);
       setSelectedIds(new Set());
       setSelectedMultipartRows(new Map());
@@ -1700,18 +1721,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       refreshForAuthority.current = null;
     };
   });
-  const modelMoves = useModelMoves(entry, refresh);
+  const modelMoves = useModelMoves(entry, async () => {
+    await Promise.all([refresh(), queryClient.invalidateQueries({ queryKey: queryKeys.outliner })]);
+  });
 
   // Multi-select for batch actions. The selected set is view-independent so it
   // survives load-more and search; backend per-model RBAC makes cross-collection
   // selections safe. We clear it when navigating folders (see below) so a hidden
   // off-screen selection doesn't linger.
-
-  function toggleStructuredFilters(event: React.MouseEvent<HTMLButtonElement>) {
-    filtersOpener.current = event.currentTarget;
-    startup.request("filters");
-    setFiltersExpanded((current) => !current);
-  }
 
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchRecovery, setBatchRecovery] = useState<{
@@ -1757,20 +1774,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   useLayoutEffect(() => {
     selectionOrder.current = sortedModels;
   }, [sortedModels]);
-  const groupedModels = useRef(new Map<number, ModelListItem[]>());
-  const recordGroupedModels = useCallback((id: number, models: ModelListItem[] | null) => {
-    if (models) groupedModels.current.set(id, models);
-    else groupedModels.current.delete(id);
-  }, []);
   const toggleSelect = useCallback(
     (id: number, range = false) => {
       // Capture this gesture once; React may replay the state updater.
       const sortedModels = Array.from(
-        new Map(
-          [...selectionOrder.current, ...Array.from(groupedModels.current.values()).flat()].map(
-            (model) => [model.id, model],
-          ),
-        ).values(),
+        new Map(selectionOrder.current.map((model) => [model.id, model])).values(),
       );
       const clicked = sortedModels.find((model) => model.id === id);
       const selection = clicked
@@ -2298,6 +2306,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     docView === "models" &&
     !searchQuery &&
     (visibleCollections.length > 0 || reservedCollections > 0);
+  const SubfolderScopeIcon = includeSubfolders ? Check : FolderTree;
   // Links belong to the displayed result even while another destination loads.
   const currentLibraryHref = snapshot?.entry.href ?? destinationHref;
   const inspectorScope = `${entry.session}:${entry.key}:${currentLibraryHref}`;
@@ -2712,35 +2721,41 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     router,
   ]);
 
-  async function handleCreateCollection() {
-    const name = newCollectionName.trim();
-    if (!name) return;
+  async function saveNewCollection(name: string) {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
-      return;
+      return false;
     }
     if (!canAdminSelectedCollection) {
       toast.warning(uiText("Admin access required"));
-      return;
+      return false;
     }
     // Until the open folder has loaded, a new folder would land at the root.
-    if (selectedCollection !== null && selectedCollectionRow === null) return;
+    if (selectedCollection !== null && selectedCollectionRow === null) return false;
     try {
       await createCollection({ name, parent_id: selectedCollectionRow?.id ?? null });
-      setNewCollectionName("");
-      setIsCreatingCollection(false);
       toast.success(uiText('Collection "{value1}" created', { value1: String(name) }));
+      return true;
     } catch (e: any) {
       toast.error(e);
+      return false;
     }
   }
 
-  function handleMoveModel(source: ModelDrag, targetCollection: string | null) {
+  async function handleCreateCollection() {
+    const name = newCollectionName.trim();
+    if (name && (await saveNewCollection(name))) {
+      setNewCollectionName("");
+      setIsCreatingCollection(false);
+    }
+  }
+
+  async function handleMoveModel(source: ModelDrag, targetCollection: string | null) {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
       return;
     }
-    void modelMoves.move(source, targetCollection);
+    await modelMoves.move(source, targetCollection);
   }
 
   async function handleMoveCollection(collectionId: number, newParentId: number | null) {
@@ -2751,7 +2766,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     try {
       await moveCollection(collectionId, newParentId);
       toast.success(uiText("Moved"));
-      refresh();
     } catch (e: any) {
       toast.error(e);
     }
@@ -3003,6 +3017,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       {uiText("New collection")}
     </Button>
   );
+  const showNewCollectionCard =
+    viewMode === "grid" && canCreateCollection && !loading && visibleCollections.length > 0;
 
   const libraryMoreActions = (
     <>
@@ -3125,58 +3141,27 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   function filterControl(className: string) {
     return (
-      <DropdownMenu
-        open={!!filtersExpanded}
-        onOpenChange={(open) => setFiltersExpanded(open)}
-        portal
-        align="start"
-        role="dialog"
-        aria-label={uiText("Filter Models")}
+      <LibraryFilterControl
+        key={filterPickerRevision}
         className={className}
-        contentClassName="w-[352px] overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-lg"
-        trigger={
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            data-menu-trigger
-            onClick={toggleStructuredFilters}
-            aria-label={uiText("Filters")}
-            aria-haspopup="dialog"
-            aria-expanded={!!filtersExpanded}
-            aria-controls="library-filter-panel"
-            className="h-8 w-full gap-2 aria-expanded:bg-accent aria-expanded:text-accent-foreground"
-          >
-            <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            <span className="library-toolbar-filter-label">{uiText("Filters")}</span>
-            {activeFilterItems.length > Number(!!query.trim()) && (
-              <span className="text-xs tabular-nums text-muted-foreground">
-                {activeFilterItems.length - Number(!!query.trim())}
-              </span>
-            )}
-          </Button>
-        }
-      >
-        <LibraryFilterPicker
-          filters={currentFilters}
-          facets={facetQuery.data}
-          tags={tags}
-          printers={printers}
-          canViewPrinters={canViewPrinters}
-          loading={facetQuery.isLoading || tagsQuery.isLoading}
-          error={facetQuery.isError || tagsQuery.isError}
-          onRetry={() => {
-            void facetQuery.refetch();
-            void tagsQuery.refetch();
-          }}
-          onChange={setStructuredFilter}
-          onReset={() => clearAllFilters(true)}
-          onClose={() => {
-            setFiltersExpanded(false);
-            filtersOpener.current?.focus();
-          }}
-        />
-      </DropdownMenu>
+        activeCount={activeFilterItems.length - Number(!!query.trim())}
+        onOpen={() => {
+          if (!filtersEnabled) startTransition(() => requestStartup("filters"));
+        }}
+        filters={currentFilters}
+        facets={facetQuery.data}
+        tags={tags}
+        printers={printers}
+        canViewPrinters={canViewPrinters}
+        loading={!filtersEnabled || facetQuery.isLoading || tagsQuery.isLoading}
+        error={facetQuery.isError || tagsQuery.isError}
+        onRetry={() => {
+          void facetQuery.refetch();
+          void tagsQuery.refetch();
+        }}
+        onChange={setStructuredFilter}
+        onReset={() => clearAllFilters(true)}
+      />
     );
   }
 
@@ -3262,9 +3247,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 aria-label={uiText("Include subfolders")}
                 disabled={loading}
                 onClick={() => setModelScope(includeSubfolders ? "here" : "all")}
-                className="h-8 aria-pressed:bg-accent aria-pressed:text-accent-foreground"
+                className="aria-pressed:bg-accent aria-pressed:text-accent-foreground aria-pressed:hover:bg-accent dark:hover:bg-surface-container-highest dark:aria-pressed:bg-surface-bright dark:aria-pressed:hover:bg-surface-bright"
               >
-                <FolderTree className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <SubfolderScopeIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 <span className="library-toolbar-label">{uiText("Include subfolders")}</span>
               </Button>
             )}
@@ -3333,43 +3318,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     </DropdownMenu>
   );
 
-  const childGroups =
-    displayedCollection && !includeSubfolders && libraryView === "all" && user
-      ? visibleCollections
-          .filter((collection) => collection.model_count > 0)
-          .map((collection) => (
-            <LibraryCollectionGroup
-              key={collection.id}
-              collection={collection}
-              userId={user.id}
-              href={collectionHref(collection.path, collection.id)}
-              sort={sortKey}
-              compact={compact}
-              scrollRef={startupContent}
-              onOpen={(child) => handleCollectionChange(child.path, child.id)}
-              onLoaded={recordGroupedModels}
-              renderModel={(model) => (
-                <ModelCard
-                  model={model}
-                  origin={snapshot?.entry}
-                  selectable={selectMode}
-                  selected={
-                    modelSelection(model, selectedIds, selectedCollectionRows.values()).kind !==
-                    "none"
-                  }
-                  onToggleSelect={auth.isAuthenticated ? toggleSelect : undefined}
-                  draggable={canUploadToVault && !selectMode}
-                  onEditTags={openTagEditor}
-                  onIntent={warmModel}
-                  onInspect={inspectModel}
-                  inspected={inspectorOpen && inspectorIntent?.id === model.id}
-                />
-              )}
-            />
-          ))
-      : null;
-
-  return (
+  const layout = (
     <Localized>
       <>
         <ModelMoveReview moves={modelMoves} />
@@ -3712,7 +3661,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               <div className="library-collection-identity min-w-0 flex-1">
                 <InlineTitleEditor
                   fieldLabel={uiText("inbox.collectionName")}
-                  maxLength={100}
+                  maxLength={COLLECTION_NAME_LIMIT}
                   title={
                     unavailableCollection
                       ? uiText("library.collectionUnavailable")
@@ -3778,7 +3727,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   )}
                 </div>
               </div>
-              {newCollectionButton}
+              {!showNewCollectionCard && newCollectionButton}
               {!hasCollectionsPane && (
                 <Button
                   onClick={() => {
@@ -4021,8 +3970,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           freezeInspectorTracks={inspectorOpen}
                           compact={compact}
                           estimateSize={COMPACT_COLLECTION_HEIGHT}
-                          keepCollectionCardWidth
-                          minCardWidth={300}
                           virtualize={false}
                           singleRow={singleRow}
                           onColumnsChange={onColumns}
@@ -4040,77 +3987,92 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     <CollectionStrip
                       total={visibleCollections.length}
                       overview={collectionOverview}
+                      hasCreateCard={showNewCollectionCard}
                       resetKey={displayedPath ?? ""}
                     >
-                      {(singleRow, onColumns) => (
+                      {(singleRow, onColumns, visibleCount) => (
                         <LibraryItems
                           key={`collections:${displayedPath ?? ""}`}
-                          items={visibleCollections}
-                          itemKey={(collection) => `collection:${collection.id}`}
-                          renderItem={(collection) => (
-                            <LibraryCardFill
-                              identity={cardIdentity}
-                              animateOnMount={cardEntrance !== null}
-                              className="library-collection-reveal"
-                            >
-                              <CollectionOverviewCard
-                                collection={collection}
-                                compact={!collectionOverview}
-                                arriving={arriving.has(`c:${collection.id}`)}
-                                authorizationRevision={snapshot?.authorizationRevision}
-                                onAuthorityRetired={onAuthorityRetired}
-                                previewsReady={browseReady}
-                                previewSource={snapshot?.previewSource}
-                                onSelect={handleCollectionChange}
-                                onIntent={prefetchFolder}
-                                onDropModel={canUploadToVault ? handleMoveModel : undefined}
-                                selectable={selectMode}
-                                selected={selectedCollectionRows.has(collection.id)}
-                                onToggleSelect={
-                                  auth.isAuthenticated ? toggleCollectionSelect : undefined
-                                }
-                                onRename={
-                                  canManageCard(collection, "rename")
-                                    ? () =>
-                                        setCollectionCardTarget({
-                                          entry,
-                                          id: collection.id,
-                                          action: "rename",
-                                        })
-                                    : undefined
-                                }
-                                onEditCover={
-                                  canManageCard(collection, "cover")
-                                    ? () =>
-                                        setCollectionCardTarget({
-                                          entry,
-                                          id: collection.id,
-                                          action: "cover",
-                                        })
-                                    : undefined
-                                }
-                                onRegenerateThumbnails={
-                                  canManageCard(collection, "cover")
-                                    ? () => void regenerateCardThumbnails(collection)
-                                    : undefined
-                                }
-                                renaming={
-                                  managedCollection?.id === collection.id &&
-                                  collectionCardTarget?.action === "rename"
-                                }
-                                onRenameEnd={(saved) => {
-                                  setCollectionCardTarget((target) =>
-                                    target?.entry === entry &&
-                                    target.id === collection.id &&
-                                    target.action === "rename"
-                                      ? null
-                                      : target,
-                                  );
-                                  if (saved) void refresh();
-                                }}
+                          items={[
+                            ...visibleCollections.slice(0, visibleCount),
+                            ...(showNewCollectionCard ? ["create" as const] : []),
+                          ]}
+                          itemKey={(collection) =>
+                            collection === "create"
+                              ? "create-collection"
+                              : `collection:${collection.id}`
+                          }
+                          renderItem={(collection) =>
+                            collection === "create" ? (
+                              <NewCollectionCard
+                                maxLength={COLLECTION_NAME_LIMIT}
+                                onCreate={saveNewCollection}
                               />
-                            </LibraryCardFill>
-                          )}
+                            ) : (
+                              <LibraryCardFill
+                                identity={cardIdentity}
+                                animateOnMount={cardEntrance !== null}
+                                className="library-collection-reveal"
+                              >
+                                <CollectionOverviewCard
+                                  collection={collection}
+                                  compact={!collectionOverview}
+                                  arriving={arriving.has(`c:${collection.id}`)}
+                                  authorizationRevision={snapshot?.authorizationRevision}
+                                  onAuthorityRetired={onAuthorityRetired}
+                                  previewsReady={browseReady}
+                                  previewSource={snapshot?.previewSource}
+                                  onSelect={handleCollectionChange}
+                                  onIntent={prefetchFolder}
+                                  onDropModel={canUploadToVault ? handleMoveModel : undefined}
+                                  selectable={selectMode}
+                                  selected={selectedCollectionRows.has(collection.id)}
+                                  onToggleSelect={
+                                    auth.isAuthenticated ? toggleCollectionSelect : undefined
+                                  }
+                                  onRename={
+                                    canManageCard(collection, "rename")
+                                      ? () =>
+                                          setCollectionCardTarget({
+                                            entry,
+                                            id: collection.id,
+                                            action: "rename",
+                                          })
+                                      : undefined
+                                  }
+                                  onEditCover={
+                                    canManageCard(collection, "cover")
+                                      ? () =>
+                                          setCollectionCardTarget({
+                                            entry,
+                                            id: collection.id,
+                                            action: "cover",
+                                          })
+                                      : undefined
+                                  }
+                                  onRegenerateThumbnails={
+                                    canManageCard(collection, "cover")
+                                      ? () => void regenerateCardThumbnails(collection)
+                                      : undefined
+                                  }
+                                  renaming={
+                                    managedCollection?.id === collection.id &&
+                                    collectionCardTarget?.action === "rename"
+                                  }
+                                  onRenameEnd={(saved) => {
+                                    setCollectionCardTarget((target) =>
+                                      target?.entry === entry &&
+                                      target.id === collection.id &&
+                                      target.action === "rename"
+                                        ? null
+                                        : target,
+                                    );
+                                    if (saved) void refresh();
+                                  }}
+                                />
+                              </LibraryCardFill>
+                            )
+                          }
                           scrollRef={startupContent}
                           readingRenderers={readingRenderers}
                           readingId="collections"
@@ -4118,8 +4080,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           freezeInspectorTracks={inspectorOpen}
                           compact={!collectionOverview && compact}
                           estimateSize={collectionOverview ? 266 : COMPACT_COLLECTION_HEIGHT}
-                          keepCollectionCardWidth={!collectionOverview}
-                          minCardWidth={collectionOverview ? undefined : 300}
                           singleRow={singleRow}
                           onColumnsChange={onColumns}
                         />
@@ -4337,9 +4297,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       failed={modelQuery.isFetchNextPageError}
                       onClick={loadMore}
                     />
-                    {childGroups && childGroups.length > 0 && (
-                      <div className="mt-4 space-y-4">{childGroups}</div>
-                    )}
                   </div>
                 ) : (
                   <div
@@ -4453,9 +4410,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       failed={modelQuery.isFetchNextPageError}
                       onClick={loadMore}
                     />
-                    {childGroups && childGroups.length > 0 && (
-                      <div className="mt-4 space-y-4">{childGroups}</div>
-                    )}
                   </div>
                 )}
               </div>
@@ -4575,6 +4529,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       </>
     </Localized>
   );
+  return <ModelGalleryDrag onMove={handleMoveModel}>{layout}</ModelGalleryDrag>;
 }
 
 function CollectionListRow({

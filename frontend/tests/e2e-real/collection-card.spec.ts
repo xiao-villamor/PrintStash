@@ -1,7 +1,7 @@
 /** Collection card context actions persist through the real API. */
 import { randomUUID } from "node:crypto";
 import { expect, test } from "./helpers";
-import { collapseNavigationSidebar, stlFor } from "./util";
+import { collapseNavigationSidebar, modelCard, stlFor, uploadModel } from "./util";
 import type { DerivativeRead, ModelRead } from "../../src/types/models";
 
 const coverImage = Buffer.from(
@@ -10,6 +10,95 @@ const coverImage = Buffer.from(
 );
 
 test.describe("collection card", () => {
+  test("creates a subcollection from the trailing card", async ({ page }) => {
+    const parent = `e2e-create-card-${randomUUID().slice(0, 8)}`;
+    const response = await page.request.post("/api/v1/collections", { data: { name: parent } });
+    expect(response.status()).toBe(201);
+    const { id } = await response.json();
+    try {
+      const existing = await page.request.post("/api/v1/collections", {
+        data: { parent_id: id, name: "Existing" },
+      });
+      expect(existing.status()).toBe(201);
+      await page.goto(`/?c=${parent}&cid=${id}`);
+      await collapseNavigationSidebar(page);
+      const tiles = page
+        .getByRole("main")
+        .getByRole("region", { name: "Collections", exact: true });
+      await tiles.getByRole("button", { name: "New collection", exact: true }).click();
+      const name = tiles.getByRole("textbox", { name: "Collection name", exact: true });
+      await expect(name).toBeFocused();
+      await name.fill("Existing");
+      const rejected = page.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === "/api/v1/collections",
+      );
+      await name.press("Enter");
+      expect((await rejected).ok()).toBe(false);
+      await expect(name).toHaveValue("Existing");
+      await expect(name).not.toHaveAttribute("readonly");
+
+      await name.fill("Created here");
+      await name.press("Enter");
+      await expect(name).toHaveCount(0);
+      await page.reload();
+      await expect(tiles.getByRole("button", { name: /^Created here\b/ })).toBeVisible();
+    } finally {
+      expect((await page.request.delete(`/api/v1/collections/${id}?recursive=true`)).status()).toBe(
+        204,
+      );
+    }
+  });
+
+  test("moves a gallery card into a collection using a pointer drag", async ({ page }) => {
+    const name = `e2e-gallery-move-${randomUUID().slice(0, 8)}`;
+    const folder = `${name}-folder`;
+    const created = await page.request.post("/api/v1/collections", { data: { name: folder } });
+    expect(created.status()).toBe(201);
+    const { id } = await created.json();
+    let modelId: string | undefined;
+    try {
+      await uploadModel(page, name);
+      const source = modelCard(page, name);
+      const href = await source.getAttribute("href");
+      modelId = href?.match(/\/models\/(\d+)/)?.[1];
+      if (!modelId) throw new Error("Missing Model card destination");
+      await collapseNavigationSidebar(page);
+
+      const target = page.getByRole("main").locator(`[data-collection-path="${folder}"]`);
+      const thumbnail = source.locator("[data-model-preview]");
+      await expect(thumbnail).toBeVisible();
+      await expect(target).toBeVisible();
+      const from = await thumbnail.boundingBox();
+      const to = await target.boundingBox();
+      if (!from || !to) throw new Error("Missing gallery drag bounds");
+      const x = from.x + from.width / 2;
+      const y = from.y + from.height / 2;
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x + 24, y, { steps: 4 });
+      await expect(page.locator("[data-gallery-drag-preview]")).toBeVisible();
+      await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 });
+      await expect(target).toHaveClass(/ring-inset/);
+      await page.mouse.up();
+      await expect(page.getByText("Moved", { exact: true })).toBeVisible();
+      const moved = await page.request.get(`/api/v1/models/${modelId}`);
+      expect(moved.status()).toBe(200);
+      expect((await moved.json()).collection).toBe(folder);
+
+      await target.getByRole("button", { name: new RegExp(`^${folder}\\b`) }).click();
+      await page.reload();
+      await expect(modelCard(page, name)).toBeVisible();
+    } finally {
+      if (modelId) {
+        expect((await page.request.delete(`/api/v1/models/${modelId}`)).status()).toBe(204);
+        expect((await page.request.delete(`/api/v1/models/${modelId}/purge`)).status()).toBe(200);
+      }
+      expect((await page.request.delete(`/api/v1/collections/${id}`)).status()).toBe(204);
+    }
+  });
+
   test("renames a collection from its card", async ({ page }) => {
     const original = `e2e-rename-${randomUUID().slice(0, 8)}`;
     const renamed = `${original}-renamed`;

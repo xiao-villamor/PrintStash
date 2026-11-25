@@ -40,19 +40,17 @@ test.describe("Library shell navigation", () => {
     await expect(page.locator("[data-shell-panel-search]")).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/");
 
-    await rail.getByRole("link", { name: "Settings", exact: true }).press("Enter");
+    await page.getByRole("button", { name: "My workspace" }).click();
+    await page.getByRole("menuitem", { name: "Settings", exact: true }).press("Enter");
 
     await expect(page.getByRole("navigation", { name: "Settings sections" })).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Settings", exact: true, level: 1 }),
     ).toBeVisible();
-    await expect(rail.getByRole("link", { name: "Settings", exact: true })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
+    await expect(rail.getByRole("link", { name: "Settings", exact: true })).toHaveCount(0);
   });
 
-  test("Settings restores its sidebar after opening Collections", async ({ page }) => {
+  test("Settings keeps its section when closing the Collections pane", async ({ page }) => {
     await page.goto("/settings?section=design");
     await expect(page.getByRole("navigation", { name: "Settings sections" })).toBeVisible();
     const rail = page.getByRole("navigation", { name: "Navigation", exact: true });
@@ -61,7 +59,8 @@ test.describe("Library shell navigation", () => {
       page.getByRole("complementary", { name: "Collections", exact: true }),
     ).toBeVisible();
 
-    await rail.getByRole("link", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "My workspace" }).click();
+    await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
 
     await expect(page.getByRole("navigation", { name: "Settings sections" })).toBeVisible();
     await expect(

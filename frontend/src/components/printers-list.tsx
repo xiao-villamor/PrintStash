@@ -17,7 +17,7 @@ import {
   type PrinterCreate,
   type PrinterStatus,
 } from "@/types";
-import { usePrinterCatalogCommands } from "@/features/printers/queries";
+import { FLEET_LIVE_REFRESH_MS, usePrinterCatalogCommands } from "@/features/printers/queries";
 import { useFleetSummary, usePrinters } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { useAuth } from "@/lib/auth-context";
@@ -57,6 +57,7 @@ import {
   ArrowUpRight,
   Check,
   Fan,
+  Layers,
   Pencil,
   Plus,
   RefreshCw,
@@ -87,6 +88,31 @@ const STATUS_PRIORITY = {
   unknown: 5,
 } satisfies Record<PrinterStatus, number>;
 
+const FLEET_GROUPING_KEY = "printstash.fleet.group-printers";
+
+function printerGroup(printer: PrinterRead): string | null {
+  return printer.group?.trim() || null;
+}
+
+function groupOptionValue(name: string | null): string {
+  return name === null ? "ungrouped" : `group:${name}`;
+}
+
+function groupPrinters(printers: PrinterRead[]) {
+  const groups = new Map<string | null, PrinterRead[]>();
+  for (const printer of printers) {
+    const name = printerGroup(printer);
+    const members = groups.get(name);
+    if (members) members.push(printer);
+    else groups.set(name, [printer]);
+  }
+  return [...groups.entries()].sort(([a], [b]) => {
+    if (a === null) return 1;
+    if (b === null) return -1;
+    return a.localeCompare(b);
+  });
+}
+
 /** Resolve a <select> value back to the setup kind it was rendered from. */
 function parseSetupKind(value: string): PrinterSetupKind | null {
   return PRINTER_SETUP_OPTIONS.find((option) => option.value === value)?.value ?? null;
@@ -101,13 +127,7 @@ export function PrintersPage() {
   // Shared printers cache: catalog commands invalidate
   // queryKeys.printers, so this list refetches itself after add/delete.
   const printersQuery = usePrinters({ refetchInterval: 15_000 });
-  const summaryQuery = useFleetSummary({ refetchInterval: 5_000 });
   const printers = useMemo(() => printersQuery.data ?? [], [printersQuery.data]);
-  const summary = summaryQuery.data;
-  const fleetRows = useMemo(
-    () => new Map(summary?.printers.map((row) => [row.printer_id, row])),
-    [summary],
-  );
   const loading = printersQuery.isLoading;
   const error = printersQuery.error instanceof Error ? printersQuery.error.message : null;
   const [addOpen, setAddOpen] = useState(false);
@@ -120,6 +140,13 @@ export function PrintersPage() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const artworkPreference = usePrinterArtworkPreference();
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const [grouped, setGrouped] = useState(() => {
+    try {
+      return localStorage.getItem(FLEET_GROUPING_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
   const searchParams = useSearchParams();
   const [requestedView, setActiveView] = useState<"fleet" | "queue" | "maintenance">(() =>
     searchParams.get("tab") === "queue" ? "queue" : "fleet",
@@ -132,14 +159,21 @@ export function PrintersPage() {
   const manageablePrinters = printers.filter((printer) => printer.access.can_admin);
   const canManagePrinters = Boolean(user?.is_superuser || manageablePrinters.length);
   const activeView = requestedView;
+  const summaryQuery = useFleetSummary({
+    refetchInterval: activeView === "fleet" ? FLEET_LIVE_REFRESH_MS : undefined,
+  });
+  const summary = summaryQuery.data;
+  const fleetRows = useMemo(
+    () => new Map(summary?.printers.map((row) => [row.printer_id, row])),
+    [summary],
+  );
   const visiblePrinters = useMemo(
     () =>
       printers
         .filter((printer) => {
           const row = fleetRows.get(printer.id);
           return (
-            (selectedGroup === null ||
-              (printer.group?.trim() || "__ungrouped") === selectedGroup) &&
+            (selectedGroup === null || groupOptionValue(printerGroup(printer)) === selectedGroup) &&
             (healthFilter === null ||
               (healthFilter === "ready" && isReady(printer, row)) ||
               (healthFilter === "attention" && needsAttention(printer, row)))
@@ -147,20 +181,16 @@ export function PrintersPage() {
         })
         .sort(
           (a, b) =>
-            STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status] || a.name.localeCompare(b.name),
+            STATUS_PRIORITY[liveStatus(a, fleetRows.get(a.id))] -
+              STATUS_PRIORITY[liveStatus(b, fleetRows.get(b.id))] || a.name.localeCompare(b.name),
         ),
     [printers, fleetRows, selectedGroup, healthFilter],
   );
-  const printerGroups = useMemo(() => {
-    const groups = new Map<string, number>();
-    for (const printer of printers) {
-      const group = printer.group?.trim() || "__ungrouped";
-      groups.set(group, (groups.get(group) ?? 0) + 1);
-    }
-    return [...groups.entries()]
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [printers]);
+  const printerGroups = useMemo(() => groupPrinters(printers), [printers]);
+  const visibleGroups = useMemo(
+    () => (grouped ? groupPrinters(visiblePrinters) : []),
+    [grouped, visiblePrinters],
+  );
   const attentionCount = printers.filter((printer) =>
     needsAttention(printer, fleetRows.get(printer.id)),
   ).length;
@@ -170,6 +200,31 @@ export function PrintersPage() {
   function openQueue(view: FleetQueueView) {
     setQueueView(view);
     setActiveView("queue");
+  }
+
+  function toggleGrouping() {
+    const next = !grouped;
+    setGrouped(next);
+    try {
+      localStorage.setItem(FLEET_GROUPING_KEY, String(next));
+    } catch {
+      // The current page still applies the layout if storage is unavailable.
+    }
+  }
+
+  function renderCards(list: PrinterRead[]) {
+    return list.map((printer) => (
+      <FleetPrinterCard
+        key={printer.id}
+        printer={printer}
+        row={fleetRows.get(printer.id)}
+        artworkPreference={artworkPreference}
+        grouped={grouped}
+        onSettings={setSettingsTarget}
+        onRemove={setDeleteTarget}
+        onEditModel={setModelTarget}
+      />
+    ));
   }
 
   async function confirmDelete() {
@@ -292,22 +347,26 @@ export function PrintersPage() {
                 <div className="flex divide-x divide-border overflow-hidden rounded-lg border border-border bg-card">
                   <FleetMetric
                     label={uiText("Ready")}
+                    tone="ready"
                     value={readyCount}
                     selected={healthFilter === "ready"}
                     onClick={() => setHealthFilter(healthFilter === "ready" ? null : "ready")}
                   />
                   <FleetMetric
                     label={uiText("Active jobs")}
+                    tone="active"
                     value={summary?.active_jobs}
                     onClick={canSeeQueue ? () => openQueue("active") : undefined}
                   />
                   <FleetMetric
                     label={uiText("Queued jobs")}
+                    tone="queued"
                     value={summary?.queued_jobs}
                     onClick={canSeeQueue ? () => openQueue("queued") : undefined}
                   />
                   <FleetMetric
                     label={uiText("Needs attention")}
+                    tone="attention"
                     value={attentionCount}
                     selected={healthFilter === "attention"}
                     onClick={() =>
@@ -315,21 +374,38 @@ export function PrintersPage() {
                     }
                   />
                 </div>
-                <label className="flex min-w-0 max-w-full items-center gap-3 text-sm text-muted-foreground">
-                  {uiText("Group")}
-                  <select
-                    value={selectedGroup ?? ""}
-                    onChange={(event) => setSelectedGroup(event.target.value || null)}
-                    className="h-8 w-37.5 min-w-0 rounded-md border border-input bg-card px-2.5 text-sm text-foreground"
+                <div className="flex min-w-0 max-w-full flex-wrap items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    aria-pressed={grouped}
+                    onClick={toggleGrouping}
+                    className="h-8 aria-pressed:bg-accent aria-pressed:text-accent-foreground dark:aria-pressed:bg-surface-bright"
                   >
-                    <option value="">{uiText("All groups")}</option>
-                    {printerGroups.map((group) => (
-                      <option key={group.name} value={group.name}>
-                        {group.name === "__ungrouped" ? uiText("Ungrouped") : group.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    {grouped ? (
+                      <Check className="h-3.5 w-3.5" aria-hidden />
+                    ) : (
+                      <Layers className="h-3.5 w-3.5" aria-hidden />
+                    )}
+                    {uiText("Group printers")}
+                  </Button>
+                  <label className="flex min-w-0 items-center gap-3 text-sm text-muted-foreground">
+                    {uiText("Group")}
+                    <select
+                      value={selectedGroup ?? ""}
+                      onChange={(event) => setSelectedGroup(event.target.value || null)}
+                      className="h-8 w-37.5 min-w-0 rounded-md border border-input bg-field-surface px-2.5 text-sm text-foreground"
+                    >
+                      <option value="">{uiText("All groups")}</option>
+                      {printerGroups.map(([name]) => (
+                        <option key={groupOptionValue(name)} value={groupOptionValue(name)}>
+                          {name ?? uiText("Ungrouped")}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
               </section>
             )}
           </div>
@@ -383,19 +459,34 @@ export function PrintersPage() {
                       title={uiText("No matching printers")}
                       className="rounded-lg border border-border bg-card"
                     />
+                  ) : grouped ? (
+                    <div className="flex flex-wrap items-start gap-5 pt-2">
+                      {visibleGroups.map(([name, members]) => {
+                        const label = name ?? uiText("Ungrouped");
+                        return (
+                          <section
+                            key={groupOptionValue(name)}
+                            aria-label={label}
+                            className="relative w-fit max-w-full rounded-xl border-2 border-dotted border-border-strong bg-card/35 p-3 sm:p-4"
+                          >
+                            <h2 className="absolute inset-x-3 top-0 -translate-y-1/2 text-xs font-medium">
+                              <span className="inline-flex max-w-full items-center gap-1.5 rounded-sm bg-background px-1.5">
+                                <span className="min-w-0 truncate">{label}</span>
+                                <span className="shrink-0 tabular-nums text-muted-foreground">
+                                  {formatNumber(members.length)}
+                                </span>
+                              </span>
+                            </h2>
+                            <div className="flex min-w-0 flex-wrap gap-4">
+                              {renderCards(members)}
+                            </div>
+                          </section>
+                        );
+                      })}
+                    </div>
                   ) : (
                     <div className="grid min-w-0 gap-4 grid-cols-[repeat(auto-fit,minmax(min(100%,26rem),1fr))]">
-                      {visiblePrinters.map((printer) => (
-                        <FleetPrinterCard
-                          key={printer.id}
-                          printer={printer}
-                          row={fleetRows.get(printer.id)}
-                          artworkPreference={artworkPreference}
-                          onSettings={setSettingsTarget}
-                          onRemove={setDeleteTarget}
-                          onEditModel={setModelTarget}
-                        />
-                      ))}
+                      {renderCards(visiblePrinters)}
                     </div>
                   )}
                 </div>
@@ -466,6 +557,14 @@ export function PrintersPage() {
 
 type FleetPrinterRow = FleetSummary["printers"][number];
 
+function isPrinterStatus(value: string | undefined): value is PrinterStatus {
+  return value !== undefined && Object.hasOwn(STATUS_PRIORITY, value);
+}
+
+function liveStatus(printer: PrinterRead, row: FleetPrinterRow | undefined): PrinterStatus {
+  return isPrinterStatus(row?.status) ? row.status : printer.status;
+}
+
 function routingHold(printer: PrinterRead, row: FleetPrinterRow | undefined) {
   if (row?.maintenance) return uiText("Maintenance");
   if (row?.pending_operator_release) return uiText("Operator release required");
@@ -475,33 +574,47 @@ function routingHold(printer: PrinterRead, row: FleetPrinterRow | undefined) {
 
 function isReady(printer: PrinterRead, row: FleetPrinterRow | undefined) {
   return (
-    printer.status === "ready" && row?.current_job_id == null && routingHold(printer, row) === null
+    liveStatus(printer, row) === "ready" &&
+    row?.current_job_id == null &&
+    routingHold(printer, row) === null
   );
 }
 
 function needsAttention(printer: PrinterRead, row: FleetPrinterRow | undefined) {
+  const status = liveStatus(printer, row);
   return (
-    printer.status === "error" ||
-    printer.status === "offline" ||
-    printer.status === "unknown" ||
+    status === "error" ||
+    status === "offline" ||
+    status === "unknown" ||
     routingHold(printer, row) !== null
   );
 }
 
+const FLEET_METRIC_COLORS = {
+  ready: "text-success",
+  active: "text-primary",
+  queued: "text-foreground",
+  attention: "text-warning",
+};
+
 function FleetMetric({
   label,
+  tone,
   value,
   onClick,
   selected,
 }: {
   label: string;
+  tone: keyof typeof FLEET_METRIC_COLORS;
   value: number | undefined;
   onClick?: () => void;
   selected?: boolean;
 }) {
   const contents = (
     <>
-      <span className="font-mono text-xl font-semibold leading-none tabular-nums">
+      <span
+        className={`font-mono text-xl font-semibold leading-none tabular-nums ${value ? FLEET_METRIC_COLORS[tone] : "text-muted-foreground"}`}
+      >
         {value === undefined ? "—" : formatNumber(value)}
       </span>
       <span className="text-xs text-muted-foreground">{label}</span>
@@ -526,6 +639,7 @@ function FleetPrinterCard({
   printer,
   row,
   artworkPreference,
+  grouped,
   onSettings,
   onRemove,
   onEditModel,
@@ -533,6 +647,7 @@ function FleetPrinterCard({
   printer: PrinterRead;
   row: FleetPrinterRow | undefined;
   artworkPreference: PrinterArtworkPreference;
+  grouped: boolean;
   onSettings: (printer: PrinterRead) => void;
   onRemove: (printer: PrinterRead) => void;
   onEditModel: (printer: PrinterRead) => void;
@@ -540,6 +655,7 @@ function FleetPrinterCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(null);
   const menuOpener = useRef<HTMLAnchorElement | null>(null);
+  const status = liveStatus(printer, row);
   const hold = routingHold(printer, row);
   const progress = row?.progress == null ? null : row.progress * 100;
   // Older servers publish only the display label for each loaded slot.
@@ -553,6 +669,7 @@ function FleetPrinterCard({
     })) ??
     [];
   const model = printer.model_name || printer.detected_model;
+  const Heading = grouped ? "h3" : "h2";
   const artworkUrl = printerArtwork(artworkPreference === "model" ? model : null).imageUrl;
   const itemClass =
     "flex min-h-9 w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none";
@@ -569,7 +686,7 @@ function FleetPrinterCard({
       align="start"
       anchorPoint={menuPoint}
       returnFocusRef={menuOpener}
-      className="h-full min-w-0"
+      className={grouped ? "w-104 max-w-full shrink-0" : "h-full min-w-0"}
       aria-label={uiText("Printer actions")}
       contentClassName="w-60 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
       trigger={
@@ -594,12 +711,13 @@ function FleetPrinterCard({
               <PrinterCardArtwork key={artworkUrl} url={artworkUrl} model={model} />
             )}
             <div className="grid min-w-0 flex-1 grid-cols-1 content-start gap-3 px-4 py-4 text-xs">
-              <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-1.5">
-                <div className="min-w-0">
-                  <h2 className="text-lg font-semibold leading-tight tracking-tight">
+              <div className="flex min-w-0 items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <Heading className="truncate text-lg font-semibold leading-tight tracking-tight">
                     <Link
                       href={`/printers/${printer.id}`}
-                      className="wrap-anywhere after:absolute after:inset-0 after:z-10 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring"
+                      title={printer.name}
+                      className="after:absolute after:inset-0 after:z-10 focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring"
                     >
                       {printer.name}
                       <ArrowUpRight
@@ -607,39 +725,47 @@ function FleetPrinterCard({
                         aria-hidden="true"
                       />
                     </Link>
-                  </h2>
-                  <p className="mt-1 wrap-anywhere text-xs text-muted-foreground">
+                  </Heading>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">
                     {providerLabel(printer)}
                     {printer.capabilities.support_level === "beta" ? ` · ${uiText("Beta")}` : ""}
-                    {printer.group ? ` · ${printer.group}` : ""}
+                    {!grouped && printer.group ? ` · ${printer.group}` : ""}
                   </p>
                 </div>
-                <PrinterStatusBadge status={printer.status} />
+                <div className="shrink-0">
+                  <PrinterStatusBadge status={status} />
+                </div>
               </div>
-              <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
-                <div className="min-w-0 flex-1 basis-28 space-y-1.5">
-                  <div className="flex min-w-0 items-center justify-between gap-2">
-                    <span className="text-muted-foreground">{uiText("Current job")}</span>
-                    {progress !== null && (
-                      <span className="shrink-0 font-mono text-sm font-semibold tabular-nums">
-                        {formatNumber(progress, { maximumFractionDigits: 0 })}%
+              <div className="@container/printer-details">
+                <div className="flex flex-col gap-3 @min-[16rem]/printer-details:flex-row @min-[16rem]/printer-details:items-start">
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <div className="flex min-h-5 items-center justify-between gap-2">
+                      <span className="truncate text-muted-foreground">
+                        {uiText("Current job")}
                       </span>
-                    )}
+                      {progress !== null && (
+                        <span className="shrink-0 font-mono text-sm font-semibold tabular-nums">
+                          {formatNumber(progress, { maximumFractionDigits: 0 })}%
+                        </span>
+                      )}
+                    </div>
+                    <p
+                      className="truncate text-sm font-semibold"
+                      title={row?.current_job_name ?? undefined}
+                    >
+                      {row?.current_job_name ??
+                        (row?.current_job_id != null
+                          ? knownUiText(status)
+                          : row
+                            ? uiText("No active print")
+                            : "—")}
+                    </p>
+                    <div className="h-1.5">
+                      {progress !== null && <PrinterProgress value={progress} />}
+                    </div>
                   </div>
-                  <p
-                    className="truncate text-sm font-semibold"
-                    title={row?.current_job_name ?? undefined}
-                  >
-                    {row?.current_job_name ??
-                      (row?.current_job_id != null
-                        ? knownUiText(printer.status)
-                        : row
-                          ? uiText("No active print")
-                          : "—")}
-                  </p>
-                  {progress !== null && <PrinterProgress value={progress} />}
+                  {row?.telemetry && <FleetTelemetryReadings telemetry={row.telemetry} />}
                 </div>
-                {row?.telemetry && <FleetTelemetryReadings telemetry={row.telemetry} />}
               </div>
               {(row?.next_job_name || hold) && (
                 <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-t border-border pt-2.5">
@@ -765,15 +891,15 @@ function FleetTelemetryReadings({ telemetry }: { telemetry: FleetPrinterTelemetr
   if (readings.every(({ value }) => value == null)) return null;
 
   return (
-    <dl className="grid max-w-full gap-y-1 border-s border-border ps-3">
+    <dl className="grid min-w-0 gap-y-1 border-s border-border ps-2 @min-[16rem]/printer-details:w-36 @min-[16rem]/printer-details:shrink-0">
       {readings.map(({ label, value, unit }) =>
         value == null ? null : (
-          <div key={label} className="flex items-baseline justify-between gap-2">
-            <dt className="flex min-w-0 items-center gap-1 wrap-anywhere text-muted-foreground">
+          <div key={label} className="flex items-baseline justify-between gap-1.5">
+            <dt className="min-w-0 truncate text-muted-foreground" title={label}>
               {unit === "%" && (
                 <Fan
                   aria-hidden="true"
-                  className="size-3 shrink-0 transition-transform duration-fast ease-out motion-reduce:transition-none"
+                  className="me-1 inline size-3 align-text-bottom transition-transform duration-fast ease-out motion-reduce:transition-none"
                   style={{ transform: `rotate(${value * 2.7}deg)` }}
                 />
               )}
@@ -1169,7 +1295,12 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
             <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
               {uiText("Cancel")}
             </Button>
-            <Button type="submit" form={formId} loading={submitting} disabled={!name || !url}>
+            <Button
+              type="submit"
+              form={formId}
+              loading={submitting}
+              disabled={!name.trim() || !url.trim()}
+            >
               {uiText("Add printer")}
             </Button>
           </>
@@ -1177,7 +1308,6 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
       >
         <form id={formId} onSubmit={submit} className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-2">
-            <h3 className="col-span-full text-field font-semibold">{uiText("Printer")}</h3>
             <FormField htmlFor="printer-name" label={uiText("Name")}>
               <Input
                 id="printer-name"
@@ -1205,16 +1335,8 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
                 ))}
               </select>
             </FormField>
-            <div className="col-span-full flex flex-wrap items-center justify-between gap-3 text-field">
-              <span className="text-muted-foreground">
-                {modelName || uiText("No printer model selected")}
-              </span>
-              <Button type="button" variant="outline" onClick={() => setModelChoiceOpen(true)}>
-                {uiText("Choose printer model")}
-              </Button>
-            </div>
           </div>
-          <div className="space-y-4">
+          <div className="space-y-4 border-y border-border py-4">
             <div>
               <h3 className="text-field font-semibold">{uiText("Connection")}</h3>
               <p className="mt-1 text-xs text-muted-foreground">
@@ -1387,23 +1509,51 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
                 </FormField>
               </>
             )}
-            <div>
-              <FormField htmlFor="printer-notes" label={uiText("Notes")}>
-                <textarea
-                  id="printer-notes"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className={inputClasses}
-                  placeholder={uiText("Optional")}
-                />
-              </FormField>
-              {err && (
-                <div role="alert" className="mt-1 text-xs text-destructive">
-                  {err}
-                </div>
-              )}
-            </div>
           </div>
+          <div className="grid gap-4">
+            <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-muted/30 p-3">
+              <Printer3D className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+              <div className="min-w-0 flex-1">
+                <p className="text-field font-medium">
+                  {uiText("Printer model")}{" "}
+                  <span className="font-normal text-muted-foreground">{uiText("(optional)")}</span>
+                </p>
+                <p className="wrap-anywhere text-xs text-muted-foreground">
+                  {modelName || uiText("Used to show your printer’s image.")}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setModelChoiceOpen(true)}
+              >
+                {uiText("Choose printer model")}
+              </Button>
+            </div>
+            <FormField
+              htmlFor="printer-notes"
+              label={
+                <>
+                  {uiText("Notes")}{" "}
+                  <span className="font-normal text-muted-foreground">{uiText("(optional)")}</span>
+                </>
+              }
+            >
+              <textarea
+                id="printer-notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className={inputClasses}
+                rows={2}
+              />
+            </FormField>
+          </div>
+          {err && (
+            <p role="alert" className="text-sm text-destructive">
+              {err}
+            </p>
+          )}
         </form>
       </Modal>
       {modelChoiceOpen && (

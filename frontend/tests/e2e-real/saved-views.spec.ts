@@ -21,13 +21,24 @@ async function manageSavedViews(page: import("@playwright/test").Page) {
       .getByRole("navigation", { name: "Navigation", exact: true })
       .getByRole("button", { name: "Saved views", exact: true })
       .click();
-  await pane.getByRole("button", { name: "Manage saved views" }).click();
-  return page.getByRole("dialog", { name: "Saved views", exact: true });
+  const trigger = pane.getByRole("button", { name: "Manage saved views" });
+  await trigger.click();
+  const picker = page.getByRole("dialog", { name: "Saved views", exact: true });
+  await expect(picker).toBeVisible();
+  const anchor = await trigger.boundingBox();
+  const panel = await picker.boundingBox();
+  if (!anchor || !panel) throw new Error("Saved views actions did not open at the sidebar");
+  expect(Math.abs(panel.x + panel.width - (anchor.x + anchor.width))).toBeLessThan(2);
+  expect(panel.y).toBeGreaterThanOrEqual(anchor.y + anchor.height);
+  return picker;
 }
 
 test.describe("saved views", () => {
   test.use({ viewport: { width: 1920, height: 1080 } });
-  test("save current filters as a view, apply it restores the canonical URL", async ({ page }) => {
+  test("save current filters as a view, apply it restores the canonical URL", async ({
+    page,
+  }, testInfo) => {
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
     const stamp = Date.now();
     const tag = `e2e-view-tag-${stamp}`;
     const tagged = `e2e-view-tagged-${stamp}`;
@@ -50,8 +61,17 @@ test.describe("saved views", () => {
     await expect(modelCard(page, plain)).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`tag=${encodeURIComponent(tag)}`));
 
+    const actions = await manageSavedViews(page);
+    await expect(actions.getByRole("textbox")).toHaveCount(0);
+    await expect(actions.getByText("No saved views yet")).toHaveCount(0);
+    const saveView = actions.getByRole("button", { name: "Save current view" });
+    await expect(saveView).toBeFocused();
+    await page.screenshot({ path: testInfo.outputPath("saved-views-empty-actions.png") });
+    await saveView.press("Escape");
+    await expect(page.getByRole("button", { name: "Manage saved views" })).toBeFocused();
+    await expect(actions).toHaveCount(0);
     await manageSavedViews(page);
-    await page.getByText("Save current view").click();
+    await saveView.click();
     const createName = page.getByRole("textbox", { name: "View name", exact: true });
     await expect(createName).toBeFocused();
     await page.keyboard.type(viewName);

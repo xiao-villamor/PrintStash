@@ -366,7 +366,7 @@ function CandidateReview({
           <label className="block space-y-1 text-sm">
             {t("similarity.multipartTarget")}
             <select
-              className="block w-full rounded-md border border-input bg-background p-2 text-sm"
+              className="block w-full rounded-md border border-input bg-field-surface p-2 text-sm"
               disabled={decision.isPending || readOnly}
               value={targetId ?? ""}
               onChange={(event) => {

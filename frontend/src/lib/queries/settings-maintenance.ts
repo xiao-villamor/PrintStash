@@ -40,6 +40,17 @@ export function auditHistoryOptions() {
           : false,
   });
 }
+export function auditDetailsOptions(runId: number | null) {
+  return queryOptions({
+    queryKey: [...maintenanceKeys.audits, runId],
+    enabled: runId !== null,
+    queryFn: ({ signal }) => {
+      if (runId === null) throw new Error("An audit run is required");
+      return api.getVaultAudit(runId, { signal });
+    },
+    retry: false,
+  });
+}
 export function auditPoliciesOptions() {
   return queryOptions({
     queryKey: maintenanceKeys.policies,

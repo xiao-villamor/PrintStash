@@ -20,27 +20,15 @@ interface SettingsNavProps {
   groups: SettingsNavGroup[];
   active: string;
   onChange: (id: string) => void;
-  /** `sidebar` lives in the workbench sidebar; `page` is the in-page rail. */
-  variant: "sidebar" | "page";
-  hidden?: boolean;
-  /** Page rail only: the signed-in account and the way back to the Library. */
   account?: { name: string; role: string };
   onBack?: () => void;
   className?: string;
 }
 
-/**
- * The one grouped navigation for Settings. The page rail adds a way back to the
- * Library, the signed-in account and a filter over the section names; both
- * variants list the same groups so the 18 sections never need a scrolling
- * tab strip on a desktop screen.
- */
 export function SettingsNav({
   groups,
   active,
   onChange,
-  variant,
-  hidden,
   account,
   onBack,
   className,
@@ -58,77 +46,63 @@ export function SettingsNav({
     }))
     .filter((group) => group.sections.length > 0);
   const first = filtered[0]?.sections[0];
-  const isPage = variant === "page";
 
   return (
     <nav
       aria-label={uiText("Settings sections")}
-      hidden={hidden}
-      className={cn(
-        "settings-nav",
-        isPage
-          ? "sticky top-0 hidden self-start lg:block"
-          : "h-full w-full overflow-y-auto px-3 pb-4",
-        className,
-      )}
+      className={cn("settings-nav sticky top-0 hidden self-start lg:block", className)}
     >
-      {isPage ? (
-        <div className="mb-3 space-y-3">
-          {onBack && (
-            <button
-              type="button"
-              onClick={onBack}
-              className="flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-left text-sm text-muted-foreground transition-[color,background-color] duration-press hover:bg-popover-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <ChevronLeft className="size-4 shrink-0" aria-hidden />
-              {uiText("Back to library")}
-            </button>
-          )}
-          {account && (
-            <div className="flex items-center gap-2.5 px-2">
-              <span
-                aria-hidden
-                className="flex size-7 shrink-0 items-center justify-center rounded-full bg-foreground/10 text-xs font-semibold uppercase text-foreground"
-              >
-                {account.name.slice(0, 1)}
-              </span>
-              <span className="min-w-0 leading-tight">
-                <span className="block truncate text-sm font-semibold text-foreground">
-                  {account.name}
-                </span>
-                <span className="block truncate text-sm text-muted-foreground">{account.role}</span>
-              </span>
-            </div>
-          )}
-          <div className="relative">
-            <label htmlFor={searchId} className="sr-only">
-              {uiText("Search settings")}
-            </label>
-            <Search
+      <div className="mb-3 space-y-3">
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-left text-sm text-muted-foreground transition-[color,background-color] duration-press hover:bg-popover-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <ChevronLeft className="size-4 shrink-0" aria-hidden />
+            {uiText("Back to library")}
+          </button>
+        )}
+        {account && (
+          <div className="flex items-center gap-2.5 px-2">
+            <span
               aria-hidden
-              className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              id={searchId}
-              type="search"
-              value={query}
-              placeholder={uiText("Search settings")}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && first) {
-                  onChange(first.id);
-                  setQuery("");
-                }
-              }}
-              className="h-8 rounded-md pl-8 text-sm"
-            />
+              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-foreground/10 text-xs font-semibold uppercase text-foreground"
+            >
+              {account.name.slice(0, 1)}
+            </span>
+            <span className="min-w-0 leading-tight">
+              <span className="block truncate text-sm font-semibold text-foreground">
+                {account.name}
+              </span>
+              <span className="block truncate text-sm text-muted-foreground">{account.role}</span>
+            </span>
           </div>
+        )}
+        <div className="relative">
+          <label htmlFor={searchId} className="sr-only">
+            {uiText("Search settings")}
+          </label>
+          <Search
+            aria-hidden
+            className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            id={searchId}
+            type="search"
+            value={query}
+            placeholder={uiText("Search settings")}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && first) {
+                onChange(first.id);
+                setQuery("");
+              }
+            }}
+            className="h-8 rounded-md pl-8 text-sm"
+          />
         </div>
-      ) : (
-        <h2 className="flex h-12 items-center px-1 font-mono text-2xs font-medium uppercase tracking-[.06em] text-muted-foreground">
-          {uiText("Settings")}
-        </h2>
-      )}
+      </div>
       {filtered.length === 0 && (
         <p className="px-2 py-3 text-sm text-muted-foreground">{uiText("No settings match")}</p>
       )}

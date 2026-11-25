@@ -9,6 +9,7 @@ module.exports = {
         "overlay-scrim": "var(--overlay-scrim)",
         plate: "var(--plate)",
         input: "var(--input)",
+        "field-surface": "var(--field-surface)",
         ring: "var(--ring)",
         background: "var(--background)",
         foreground: "var(--foreground)",

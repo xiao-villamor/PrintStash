@@ -896,7 +896,7 @@ export function RevisionsTab({
                                 onChange={(e) => setRevisionLabel(e.target.value)}
                                 maxLength={128}
                                 placeholder={uiText("Revision label")}
-                                className="w-full bg-card border border-input rounded px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
+                                className="w-full bg-field-surface border border-input rounded px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
                               />
                             </label>
                             <ChoiceField<FileRevisionStatus | "">
@@ -918,7 +918,7 @@ export function RevisionsTab({
                                 placeholder={uiText(
                                   "Notes about print outcome, fit, filament, or what to try next",
                                 )}
-                                className="w-full bg-card border border-input rounded px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                                className="w-full bg-field-surface border border-input rounded px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary resize-none"
                               />
                             </label>
                             <ChoiceField

@@ -5,6 +5,17 @@ import { useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("Collection tree", () => {
+  test("opens the library root from the sidebar", async ({ page }) => {
+    await page.goto("/?c=maraio");
+    const root = page.getByRole("tree").getByRole("button", { name: "All Models", exact: true });
+    await expect(page.getByRole("main").getByRole("heading", { name: "maraio" })).toBeVisible();
+    await root.click();
+    await expect(page.getByRole("main").getByRole("heading", { name: "All Models" })).toBeVisible();
+    await expect(page).toHaveURL(
+      (url) => !url.searchParams.has("c") && !url.searchParams.has("cid"),
+    );
+  });
+
   test("keeps displayed rows mounted when selecting a folder", async ({ page }) => {
     const pending = Promise.withResolvers<void>();
     let selecting = false;

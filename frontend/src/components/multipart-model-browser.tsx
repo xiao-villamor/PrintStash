@@ -1492,7 +1492,7 @@ function MultipartDetail({ id }: { id: number }) {
                         aria-haspopup="dialog"
                         aria-expanded={collectionPickerOpen}
                         aria-label={t("multipart.collectionLabel")}
-                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-left text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                        className="h-10 w-full rounded-md border border-input bg-field-surface px-3 text-left text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                       >
                         {model.collection_label || t("multipart.vaultOnly")}
                       </button>
@@ -1528,7 +1528,7 @@ function MultipartDetail({ id }: { id: number }) {
                     onChange={(event) => setDraft({ ...model, description: event.target.value })}
                     disabled={!canEdit}
                     rows={3}
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                    className="w-full rounded-md border border-input bg-field-surface px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                   />
                 </label>
                 <div className="space-y-3">

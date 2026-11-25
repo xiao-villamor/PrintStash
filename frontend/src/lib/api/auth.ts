@@ -79,6 +79,10 @@ export function deactivateAdminUser(id: number): Promise<void> {
   return requestApi<void>(`/api/v1/admin/users/${id}`, { method: "DELETE" });
 }
 
+export function removeAdminUser(id: number): Promise<void> {
+  return requestApi<void>(`/api/v1/admin/users/${id}?remove=true`, { method: "DELETE" });
+}
+
 export function createApiKey(name: string): Promise<ApiKeyCreateResponse> {
   return requestApi<ApiKeyCreateResponse>("/api/v1/auth/api-keys", {
     method: "POST",

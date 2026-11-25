@@ -135,18 +135,15 @@ describe("SidebarNav", () => {
     it.each([
       { account: "admin", auth: adminSession() },
       { account: "member", auth: memberSession() },
-    ])("keeps Settings directly reachable for a $account", async ({ auth }) => {
+    ])("opens Settings from the workspace menu for a $account", async ({ auth }) => {
       const user = userEvent.setup();
       renderNav({ at: "/search", auth });
 
-      await user.click(screen.getByRole("link", { name: "Settings" }));
-
+      expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "My workspace" }));
+      await user.click(screen.getByRole("menuitem", { name: "Settings" }));
       await waitFor(() =>
         expect(screen.getByTestId("rail-location")).toHaveTextContent("/settings"),
-      );
-      expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
-        "aria-current",
-        "page",
       );
     });
 

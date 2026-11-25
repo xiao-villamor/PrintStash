@@ -77,8 +77,7 @@ export function TopBar() {
   const attachBreadcrumbs = pane?.attachBreadcrumbs;
   const section = pathname === "/settings" ? settingsSection(searchParams.get("section")) : null;
   const titleKey = section ? SETTINGS_SECTION_LABELS[section] : pageTitle(pathname);
-  const settingsBreadcrumb =
-    section !== null && (section !== "trash" || searchParams.get("view") === "settings");
+  const settingsBreadcrumb = section !== null && section !== "trash";
   const desktop = useMediaQuery("(min-width: 768px)");
   const mobileCollections = useMobileFilterDrawer();
   const router = useRouter();

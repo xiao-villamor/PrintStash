@@ -489,7 +489,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
                       <select
                         value={destination}
                         onChange={(event) => setDestination(event.target.value)}
-                        className="mt-1.5 block h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        className="mt-1.5 block h-10 w-full rounded-md border border-input bg-field-surface px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                       >
                         <option value={NEW_COLLECTION}>{t("inbox.newCollectionFromTitle")}</option>
                         <option value={NO_COLLECTION}>{t("inbox.noCollection")}</option>

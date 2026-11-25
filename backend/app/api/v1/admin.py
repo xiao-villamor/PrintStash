@@ -190,16 +190,30 @@ def reset_user_password(
 
 
 @router.delete("/users/{user_id}", status_code=204)
-def deactivate_user(user_id: int, session: Session = Depends(get_session)) -> Response:
+def deactivate_user(
+    user_id: int,
+    remove: bool = Query(default=False),
+    current_user: User = Depends(require_superuser),
+    session: Session = Depends(get_session),
+) -> Response:
     with _admin_security_lock:
-        return _deactivate_user_locked(user_id, session)
+        return _deactivate_user_locked(
+            user_id, session, remove=remove, actor_id=current_user.id
+        )
 
 
-def _deactivate_user_locked(user_id: int, session: Session) -> Response:
+def _deactivate_user_locked(
+    user_id: int, session: Session, *, remove: bool, actor_id: int | None
+) -> Response:
     user = session.get(User, user_id)
     if user is None or user.deleted_at is not None:
         raise HTTPException(status_code=404, detail="user_not_found")
     _prevent_last_superuser_lockout(session, user, next_is_active=False)
+    if remove:
+        if user_id == actor_id:
+            raise HTTPException(status_code=400, detail="cannot_delete_current_user")
+        user.deleted_at = utcnow()
+        user.deleted_by = actor_id
     invalidate_user_sessions(session, user)
     user.is_active = False
     user.updated_at = utcnow()

@@ -292,8 +292,7 @@ describe("Storage insights", () => {
       screen.queryByRole("img", { name: "Recorded owned storage over time" }),
     ).not.toBeInTheDocument();
   });
-  it("keeps storage measurement details accessible", async () => {
-    const user = userEvent.setup();
+  it("toggles measurement details from a labeled button", async () => {
     setup({
       ...report,
       inventory: {
@@ -304,11 +303,17 @@ describe("Storage insights", () => {
       },
     });
 
-    await user.click(await screen.findByText("Measurement details"));
+    const toggle = await screen.findByRole("button", { name: "Measurement details" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("heading", { name: "Files by type" })).not.toBeInTheDocument();
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("heading", { name: "Files by type" })).toBeVisible();
     expect(screen.getByText("STEP files")).toBeVisible();
     expect(screen.getByText("In library")).toBeVisible();
     expect(screen.getByText(/Provider measurement/)).toBeVisible();
+    await userEvent.click(toggle);
+    expect(screen.queryByRole("heading", { name: "Files by type" })).not.toBeInTheDocument();
   });
 
   it("shows a privacy-safe reservation beside the paginated Collection drilldown", async () => {

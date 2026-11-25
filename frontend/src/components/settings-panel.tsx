@@ -1,5 +1,4 @@
 "use client";
-import { WorkbenchSidebarContent } from "@/components/collections-pane";
 import {
   SETTINGS_SECTION_LABELS,
   settingsSection,
@@ -7,8 +6,7 @@ import {
 } from "@/lib/settings-sections";
 import { SettingsNav, type SettingsNavGroup } from "@/components/settings-nav";
 import { SettingsToc } from "@/components/settings-toc";
-import { CardMetricsPreview, ThemeTiles } from "@/components/settings-appearance-parts";
-import { useCollectionsPane } from "@/lib/collections-pane-context";
+import { CardMetricsEditor, ThemeTiles } from "@/components/settings-appearance-parts";
 
 import { useContentReveal } from "@/lib/use-content-reveal";
 import { StorageConnectionReview } from "@/components/storage-connection-review";
@@ -22,7 +20,7 @@ import { GettingStartedReminder } from "@/components/getting-started-reminder";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 
 import { knownUiText } from "@/lib/locale";
-import { formatNumber } from "@/lib/format";
+import { formatNumber, parseApiInstant } from "@/lib/format";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { setThemeMode, useThemeMode } from "@/lib/theme";
@@ -94,6 +92,8 @@ import {
   Database,
   Download,
   Eraser,
+  Eye,
+  EyeOff,
   Gpu,
   Hourglass,
   Files,
@@ -108,16 +108,13 @@ import {
   Copy,
   Loader2,
   Palette,
-  Puzzle,
   ShieldCheck,
   RotateCcw,
   Save,
-  Settings as SettingsIcon,
   Trash2,
   Search,
   Server,
   Tag,
-  UserPlus,
   Users,
   Clock,
   RefreshCw,
@@ -133,6 +130,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { TabBar } from "@/components/ui/tabs";
+import { FormField } from "@/components/ui/form-field";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Localized } from "@/components/ui/localized";
@@ -180,10 +178,9 @@ import {
   writeMetadataPreferences,
 } from "@/lib/metadata-preferences";
 import {
-  CARD_METRIC_OPTIONS,
   CardMetricId,
-  CardMetrics,
   DEFAULT_CARD_METRICS,
+  cardMetricsInDisplayOrder,
   readCardMetrics,
   writeCardMetrics,
 } from "@/lib/card-metrics";
@@ -192,6 +189,7 @@ import { localeDefinitions, SUPPORTED_LOCALES, useI18n, type MessageKey } from "
 import "./settings-panel.css";
 import {
   SettingsCard,
+  SettingsGroupHead,
   SettingsEmptyRow,
   SettingsNotice,
   SettingsChoiceCards,
@@ -219,7 +217,6 @@ import {
   type PreviewPreferences,
   type PreviewQuality,
   type MeshRendererPreference,
-  type ScreenshotScale,
 } from "@/lib/preview-preferences";
 import {
   prepareBrowserExtensionSetup,
@@ -259,7 +256,6 @@ const SETTINGS_SECTIONS: {
   { id: "design", labelKey: SETTINGS_SECTION_LABELS["design"], icon: Palette },
   { id: "previews", labelKey: SETTINGS_SECTION_LABELS["previews"], icon: Images },
   { id: "gpu", labelKey: SETTINGS_SECTION_LABELS["gpu"], icon: Gpu },
-  { id: "trash", labelKey: SETTINGS_SECTION_LABELS["trash"], icon: Trash2 },
   { id: "about", labelKey: SETTINGS_SECTION_LABELS["about"], icon: Info },
 ];
 
@@ -268,7 +264,7 @@ const SETTINGS_GROUPS: { labelKey: MessageKey; ids: SettingsSection[] }[] = [
     labelKey: "Vault",
     ids: ["overview", "access", "storage", "backup", "remote-storage", "maintenance"],
   },
-  { labelKey: "Library", ids: ["imports", "libraries", "previews", "ai-search", "trash"] },
+  { labelKey: "Library", ids: ["imports", "libraries", "previews", "ai-search"] },
   { labelKey: "Integrations", ids: ["spoolman", "notifications", "sso"] },
   { labelKey: "This browser", ids: ["design", "gpu"] },
   { labelKey: "System", ids: ["work", "about"] },
@@ -325,7 +321,6 @@ const MESH_RENDERERS = [
   "auto",
   "webgpu",
 ] as const satisfies readonly MeshRendererPreference[];
-const SCREENSHOT_SCALES = [1, 2, 3] as const satisfies readonly ScreenshotScale[];
 /** Widths the vault offers; a legacy config value outside this list shows as "Custom". */
 const MODEL_THUMBNAIL_WIDTHS = [320, 640, 1280] as const;
 type ModelThumbnailWidth = (typeof MODEL_THUMBNAIL_WIDTHS)[number];
@@ -367,14 +362,14 @@ function formatDate(value: string | null | undefined): string {
     month: "short",
     day: "numeric",
     year: "numeric",
-  }).format(new Date(value));
+  }).format(parseApiInstant(value) ?? new Date(value));
 }
 
 function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat(currentLocale(), {
     dateStyle: "medium",
     timeStyle: "short",
-  }).format(new Date(value));
+  }).format(parseApiInstant(value) ?? new Date(value));
 }
 
 interface RetentionDraft {
@@ -465,10 +460,11 @@ function useDeadlineReached(deadline: string | null): boolean {
   const [reachedDeadline, setReachedDeadline] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!deadline) return;
+    const instant = parseApiInstant(deadline);
+    if (!deadline || !instant) return;
     let timer: number;
     const poll = () => {
-      const remaining = Date.parse(deadline) - Date.now();
+      const remaining = instant.getTime() - Date.now();
       if (remaining <= 0) {
         setReachedDeadline(deadline);
         return;
@@ -482,13 +478,32 @@ function useDeadlineReached(deadline: string | null): boolean {
   return deadline !== null && reachedDeadline === deadline;
 }
 
+function gcCandidateName(kind: string, id: number): string {
+  switch (kind) {
+    case "model":
+      return uiText("Model #{value1}", { value1: String(id) });
+    case "multipart_model":
+      return uiText("Multipart Model #{value1}", { value1: String(id) });
+    case "file":
+      return uiText("File #{value1}", { value1: String(id) });
+    case "document":
+      return uiText("Document #{value1}", { value1: String(id) });
+    case "collection":
+      return uiText("Collection #{value1}", { value1: String(id) });
+    case "printer":
+      return uiText("Printer #{value1}", { value1: String(id) });
+    default:
+      return uiText("Item #{value1}", { value1: String(id) });
+  }
+}
+
 /** How long a trashed item has left; the last days take the destructive tone. */
 function TrashExpiry({ expiresAt }: { expiresAt: string | null | undefined }) {
   useUiLocale();
   const [now] = useState(Date.now);
-  if (!expiresAt) return null;
-  const days = Math.ceil((Date.parse(expiresAt) - now) / 86_400_000);
-  if (Number.isNaN(days)) return null;
+  const expiry = parseApiInstant(expiresAt);
+  if (!expiry) return null;
+  const days = Math.ceil((expiry.getTime() - now) / 86_400_000);
   return (
     <span
       className={cn(
@@ -497,13 +512,18 @@ function TrashExpiry({ expiresAt }: { expiresAt: string | null | undefined }) {
       )}
     >
       <Clock className="size-3" aria-hidden="true" />
-      {days <= 0 ? uiText("Expires today") : uiText("{value1} days left", { value1: String(days) })}
+      {days <= 0
+        ? uiText("Expired")
+        : days === 1
+          ? uiText("1 day left")
+          : uiText("{value1} days left", { value1: formatNumber(days) })}
     </span>
   );
 }
 
+const EMPTY_CREATE_USER = { username: "", email: "", password: "", confirmation: "" };
+
 export function SettingsPanel() {
-  const sidebar = useCollectionsPane();
   useUiLocale();
   const { user } = useAuth();
   const [addingSamples, setAddingSamples] = useState(false);
@@ -520,8 +540,7 @@ export function SettingsPanel() {
   // deep link, back button, and replace.
   const activeSection = settingsSection(searchParams.get("section"));
   const sectionMotion = useContentReveal<HTMLElement>(activeSection);
-  const settingsTrash = activeSection === "trash" && searchParams.get("view") === "settings";
-  const trashPage = activeSection === "trash" && !settingsTrash;
+  const trashPage = activeSection === "trash";
   const mobileTabsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -554,7 +573,7 @@ export function SettingsPanel() {
   const [archiveBusy, setArchiveBusy] = useState<"export" | "import" | null>(null);
   const apiKeysQuery = useQuery({
     ...apiKeysOptions(user?.id ?? null),
-    enabled: user !== null && activeSection === "access",
+    enabled: user !== null && (activeSection === "access" || activeSection === "imports"),
   });
   const usersQuery = useQuery({
     ...adminUsersOptions(user?.is_superuser ? user.id : null),
@@ -573,10 +592,19 @@ export function SettingsPanel() {
       ? "create"
       : userCommand.variables.id
     : null;
-  const [createUserDraft, setCreateUserDraft] = useState({ username: "", email: "", password: "" });
+  const [createUserDraft, setCreateUserDraft] = useState(EMPTY_CREATE_USER);
+  const [showNewUserPasswords, setShowNewUserPasswords] = useState(false);
+  const [deleteUserTarget, setDeleteUserTarget] = useState<number | null>(null);
+  const [deleteUserError, setDeleteUserError] = useState<string | null>(null);
   const [createUserOpen, setCreateUserOpen] = useState(false);
   const [passwordTarget, setPasswordTarget] = useState<number | null>(null);
-  const { username: newUsername, email: newUserEmail, password: newUserPassword } = createUserDraft;
+  const {
+    username: newUsername,
+    email: newUserEmail,
+    password: newUserPassword,
+    confirmation,
+  } = createUserDraft;
+  const passwordsMatch = newUserPassword === confirmation;
   const [passwordDrafts, setPasswordDrafts] = useState<Record<number, string>>({});
   const [accessCollection, setAccessCollection] = useState<CollectionNodeRead | null>(null);
   const [accessPickerOpen, setAccessPickerOpen] = useState(false);
@@ -638,7 +666,7 @@ export function SettingsPanel() {
       : `${printerCommand.variables.printerId}:${printerCommand.variables.targetUserId}`
     : null;
   const [ownedReceipt, setOwnedReceipt] = useState<
-    (ApiKeyReceipt & { handoff: BrowserExtensionSetup | null }) | null
+    (ApiKeyReceipt & { handoff: BrowserExtensionSetup | null; extension: boolean }) | null
   >(null);
   const receipt =
     user &&
@@ -825,7 +853,10 @@ export function SettingsPanel() {
   useEffect(() => {
     accountLive.current = true;
     const release = onAuthChange(() => {
-      setCreateUserDraft({ username: "", email: "", password: "" });
+      setCreateUserDraft(EMPTY_CREATE_USER);
+      setShowNewUserPasswords(false);
+      setDeleteUserTarget(null);
+      setDeleteUserError(null);
       setCreateUserOpen(false);
       setPasswordDrafts({});
       setPasswordTarget(null);
@@ -871,16 +902,12 @@ export function SettingsPanel() {
     });
     return sections.length ? [{ label: uiText(group.labelKey), sections }] : [];
   });
-  // The Settings sidebar and the in-page rail are the same navigation; the rail
-  // shows whenever the sidebar is not already showing it.
-  const pageRail = !(sidebar && sidebar.open && sidebar.mode === "settings");
 
   function changeSection(section: SettingsSection) {
     const params = new URLSearchParams(searchParams.toString());
     if (section === "overview") params.delete("section");
     else params.set("section", section);
-    if (section === "trash") params.set("view", "settings");
-    else params.delete("view");
+    params.delete("view");
     const query = params.toString();
     router.replace(query ? `/settings?${query}` : "/settings");
   }
@@ -1385,7 +1412,7 @@ export function SettingsPanel() {
         name: extension ? "Browser extension" : keyName.trim() || "Programmatic access",
         receiveReceipt: (result) => {
           if (!accountCurrent(session)) return;
-          setOwnedReceipt({ ...result, handoff: null });
+          setOwnedReceipt({ ...result, handoff: null, extension });
           if (extension) {
             try {
               const handoff = prepareBrowserExtensionSetup(
@@ -1394,7 +1421,7 @@ export function SettingsPanel() {
                 result.secret,
               );
               handoffPrepared = true;
-              setOwnedReceipt({ ...result, handoff });
+              setOwnedReceipt({ ...result, handoff, extension });
             } catch {
               toast.error(t("settings.accountHandoffFailed"));
             }
@@ -1575,8 +1602,8 @@ export function SettingsPanel() {
       return;
     const captured = createUserDraft;
     const username = captured.username.trim();
-    const password = captured.password.trim();
-    if (!username || password.length < 8) return;
+    const password = captured.password;
+    if (username.length < 3 || password.length < 8 || password !== captured.confirmation) return;
     const session = getSessionVersion();
     try {
       await userCommand.mutateAsync({
@@ -1586,10 +1613,9 @@ export function SettingsPanel() {
         payload: { username, password, email: captured.email.trim() || null },
       });
       if (!accountCurrent(session)) return;
-      setCreateUserDraft((current) =>
-        current === captured ? { username: "", email: "", password: "" } : current,
-      );
+      setCreateUserDraft((current) => (current === captured ? EMPTY_CREATE_USER : current));
       setCreateUserOpen(false);
+      setShowNewUserPasswords(false);
       toast.success(uiText("User created."));
     } catch (error) {
       if (accountCurrent(session)) toast.error(error);
@@ -1637,6 +1663,27 @@ export function SettingsPanel() {
     }
   }
 
+  async function deleteUser(id: number) {
+    if (!user?.is_superuser || id === user.id || usersBusy !== null || !usersQuery.isSuccess)
+      return;
+    setDeleteUserError(null);
+    const session = getSessionVersion();
+    try {
+      await userCommand.mutateAsync({ kind: "remove", id, userId: user.id, session });
+      if (!accountCurrent(session)) return;
+      setDeleteUserTarget(null);
+      toast.success(uiText("User deleted."));
+    } catch (error) {
+      if (accountCurrent(session)) setDeleteUserError(userMessage(error));
+    }
+  }
+
+  function closeCreateUser() {
+    if (usersBusy === "create") return;
+    setCreateUserOpen(false);
+    setShowNewUserPasswords(false);
+  }
+
   async function confirmRestart() {
     setRestartBusy(true);
     try {
@@ -1670,7 +1717,7 @@ export function SettingsPanel() {
   }
 
   function updateCardMetric(slot: 0 | 1 | 2, id: CardMetricId) {
-    const next: CardMetrics = [cardMetrics[0], cardMetrics[1], cardMetrics[2]];
+    const next = cardMetricsInDisplayOrder(cardMetrics);
     next[slot] = id;
     setCardMetrics(next);
     writeCardMetrics(next);
@@ -1861,12 +1908,14 @@ export function SettingsPanel() {
       if (!accountCurrent(session)) return;
       if (receipt.kind !== "plan") throw new Error("Expected a GC plan receipt");
       setGcDigestConfirmation("");
-      toast.success(
-        uiText("gc.previewCreated", {
-          value1: String(receipt.plan.resource_count),
-          count: receipt.plan.resource_count,
-        }),
-      );
+      if (receipt.plan.resource_count > 0) {
+        toast.success(
+          uiText("gc.previewCreated", {
+            value1: String(receipt.plan.resource_count),
+            count: receipt.plan.resource_count,
+          }),
+        );
+      }
     } catch (error) {
       if (accountCurrent(session)) toast.error(error);
     } finally {
@@ -1875,7 +1924,7 @@ export function SettingsPanel() {
   }
 
   async function approveExpiredGcPlan() {
-    if (!gcPlan || gcRead.isError || trashBusy !== null) return;
+    if (!gcPlan || gcPlan.resource_count === 0 || gcRead.isError || trashBusy !== null) return;
     const session = getSessionVersion();
     setTrashBusy("gc");
     try {
@@ -1903,7 +1952,7 @@ export function SettingsPanel() {
       await trashCommand.run({ kind: "abort", plan: gcPlan, session });
       if (!accountCurrent(session)) return;
       setGcDigestConfirmation("");
-      toast.success(uiText("GC plan aborted. Every candidate remains in the trash."));
+      toast.success(uiText("Cleanup review dismissed. Items remain in Trash."));
     } catch (error) {
       if (accountCurrent(session)) toast.error(error);
     } finally {
@@ -2059,6 +2108,7 @@ export function SettingsPanel() {
       disabled={
         !user?.is_superuser ||
         trashBusy === "gc" ||
+        trashRetentionBusy ||
         parsedTrashRetentionDays === null ||
         trashRetentionDays < 0 ||
         gcRead.isError ||
@@ -2071,130 +2121,180 @@ export function SettingsPanel() {
     </Button>
   );
 
-  const trashCleanupDetails =
-    activeSection === "trash" ? (
-      <>
-        {trashPurgeResult && (
-          <div
-            role="status"
-            aria-live="polite"
-            className={cn(
-              "border-t border-border px-4 py-3 text-xs sm:px-5",
-              (trashPurgeResult.storage_cleanup_status ?? "completed") === "completed"
-                ? "text-foreground"
-                : "settings-status text-xs",
-            )}
-          >
-            {cleanupStatusMessage(t, trashPurgeResult)}
-          </div>
-        )}
-        {gcPlan && (
-          <div className="border-t border-border px-4 py-4 sm:px-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold text-foreground">
-                  {uiText("GC plan #{value1} · {value2}", {
-                    value1: String(gcPlan.id ?? ""),
-                    value2: String(gcPlan.state ?? ""),
+  const cleanupStates = {
+    preview: "Preview ready",
+    quarantined: "Recovery period",
+    finalizing: "Cleanup in progress",
+    completed: "Cleanup complete",
+    aborted: "Review dismissed",
+    blocked: "Cleanup blocked",
+  } as const satisfies Record<NonNullable<typeof gcPlan>["state"], MessageKey>;
+
+  const trashCleanupDetails = trashPage ? (
+    <>
+      {trashPurgeResult && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={cn(
+            "border-t border-border px-4 py-3 text-xs sm:px-5",
+            (trashPurgeResult.storage_cleanup_status ?? "completed") === "completed"
+              ? "text-foreground"
+              : "settings-status text-xs",
+          )}
+        >
+          {cleanupStatusMessage(t, trashPurgeResult)}
+        </div>
+      )}
+      {gcPlan && (
+        <section
+          aria-label={uiText("Trash cleanup")}
+          className="rounded-lg border border-border bg-card px-4 py-4 sm:px-5"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <h2 className="text-sm font-semibold">{uiText("Trash cleanup")}</h2>
+              <p role="status" className="text-sm text-muted-foreground">
+                {gcPlan.state === "preview" && gcPlan.resource_count === 0
+                  ? uiText(
+                      gcPlan.candidate_pool_count === 0
+                        ? "No expired items were found."
+                        : "No expired items fit within the cleanup limits.",
+                    )
+                  : uiText(cleanupStates[gcPlan.state])}
+              </p>
+              {gcPlan.resource_count > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  {uiText("{value1} of {value2} expired items in this batch · {value3}", {
+                    value1: formatNumber(gcPlan.resource_count),
+                    value2: formatNumber(gcPlan.candidate_pool_count),
+                    value3: String(formatBytes(gcPlan.size_bytes)),
                   })}
                 </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {uiText(
-                    "{value1} of {value2} expired resources · {value3} storage keys · {value4}",
-                    {
-                      value1: String(gcPlan.resource_count ?? ""),
-                      value2: String(gcPlan.candidate_pool_count ?? ""),
-                      value3: String(gcPlan.key_count ?? ""),
-                      value4: String(formatBytes(gcPlan.size_bytes) ?? ""),
-                    },
-                  )}
-                </p>
-              </div>
-              <span className="settings-status">
-                {gcPlan.backup_id ? uiText("backup verified") : uiText("no backup bound")}
-              </span>
+              )}
             </div>
-            <p className="mt-3 text-2xs text-muted-foreground">{uiText("Exact plan digest")}</p>
-            <code className="mt-1 block break-all rounded border border-border bg-background px-2 py-2 text-3xs text-foreground">
-              {gcPlan.digest}
-            </code>
-            {gcPlan.state === "preview" && (
-              <div className="mt-3 space-y-3">
-                <p className="text-xs text-muted-foreground">
+            {gcPlan.resource_count > 0 && (
+              <span className="settings-status">
+                {gcPlan.backup_id
+                  ? uiText("backup verified")
+                  : uiText("Awaiting backup verification")}
+              </span>
+            )}
+          </div>
+          {gcPlan.state === "preview" && gcPlan.resource_count > 0 && (
+            <div className="mt-4 space-y-3">
+              {gcPlan.items.length > 0 && (
+                <ul
+                  aria-label={uiText("Items in this cleanup preview")}
+                  className="max-h-48 divide-y divide-border overflow-auto rounded-md border border-border"
+                >
+                  {gcPlan.items.map((candidate) => {
+                    const row = trashItems.find(
+                      (item) =>
+                        item.id === candidate.resource_id &&
+                        (item.kind === "multipart" ? "multipart_model" : "model") ===
+                          candidate.resource_kind,
+                    );
+                    return (
+                      <li
+                        key={candidate.id}
+                        className="flex justify-between gap-3 px-3 py-2 text-sm"
+                      >
+                        <span className="min-w-0 break-words">
+                          {row?.name ??
+                            gcCandidateName(candidate.resource_kind, candidate.resource_id)}
+                        </span>
+                        <span className="shrink-0 text-muted-foreground">
+                          {formatBytes(candidate.size_bytes)}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              <div className="space-y-1.5">
+                <label htmlFor="cleanup-approval-code" className="block text-sm font-medium">
+                  {uiText("Cleanup approval code")}
+                </label>
+                <code className="block break-all rounded-md border border-border bg-field-surface px-3 py-2 text-xs">
+                  {gcPlan.digest}
+                </code>
+                <p className="text-sm text-muted-foreground">
                   {uiText(
-                    "Approval is fail-closed: paste the exact digest below. The server will also require verified storage and a recent backup on an independent S3 provider before starting the quarantine.",
+                    "Paste this code to approve the exact list above. PrintStash checks storage and a recent independent S3 backup before starting the recovery period.",
                   )}
                 </p>
                 <input
                   className={INPUT}
-                  aria-label={uiText("Confirm GC plan digest")}
-                  placeholder={uiText("Paste the 64-character digest")}
+                  id="cleanup-approval-code"
+                  placeholder={uiText("Paste the approval code")}
                   value={gcDigestConfirmation}
                   disabled={gcRead.isError || gcRead.isPending || trashBusy === "gc"}
                   onChange={(event) => setGcDigestConfirmation(event.target.value.trim())}
                 />
               </div>
-            )}
-            {gcPlan.state === "quarantined" && gcPlan.quarantine_until && (
-              <p className="mt-3 text-xs text-muted-foreground">
-                {uiText(
-                  "Recovery quarantine ends {value1}. The plan and backup are reverified before final deletion.",
-                  { value1: String(formatDateTime(gcPlan.quarantine_until) ?? "") },
-                )}
-              </p>
-            )}
-            {gcPlan.last_error && (
-              <p className="mt-3 text-xs text-destructive">{gcPlan.last_error}</p>
-            )}
-            <div className="mt-3 flex flex-wrap justify-end gap-2">
-              {gcPlan.state === "preview" && (
-                <button
-                  type="button"
-                  className={BTN_PRIMARY}
-                  disabled={
-                    gcRead.isError ||
-                    gcRead.isPending ||
-                    trashBusy === "gc" ||
-                    gcDigestConfirmation !== gcPlan.digest
-                  }
-                  onClick={approveExpiredGcPlan}
-                >
-                  <ShieldCheck className="h-3.5 w-3.5" />
-                  {uiText("Verify backup and quarantine")}
-                </button>
-              )}
-              {gcPlan.state === "quarantined" && (
-                <button
-                  type="button"
-                  className={BTN_PRIMARY}
-                  disabled={
-                    gcRead.isError ||
-                    gcRead.isPending ||
-                    trashBusy === "gc" ||
-                    !gcPlan.quarantine_until ||
-                    !gcQuarantineReady
-                  }
-                  onClick={finalizeExpiredGcPlan}
-                >
-                  <Eraser className="h-3.5 w-3.5" />
-                  {uiText("Reverify and finalize")}
-                </button>
-              )}
-              {["preview", "quarantined"].includes(gcPlan.state) && (
-                <button
-                  type="button"
-                  className={BTN_SECONDARY}
-                  disabled={gcRead.isError || gcRead.isPending || trashBusy === "gc"}
-                  onClick={abortExpiredGcPlan}
-                >
-                  {uiText("Abort plan")}
-                </button>
-              )}
             </div>
+          )}
+          {gcPlan.state === "quarantined" && gcPlan.quarantine_until && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              {uiText(
+                "Recovery quarantine ends {value1}. The plan and backup are reverified before final deletion.",
+                { value1: String(formatDateTime(gcPlan.quarantine_until) ?? "") },
+              )}
+            </p>
+          )}
+          {gcPlan.last_error && (
+            <p className="mt-3 text-xs text-destructive">{gcPlan.last_error}</p>
+          )}
+          <div className="mt-3 flex flex-wrap justify-end gap-2">
+            {gcPlan.state === "preview" && gcPlan.resource_count > 0 && (
+              <button
+                type="button"
+                className={BTN_PRIMARY}
+                disabled={
+                  gcRead.isError ||
+                  gcRead.isPending ||
+                  trashBusy === "gc" ||
+                  gcDigestConfirmation !== gcPlan.digest
+                }
+                onClick={approveExpiredGcPlan}
+              >
+                <ShieldCheck className="h-3.5 w-3.5" />
+                {uiText("Verify backup and quarantine")}
+              </button>
+            )}
+            {gcPlan.state === "quarantined" && (
+              <button
+                type="button"
+                className={BTN_PRIMARY}
+                disabled={
+                  gcRead.isError ||
+                  gcRead.isPending ||
+                  trashBusy === "gc" ||
+                  !gcPlan.quarantine_until ||
+                  !gcQuarantineReady
+                }
+                onClick={finalizeExpiredGcPlan}
+              >
+                <Eraser className="h-3.5 w-3.5" />
+                {uiText("Reverify and finalize")}
+              </button>
+            )}
+            {["preview", "quarantined"].includes(gcPlan.state) && (
+              <button
+                type="button"
+                className={BTN_SECONDARY}
+                disabled={gcRead.isError || gcRead.isPending || trashBusy === "gc"}
+                onClick={abortExpiredGcPlan}
+              >
+                {uiText(gcPlan.resource_count === 0 ? "Dismiss review" : "Abort plan")}
+              </button>
+            )}
           </div>
-        )}
-      </>
-    ) : null;
+        </section>
+      )}
+    </>
+  ) : null;
 
   const saveTrashRetentionDisabled =
     !user?.is_superuser ||
@@ -2210,7 +2310,7 @@ export function SettingsPanel() {
     activeSection === "trash" ? (
       <form
         aria-label={uiText("Trash retention")}
-        className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3.5 text-[13px] sm:px-5"
+        className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-border bg-card px-4 py-3.5 text-sm sm:px-5"
         onSubmit={(event) => {
           event.preventDefault();
           if (!saveTrashRetentionDisabled) saveTrashRetention();
@@ -2225,7 +2325,7 @@ export function SettingsPanel() {
         <input
           id="trash-retention-days"
           type="number"
-          min={0}
+          min={-1}
           inputMode="numeric"
           aria-describedby="trash-retention-hint"
           aria-invalid={parsedTrashRetentionDays === null}
@@ -2245,7 +2345,9 @@ export function SettingsPanel() {
         />
         <span className="text-foreground">{uiText("days")}</span>
         <span id="trash-retention-hint" className="text-xs text-muted-foreground">
-          {uiText("Soft-deleted models stay restorable until the retention window expires.")}
+          {uiText(
+            "Items become eligible for cleanup after this many days. Use -1 to keep them indefinitely.",
+          )}
         </span>
         <span className="ml-auto flex gap-2">
           {trashRetentionDraft !== null && (
@@ -2276,72 +2378,18 @@ export function SettingsPanel() {
       </form>
     ) : null;
 
-  const trashRetentionCard =
-    activeSection === "trash" ? (
-      <SettingsCard
-        className="border-0"
-        title={uiText("Trash retention")}
-        description={uiText(
-          "Soft-deleted models stay restorable until the retention window expires.",
-        )}
-        action={settingsTrash ? reviewExpiredButton : undefined}
-        footer={
-          <button
-            type="button"
-            onClick={saveTrashRetention}
-            disabled={
-              !user?.is_superuser ||
-              !remoteConfigData ||
-              remoteConfig.isError ||
-              preferenceCommand.blocked ||
-              backupPolicy.isPending ||
-              parsedTrashRetentionDays === null
-            }
-            className={BTN_PRIMARY}
-          >
-            {trashRetentionBusy ? uiText("Saving") : uiText("Save retention")}
-          </button>
-        }
-      >
-        <div className="settings-preference-fields">
-          <label className="settings-preference-row">
-            <span>{uiText("Days")}</span>
-            <input
-              type="number"
-              min={-1}
-              value={trashRetentionText}
-              onChange={(event) => {
-                const text = event.target.value;
-                if (remoteConfigData)
-                  setTrashRetentionDraft((previous) => ({
-                    text,
-                    base: previous?.base ?? captureEditingBase(remoteConfigData),
-                  }));
-              }}
-              disabled={
-                !user?.is_superuser ||
-                !remoteConfigData ||
-                remoteConfig.isError ||
-                trashRetentionBusy
-              }
-              className={INPUT}
-            />
-          </label>
-        </div>
-        {trashCleanupDetails}
-      </SettingsCard>
-    ) : null;
-
   const trashItemsCard =
     activeSection === "trash" ? (
-      <SettingsCard
-        hideHeader={trashPage}
-        className="border-0"
-        title={uiText("trash.itemsTitle")}
-        description={uiText("multipart.trashHelp")}
+      <section
+        aria-label={uiText("trash.itemsTitle")}
+        className="overflow-hidden rounded-lg border border-border bg-card"
       >
         {trashItems.length > 0 && (
-          <div className="flex flex-wrap items-center gap-3 border-b border-border bg-foreground/[0.03] px-4 py-3 text-xs text-muted-foreground sm:px-5">
+          <div
+            role="group"
+            aria-label={uiText("Trash selection")}
+            className="flex flex-wrap items-center gap-3 border-b border-border bg-muted px-4 py-3 text-sm text-muted-foreground sm:px-5"
+          >
             <span className="flex items-center gap-3 font-medium text-foreground">
               <Checkbox
                 checked={selectedTrash.length === trashItems.length}
@@ -2385,7 +2433,7 @@ export function SettingsPanel() {
               </span>
             )}
             {trashItems.some((item) => item.kind === "model") && (
-              <span className="ml-auto rounded-full bg-foreground/10 px-2.5 py-1 font-mono tabular-nums text-foreground/80">
+              <span className="ml-auto text-xs tabular-nums">
                 {t("Known model storage: {size}", {
                   size: formatBytes(
                     trashItems.reduce(
@@ -2410,7 +2458,7 @@ export function SettingsPanel() {
               {uiText("settings.trashLoadFailed")}
             </p>
           ) : trashItems.length === 0 ? (
-            <SettingsEmptyRow className={trashPage ? "px-5" : undefined}>
+            <SettingsEmptyRow className="px-5">
               <strong className="font-medium text-foreground">{uiText("Trash is empty.")}</strong>{" "}
               {uiText("Deleted models wait here until the retention window ends.")}
             </SettingsEmptyRow>
@@ -2418,12 +2466,7 @@ export function SettingsPanel() {
             trashItems.map((item) => (
               <div
                 key={trashRowKey(item)}
-                className={cn(
-                  "grid gap-3 p-4 sm:p-5 lg:items-center",
-                  trashPage
-                    ? "grid-cols-[auto_auto_minmax(0,1fr)] lg:grid-cols-[auto_auto_minmax(0,1fr)_auto]"
-                    : "grid-cols-[auto_minmax(0,1fr)] lg:grid-cols-[auto_minmax(0,1fr)_auto]",
-                )}
+                className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-3 p-4 sm:p-5 lg:grid-cols-[auto_auto_minmax(0,1fr)_auto]"
               >
                 <Checkbox
                   checked={trashSelection.has(trashRowKey(item))}
@@ -2438,39 +2481,36 @@ export function SettingsPanel() {
                     },
                   )}
                 />
-                {trashPage && (
-                  <ProtectedThumbnail
-                    path={item.kind === "model" ? item.thumbnail_url : null}
-                    alt=""
-                    className="flex size-12 items-center justify-center overflow-hidden rounded-md border border-border bg-muted text-muted-foreground"
-                    imageClassName="h-full w-full object-cover"
-                    placeholder={<Boxes className="h-5 w-5" aria-hidden />}
-                  />
-                )}
+                <ProtectedThumbnail
+                  path={item.kind === "model" ? item.thumbnail_url : null}
+                  alt=""
+                  className="flex size-12 items-center justify-center overflow-hidden rounded-md border border-border bg-muted text-muted-foreground"
+                  imageClassName="h-full w-full object-cover"
+                  placeholder={<Boxes className="h-5 w-5" aria-hidden />}
+                />
                 <div className="min-w-0">
                   <p className="settings-list-title break-words">{item.name}</p>
                   <p className="settings-list-meta">
                     {[
                       item.kind === "multipart"
                         ? uiText("multipart.trashLabel")
-                        : uiText("{value1} files", { value1: String(item.file_count) }),
+                        : uiText("counts.files", { count: item.file_count }),
                       item.kind === "multipart"
                         ? uiText("multipart.partsCount", { count: item.part_count })
                         : formatBytes(item.size_bytes),
-                      uiText("Deleted {value1} · Expires {value2}", {
-                        value1: String(formatDate(item.deleted_at) ?? ""),
-                        value2: String(formatDate(item.expires_at) ?? ""),
-                      }),
+                      item.expires_at
+                        ? uiText("Deleted {value1} · Expires {value2}", {
+                            value1: String(formatDate(item.deleted_at)),
+                            value2: String(formatDate(item.expires_at)),
+                          })
+                        : uiText("Deleted {value1} · No expiry", {
+                            value1: String(formatDate(item.deleted_at)),
+                          }),
                     ].join(" · ")}
                   </p>
                   <TrashExpiry expiresAt={item.expires_at} />
                 </div>
-                <div
-                  className={cn(
-                    "flex flex-wrap gap-2 lg:col-start-auto lg:justify-end",
-                    trashPage ? "col-start-3" : "col-start-2",
-                  )}
-                >
+                <div className="col-start-3 flex flex-wrap gap-2 lg:col-start-auto lg:justify-end">
                   <button
                     type="button"
                     onClick={() => restoreTrashItem(trashRowKey(item))}
@@ -2494,7 +2534,7 @@ export function SettingsPanel() {
             ))
           )}
         </div>
-      </SettingsCard>
+      </section>
     ) : null;
 
   return (
@@ -2571,9 +2611,9 @@ export function SettingsPanel() {
           onClose={() => setPurgeExpiredOpen(false)}
           onConfirm={createExpiredGcPreview}
           busy={trashBusy === "gc"}
-          title={uiText("Create a safe GC preview?")}
+          title={uiText("Review expired items?")}
           description={uiText(
-            "This only records a bounded candidate plan. It does not delete catalog rows or storage bytes. Approval later requires the exact digest, verified storage, and a recent independent backup.",
+            "Create a list of items whose retention period has ended. Their expiry dates stay the same. Permanent deletion requires separate approval and a verified backup.",
           )}
           confirmLabel={uiText("Create preview")}
         />
@@ -2705,20 +2745,8 @@ export function SettingsPanel() {
                   />
                   {t("Refresh")}
                 </Button>
-                {reviewExpiredButton}
-                <Button size="sm" variant="outline" onClick={() => changeSection("overview")}>
-                  <SettingsIcon className="size-3.5" aria-hidden="true" />
-                  {t("settings.title")}
-                </Button>
+                {user?.is_superuser && reviewExpiredButton}
               </>
-            ) : settingsTrash ? (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => router.push("/settings?section=trash")}
-              >
-                {t("Open Trash")}
-              </Button>
             ) : activeSection === "spoolman" ? (
               <div ref={setSpoolmanActionHost} className="flex flex-wrap items-center gap-2" />
             ) : undefined
@@ -2726,10 +2754,7 @@ export function SettingsPanel() {
         />
 
         {!trashPage && (
-          <div
-            ref={mobileTabsRef}
-            className={cn("border-b border-border pb-3", pageRail ? "lg:hidden" : "md:hidden")}
-          >
+          <div ref={mobileTabsRef} className="border-b border-border pb-3 lg:hidden">
             <TabBar
               tabs={visibleSettingsSections.map((section) => {
                 const Icon = section.icon;
@@ -2757,42 +2782,24 @@ export function SettingsPanel() {
           className={
             trashPage
               ? ""
-              : pageRail
-                ? "lg:grid lg:grid-cols-[14.5rem_minmax(0,1fr)] lg:items-start lg:gap-8 xl:grid-cols-[14.5rem_minmax(0,1fr)_10.5rem]"
-                : "xl:grid xl:grid-cols-[minmax(0,1fr)_10.5rem] xl:items-start xl:gap-8"
+              : "lg:grid lg:grid-cols-[14.5rem_minmax(0,1fr)] lg:items-start lg:gap-8 xl:grid-cols-[14.5rem_minmax(0,1fr)_10.5rem]"
           }
         >
           {!trashPage && (
-            <>
-              <WorkbenchSidebarContent>
-                {sidebar && (
-                  <SettingsNav
-                    variant="sidebar"
-                    groups={settingsNavGroups}
-                    active={activeSection}
-                    onChange={(id) => changeSection(settingsSection(id))}
-                    hidden={sidebar.mode !== "settings"}
-                  />
-                )}
-              </WorkbenchSidebarContent>
-              {pageRail && (
-                <SettingsNav
-                  variant="page"
-                  groups={settingsNavGroups}
-                  active={activeSection}
-                  onChange={(id) => changeSection(settingsSection(id))}
-                  account={
-                    user
-                      ? {
-                          name: user.username,
-                          role: user.is_superuser ? uiText("Vault admin") : uiText("Member"),
-                        }
-                      : undefined
-                  }
-                  onBack={() => router.push("/")}
-                />
-              )}
-            </>
+            <SettingsNav
+              groups={settingsNavGroups}
+              active={activeSection}
+              onChange={(id) => changeSection(settingsSection(id))}
+              account={
+                user
+                  ? {
+                      name: user.username,
+                      role: user.is_superuser ? uiText("Vault admin") : uiText("Member"),
+                    }
+                  : undefined
+              }
+              onBack={() => router.push("/")}
+            />
           )}
 
           <main ref={sectionMotion} className="settings-main min-w-0">
@@ -3216,9 +3223,7 @@ export function SettingsPanel() {
                 {user?.is_superuser && (
                   <SettingsCard
                     title={uiText("Users")}
-                    description={uiText(
-                      "Create users, assign vault admins, disable accounts, and reset passwords.",
-                    )}
+                    description={uiText("Manage accounts, administrator access, and passwords.")}
                     action={
                       <Button
                         size="sm"
@@ -3232,44 +3237,48 @@ export function SettingsPanel() {
                     <div className="space-y-4 py-4">
                       <Modal
                         open={createUserOpen}
-                        onClose={() => {
-                          if (usersBusy !== "create") setCreateUserOpen(false);
-                        }}
+                        onClose={closeCreateUser}
                         title={t("Create user")}
-                        className="settings-dialog"
+                        description={uiText(
+                          "Choose the credentials this person will use to sign in.",
+                        )}
+                        className="settings-dialog sm:max-w-md"
                         footer={
                           <>
                             <Button
                               variant="outline"
-                              onClick={() => setCreateUserOpen(false)}
+                              onClick={closeCreateUser}
                               disabled={usersBusy === "create"}
                             >
                               {t("Cancel")}
                             </Button>
-                            <button
-                              type="button"
-                              onClick={createUser}
+                            <Button
+                              type="submit"
+                              form="create-user-form"
+                              loading={usersBusy === "create"}
                               disabled={
                                 usersBusy !== null ||
-                                usersQuery.isError ||
-                                usersQuery.isPending ||
-                                !newUsername.trim() ||
-                                newUserPassword.trim().length < 8
+                                !usersQuery.isSuccess ||
+                                newUsername.trim().length < 3 ||
+                                newUserPassword.length < 8 ||
+                                !passwordsMatch
                               }
-                              className={cn(BTN_PRIMARY, "h-9")}
                             >
-                              <UserPlus className="h-3.5 w-3.5" />
                               {uiText("Create")}
-                            </button>
+                            </Button>
                           </>
                         }
                       >
-                        <div className="grid gap-4">
-                          <label className="block space-y-1">
-                            <span className="block text-sm font-medium text-foreground">
-                              {uiText("Username")}
-                            </span>
-                            <input
+                        <form
+                          id="create-user-form"
+                          className="grid gap-4"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            void createUser();
+                          }}
+                        >
+                          <FormField htmlFor="new-user-username" label={uiText("Username")}>
+                            <Input
                               id="new-user-username"
                               value={newUsername}
                               onChange={(event) =>
@@ -3278,16 +3287,24 @@ export function SettingsPanel() {
                                   username: event.target.value,
                                 }))
                               }
-                              className={INPUT}
+                              minLength={3}
                               maxLength={128}
-                              autoComplete="username"
+                              autoComplete="off"
+                              required
                             />
-                          </label>
-                          <label className="block space-y-1">
-                            <span className="block text-sm font-medium text-foreground">
-                              {uiText("Email")}
-                            </span>
-                            <input
+                          </FormField>
+                          <FormField
+                            htmlFor="new-user-email"
+                            label={
+                              <>
+                                {uiText("Email")}{" "}
+                                <span className="font-normal text-muted-foreground">
+                                  {uiText("(optional)")}
+                                </span>
+                              </>
+                            }
+                          >
+                            <Input
                               id="new-user-email"
                               value={newUserEmail}
                               onChange={(event) =>
@@ -3296,40 +3313,88 @@ export function SettingsPanel() {
                                   email: event.target.value,
                                 }))
                               }
-                              className={INPUT}
                               type="email"
                               maxLength={255}
-                              autoComplete="email"
+                              autoComplete="off"
                             />
-                          </label>
-                          <label className="block space-y-1">
-                            <span className="block text-sm font-medium text-foreground">
-                              {uiText("Initial password")}
-                            </span>
-                            <input
-                              id="new-user-password"
-                              value={newUserPassword}
+                          </FormField>
+                          <FormField
+                            htmlFor="new-user-password"
+                            label={uiText("Initial password")}
+                            hint={uiText("Initial password: at least 8 characters.")}
+                            hintId="new-user-password-help"
+                          >
+                            <div className="relative">
+                              <Input
+                                id="new-user-password"
+                                value={newUserPassword}
+                                onChange={(event) =>
+                                  setCreateUserDraft((current) => ({
+                                    ...current,
+                                    password: event.target.value,
+                                  }))
+                                }
+                                className="pe-11"
+                                type={showNewUserPasswords ? "text" : "password"}
+                                minLength={8}
+                                maxLength={256}
+                                autoComplete="new-password"
+                                aria-describedby="new-user-password-help"
+                                required
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                className="absolute end-0 top-0"
+                                aria-controls="new-user-password new-user-confirmation"
+                                aria-label={uiText(
+                                  showNewUserPasswords ? "Hide passwords" : "Show passwords",
+                                )}
+                                onClick={() => setShowNewUserPasswords((visible) => !visible)}
+                              >
+                                {showNewUserPasswords ? (
+                                  <EyeOff aria-hidden />
+                                ) : (
+                                  <Eye aria-hidden />
+                                )}
+                              </Button>
+                            </div>
+                          </FormField>
+                          <FormField
+                            htmlFor="new-user-confirmation"
+                            label={uiText("Confirm password")}
+                          >
+                            <Input
+                              id="new-user-confirmation"
+                              value={confirmation}
                               onChange={(event) =>
                                 setCreateUserDraft((current) => ({
                                   ...current,
-                                  password: event.target.value,
+                                  confirmation: event.target.value,
                                 }))
                               }
-                              className={INPUT}
-                              type="password"
-                              minLength={8}
+                              type={showNewUserPasswords ? "text" : "password"}
                               maxLength={256}
                               autoComplete="new-password"
-                              aria-describedby="new-user-password-help"
+                              aria-invalid={confirmation !== "" && !passwordsMatch}
+                              aria-describedby={
+                                confirmation !== "" && !passwordsMatch
+                                  ? "new-user-password-mismatch"
+                                  : undefined
+                              }
+                              required
                             />
-                          </label>
-                        </div>
-                        <p
-                          id="new-user-password-help"
-                          className="mt-2 text-xs text-muted-foreground"
-                        >
-                          {uiText("Initial password: at least 8 characters.")}
-                        </p>
+                            {confirmation !== "" && !passwordsMatch && (
+                              <p
+                                id="new-user-password-mismatch"
+                                className="mt-1 text-xs text-destructive"
+                              >
+                                {uiText("Passwords do not match.")}
+                              </p>
+                            )}
+                          </FormField>
+                        </form>
                       </Modal>
 
                       <div className="space-y-2">
@@ -3452,10 +3517,43 @@ export function SettingsPanel() {
                                               ? deactivateUser(row.id)
                                               : patchUser(row.id, { is_active: true }),
                                         },
+                                        ...(row.id === user.id
+                                          ? []
+                                          : [
+                                              {
+                                                label: uiText("Delete user…"),
+                                                danger: true,
+                                                onSelect: () => {
+                                                  setDeleteUserError(null);
+                                                  setDeleteUserTarget(row.id);
+                                                },
+                                              },
+                                            ]),
                                       ]}
                                     />
                                   </div>
                                 </div>
+                                <ConfirmModal
+                                  open={deleteUserTarget === row.id}
+                                  onClose={() => {
+                                    if (usersBusy !== row.id) setDeleteUserTarget(null);
+                                  }}
+                                  onConfirm={() => void deleteUser(row.id)}
+                                  busy={usersBusy === row.id}
+                                  confirmDisabled={!usersQuery.isSuccess || usersBusy !== null}
+                                  title={uiText("Delete user")}
+                                  description={uiText(
+                                    "{value1} will lose access and disappear from the user list. Their activity history will be kept.",
+                                    { value1: row.username },
+                                  )}
+                                  confirmLabel={uiText("Delete user")}
+                                >
+                                  {deleteUserTarget === row.id && deleteUserError && (
+                                    <p role="alert" className="text-sm text-destructive">
+                                      {deleteUserError}
+                                    </p>
+                                  )}
+                                </ConfirmModal>
                                 <ConfirmModal
                                   open={passwordTarget === row.id}
                                   onClose={() => setPasswordTarget(null)}
@@ -3973,60 +4071,17 @@ export function SettingsPanel() {
                       </p>
                     ) : (
                       <>
-                        <div className="rounded-lg border border-border bg-muted/30 p-3">
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-foreground">
-                                {uiText("Browser importer")}
-                              </p>
-                              <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                                {uiText(
-                                  "Create a dedicated key and prepare this vault in the browser extension.",
-                                )}
-                              </p>
-                            </div>
-                            {extensionSetupReady ? (
-                              <span className="settings-status" role="status">
-                                {uiText("Setup prepared")}
-                              </span>
-                            ) : (
-                              <Button
-                                type="button"
-                                size="sm"
-                                onClick={setupBrowserExtension}
-                                loading={keyBusy}
-                                disabled={
-                                  receipt !== null || apiKeysQuery.isError || apiKeysQuery.isPending
-                                }
-                              >
-                                <Puzzle className="h-3.5 w-3.5" />
-                                {uiText("Set up extension")}
-                              </Button>
-                            )}
-                          </div>
-                          {extensionSetupReady && (
-                            <p className="mt-3 text-xs font-medium text-muted-foreground">
-                              {uiText(
-                                "Open the PrintStash extension on this tab to finish the verified connection.",
-                              )}
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                          <label className="block space-y-1">
-                            <span className="block text-sm font-medium text-foreground">
-                              {uiText("Key name")}
-                            </span>
-                            <input
+                        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                          <FormField htmlFor="api-key-name" label={uiText("Key name")}>
+                            <Input
                               id="api-key-name"
                               value={keyName}
                               onChange={(event) => setKeyName(event.target.value)}
-                              className={INPUT}
+                              className="max-w-none"
                               maxLength={128}
                             />
-                          </label>
-                          <button
+                          </FormField>
+                          <Button
                             type="button"
                             onClick={generateApiKey}
                             disabled={
@@ -4035,14 +4090,13 @@ export function SettingsPanel() {
                               apiKeysQuery.isError ||
                               apiKeysQuery.isPending
                             }
-                            className={BTN_PRIMARY}
                           >
                             <KeyRound className="h-3.5 w-3.5" />
                             {uiText("Generate")}
-                          </button>
+                          </Button>
                         </div>
 
-                        {newApiKey && (
+                        {newApiKey && !receipt?.extension && (
                           <div className="border border-primary/40 bg-primary/10 rounded p-3 space-y-2">
                             <p className="text-xs text-muted-foreground">
                               {uiText("Copy this key now. It will only be shown once.")}
@@ -5107,6 +5161,81 @@ export function SettingsPanel() {
               <div className="settings-imports">
                 <MakerWorldConnectCard />
                 <ProviderConnectionsPanel />
+                {user && (
+                  <SettingsCard
+                    title={uiText("Browser extension")}
+                    description={uiText(
+                      "Install the extension, prepare a connection here, then open the extension in this tab to finish.",
+                    )}
+                    action={
+                      !extensionSetupReady && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={setupBrowserExtension}
+                          loading={keyBusy}
+                          disabled={
+                            receipt !== null || apiKeysQuery.isError || apiKeysQuery.isPending
+                          }
+                        >
+                          {uiText("Set up extension")}
+                        </Button>
+                      )
+                    }
+                  >
+                    <div
+                      className="space-y-3 py-3"
+                      hidden={!apiKeysQuery.isError && !receipt?.extension}
+                    >
+                      {apiKeysQuery.isError && (
+                        <div role="alert" className="flex items-center gap-2 text-sm">
+                          <p>{t("settings.accountKeysFailed")}</p>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void apiKeysQuery.refetch()}
+                          >
+                            {t("Retry")}
+                          </Button>
+                        </div>
+                      )}
+                      {extensionSetupReady ? (
+                        <div role="status" className="space-y-1">
+                          <span className="settings-status">{uiText("Setup prepared")}</span>
+                          <p className="text-sm text-muted-foreground">
+                            {uiText(
+                              "Open the PrintStash extension on this tab to finish the verified connection.",
+                            )}
+                          </p>
+                        </div>
+                      ) : receipt?.extension && newApiKey ? (
+                        <div className="space-y-2">
+                          <p className="text-xs text-muted-foreground">
+                            {uiText("Copy this key now. It will only be shown once.")}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded bg-muted p-2 text-xs">
+                              {newApiKey}
+                            </code>
+                            <button
+                              type="button"
+                              onClick={copyApiKey}
+                              className={BTN_ICON}
+                              title={uiText("Copy API key")}
+                            >
+                              <Copy className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                      {receipt?.extension && (
+                        <Button size="sm" variant="ghost" onClick={dismissReceipt}>
+                          {t("settings.accountDismissSecret")}
+                        </Button>
+                      )}
+                    </div>
+                  </SettingsCard>
+                )}
               </div>
             )}
 
@@ -5265,48 +5394,28 @@ export function SettingsPanel() {
                 </SettingsCard>
 
                 {/* Card metrics picker */}
-                <SettingsCard
-                  title={uiText("Model card metrics")}
-                  description={uiText(
-                    "Choose which 3 stats appear on each model card in the grid.",
-                  )}
-                  action={
-                    <button type="button" onClick={resetCardMetrics} className={BTN_SECONDARY}>
-                      {uiText("Reset metrics")}
-                    </button>
-                  }
+                <section
+                  className="settings-card scroll-mt-4"
+                  role="group"
+                  aria-label={uiText("Model card metrics")}
                 >
-                  <div className="flex flex-col gap-6 py-4 lg:flex-row lg:items-start">
-                    <div className="min-w-0 flex-1">
-                      {([0, 1, 2] as const).map((slot) => (
-                        <label key={slot} className="settings-preference-row">
-                          <span>{uiText("Metric {value1}", { value1: String(slot + 1) })}</span>
-                          <select
-                            value={cardMetrics[slot]}
-                            onChange={(event) => {
-                              const option = CARD_METRIC_OPTIONS.find(
-                                (item) => item.id === event.target.value,
-                              );
-                              if (option) updateCardMetric(slot, option.id);
-                            }}
-                            className={INPUT}
-                          >
-                            {CARD_METRIC_OPTIONS.map((opt) => (
-                              <option
-                                key={opt.id}
-                                value={opt.id}
-                                disabled={cardMetrics.some((id, i) => i !== slot && id === opt.id)}
-                              >
-                                {opt.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      ))}
-                    </div>
-                    <CardMetricsPreview metrics={cardMetrics} />
-                  </div>
-                </SettingsCard>
+                  <SettingsGroupHead
+                    placement="outside"
+                    title={uiText("Model card metrics")}
+                    description={uiText(
+                      "Select a sample value to change the metric shown on your model cards.",
+                    )}
+                    action={
+                      <button type="button" onClick={resetCardMetrics} className={BTN_SECONDARY}>
+                        {uiText("Reset metrics")}
+                      </button>
+                    }
+                  />
+                  <CardMetricsEditor
+                    metrics={cardMetricsInDisplayOrder(cardMetrics)}
+                    onChange={updateCardMetric}
+                  />
+                </section>
 
                 <SettingsCard
                   title={uiText("Model metadata")}
@@ -5462,29 +5571,6 @@ export function SettingsPanel() {
                           { value: "performance", label: uiText("Performance · 1×") },
                           { value: "balanced", label: uiText("Balanced · 1.5×") },
                           { value: "detail", label: uiText("High detail · 2×") },
-                        ]}
-                      />
-                    </div>
-
-                    <div className="settings-preference-row">
-                      <span>
-                        {uiText("Screenshot resolution")}
-                        <span className="settings-row-hint">
-                          {uiText("Standard 1× · Sharp 2× · Print-ready 3×")}
-                        </span>
-                      </span>
-                      <SettingsSegmented
-                        label={uiText("Screenshot resolution")}
-                        value={String(previewPreferences.screenshotScale)}
-                        onChange={(value) =>
-                          savePreviewPreference({
-                            screenshotScale: selectedOption(SCREENSHOT_SCALES, Number(value)),
-                          })
-                        }
-                        options={[
-                          { value: "1", label: uiText("Standard · 1×") },
-                          { value: "2", label: uiText("Sharp · 2×") },
-                          { value: "3", label: uiText("Print-ready · 3×") },
                         ]}
                       />
                     </div>
@@ -5670,28 +5756,9 @@ export function SettingsPanel() {
                     </Button>
                   </div>
                 )}
-                {trashPage ? (
-                  <>
-                    <div
-                      data-trash-page
-                      className="overflow-hidden rounded-lg border border-border bg-card"
-                    >
-                      {trashRetentionBar}
-                      {trashCleanupDetails}
-                    </div>
-                    <div
-                      data-trash-page
-                      className="overflow-hidden rounded-lg border border-border bg-card"
-                    >
-                      {trashItemsCard}
-                    </div>
-                  </>
-                ) : (
-                  <div className="settings-grouped">
-                    {trashRetentionCard}
-                    {trashItemsCard}
-                  </div>
-                )}
+                {trashRetentionBar}
+                {trashCleanupDetails}
+                {trashItemsCard}
               </div>
             )}
 

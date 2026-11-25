@@ -4813,43 +4813,35 @@ describe("ModelBrowser", () => {
       };
     }
 
-    it.each(["grid", "list"])(
-      "moves with the version captured by the native %s drag",
-      async (layout) => {
-        window.localStorage.setItem("ps-vault-view", layout);
-        const versions: (string | null)[] = [];
-        renderVault({
-          collections: [aCollection()],
-          models: [aModelListItem({ id: 1, name: "Benchy", edit_version: 7 })],
-          routes: {
-            "PATCH /api/v1/models/1": (_url, init) => {
-              versions.push(new Headers(init?.headers).get("If-Match"));
-              return json({ id: 1, edit_version: 8, collection: "parts" });
-            },
+    it("moves with the version captured by the native list drag", async () => {
+      window.localStorage.setItem("ps-vault-view", "list");
+      const versions: (string | null)[] = [];
+      renderVault({
+        collections: [aCollection()],
+        models: [aModelListItem({ id: 1, name: "Benchy", edit_version: 7 })],
+        routes: {
+          "PATCH /api/v1/models/1": (_url, init) => {
+            versions.push(new Headers(init?.headers).get("If-Match"));
+            return json({ id: 1, edit_version: 8, collection: "parts" });
           },
-        });
-        const folder = await folderCard();
-        await within(screen.getByRole("main")).findByText("Benchy");
-        const values = new Map<string, string>();
-        const dataTransfer = {
-          types: [MODEL_DND_MIME],
-          setData: (kind: string, value: string) => values.set(kind, value),
-          getData: (kind: string) => values.get(kind) ?? "",
-          effectAllowed: "",
-          dropEffect: "",
-        };
-        fireEvent.dragStart(
-          layout === "grid"
-            ? screen.getByRole("article")
-            : screen.getByRole("link", { name: /Benchy/ }),
-          { dataTransfer },
-        );
-        fireEvent.drop(folder, { dataTransfer });
-        await waitFor(() =>
-          expect(versions).toEqual(['"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v7"']),
-        );
-      },
-    );
+        },
+      });
+      const folder = await folderCard();
+      await within(screen.getByRole("main")).findByText("Benchy");
+      const values = new Map<string, string>();
+      const dataTransfer = {
+        types: [MODEL_DND_MIME],
+        setData: (kind: string, value: string) => values.set(kind, value),
+        getData: (kind: string) => values.get(kind) ?? "",
+        effectAllowed: "",
+        dropEffect: "",
+      };
+      fireEvent.dragStart(screen.getByRole("link", { name: /Benchy/ }), { dataTransfer });
+      fireEvent.drop(folder, { dataTransfer });
+      await waitFor(() =>
+        expect(versions).toEqual(['"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v7"']),
+      );
+    });
 
     it("moves the model into the folder it was dropped on", async () => {
       const { requestsWithMethod } = renderVault({

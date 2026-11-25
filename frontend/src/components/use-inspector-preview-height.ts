@@ -18,10 +18,7 @@ export function useInspectorPreviewHeight(scroll: RefObject<HTMLDivElement | nul
   useLayoutEffect(() => {
     const element = scroll.current;
     if (!element) return;
-    const measure = () => {
-      const headerHeight = element.firstElementChild?.getBoundingClientRect().height ?? 0;
-      setAvailable(element.clientHeight - headerHeight);
-    };
+    const measure = () => setAvailable(element.clientHeight);
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(element);

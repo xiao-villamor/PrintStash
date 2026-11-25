@@ -4,14 +4,16 @@ import { collapseNavigationSidebar, gcodeFor, modelCard, uploadModel } from "./u
 import type { ModelPrintJobRead, ModelRead } from "../../src/types";
 
 test.describe("Library inline inspector", () => {
-  test("keeps toolpath controls reachable in the narrow inspector", async ({ page }) => {
+  test("keeps toolpath controls on the full Model page", async ({ page }) => {
     const name = `e2e-inspector-toolpath-${Date.now()}`;
     await uploadModel(page, name, {
       gcode: true,
       gcodeFile: {
         name: `${name}.gcode`,
         mimeType: "text/plain",
-        buffer: Buffer.from(`${gcodeFor(name)}\nG1 X10 Y10 E1\nG1 Z0.4\nG1 X20 Y10 E2`),
+        buffer: Buffer.from(
+          `${gcodeFor(name)}\n;TYPE:Outer wall\nG1 X10 Y10 E1\nG1 Z0.4\n;TYPE:Sparse infill\nG1 X20 Y10 E2`,
+        ),
       },
     });
     await collapseNavigationSidebar(page);
@@ -23,23 +25,43 @@ test.describe("Library inline inspector", () => {
     try {
       await card.click();
       const drawer = page.locator("#model-drawer");
-      await drawer.getByRole("radio", { name: "G-code", exact: true }).click();
-      const panel = drawer.getByRole("complementary", { name: "Toolpath controls" });
+      await expect(drawer.getByRole("region", { name: "Preview", exact: true })).toBeVisible();
+      await expect(drawer.getByRole("tablist")).toHaveCount(0);
+      await expect(drawer.getByRole("complementary", { name: "Toolpath controls" })).toHaveCount(0);
+      await drawer.getByRole("link", { name: "Open page" }).click();
+      const preview = page.getByRole("region", { name: "Preview", exact: true });
+      await preview.getByRole("button", { name: "G-code", exact: true }).click();
+      const panel = preview.getByRole("complementary", { name: "Toolpath controls" });
       await expect(panel.getByRole("slider")).toBeVisible();
+      await panel.getByRole("button", { name: "Previous layer" }).click();
+      await expect(panel.getByRole("spinbutton", { name: "Layer number" })).toHaveValue("1");
+      const outerWall = panel.getByRole("button", { name: "Outer wall" });
+      await outerWall.click();
+      await expect(outerWall).toHaveAttribute("aria-pressed", "false");
+      await panel.getByRole("button", { name: "Show all" }).click();
+      await expect(outerWall).toHaveAttribute("aria-pressed", "true");
+      await page.screenshot({ path: test.info().outputPath("toolpath-layers.png") });
       await panel.getByRole("tab", { name: "View", exact: true }).click();
-      await panel.getByRole("combobox", { name: "Camera view" }).selectOption("top");
+      await preview.getByRole("button", { name: "Top", exact: true }).click();
+      await expect(preview.getByRole("button", { name: "Top", exact: true })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
       await panel.getByRole("button", { name: "Travel", exact: true }).click();
       await expect(panel.getByRole("button", { name: "Travel", exact: true })).toHaveAttribute(
         "aria-pressed",
         "true",
       );
-      await panel.getByRole("button", { name: "Fit to view" }).click();
-      await expect(panel.getByRole("combobox", { name: "Camera view" })).toHaveValue("isometric");
-      await drawer.locator("canvas").scrollIntoViewIfNeeded();
-      await expect(drawer.locator("canvas")).toBeVisible();
-      await page.screenshot({ path: test.info().outputPath("inspector-toolpath.png") });
+      await preview.getByRole("button", { name: "Fit to view" }).click();
+      await expect(preview.getByRole("button", { name: "Isometric" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      await expect(preview.locator("canvas")).toBeVisible();
+      await page.screenshot({ path: test.info().outputPath("toolpath-view.png") });
     } finally {
       expect((await page.request.delete(`/api/v1/models/${modelId}`)).status()).toBe(204);
+      expect((await page.request.delete(`/api/v1/models/${modelId}/purge`)).ok()).toBe(true);
     }
   });
 
