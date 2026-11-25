@@ -212,6 +212,19 @@ class TestQuickGate:
         )
         assert "export PRINTSTASH_TEST_NO_EXTERNAL=1" in runner
 
+    def test_api_domains_can_diagnose_a_stalled_case(self) -> None:
+        backend = _workflow("ci.yml")["jobs"]["backend"]
+        rows = backend["strategy"]["matrix"]["include"]
+        (api_domains,) = [row for row in rows if row["suite"] == "integration-api-domains"]
+
+        assert api_domains["pytest_args"].split() == [
+            "--dist=load",
+            "-vv",
+            "-o",
+            "faulthandler_timeout=90",
+        ]
+        assert "${{ matrix.pytest_args }}" in _commands(backend)
+
     def test_backend_shards_cover_every_test_file_once(self) -> None:
         rows = _workflow("ci.yml")["jobs"]["backend"]["strategy"]["matrix"]["include"]
         roots = [path for row in rows for path in row["paths"].split()]
