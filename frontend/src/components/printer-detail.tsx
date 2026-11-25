@@ -85,7 +85,6 @@ import {
 import { PrinterConsole } from "./printer-console";
 import { MachineIdentity, MachineMaterials, MachinePortrait } from "@/components/printer-machine";
 import { PrinterStatusBadge } from "@/components/printer-status-badge";
-import { PrinterReadouts } from "@/components/printer-readouts";
 import { Switch } from "@/components/ui/switch";
 import {
   PREHEAT_PRESETS,
@@ -1014,10 +1013,6 @@ function PrinterDetailView({
               activeTabClassName="bg-foreground/12 text-foreground"
             />
           </div>
-
-          {activeTab === "status" && telemetry === "live" && (
-            <PrinterReadouts snapshot={snapshot} />
-          )}
 
           {activeTab === "status" && (
             <div

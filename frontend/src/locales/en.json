@@ -1387,8 +1387,6 @@
   "Used to estimate production cost for prints on this machine.": "Used to estimate production cost for prints on this machine.",
   "Control when the dispatcher may send new work here.": "Control when the dispatcher may send new work here.",
   "Visible to everyone who can see this printer.": "Visible to everyone who can see this printer.",
-  "Part fan": "Part fan",
-  "Live readings": "Live readings",
   "Weight": "Weight",
   "More actions for {value1}": "More actions for {value1}",
   "Queue is empty": "Queue is empty",

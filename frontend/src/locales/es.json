@@ -1387,8 +1387,6 @@
   "Used to estimate production cost for prints on this machine.": "Se usa para estimar el coste de producción de las impresiones en esta máquina.",
   "Control when the dispatcher may send new work here.": "Controla cuándo el despachador puede enviar trabajo nuevo aquí.",
   "Visible to everyone who can see this printer.": "Visible para todos los que pueden ver esta impresora.",
-  "Part fan": "Ventilador de pieza",
-  "Live readings": "Lecturas en vivo",
   "Weight": "Peso",
   "More actions for {value1}": "Más acciones de {value1}",
   "Queue is empty": "La cola está vacía",
