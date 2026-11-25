@@ -120,11 +120,11 @@
   opacity: 1;
 }
 
+/* Rings are box-shadows so they follow the card's rounded corners. */
 .library-model-card[data-inspected],
 .library-model-row[data-inspected] {
   border-color: var(--ring);
-  outline: 1px solid var(--ring);
-  outline-offset: -1px;
+  box-shadow: 0 0 0 1px var(--ring);
 }
 
 .library-model-card:not([data-favorites]) :is(.library-preview, .library-preview-controls) {
@@ -325,7 +325,16 @@
 }
 
 .library-model-card:not([data-inspected]):hover {
-  border-color: var(--border-strong);
+  border-color: color-mix(in srgb, var(--primary) 80%, var(--border-strong));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent),
+    0 12px 28px -12px rgb(0 0 0 / 0.6);
+}
+
+/* Keyboard focus rings the whole card, not the square link inside it. */
+.library-model-card:not([data-inspected]):has(:focus-visible) {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 1px var(--ring);
 }
 
 .library-model-card:not([data-favorites]) .library-preview {

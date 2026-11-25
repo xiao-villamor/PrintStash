@@ -264,7 +264,7 @@ function ModelCardInner({
               aria-label={model.name}
               draggable={false}
               data-menu-trigger
-              className="flex min-w-0 flex-col overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              className="flex min-w-0 flex-col overflow-hidden focus-visible:outline-none"
               onPointerEnter={() => !selectable && onIntent?.(model.id)}
               onFocus={() => !selectable && onIntent?.(model.id)}
               onPointerLeave={() => onIntent?.(null)}
