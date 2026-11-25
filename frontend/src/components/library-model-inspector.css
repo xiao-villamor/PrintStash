@@ -451,7 +451,6 @@ details.library-inspector-section {
 }
 details.library-inspector-section > summary {
   min-height: 42px;
-  cursor: pointer;
 }
 .library-inspector-tabs {
   display: inline-flex;

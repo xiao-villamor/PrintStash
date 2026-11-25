@@ -284,3 +284,36 @@ class TestDeferredNormalHelpers:
             render_geometry.prepare_normals(
                 geometry, position_ids=np.asarray(identities)
             )
+
+
+class TestPrepareNormals:
+    def test_blends_a_dense_fan_of_faces_at_a_shared_vertex(self):
+        # 510 shared faces exceed the pair budget. Their tips meet at a
+        # shallow crease, so matching normals must still be averaged.
+        vertices = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 1, 0.2]])
+        faces = np.tile([[0, 1, 2], [0, 1, 3]], (255, 1))
+
+        result = prepare_mesh_render(SimpleNamespace(vertices=vertices, faces=faces))
+
+        tilted = np.array([0, -0.2, 1]) / np.sqrt(1.04)
+        mean = tilted + [0, 0, 1]
+        expected = mean / np.linalg.norm(mean)
+        np.testing.assert_allclose(
+            result.corner_normals[:, 0],
+            np.broadcast_to(expected, (510, 3)),
+            atol=1e-6,
+        )
+
+    def test_rejects_a_geometry_stream_shorter_than_its_declared_face_count(self):
+        from printstash_core.mesh.render_geometry import (
+            PreparedRenderGeometry,
+            prepare_normals,
+        )
+
+        vertices = np.array([[0.0, 0, 0], [1, 0, 0], [0, 1, 0]])
+        geometry = PreparedRenderGeometry(
+            vertices, 2, lambda _: iter([np.array([[0, 1, 2]])])
+        )
+
+        with pytest.raises(ValueError, match="invalid_render_face_count"):
+            prepare_normals(geometry)

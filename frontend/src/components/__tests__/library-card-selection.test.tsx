@@ -1,3 +1,4 @@
+/* The selection control must expose each item to assistive technology and report the intended toggle. */
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { LibraryCardSelection } from "@/components/library-card-selection";

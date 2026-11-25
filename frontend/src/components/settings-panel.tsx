@@ -485,8 +485,9 @@ function useDeadlineReached(deadline: string | null): boolean {
 /** How long a trashed item has left; the last days take the destructive tone. */
 function TrashExpiry({ expiresAt }: { expiresAt: string | null | undefined }) {
   useUiLocale();
+  const [now] = useState(Date.now);
   if (!expiresAt) return null;
-  const days = Math.ceil((Date.parse(expiresAt) - Date.now()) / 86_400_000);
+  const days = Math.ceil((Date.parse(expiresAt) - now) / 86_400_000);
   if (Number.isNaN(days)) return null;
   return (
     <span

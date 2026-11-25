@@ -1,3 +1,4 @@
+/* Embedded STL colours must stay attached to the facets that declared them. */
 import { describe, expect, it } from "vitest";
 import { embeddedStlColor } from "../embedded-stl-color";
 

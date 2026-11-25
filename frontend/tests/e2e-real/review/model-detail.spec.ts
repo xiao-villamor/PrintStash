@@ -1,3 +1,4 @@
+/* Capture the model detail workspace and its dialogs in a real browser. */
 import { selectModelDetailTab } from "../../model-detail-navigation";
 /**
  * Inspect an existing Model using its real Artifacts, metadata and printer state.
@@ -360,7 +361,8 @@ test.describe("Existing Model review", () => {
             await tab("Print");
             await page.getByRole("button", { name: "More model actions", exact: true }).click();
             await review.capture("model-actions-menu");
-            await page.getByRole("menuitem", { name: "Edit details" }).click();
+            await page.keyboard.press("Escape");
+            await page.getByRole("button", { name: "Edit details", exact: true }).click();
             await review.capture("model-details-editor");
             await dismiss();
             await expect(revisionTab).toHaveAttribute("aria-selected", "true");

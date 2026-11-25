@@ -13,7 +13,7 @@ import { collectPageProblems, useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("profiles route", () => {
-  test("aligns Profiles and its actions with other document headers", async ({ page }) => {
+  test("aligns the Profiles header with other document headers", async ({ page }) => {
     const headers = [];
     for (const [route, title, action] of [
       ["/profiles", "Profiles", "New filament preset"],

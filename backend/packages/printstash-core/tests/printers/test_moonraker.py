@@ -32,10 +32,13 @@ import pytest
 
 from printstash_core.printers.contracts import PrinterClient
 from printstash_core.printers.models import (
+    MachineControlConflict,
     MachineControlError,
+    MotionAxis,
     MoonrakerConfig,
     OctoPrintConfig,
     PrinterSnapshot,
+    TuningControl,
 )
 from printstash_core.printers.moonraker import (
     SUBSCRIPTIONS,
@@ -106,6 +109,147 @@ class TestBedMeshMeasurement:
         assert scripts == ["BED_MESH_CALIBRATE"]
         await first.aclose()
         await second.aclose()
+
+
+@pytest.fixture
+def bed_status():
+    return {
+        "print_stats": {"state": "standby"},
+        "webhooks": {"state": "ready"},
+        "idle_timeout": {"state": "Ready"},
+        "toolhead": {"homed_axes": "xyz"},
+        "bed_mesh": {"probed_matrix": [[0.01, 0.02], [0.02, 0.03]]},
+        "probe": {"last_query": False},
+        "configfile": {"settings": {"bed_mesh": {}}},
+        "gcode": {"commands": {"BED_MESH_CALIBRATE": {}}},
+    }
+
+
+class TestBedMeasurementSupported:
+    @pytest.mark.parametrize(
+        ("object_name", "value", "supported"),
+        [
+            ("manual_probe", {"is_active": False}, True),
+            ("bed_mesh", {}, False),
+            ("probe", None, False),
+            ("probe", {}, False),
+            ("configfile", None, False),
+            ("configfile", {"settings": {}}, False),
+            (
+                "configfile",
+                {"settings": {"bed_mesh": {}, "gcode_macro BED_MESH_CALIBRATE": {}}},
+                False,
+            ),
+            ("gcode", None, False),
+            ("gcode", {"commands": {}}, False),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_requires_automatic_probe_capability(
+        self, bed_status, object_name, value, supported
+    ):
+        bed_status[object_name] = value
+        client = _client(
+            lambda _: httpx.Response(200, json={"result": {"status": bed_status}})
+        )
+        try:
+            result = await client.bed_measurement_supported()
+        finally:
+            await client.aclose()
+        assert result is supported
+
+    @pytest.mark.asyncio
+    async def test_rejects_a_malformed_capability_response(self):
+        client = _client(lambda _: httpx.Response(200, json={"result": []}))
+        try:
+            with pytest.raises(MoonrakerError, match="invalid bed measurement status"):
+                await client.bed_measurement_supported()
+        finally:
+            await client.aclose()
+
+
+class TestMeasureBed:
+    @pytest.mark.parametrize(
+        ("object_name", "value", "reason"),
+        [
+            (
+                "toolhead",
+                {"homed_axes": "xy"},
+                MachineControlConflict.BED_AXES_NOT_HOMED,
+            ),
+            ("toolhead", {}, MachineControlConflict.BED_AXES_NOT_HOMED),
+            ("probe", {}, MachineControlConflict.BED_MEASUREMENT_UNSUPPORTED),
+            ("manual_probe", {"is_active": True}, MachineControlConflict.BUSY),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_refuses_a_probe_without_safe_preconditions(
+        self, bed_status, object_name, value, reason
+    ):
+        bed_status[object_name] = value
+
+        def handle(request):
+            assert request.method == "GET"
+            return httpx.Response(200, json={"result": {"status": bed_status}})
+
+        client = _client(handle)
+        try:
+            with pytest.raises(MachineControlError) as error:
+                await client.measure_bed()
+        finally:
+            await client.aclose()
+        assert error.value.reason is reason
+
+    @pytest.mark.parametrize(
+        ("receipts", "reason"),
+        [
+            ([httpx.Response(503)], "printer_offline"),
+            ([httpx.Response(502)], "bed_measurement_unknown"),
+            ([httpx.Response(200, text="OK")], "bed_measurement_unknown"),
+            (
+                [httpx.Response(200, json={"result": "ok"}), httpx.Response(503)],
+                "bed_measurement_mesh_unavailable",
+            ),
+        ],
+        ids=["initial-status", "command-failure", "ambiguous-receipt", "grid-read"],
+    )
+    @pytest.mark.asyncio
+    async def test_distinguishes_the_stage_that_failed(
+        self, bed_status, receipts, reason
+    ):
+        def handle(request):
+            if "toolhead" in request.url.params and reason != "printer_offline":
+                return httpx.Response(200, json={"result": {"status": bed_status}})
+            return next(responses)
+
+        responses = iter(receipts)
+        client = _client(handle)
+        try:
+            with pytest.raises(ProviderError) as error:
+                await client.measure_bed()
+        finally:
+            await client.aclose()
+        assert error.value.code == reason
+
+    @pytest.mark.asyncio
+    async def test_returns_the_completed_grid(self, bed_status):
+        bed_status["manual_probe"] = {"is_active": False}
+        grid = {"result": {"status": {"bed_mesh": bed_status["bed_mesh"]}}}
+
+        def handle(request):
+            if request.method == "POST":
+                assert request.url.params["script"] == "BED_MESH_CALIBRATE"
+                return httpx.Response(200, json={"result": "ok"})
+            if "toolhead" in request.url.params:
+                return httpx.Response(200, json={"result": {"status": bed_status}})
+            return httpx.Response(200, json=grid)
+
+        client = _client(handle)
+        try:
+            response = await client.measure_bed()
+        finally:
+            await client.aclose()
+        assert response == grid
 
 
 class _FakeWebSocket:
@@ -632,6 +776,345 @@ class TestPrintActions:
             assert await client.run_gcode("G28") == {"raw": "OK"}
         finally:
             await client.aclose()
+
+
+@pytest.fixture
+def controller():
+    """Expose the controller's wire status and capture commands it receives."""
+    status = {
+        "print_stats": {"state": "standby"},
+        "webhooks": {"state": "ready"},
+        "idle_timeout": {"state": "Ready"},
+        "toolhead": {
+            "homed_axes": "xyz",
+            "position": [20, 30, 40],
+            "axis_minimum": [0, 0, 0],
+            "axis_maximum": [200, 200, 200],
+            "extruder": "extruder",
+        },
+        "gcode_move": {
+            "gcode_position": [10, 20, 30, 40],
+            "absolute_coordinates": True,
+            "absolute_extrude": True,
+            "extrude_factor": 0.5,
+            "speed_factor": 1,
+        },
+        "extruder": {"can_extrude": True},
+        "fan": {"speed": 0.5},
+    }
+    commands: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"result": {"status": status}})
+        commands.append(request.url.params["script"])
+        return httpx.Response(200, json={"result": "ok"})
+
+    return _client(handle), status, commands
+
+
+class TestHome:
+    @pytest.mark.asyncio
+    async def test_homes_selected_axes(self, controller):
+        client, _, commands = controller
+        try:
+            await client.home((MotionAxis.X, MotionAxis.Z))
+        finally:
+            await client.aclose()
+        assert commands == ["G28 X Z"]
+
+    @pytest.mark.parametrize(
+        ("object_name", "status", "reason"),
+        [
+            ("webhooks", {"state": "shutdown"}, MachineControlConflict.NOT_READY),
+            ("print_stats", {"state": "error"}, MachineControlConflict.UNAVAILABLE),
+            ("print_stats", {"state": "printing"}, MachineControlConflict.BUSY),
+            ("idle_timeout", {"state": "Printing"}, MachineControlConflict.BUSY),
+            ("idle_timeout", None, MachineControlConflict.UNAVAILABLE),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_refuses_when_idle_motion_is_unavailable(
+        self, controller, object_name, status, reason
+    ):
+        client, report, commands = controller
+        report[object_name] = status
+        try:
+            with pytest.raises(MachineControlError) as error:
+                await client.home((MotionAxis.X,))
+        finally:
+            await client.aclose()
+        assert error.value.reason is reason
+        assert commands == []
+
+    @pytest.mark.asyncio
+    async def test_refuses_a_malformed_state_envelope(self):
+        client = _client(lambda _: httpx.Response(200, json={"result": {"status": []}}))
+        try:
+            with pytest.raises(
+                MachineControlError, match="machine_control_unavailable"
+            ):
+                await client.home((MotionAxis.X,))
+        finally:
+            await client.aclose()
+
+
+class TestJog:
+    @pytest.mark.parametrize(
+        ("absolute", "script"), [(True, "G1 X12"), (False, "G1 X2")]
+    )
+    @pytest.mark.asyncio
+    async def test_moves_in_the_current_coordinate_mode(
+        self, controller, absolute, script
+    ):
+        client, status, commands = controller
+        status["gcode_move"]["absolute_coordinates"] = absolute
+        try:
+            await client.jog(MotionAxis.X, 2)
+        finally:
+            await client.aclose()
+        assert commands == [script]
+
+    @pytest.mark.asyncio
+    async def test_defers_bounds_to_the_controller_when_neither_limit_is_reported(
+        self, controller
+    ):
+        client, status, commands = controller
+        del status["toolhead"]["axis_minimum"]
+        del status["toolhead"]["axis_maximum"]
+        try:
+            await client.jog(MotionAxis.X, -2)
+        finally:
+            await client.aclose()
+        assert commands == ["G1 X8"]
+
+    @pytest.mark.parametrize(
+        ("object_name", "field", "value", "reason"),
+        [
+            ("toolhead", "homed_axes", None, MachineControlConflict.UNAVAILABLE),
+            ("toolhead", "homed_axes", "yz", MachineControlConflict.AXIS_NOT_HOMED),
+            ("toolhead", "axis_minimum", [], MachineControlConflict.UNAVAILABLE),
+            (
+                "toolhead",
+                "position",
+                [199, 30, 40],
+                MachineControlConflict.OUT_OF_BOUNDS,
+            ),
+            (
+                "gcode_move",
+                "absolute_coordinates",
+                None,
+                MachineControlConflict.UNAVAILABLE,
+            ),
+            ("gcode_move", "gcode_position", None, MachineControlConflict.UNAVAILABLE),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_rejects_an_unsafe_move(
+        self, controller, object_name, field, value, reason
+    ):
+        client, status, commands = controller
+        status[object_name][field] = value
+        try:
+            with pytest.raises(MachineControlError) as error:
+                await client.jog(MotionAxis.X, 2)
+        finally:
+            await client.aclose()
+        assert error.value.reason is reason
+        assert commands == []
+
+    @pytest.mark.parametrize("distance", [0, 11])
+    @pytest.mark.asyncio
+    async def test_rejects_distance_outside_the_jog_limit(self, controller, distance):
+        client, _, commands = controller
+        try:
+            with pytest.raises(ValueError, match="Jog distance"):
+                await client.jog(MotionAxis.X, distance)
+        finally:
+            await client.aclose()
+        assert commands == []
+
+
+class TestExtrude:
+    @pytest.mark.parametrize(
+        ("absolute_coordinates", "absolute_extrude", "script"),
+        [(True, True, "G1 E44"), (True, False, "G1 E4"), (False, True, "G1 E4")],
+    )
+    @pytest.mark.asyncio
+    async def test_compensates_for_the_current_flow_multiplier(
+        self, controller, absolute_coordinates, absolute_extrude, script
+    ):
+        client, status, commands = controller
+        status["gcode_move"].update(
+            absolute_coordinates=absolute_coordinates,
+            absolute_extrude=absolute_extrude,
+        )
+        try:
+            await client.extrude(2)
+        finally:
+            await client.aclose()
+        assert commands == [script]
+
+    @pytest.mark.parametrize(
+        ("object_name", "field", "value", "reason"),
+        [
+            ("toolhead", "extruder", "extruder1", MachineControlConflict.UNAVAILABLE),
+            ("extruder", "can_extrude", None, MachineControlConflict.UNAVAILABLE),
+            ("extruder", "can_extrude", False, MachineControlConflict.COLD_EXTRUDER),
+            (
+                "gcode_move",
+                "absolute_coordinates",
+                None,
+                MachineControlConflict.UNAVAILABLE,
+            ),
+            (
+                "gcode_move",
+                "absolute_extrude",
+                None,
+                MachineControlConflict.UNAVAILABLE,
+            ),
+            ("gcode_move", "extrude_factor", None, MachineControlConflict.UNAVAILABLE),
+            ("gcode_move", "extrude_factor", 0, MachineControlConflict.UNAVAILABLE),
+            (
+                "gcode_move",
+                "extrude_factor",
+                1e-310,
+                MachineControlConflict.UNAVAILABLE,
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_refuses_when_extrusion_is_unsafe(
+        self, controller, object_name, field, value, reason
+    ):
+        client, status, commands = controller
+        status[object_name][field] = value
+        try:
+            with pytest.raises(MachineControlError) as error:
+                await client.extrude(2)
+        finally:
+            await client.aclose()
+        assert error.value.reason is reason
+        assert commands == []
+
+    @pytest.mark.asyncio
+    async def test_enforces_the_extrusion_limit(self, controller):
+        client, _, commands = controller
+        try:
+            with pytest.raises(ValueError, match="Extrusion distance"):
+                await client.extrude(51)
+        finally:
+            await client.aclose()
+        assert commands == []
+
+
+class TestTune:
+    @pytest.mark.parametrize(
+        ("control", "percent", "script"),
+        [
+            (TuningControl.FAN, 50, "M106 S127.5"),
+            (TuningControl.SPEED, 110, "M220 S110"),
+            (TuningControl.FLOW, 90, "M221 S90"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_applies_an_override_during_a_print(
+        self, controller, control, percent, script
+    ):
+        client, status, commands = controller
+        status["print_stats"]["state"] = "printing"
+        try:
+            await client.tune(control, percent)
+        finally:
+            await client.aclose()
+        assert commands == [script]
+
+    @pytest.mark.parametrize(
+        ("control", "object_name", "field", "value", "reason"),
+        [
+            (
+                TuningControl.FAN,
+                "fan",
+                "speed",
+                None,
+                MachineControlConflict.FAN_UNAVAILABLE,
+            ),
+            (
+                TuningControl.FAN,
+                "fan",
+                "speed",
+                2,
+                MachineControlConflict.FAN_UNAVAILABLE,
+            ),
+            (
+                TuningControl.SPEED,
+                "gcode_move",
+                "speed_factor",
+                None,
+                MachineControlConflict.UNAVAILABLE,
+            ),
+            (
+                TuningControl.FLOW,
+                "gcode_move",
+                "extrude_factor",
+                0,
+                MachineControlConflict.UNAVAILABLE,
+            ),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_requires_telemetry_for_the_requested_override(
+        self, controller, control, object_name, field, value, reason
+    ):
+        client, status, commands = controller
+        status[object_name][field] = value
+        try:
+            with pytest.raises(MachineControlError) as error:
+                await client.tune(control, 80)
+        finally:
+            await client.aclose()
+        assert error.value.reason is reason
+        assert commands == []
+
+    @pytest.mark.parametrize(
+        ("control", "percent"), [(TuningControl.FAN, 101), (TuningControl.SPEED, 49)]
+    )
+    @pytest.mark.asyncio
+    async def test_rejects_an_override_outside_its_range(
+        self, controller, control, percent
+    ):
+        client, _, commands = controller
+        try:
+            with pytest.raises(ValueError, match="percentage"):
+                await client.tune(control, percent)
+        finally:
+            await client.aclose()
+        assert commands == []
+
+
+class TestMaintenanceReads:
+    @pytest.mark.parametrize(
+        ("method", "endpoint"),
+        [
+            ("console_history", "/server/gcode_store?count=100"),
+            ("printer_objects", "/printer/objects/list"),
+            ("temperature_store", "/server/temperature_store"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_requests_the_provider_read(self, method, endpoint):
+        seen = []
+
+        def handle(request):
+            seen.append((request.method, request.url.raw_path.decode()))
+            return httpx.Response(200, json={"result": []})
+
+        client = _client(handle)
+        try:
+            await getattr(client, method)()
+        finally:
+            await client.aclose()
+        assert seen == [("GET", endpoint)]
 
 
 class TestGetPrintHistory:

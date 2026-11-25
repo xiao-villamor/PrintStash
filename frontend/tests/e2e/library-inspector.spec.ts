@@ -148,7 +148,7 @@ test.describe("Library inline inspector", () => {
           const [frames] = args;
           const transform = Array.isArray(frames) ? frames[0]?.transform : undefined;
           const match = /^translate\(([-.\d]+)px, [-.\d]+px\) scale\(([-.\d]+),/.exec(
-            transform ?? "",
+            typeof transform === "string" ? transform : "",
           );
           if (match && this.parentElement) {
             const distance = Math.abs(Number(match[1]));

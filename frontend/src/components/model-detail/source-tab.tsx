@@ -462,7 +462,6 @@ function SourceTabContent({
   const canEditSource = canEdit && !editor.editDenied;
   const editable = canEditSource && editingSource && !blocked;
   const reviewed = state.phase === "blocked" ? state.reviewed : null;
-  const pending = state.phase === "blocked" ? state.pending.command : null;
   const feedback = state.phase === "blocked" && (
     <div role="alert" className="space-y-3 rounded border border-border bg-muted p-3 text-sm">
       <p>

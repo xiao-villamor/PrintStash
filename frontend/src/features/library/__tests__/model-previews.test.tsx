@@ -13,7 +13,7 @@ function Probe() {
 }
 
 describe("useRegenerateModelPreviews", () => {
-  it("asks the Model to recreate its views and invalidates what shows them", async () => {
+  it("refreshes Model views after requesting regeneration", async () => {
     const user = userEvent.setup();
     const view = renderApp(<Probe />, {
       seed: [

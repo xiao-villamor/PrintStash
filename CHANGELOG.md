@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- PostgreSQL library browsing works when none of the requested Models have an automatic thumbnail.
+
 - “Preparing previews” completes after a successful rebuild even when older library failures remain, and gives a specific reason when new preview work fails.
 
 - A card whose published views cannot be read now offers a compact retry icon that asks the server to recreate the Model's views (`POST /api/v1/models/{id}/previews/regenerate`), then looks again. The request is refused while multi-angle views are switched off.

@@ -562,7 +562,10 @@ describe("derivative controls", () => {
     const api = stubApi(overview, { overview: overviewReader });
     renderPanel(api);
     await user.click(
-      await screen.findByRole("button", { name: "Turn off Mesh metadata and preview images" }),
+      await screen.findByRole("switch", {
+        name: "Mesh metadata and preview images",
+        checked: true,
+      }),
     );
     await waitFor(() =>
       expect(api.setPolicy).toHaveBeenCalledWith(
@@ -572,7 +575,7 @@ describe("derivative controls", () => {
     );
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "Turn on Mesh metadata and preview images" }),
+        screen.getByRole("switch", { name: "Mesh metadata and preview images", checked: false }),
       ).toBeVisible(),
     );
     expect(screen.getByRole("button", { name: "Use deployment default" })).toBeVisible();
@@ -604,7 +607,7 @@ describe("derivative controls", () => {
     const api = stubApi(withPreviews);
     renderPanel(api);
     await user.click(
-      await screen.findByRole("button", { name: "Turn off Multi-angle Model card views" }),
+      await screen.findByRole("switch", { name: "Multi-angle Model card views", checked: true }),
     );
     await waitFor(() =>
       expect(api.setPolicy).toHaveBeenCalledWith(
@@ -613,7 +616,7 @@ describe("derivative controls", () => {
       ),
     );
     expect(
-      screen.getByRole("button", { name: "Turn off Mesh metadata and preview images" }),
+      screen.getByRole("switch", { name: "Mesh metadata and preview images", checked: true }),
     ).toBeEnabled();
   });
 
@@ -626,12 +629,15 @@ describe("derivative controls", () => {
     });
     renderPanel(api);
     await user.click(
-      await screen.findByRole("button", { name: "Turn off Mesh metadata and preview images" }),
+      await screen.findByRole("switch", {
+        name: "Mesh metadata and preview images",
+        checked: true,
+      }),
     );
     await waitFor(() => expect(api.setPolicy).toHaveBeenCalled());
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "Turn off Mesh metadata and preview images" }),
+        screen.getByRole("switch", { name: "Mesh metadata and preview images", checked: true }),
       ).toBeVisible(),
     );
     expect(api.overview).toHaveBeenCalledTimes(1);
@@ -640,7 +646,7 @@ describe("derivative controls", () => {
   it("refreshes on a policy notice", async () => {
     const api = stubApi();
     renderPanel(api);
-    await screen.findByRole("button", { name: "Turn off Mesh metadata and preview images" });
+    await screen.findByRole("switch", { name: "Mesh metadata and preview images", checked: true });
     await waitFor(() => expect(socket.onmessage).not.toBeNull());
     const calls = vi.mocked(api.overview).mock.calls.length;
     socket.onmessage?.({ data: JSON.stringify({ type: "derivative_policy" }) });

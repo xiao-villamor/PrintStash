@@ -64,7 +64,7 @@ describe("GeometryFacts", () => {
     expect(screen.getAllByText(/Not checked/)).toHaveLength(3);
   });
 
-  it("keeps unsupported geometry visibly unchecked and advisory", async () => {
+  it("treats unsupported geometry as an unchecked advisory", async () => {
     show(() =>
       json([
         aDerivative({
@@ -99,7 +99,7 @@ describe("GeometryFacts", () => {
     expect(screen.queryByText("Passed")).not.toBeInTheDocument();
   });
 
-  it("lists measured dimensions, volume and triangles as facts", async () => {
+  it("lists measured geometry facts", async () => {
     show(
       () => json([]),
       aRevision({

@@ -21,6 +21,8 @@ import { parseApiError } from "@/lib/errors";
 import { toast } from "@/lib/toast";
 import type { VaultConfigRead, VaultConfigUpdate } from "@/types";
 
+const EXAMPLE_ISSUER_URL = "https://auth.example.com";
+
 type OidcDraft = Pick<
   VaultConfigRead,
   | "oidc_enabled"
@@ -330,7 +332,7 @@ function OidcEditor({
               label={uiText("Issuer URL")}
               value={draft.oidc_issuer_url}
               onChange={(event) => set("oidc_issuer_url", event.target.value)}
-              placeholder="https://auth.example.com"
+              placeholder={EXAMPLE_ISSUER_URL}
               disabled={loading || saving || retired}
             />
             <Field

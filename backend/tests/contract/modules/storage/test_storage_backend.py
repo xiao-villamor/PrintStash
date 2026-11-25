@@ -1212,9 +1212,10 @@ class TestPreviewBundleStorage:
             data = trimesh.creation.box().export(file_type="stl")
             key = backend.blob_key("preview-test", 1, "cube.stl")
             backend.write_bytes(data, key)
+            model = build_model(db_session)
             file = build_file(
                 db_session,
-                build_model(db_session),
+                model,
                 filename="cube.stl",
                 file_type=FileType.STL,
                 path=key,
@@ -1225,7 +1226,7 @@ class TestPreviewBundleStorage:
                 previews.derive(file.id).kinds[DerivativeKind.PREVIEWS]
                 is DerivativeState.READY
             )
-            summary = summaries(db_session, [file.model_id])[file.model_id]
+            summary = summaries(db_session, [model])[file.model_id]
             row, manifest = resolve(
                 db_session,
                 file.model_id,

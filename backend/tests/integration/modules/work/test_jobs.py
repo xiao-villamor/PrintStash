@@ -664,6 +664,39 @@ class TestFailed:
         assert len(store.failed(limit=2)) == 2
 
 
+    def test_resolves_a_failed_derivative_to_its_artifact(
+        self, store: JobStore, make_job, make_model, make_file
+    ) -> None:
+        model = make_model("Planning jig")
+        artifact = make_file(model, filename="jig.stl")
+        make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            state=JobState.FAILED,
+            subject=f"file/{artifact.id}",
+        )
+
+        (failure,) = store.failed()
+
+        assert failure.artifact is not None
+        assert failure.artifact.model_id == model.id
+        assert failure.artifact.model_name == "Planning jig"
+        assert failure.artifact.filename == "jig.stl"
+
+    def test_keeps_malformed_derivative_subjects_in_the_failure_list(
+        self, store: JobStore, make_job
+    ) -> None:
+        job = make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            state=JobState.FAILED,
+            subject="invalid-legacy-subject",
+        )
+
+        (failure,) = store.failed()
+
+        assert failure.job_id == job.id
+        assert failure.artifact is None
+
+
 class TestCounts:
     def test_counts_jobs_per_definition_state(self, store: JobStore, make_job) -> None:
         make_job(kind=JobKind.SOURCES_SCAN)
@@ -1345,8 +1378,8 @@ class TestActiveJobQueryPlans:
     def test_source_anti_join_uses_active_history_boundary(
         self, db_session, active_history_plan, emitted_job_queries
     ):
-        from app.modules.derivatives.kinds import group
-        from app.modules.derivatives.source import DerivativeSource, subject_key
+        from app.modules.derivatives.kinds import group, subject_key
+        from app.modules.derivatives.source import DerivativeSource
         from app.modules.work.contracts import DiscoveryBudget
 
         available, claimed, _backfill, _interactive = active_history_plan

@@ -6,7 +6,7 @@ import { json, renderApp } from "@/test-support/render";
 import { CaptureSourceSummary, ModelSourceSummary } from "../source-summary";
 
 describe("SourceSummary", () => {
-  it("keeps the source and license rows when no publication was captured", async () => {
+  it("keeps source attribution visible without a publication date", async () => {
     renderApp(<ModelSourceSummary modelId={1} onAddSource={() => {}} />, {
       routes: {
         "GET /api/v1/models/1/provenance": json({

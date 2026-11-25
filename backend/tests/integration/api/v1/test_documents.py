@@ -222,7 +222,7 @@ class TestCreateDocument:
         assert response.status_code == 201, response.text
         assert response.json()["kind"] == "markdown"
 
-    def test_creates_markdown_for_the_model_and_uses_its_permissions(
+    def test_inherits_model_permissions_for_markdown(
         self,
         client: TestClient,
         db_session: Session,

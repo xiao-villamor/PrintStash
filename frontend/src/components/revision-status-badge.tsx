@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, CircleCheck, CircleX, FlaskConical, type LucideIcon } from "lucide-react";
+import { Archive, CircleCheck, CircleX, FlaskConical } from "lucide-react";
 import type { FileRevisionStatus } from "@/types";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
@@ -19,16 +19,16 @@ function statusWord(status: FileRevisionStatus) {
   }
 }
 
-function statusIcon(status: FileRevisionStatus): LucideIcon {
+function statusIcon(status: FileRevisionStatus) {
   switch (status) {
     case "known_good":
-      return CircleCheck;
+      return <CircleCheck aria-hidden className="size-3 shrink-0" />;
     case "needs_test":
-      return FlaskConical;
+      return <FlaskConical aria-hidden className="size-3 shrink-0" />;
     case "failed":
-      return CircleX;
+      return <CircleX aria-hidden className="size-3 shrink-0" />;
     case "archived":
-      return Archive;
+      return <Archive aria-hidden className="size-3 shrink-0" />;
   }
 }
 
@@ -43,7 +43,6 @@ export function RevisionStatusBadge({
 }) {
   useUiLocale();
   const word = statusWord(status);
-  const Icon = statusIcon(status);
   const accessibleLabel = label
     ? uiText("Revision status: {status}; label: {label}", { status: word, label })
     : uiText("Revision status: {status}", { status: word });
@@ -54,7 +53,7 @@ export function RevisionStatusBadge({
       title={accessibleLabel}
       className="revision-status-badge"
     >
-      <Icon aria-hidden className="size-3 shrink-0" />
+      {statusIcon(status)}
       {word}
     </span>
   );

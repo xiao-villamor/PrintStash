@@ -1510,7 +1510,7 @@ describe("PrinterDetailPage", () => {
       );
     });
 
-    it("marks the section and the save bar while a setting is unsaved", async () => {
+    it("marks unsaved settings in both navigation surfaces", async () => {
       const user = userEvent.setup();
       renderPrinter();
       await openSettings(user);

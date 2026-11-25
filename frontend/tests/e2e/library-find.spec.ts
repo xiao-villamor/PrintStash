@@ -28,24 +28,26 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-test("finds models in the collection with Ctrl+F", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.getByRole("main").getByRole("link", { name: /Alpha bracket/ })).toBeVisible();
+test.describe("Library find", () => {
+  test("finds models in the collection with Ctrl+F", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("main").getByRole("link", { name: /Alpha bracket/ })).toBeVisible();
 
-  await page.keyboard.press("Control+f");
-  const find = page.getByRole("search", { name: "Find in collection" });
-  await expect(find).toBeVisible();
-  await find.getByRole("textbox").fill("bracket");
+    await page.keyboard.press("Control+f");
+    const find = page.getByRole("search", { name: "Find in collection" });
+    await expect(find).toBeVisible();
+    await find.getByRole("textbox").fill("bracket");
 
-  await expect(find.getByRole("status")).toHaveText("1 of 2");
-  await page.keyboard.press("Enter");
-  await expect(find.getByRole("status")).toHaveText("2 of 2");
-  await page.keyboard.press("Shift+Enter");
-  await expect(find.getByRole("status")).toHaveText("1 of 2");
+    await expect(find.getByRole("status")).toHaveText("1 of 2");
+    await page.keyboard.press("Enter");
+    await expect(find.getByRole("status")).toHaveText("2 of 2");
+    await page.keyboard.press("Shift+Enter");
+    await expect(find.getByRole("status")).toHaveText("1 of 2");
 
-  await find.getByRole("textbox").fill("zzz");
-  await expect(find.getByRole("status")).toHaveText("No results");
+    await find.getByRole("textbox").fill("zzz");
+    await expect(find.getByRole("status")).toHaveText("No results");
 
-  await page.keyboard.press("Escape");
-  await expect(find).toBeHidden();
+    await page.keyboard.press("Escape");
+    await expect(find).toBeHidden();
+  });
 });

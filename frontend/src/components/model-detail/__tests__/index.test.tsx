@@ -143,7 +143,7 @@ function renderDetail(
   );
 }
 
-/** Open the header's actions menu, which is where every write action lives. */
+/** Open the header's actions menu. */
 async function openActions(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByText("Benchy");
   await user.pointer({ target: screen.getByRole("heading", { level: 1 }), keys: "[MouseRight]" });
@@ -151,8 +151,7 @@ async function openActions(user: ReturnType<typeof userEvent.setup>) {
 
 /** Open the metadata drawer while the Model page remains visible. */
 async function openEdit(user: ReturnType<typeof userEvent.setup>) {
-  await openActions(user);
-  await user.click(screen.getByRole("menuitem", { name: /Edit details/ }));
+  await user.click(await screen.findByRole("button", { name: "Edit details" }));
   await screen.findByRole("textbox", { name: "Name (required)" });
 }
 
@@ -232,7 +231,7 @@ describe("ModelDetail", () => {
       expect(screen.getByRole("textbox", { name: "Model name" })).toHaveFocus();
       expect(screen.getByRole("button", { name: "Add tags to Benchy" })).toBeVisible();
       expect(screen.getByRole("button", { name: "Add Benchy to favorites" })).toBeVisible();
-      expect(screen.getByRole("button", { name: "Share" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "More model actions" })).toBeVisible();
       expect(screen.queryByPlaceholderText("Add a description…")).not.toBeInTheDocument();
     });
 
@@ -367,11 +366,7 @@ describe("ModelDetail", () => {
       await user.dblClick(screen.getByRole("textbox", { name: "Model name" }));
       expect(screen.getByRole("textbox", { name: "Model name" })).toHaveValue("Saved title");
       expect(screen.getByRole("textbox", { name: "Model name" })).toHaveAttribute("readonly");
-      await user.pointer({
-        target: screen.getByRole("banner"),
-        keys: "[MouseRight]",
-      });
-      await user.click(screen.getByRole("menuitem", { name: "Edit details" }));
+      await user.click(screen.getByRole("button", { name: "Edit details" }));
       expect(screen.getByRole("textbox", { name: "Model name" })).toHaveAttribute("readonly");
       expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
       await act(async () => {
@@ -896,7 +891,7 @@ describe("ModelDetail", () => {
       );
     });
 
-    it("compares two source files inside Files and restores focus", async () => {
+    it("returns focus to Files after comparing two source Artifacts", async () => {
       const user = userEvent.setup();
       renderDetail({
         at: "/models/1?tab=files",
@@ -1190,9 +1185,7 @@ describe("ModelDetail", () => {
       // does not retype.
       const user = userEvent.setup();
       renderDetail();
-      await openActions(user);
-
-      await user.click(screen.getByRole("menuitem", { name: /Edit details/ }));
+      await openEdit(user);
 
       expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("Benchy");
     });
@@ -1543,7 +1536,8 @@ describe("ModelDetail", () => {
     it("opens the share dialog", async () => {
       const user = userEvent.setup();
       renderDetail();
-      await user.click(await screen.findByRole("button", { name: /^Share$/ }));
+      await openActions(user);
+      await user.click(await screen.findByRole("menuitem", { name: "Share" }));
 
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
     });
@@ -1553,7 +1547,8 @@ describe("ModelDetail", () => {
       // the viewer's own grant.
       renderDetail({ model: aModel({ effective_role: "view" }), auth: memberSession() });
 
-      expect(await screen.findByRole("button", { name: /^Share$/ })).toBeDisabled();
+      await openActions(userEvent.setup());
+      expect(await screen.findByRole("menuitem", { name: "Share" })).toBeDisabled();
     });
   });
   describe("resizing the details panel", () => {
@@ -1723,6 +1718,6 @@ describe("ModelDetail file hashes", () => {
     const hashes = await screen.findByRole("article");
     expect(within(hashes).queryByTitle("a".repeat(64), { exact: true })).not.toBeInTheDocument();
     await user.click(within(hashes).getByRole("button", { name: "Actions for cube.stl" }));
-    expect(await screen.findByRole("menuitem", { name: "Copy SHA-256" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Copy SHA-256" })).toBeVisible();
   });
 });

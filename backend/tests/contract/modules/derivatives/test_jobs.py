@@ -19,7 +19,7 @@ from app.db.session import (
 )
 from app.modules.derivatives import jobs as derivative_jobs
 from app.modules.derivatives import policy, records
-from app.modules.derivatives.source import subject_key
+from app.modules.derivatives.kinds import subject_key
 from app.modules.storage.storage_backend.runtime import bind_backend, get_backend
 from app.modules.work import catalog as catalog_module
 from app.modules.work.catalog import WorkCatalog, default_lanes

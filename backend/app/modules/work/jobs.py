@@ -804,8 +804,7 @@ class JobStore:
     def failed(
         self, *, limit: int = 50, excluded_kinds: Sequence[JobKind] = ()
     ) -> list[WorkFailure]:
-        from app.modules.derivatives.kinds import is_derivative
-        from app.modules.derivatives.source import file_id_of
+        from app.modules.derivatives.kinds import file_id_of, is_derivative
         from app.modules.ingestion.staging_views import attach_summaries
 
         with get_session_factory().scoped_session() as session:

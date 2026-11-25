@@ -209,7 +209,7 @@ describe("PrintHistorySection", () => {
       );
     });
 
-    it("names the next missing field and keeps Save record disabled until it is met", async () => {
+    it("validates the next required result field before saving", async () => {
       const user = userEvent.setup();
       renderHistory();
       await openForm(user);
@@ -228,7 +228,7 @@ describe("PrintHistorySection", () => {
       expect(screen.queryByText("Choose the printer that ran it.")).toBeNull();
     });
 
-    it("sends the outcome, revision and failure note the user chose", async () => {
+    it("submits the chosen print result", async () => {
       const user = userEvent.setup();
       const view = renderHistory({
         routes: { "POST /api/v1/models/1/print-jobs": json(aPrintJob({ id: 31 })) },

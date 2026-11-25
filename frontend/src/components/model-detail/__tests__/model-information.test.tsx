@@ -70,7 +70,7 @@ describe("ModelInformation", () => {
     expect(screen.getByRole("button", { name: /^Add tags to / })).toBeInTheDocument();
   });
 
-  it("applies a checked tag immediately and displays the server receipt", async () => {
+  it("displays the confirmed tag immediately", async () => {
     const user = userEvent.setup();
     const model = aModel();
     const onTagsSaved =

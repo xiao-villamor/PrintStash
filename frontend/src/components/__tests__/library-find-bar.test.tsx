@@ -31,7 +31,7 @@ describe("LibraryFindBar", () => {
     expect(field).toHaveFocus();
   });
 
-  it("counts matches regardless of case and reveals the first", async () => {
+  it("reveals the first case-insensitive match", async () => {
     const user = userEvent.setup();
     const { field, onReveal } = renderBar();
 
@@ -41,7 +41,7 @@ describe("LibraryFindBar", () => {
     expect(onReveal).toHaveBeenLastCalledWith(1);
   });
 
-  it("steps forward with Enter, wraps, and steps back with Shift+Enter", async () => {
+  it("cycles through matches with Enter or Shift+Enter", async () => {
     const user = userEvent.setup();
     const { field, onReveal } = renderBar();
     await user.type(field, "bracket");
@@ -57,7 +57,7 @@ describe("LibraryFindBar", () => {
     expect(screen.getByRole("status")).toHaveTextContent("2 of 2");
   });
 
-  it("says so when nothing matches and disables stepping", async () => {
+  it("prevents stepping when no models match", async () => {
     const user = userEvent.setup();
     const { field, onReveal } = renderBar();
 
@@ -68,7 +68,7 @@ describe("LibraryFindBar", () => {
     expect(onReveal).toHaveBeenLastCalledWith(null);
   });
 
-  it("closes on Escape and on the close button", async () => {
+  it("dismisses find using either close control", async () => {
     const user = userEvent.setup();
     const { field, onClose } = renderBar();
 

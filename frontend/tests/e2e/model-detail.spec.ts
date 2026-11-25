@@ -55,8 +55,7 @@ test.describe("model detail route", () => {
       route.fulfill({ json: [aTag({ name: "Short-editor tag" })] }),
     );
     await page.goto("/models/1");
-    await page.getByRole("button", { name: "More model actions" }).click();
-    await page.getByRole("menuitem", { name: "Edit details", exact: true }).click();
+    await page.getByRole("button", { name: "Edit details", exact: true }).click();
     const editor = page.getByRole("dialog", { name: "Edit Model details" });
     const search = editor.getByRole("combobox", { name: "Model tags" });
     await search.fill("short-editor");
@@ -75,8 +74,7 @@ test.describe("model detail route", () => {
       }),
     );
     await page.goto("/models/1");
-    await page.getByRole("button", { name: "More model actions" }).click();
-    await page.getByRole("menuitem", { name: "Edit details", exact: true }).click();
+    await page.getByRole("button", { name: "Edit details", exact: true }).click();
     const editor = page.getByRole("dialog", { name: "Edit Model details" });
     const collection = editor.getByRole("button", { name: collectionLabel, exact: true });
     const offset = await collection.evaluate((element) => {
@@ -91,8 +89,7 @@ test.describe("model detail route", () => {
   test("keeps the details save button clear of overlays", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/models/1");
-    await page.getByRole("button", { name: "More model actions" }).click();
-    await page.getByRole("menuitem", { name: "Edit details", exact: true }).click();
+    await page.getByRole("button", { name: "Edit details", exact: true }).click();
     const editor = page.getByRole("dialog", { name: "Edit Model details" });
     const save = editor.getByRole("button", { name: "Save changes", exact: true });
     await expect(save).toBeEnabled();
@@ -175,7 +172,9 @@ test.describe("model detail route", () => {
         exact: true,
       }),
     ).toBeVisible();
-    await expect(header.getByRole("button", { name: "Share", exact: true })).toBeVisible();
+    await expect(
+      header.getByRole("button", { name: "More model actions", exact: true }),
+    ).toBeVisible();
     await expect(
       header.getByRole("button", {
         name: "Add skadis_kitchen-roll_screw to favorites",
@@ -188,7 +187,7 @@ test.describe("model detail route", () => {
     });
     await rename.focus();
     await page.keyboard.press("Shift+F10");
-    await expect(page.getByRole("menuitem", { name: "Edit details", exact: true })).toBeVisible();
+    await expect(page.getByRole("menu", { name: "Model actions", exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(rename).toBeFocused();
   });
@@ -805,8 +804,7 @@ test.describe("model detail route", () => {
       });
     });
     await page.goto("/models/1");
-    await page.getByRole("heading", { level: 1 }).click({ button: "right" });
-    await page.getByRole("menuitem", { name: /Edit details/ }).click();
+    await page.getByRole("button", { name: "Edit details", exact: true }).click();
     await page.getByRole("textbox", { name: "Name (required)" }).fill("Saved draft");
     await page.getByRole("button", { name: "Save changes", exact: true }).click();
     await expect(
@@ -851,8 +849,7 @@ test.describe("model detail route", () => {
       });
     });
     await page.goto("/models/1");
-    await page.getByRole("heading", { level: 1 }).click({ button: "right" });
-    await page.getByRole("menuitem", { name: /Edit details/ }).click();
+    await page.getByRole("button", { name: "Edit details", exact: true }).click();
     await page.getByRole("textbox", { name: "Name (required)" }).fill("My browser draft");
     await page.getByRole("button", { name: "Save changes", exact: true }).click();
 
@@ -1206,7 +1203,7 @@ test.describe("model detail route", () => {
     await expect(page.getByRole("heading", { name: "Whole source geometry" })).toHaveCount(0);
   });
 
-  test("guides a model without G-code from Overview and Activity", async ({ page }) => {
+  test("explains the missing G-code from either entry point", async ({ page }) => {
     await page.route("**/api/v1/models/1", (route) =>
       route.fulfill({
         json: aModel({
@@ -1287,9 +1284,7 @@ test.describe("model detail route", () => {
     expect(useDescriptionBox!.y).toBeGreaterThan(descriptionBox!.y + descriptionBox!.height);
   });
 
-  test("print history centers both dialogs and restores focus to their actions", async ({
-    page,
-  }) => {
+  test("anchors print history dialogs to their originating controls", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/models/1");
     await selectModelDetailTab(page, /Activity/);
@@ -1316,9 +1311,7 @@ test.describe("model detail route", () => {
     }
   });
 
-  test("keeps the print context, outcome and actions visible in the record dialog", async ({
-    page,
-  }) => {
+  test("fits all essential result controls in the record dialog", async ({ page }) => {
     await page.goto("/models/1?tab=history");
     const sidebar = page.getByRole("button", { name: "Toggle sidebar" });
     if ((await sidebar.getAttribute("aria-expanded")) === "true") await sidebar.click();
@@ -1347,9 +1340,7 @@ test.describe("model detail route", () => {
     await expect(dialog).toHaveCount(0);
   });
 
-  test("searches long printer and revision lists without growing the record dialog", async ({
-    page,
-  }) => {
+  test("contains long choice lists inside the record dialog", async ({ page }) => {
     await page.route("**/api/v1/printers", (route) =>
       route.fulfill({
         json: Array.from({ length: 12 }, (_, index) =>
@@ -1471,8 +1462,7 @@ test.describe("model detail route", () => {
     await page.goto("/models/1");
 
     await page.getByRole("heading", { level: 1 }).click({ button: "right" });
-    await expect(page.getByRole("menuitem", { name: "Share", exact: true })).toHaveCount(0);
-    await expect(page.getByRole("menuitem", { name: "Edit details" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Share", exact: true })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "Delete model" })).toBeVisible();
     await page.keyboard.press("Escape");
 

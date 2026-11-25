@@ -23,8 +23,7 @@ test.describe("model detail", () => {
     await uploadGcodeModel(page, name);
     await openModelPage(page, name);
     const modelId = new URL(page.url()).pathname.split("/").at(-1);
-    await page.getByRole("button", { name: "More model actions" }).click();
-    await page.getByRole("menuitem", { name: "Edit details", exact: true }).click();
+    await page.getByRole("button", { name: "Edit details", exact: true }).click();
     const description =
       "## Assembly instructions\n\n- Fit **both** clips.\n- Check [the source](https://www.printables.com/).\n\n| Part | Count |\n| --- | --- |\n| Clip | 2 |";
     const editor = page.getByRole("dialog", { name: "Edit Model details" });
@@ -159,9 +158,7 @@ test.describe("model detail", () => {
     await expect(page.getByText(renamed, { exact: true })).toHaveCount(0);
   });
 
-  test("record a result from Overview and reopen it from the Activity receipt", async ({
-    page,
-  }) => {
+  test("reopens a saved result from the Activity receipt", async ({ page }) => {
     const name = `e2e-hist-${Date.now()}`;
     const printerName = `E2E Rig ${Date.now()}`;
     const upload = await page.request.post("/api/v1/ingest/orca", {
@@ -216,16 +213,14 @@ test.describe("model detail", () => {
     const tagInput = page.getByPlaceholder("Search or create — press Enter");
 
     // Cancel discards: inline-create a tag in edit mode, then cancel.
-    await page.getByRole("heading", { level: 1 }).click({ button: "right" });
-    await page.getByRole("menuitem", { name: "Edit details" }).click();
+    await page.getByRole("button", { name: "Edit details", exact: true }).click();
     await tagInput.fill(dropTag);
     await tagInput.press("Enter");
     await page.getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByText(dropTag, { exact: true })).toHaveCount(0);
 
     // Save persists: inline-create a different tag and save — it shows as a chip.
-    await page.getByRole("heading", { level: 1 }).click({ button: "right" });
-    await page.getByRole("menuitem", { name: "Edit details" }).click();
+    await page.getByRole("button", { name: "Edit details", exact: true }).click();
     await tagInput.fill(keepTag);
     await tagInput.press("Enter");
     await page.getByRole("button", { name: /^Save$/ }).click();

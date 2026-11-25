@@ -287,3 +287,14 @@ def definitions_for_kind(kind: DerivativeKind) -> list[JobKind]:
 
 def all_definitions() -> tuple[JobKind, ...]:
     return tuple(_BY_DEFINITION)
+
+
+def subject_key(file_id: int) -> str:
+    return f"file/{file_id}"
+
+
+def file_id_of(subject: str) -> int:
+    prefix, _, value = subject.partition("/")
+    if prefix != "file" or not value.isdigit():
+        raise ValueError(f"not_a_derivative_subject:{subject}")
+    return int(value)

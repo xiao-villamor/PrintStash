@@ -31,8 +31,8 @@ def previews_enabled(client, auth_headers):
     assert saved.status_code == 200, saved.text
 
 
-@pytest.mark.usefixtures("previews_enabled")
 class TestRegenerateModelPreviews:
+    @pytest.mark.usefixtures("previews_enabled")
     def test_forgets_the_views_of_each_mesh_artifact_only(
         self, client, auth_headers, db_session, make_model, make_file, make_derivative
     ):
@@ -56,6 +56,7 @@ class TestRegenerateModelPreviews:
         assert _kinds(db_session, gcode) == {DerivativeKind.THUMBNAIL}
         assert _kinds(db_session, other) == {DerivativeKind.PREVIEWS}
 
+    @pytest.mark.usefixtures("previews_enabled")
     def test_a_model_without_a_mesh_queues_nothing(
         self, client, auth_headers, make_model, make_file
     ):
@@ -70,6 +71,7 @@ class TestRegenerateModelPreviews:
         assert response.json() == {"queued": 0}
 
     @pytest.mark.parametrize("role, status", [(None, 401), (CollectionRole.VIEW, 403)])
+    @pytest.mark.usefixtures("previews_enabled")
     def test_requires_edit_permission(
         self,
         client,
@@ -95,6 +97,7 @@ class TestRegenerateModelPreviews:
 
         assert response.status_code == status
 
+    @pytest.mark.usefixtures("previews_enabled")
     def test_a_trashed_model_is_unavailable(
         self, client, auth_headers, make_model, make_file
     ):
@@ -107,15 +110,14 @@ class TestRegenerateModelPreviews:
 
         assert response.status_code == 404
 
+    def test_refuses_while_the_views_are_switched_off(
+        self, client, auth_headers, make_model, make_file
+    ):
+        model = make_model("Tray")
+        make_file(model, file_type=FileType.STL)
 
-def test_refuses_while_the_views_are_switched_off(
-    client, auth_headers, make_model, make_file
-):
-    model = make_model("Tray")
-    make_file(model, file_type=FileType.STL)
+        response = client.post(
+            f"/api/v1/models/{model.id}/previews/regenerate", headers=auth_headers
+        )
 
-    response = client.post(
-        f"/api/v1/models/{model.id}/previews/regenerate", headers=auth_headers
-    )
-
-    assert response.status_code == 409
+        assert response.status_code == 409

@@ -60,7 +60,7 @@ from app.modules.work.jobs import active_job_predicate
 from app.runtime.compute import client
 
 from . import policy
-from .kinds import DerivativeGroup
+from .kinds import DerivativeGroup, subject_key
 from .records import STALE_IN_FLIGHT, regenerations
 
 WINDOW = 5000
@@ -179,17 +179,6 @@ def pending_predicate(
             )
         )
     return and_(live(File), group.applies(), or_(*missing))
-
-
-def subject_key(file_id: int) -> str:
-    return f"file/{file_id}"
-
-
-def file_id_of(subject: str) -> int:
-    prefix, _, value = subject.partition("/")
-    if prefix != "file" or not value.isdigit():
-        raise ValueError(f"not_a_derivative_subject:{subject}")
-    return int(value)
 
 
 class DerivativeSource:

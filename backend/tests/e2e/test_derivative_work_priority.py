@@ -31,7 +31,7 @@ from app.db.models import (
 )
 from app.db.projections import bind_content_projection
 from app.db.session import get_session_factory, override_session_factory
-from app.modules.derivatives.source import subject_key
+from app.modules.derivatives.kinds import subject_key
 from app.modules.media.native_process import native_capacity
 from app.modules.search.projection import LibraryProjection
 from app.modules.work.jobs import jobs

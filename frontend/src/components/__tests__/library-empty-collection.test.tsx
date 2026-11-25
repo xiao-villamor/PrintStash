@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from "vitest";
 import { LibraryEmptyCollection } from "@/components/library-empty-collection";
 
 describe("LibraryEmptyCollection", () => {
-  it("says the collection is empty and offers one way to fill it", async () => {
+  it("offers one upload action in an empty collection", async () => {
     const onUpload = vi.fn<() => void>();
     render(<LibraryEmptyCollection disabled={false} onUpload={onUpload} />);
 

@@ -125,14 +125,16 @@ test.describe("role-based access", () => {
     await grant(page, col, viewer, "View");
     await grant(page, col, editor, "Edit");
 
-    // Viewer: both Edit and Delete are present but disabled.
+    // Viewer: editing is unavailable and Delete is disabled.
     const viewBundle = await authBundleFor(viewer, USER_PW);
     const v = await authedContext(browser, viewBundle);
     try {
       await v.page.goto(modelUrl);
       await expect(v.page.getByRole("heading", { name: model })).toBeVisible();
-      await v.page.getByRole("heading", { level: 1 }).click({ button: "right" });
-      await expect(modelActionItem(v.page, "Edit details")).toBeDisabled();
+      await expect(v.page.getByRole("button", { name: "Edit details", exact: true })).toHaveCount(
+        0,
+      );
+      await v.page.getByRole("button", { name: "More model actions", exact: true }).click();
       await expect(modelActionItem(v.page, "Delete model")).toBeDisabled();
     } finally {
       await v.context.close();

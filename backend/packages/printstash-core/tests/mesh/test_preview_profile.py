@@ -144,3 +144,49 @@ class TestPreviewProfile:
 
         with pytest.raises(ValueError, match="preview_profile_invalid"):
             profile_module._parse_studio_profile(encoded, manifest)
+
+
+class TestDecodeAppearance:
+    def test_decodes_a_named_look(self):
+        result = profile_module.decode_appearance({"look": "sand", "floor_grid": False})
+
+        assert result == profile_module.PreviewAppearance(
+            profile_module.PreviewLook.SAND, False
+        )
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"look": "sand"},
+            {"look": "sand", "floor_grid": 0},
+            {"look": "sand", "floor_grid": True, "extra": "unexpected"},
+            {"look": "invalid", "floor_grid": True},
+        ],
+    )
+    def test_rejects_an_invalid_appearance(self, payload):
+        with pytest.raises(ValueError):
+            profile_module.decode_appearance(payload)
+
+
+class TestPreviewRasterizerRecipe:
+    def test_studio_recipe_changes_with_appearance(self):
+        original = profile_module.preview_rasterizer_recipe(matte=False)
+        appearance = profile_module.PreviewAppearance(
+            profile_module.PreviewLook.SAND, False
+        )
+
+        with profile_module.appearance_scope(appearance):
+            changed = profile_module.preview_rasterizer_recipe(matte=False)
+
+        assert changed != original
+        assert changed.endswith("-sand-0")
+        assert profile_module.preview_rasterizer_recipe(matte=False) == original
+
+    def test_matte_recipe_is_independent_of_studio_appearance(self):
+        original = profile_module.preview_rasterizer_recipe(matte=True)
+        appearance = profile_module.PreviewAppearance(
+            profile_module.PreviewLook.SAND, False
+        )
+
+        with profile_module.appearance_scope(appearance):
+            assert profile_module.preview_rasterizer_recipe(matte=True) == original

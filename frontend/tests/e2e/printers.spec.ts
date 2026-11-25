@@ -18,9 +18,7 @@ import { collectPageProblems, useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("printer routes", () => {
-  test("keeps destination choices readable and independent when switching send modes", async ({
-    page,
-  }) => {
+  test("preserves destination usability across send modes", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.route("**/api/v1/printers", async (route) => {
       const response = await route.fetch();
@@ -135,7 +133,7 @@ test.describe("printer routes", () => {
     await expect(directDestination).toHaveText(directSelection);
   });
 
-  test("shares the queue layout and destination controls across entry points", async ({ page }) => {
+  test("keeps the queue dialog consistent across entry points", async ({ page }) => {
     await page.route("**/api/v1/printers", async (route) => {
       const response = await route.fetch();
       await route.fulfill({
@@ -194,7 +192,7 @@ test.describe("printer routes", () => {
     expect(widths).toEqual([960, 960]);
   });
 
-  test("shows the same visible radio control in print history and the queue", async ({ page }) => {
+  test("shares one visible radio control across print workflows", async ({ page }) => {
     const scenarios = [
       ["/models/1?tab=history", "Record result", "Result", "Success", "Failed"],
       ["/printers?tab=queue", "Add to queue", "Priority", "Normal", "Rush"],

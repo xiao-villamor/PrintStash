@@ -382,10 +382,8 @@ export async function openModelPage(page: Page, name: string): Promise<void> {
   await expect(page).toHaveURL(/\/models\/\d+(?:\?|$)/);
 }
 
-// Share/Edit details/Delete model live behind the "Model actions" dropdown on
-// the model detail page. Opens it and returns the named menu item locator
-// (still closed/disabled-checkable — call .click() to also close the menu).
-export function modelActionItem(page: Page, name: "Share" | "Edit details" | "Delete model") {
+// The detail header exposes editing directly, with other actions in its menu.
+export function modelActionItem(page: Page, name: "Share" | "Delete model") {
   return page.getByRole("menuitem", { name, exact: true });
 }
 
@@ -393,7 +391,11 @@ export async function clickModelAction(
   page: Page,
   name: "Share" | "Edit details" | "Delete model",
 ): Promise<void> {
-  await page.getByRole("heading", { level: 1 }).click({ button: "right" });
+  if (name === "Edit details") {
+    await page.getByRole("button", { name, exact: true }).click();
+    return;
+  }
+  await page.getByRole("button", { name: "More model actions", exact: true }).click();
   await modelActionItem(page, name).click();
 }
 

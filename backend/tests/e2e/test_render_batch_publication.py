@@ -22,7 +22,7 @@ from app.db.models import (
     Metadata,
 )
 from app.db.session import get_session_factory
-from app.modules.derivatives.source import subject_key
+from app.modules.derivatives.kinds import subject_key
 from app.modules.work.jobs import jobs
 from app.modules.work.reconciler import run_pass
 from app.runtime.compute import client

@@ -332,7 +332,11 @@ async function openFilters() {
 }
 
 async function waitForLibraryActions() {
-  expect(await screen.findByRole("group", { name: "Library tools" })).toBeVisible();
+  expect(
+    within(await screen.findByRole("main"))
+      .getAllByRole("button", { name: "More" })
+      .at(-1),
+  ).toBeVisible();
 }
 
 beforeEach(() => {
@@ -349,7 +353,6 @@ describe("ModelBrowser", () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
       await within(screen.getByRole("main")).findByText("Benchy");
       const main = screen.getByRole("main");
-      const actions = within(main).getByRole("group", { name: "Library tools" });
       expect(within(main).getAllByRole("button", { name: "Filters" })).not.toHaveLength(0);
       expect(
         within(screen.getByRole("complementary")).queryByRole("navigation", {
@@ -358,7 +361,7 @@ describe("ModelBrowser", () => {
       ).not.toBeInTheDocument();
 
       expect(within(main).getByRole("button", { name: "New collection" })).toBeVisible();
-      expect(within(actions).getByRole("button", { name: "Select" })).toBeVisible();
+      expect(within(main).getAllByRole("button", { name: "More" }).at(-1)).toBeVisible();
       expect(screen.getByRole("checkbox", { name: "Select Benchy" })).toBeVisible();
       expect(screen.queryByRole("button", { name: "Library tools" })).not.toBeInTheDocument();
       expect(screen.queryByRole("menu")).not.toBeInTheDocument();
@@ -1778,7 +1781,6 @@ describe("ModelBrowser", () => {
       renderVault({ at: "/?v=multipart", multipartModels: [aMultipartSet()] });
 
       expect(await screen.findByRole("heading", { name: "All Models" })).toBeInTheDocument();
-      expect(screen.getByRole("group", { name: "Library tools" })).toBeVisible();
       expect(screen.getAllByRole("button", { name: "Multipart sets only" })[0]).toHaveAttribute(
         "aria-pressed",
         "true",

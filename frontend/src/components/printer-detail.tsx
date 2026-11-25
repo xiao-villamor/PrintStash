@@ -1169,7 +1169,6 @@ function PrinterDetailView({
                 printer={printer}
                 canEdit={printer.access.can_admin}
                 key={printer.id}
-                connectionLabel={connectionLabel}
                 onDiagnostics={() => setActiveTab("diagnostics")}
                 onMaintenance={() => setActiveTab("maintenance")}
               />
@@ -1237,7 +1236,6 @@ export function PrinterSettings({
   onCancel,
   onSaved,
   onRemove,
-  connectionLabel,
   onDiagnostics,
   onMaintenance,
 }: {
@@ -1247,7 +1245,6 @@ export function PrinterSettings({
   onCancel?: () => void;
   onSaved?: () => void;
   onRemove?: () => void;
-  connectionLabel?: string;
   onDiagnostics?: () => void;
   onMaintenance?: () => void;
 }) {

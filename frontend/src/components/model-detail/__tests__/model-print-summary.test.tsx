@@ -1,3 +1,4 @@
+/* The print overview must ground its recommendation in the available Artifacts and their estimates. */
 import { renderApp } from "@/test-support/render";
 import { aMetadata, aModelPrintJob, aRevision } from "@/test-support/factories";
 import { screen, within } from "@testing-library/react";
@@ -51,7 +52,7 @@ describe("ModelPrintSummary", () => {
     expect(review).toHaveBeenCalledOnce();
   });
 
-  it("summarizes the plates and links to their estimates", async () => {
+  it("makes the estimate for each summarized plate reachable", async () => {
     const openSettings = vi.fn<() => void>();
     renderSummary({
       revision: aRevision({ original_filename: "wall-mount.gcode.3mf" }),
@@ -102,7 +103,7 @@ describe("ModelPrintSummary", () => {
     expect(mark).toHaveBeenCalledOnce();
   });
 
-  it("offers the source file and Add revision on an unsliced model", async () => {
+  it("offers a path to printing an unsliced Model", async () => {
     const user = userEvent.setup();
     const add = vi.fn<() => void>();
     renderSummary({

@@ -41,7 +41,7 @@ def _edit(headers, model_id, snapshot):
 
 class TestProductionCosting:
     @pytest.mark.parametrize("tools", [1, 2])
-    def test_exposes_raw_slicer_price_and_multiple_filaments(
+    def test_exposes_slicer_costing_inputs(
         self, client, auth_headers, make_model, make_file, db_session, tools
     ):
         artifact = make_file(make_model(), file_type=FileType.GCODE)
