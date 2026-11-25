@@ -292,8 +292,7 @@ describe("Storage insights", () => {
       screen.queryByRole("img", { name: "Recorded owned storage over time" }),
     ).not.toBeInTheDocument();
   });
-  it("keeps storage measurement details accessible", async () => {
-    const user = userEvent.setup();
+  it("shows storage measurement details under a section heading", async () => {
     setup({
       ...report,
       inventory: {
@@ -304,7 +303,7 @@ describe("Storage insights", () => {
       },
     });
 
-    await user.click(await screen.findByText("Measurement details"));
+    expect(await screen.findByRole("region", { name: "Measurement details" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Files by type" })).toBeVisible();
     expect(screen.getByText("STEP files")).toBeVisible();
     expect(screen.getByText("In library")).toBeVisible();

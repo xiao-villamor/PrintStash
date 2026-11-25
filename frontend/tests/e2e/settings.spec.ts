@@ -309,6 +309,10 @@ test.describe("settings route", () => {
   test("settings prepares a one-time browser extension setup", async ({ page }) => {
     await page.goto("/settings?section=access");
 
+    await expect(page.getByRole("link", { name: "Install Chrome extension" })).toHaveAttribute(
+      "href",
+      /^https:\/\/chromewebstore\.google\.com\//,
+    );
     await page.getByRole("button", { name: "Set up extension" }).click();
 
     const apiKeys = page.getByRole("group", { name: "API keys" });

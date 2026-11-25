@@ -97,6 +97,14 @@ test.describe("printer Files and Jobs", () => {
         "href",
         `/models/${modelId}`,
       );
+      const [label, value] = await fileInspector
+        .locator("dl > div")
+        .first()
+        .locator("dt, dd")
+        .all();
+      const [labelBox, valueBox] = await Promise.all([label.boundingBox(), value.boundingBox()]);
+      if (!labelBox || !valueBox) throw new Error("File facts must be visible");
+      expect(valueBox.x - labelBox.x - labelBox.width).toBeLessThanOrEqual(16);
       const syncReceipt = page.waitForResponse(
         (response) =>
           response.url().endsWith(`${api}/files/sync`) && response.request().method() === "POST",

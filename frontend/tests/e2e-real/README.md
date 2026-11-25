@@ -32,6 +32,9 @@ caption conflict handling remains covered by the caption API and component suite
 
 `model-hashes.spec.ts` verifies the uploaded file SHA-256, runs real geometry analysis, and checks the compact hash controls in desktop and mobile Overview layouts, including complete file and geometric SHA-256 values copied to the clipboard.
 
+`account.spec.ts` verifies password confirmation, password visibility, optional email,
+account deletion across reloads, and the API key receipt.
+
 `batch.spec.ts` reveals a Model checkbox on hover before starting selection and applying real tags, deletes and moves, including undo and viewer permission checks.
 
 `multipart-models.spec.ts` selects and deletes sets in desktop grid and mobile list views, checks the detail and build planning screens, and verifies that member Models and G-code revisions remain available.

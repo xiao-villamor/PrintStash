@@ -508,7 +508,7 @@ export function StorageConfigCard({
               {currentProvider && (
                 <>
                   <dl className="settings-storage-summary">
-                    <div>
+                    <div className="settings-storage-fact">
                       <dt>
                         {t("Provider")}
                         <span className="settings-row-hint">
@@ -518,20 +518,21 @@ export function StorageConfigCard({
                       <dd className="is-text">{knownUiText(currentProvider.label)}</dd>
                     </div>
                     {cfg?.storage_tier && (
-                      <div>
+                      <div className="settings-storage-fact">
                         <dt>
                           {t("Storage safety")}
-                          {currentProvider.expected_tier !== "guarded" && (
-                            <span className="settings-row-hint">
-                              {knownUiText(currentProvider.expected_tier_note)}
-                            </span>
-                          )}
+                          {currentProvider.expected_tier !== "guarded" &&
+                            cfg.storage_tier === currentProvider.expected_tier && (
+                              <span className="settings-row-hint">
+                                {knownUiText(currentProvider.expected_tier_note)}
+                              </span>
+                            )}
                         </dt>
                         <dd className="is-text">{knownUiText(cfg.storage_tier)}</dd>
                       </div>
                     )}
                     {locationFields.map((field) => (
-                      <div key={field.name}>
+                      <div key={field.name} className="settings-storage-location">
                         <dt>{field.label}</dt>
                         <dd>{field.value}</dd>
                       </div>

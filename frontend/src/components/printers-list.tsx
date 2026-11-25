@@ -292,22 +292,26 @@ export function PrintersPage() {
                 <div className="flex divide-x divide-border overflow-hidden rounded-lg border border-border bg-card">
                   <FleetMetric
                     label={uiText("Ready")}
+                    tone="ready"
                     value={readyCount}
                     selected={healthFilter === "ready"}
                     onClick={() => setHealthFilter(healthFilter === "ready" ? null : "ready")}
                   />
                   <FleetMetric
                     label={uiText("Active jobs")}
+                    tone="active"
                     value={summary?.active_jobs}
                     onClick={canSeeQueue ? () => openQueue("active") : undefined}
                   />
                   <FleetMetric
                     label={uiText("Queued jobs")}
+                    tone="queued"
                     value={summary?.queued_jobs}
                     onClick={canSeeQueue ? () => openQueue("queued") : undefined}
                   />
                   <FleetMetric
                     label={uiText("Needs attention")}
+                    tone="attention"
                     value={attentionCount}
                     selected={healthFilter === "attention"}
                     onClick={() =>
@@ -488,20 +492,31 @@ function needsAttention(printer: PrinterRead, row: FleetPrinterRow | undefined) 
   );
 }
 
+const FLEET_METRIC_COLORS = {
+  ready: "text-success",
+  active: "text-primary",
+  queued: "text-foreground",
+  attention: "text-warning",
+};
+
 function FleetMetric({
   label,
+  tone,
   value,
   onClick,
   selected,
 }: {
   label: string;
+  tone: keyof typeof FLEET_METRIC_COLORS;
   value: number | undefined;
   onClick?: () => void;
   selected?: boolean;
 }) {
   const contents = (
     <>
-      <span className="font-mono text-xl font-semibold leading-none tabular-nums">
+      <span
+        className={`font-mono text-xl font-semibold leading-none tabular-nums ${value ? FLEET_METRIC_COLORS[tone] : "text-muted-foreground"}`}
+      >
         {value === undefined ? "—" : formatNumber(value)}
       </span>
       <span className="text-xs text-muted-foreground">{label}</span>
@@ -1169,7 +1184,12 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
             <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
               {uiText("Cancel")}
             </Button>
-            <Button type="submit" form={formId} loading={submitting} disabled={!name || !url}>
+            <Button
+              type="submit"
+              form={formId}
+              loading={submitting}
+              disabled={!name.trim() || !url.trim()}
+            >
               {uiText("Add printer")}
             </Button>
           </>
@@ -1177,7 +1197,6 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
       >
         <form id={formId} onSubmit={submit} className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-2">
-            <h3 className="col-span-full text-field font-semibold">{uiText("Printer")}</h3>
             <FormField htmlFor="printer-name" label={uiText("Name")}>
               <Input
                 id="printer-name"
@@ -1205,16 +1224,8 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
                 ))}
               </select>
             </FormField>
-            <div className="col-span-full flex flex-wrap items-center justify-between gap-3 text-field">
-              <span className="text-muted-foreground">
-                {modelName || uiText("No printer model selected")}
-              </span>
-              <Button type="button" variant="outline" onClick={() => setModelChoiceOpen(true)}>
-                {uiText("Choose printer model")}
-              </Button>
-            </div>
           </div>
-          <div className="space-y-4">
+          <div className="space-y-4 border-y border-border py-4">
             <div>
               <h3 className="text-field font-semibold">{uiText("Connection")}</h3>
               <p className="mt-1 text-xs text-muted-foreground">
@@ -1387,23 +1398,51 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
                 </FormField>
               </>
             )}
-            <div>
-              <FormField htmlFor="printer-notes" label={uiText("Notes")}>
-                <textarea
-                  id="printer-notes"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className={inputClasses}
-                  placeholder={uiText("Optional")}
-                />
-              </FormField>
-              {err && (
-                <div role="alert" className="mt-1 text-xs text-destructive">
-                  {err}
-                </div>
-              )}
-            </div>
           </div>
+          <div className="grid gap-4">
+            <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-muted/30 p-3">
+              <Printer3D className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+              <div className="min-w-0 flex-1">
+                <p className="text-field font-medium">
+                  {uiText("Printer model")}{" "}
+                  <span className="font-normal text-muted-foreground">{uiText("(optional)")}</span>
+                </p>
+                <p className="wrap-anywhere text-xs text-muted-foreground">
+                  {modelName || uiText("Used to show your printer’s image.")}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setModelChoiceOpen(true)}
+              >
+                {uiText("Choose printer model")}
+              </Button>
+            </div>
+            <FormField
+              htmlFor="printer-notes"
+              label={
+                <>
+                  {uiText("Notes")}{" "}
+                  <span className="font-normal text-muted-foreground">{uiText("(optional)")}</span>
+                </>
+              }
+            >
+              <textarea
+                id="printer-notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className={inputClasses}
+                rows={2}
+              />
+            </FormField>
+          </div>
+          {err && (
+            <p role="alert" className="text-sm text-destructive">
+              {err}
+            </p>
+          )}
         </form>
       </Modal>
       {modelChoiceOpen && (

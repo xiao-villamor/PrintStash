@@ -316,7 +316,7 @@ export function PrinterFiles({
     selected?.model_id &&
     (selected.matched_by === "upload_history" || selected.matched_by === "vault_marker");
   return (
-    <section className="printer-explorer" aria-labelledby={id}>
+    <section className="printer-explorer printer-explorer-inventory" aria-labelledby={id}>
       <WorkHeader
         id={id}
         title={uiText("Printer files")}

@@ -16,6 +16,12 @@
 
 - Model details lead with the next print action, group revisions and production costs under Print, and keep source files, publication data, and recorded results in their own sections. Opening a source or profile preserves the return to the original library view. Overview shows the current revision, the estimate source, and the next print action. Tags save from the inline picker, and Prepare print carries over the selected preview plate.
 
+- Printer errors appear in red on the farm routing map, and the fleet summary uses color to distinguish ready printers from those needing attention. The printer file explorer keeps file facts and actions closer together on wide screens.
+- The Add printer dialog groups connection fields and labels optional model information. Account creation marks email optional, requires matching passwords, and lets administrators reveal both entries.
+- Vault administrators can delete accounts while preserving their activity history. Disabled accounts can also be deleted.
+- Browser extension setup explains how to finish connecting. Storage shows measurement details directly and gives the usage breakdown and history chart separate space.
+- Maintenance explains each check, shows what a running check is doing, and loads the findings behind the latest result.
+
 ### Performance
 
 - Model details shows the selected cover during opening and initializes the interactive body after the pane docks.

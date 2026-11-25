@@ -1,6 +1,7 @@
 "use client";
 
 import { SettingsCard } from "@/components/settings-card";
+import { CHROME_EXTENSION_URL } from "@/lib/browser-extension-setup";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
@@ -9,8 +10,6 @@ import { Button } from "@/components/ui/button";
 import { Localized } from "@/components/ui/localized";
 
 const EXTENSION_URL = "https://github.com/xiao-villamor/PrintStash/tree/main/browser-extension";
-const CHROME_EXTENSION_URL =
-  "https://chromewebstore.google.com/detail/printstash/dfeakldahcajangoijfldionahhbeajg";
 
 export function MakerWorldConnectCard() {
   useUiLocale();

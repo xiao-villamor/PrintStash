@@ -351,6 +351,58 @@ test.describe("printer routes", () => {
     });
   }
 
+  test("marks a printer error with the destructive color on the farm map", async ({ page }) => {
+    await page.route("**/api/v1/fleet/summary", async (route) => {
+      const response = await route.fetch();
+      const summary = await response.json();
+      await route.fulfill({
+        response,
+        json: {
+          ...summary,
+          printers: [{ printer_id: 3, name: "ender", status: "error", drain_mode: true }],
+        },
+      });
+    });
+    await page.goto("/printers?tab=queue");
+    const toggle = page.getByRole("button", { name: "Toggle sidebar" });
+    if ((await toggle.getAttribute("aria-expanded")) === "true") await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const node = page.getByRole("button", { name: /Error ender/ });
+    await expect(node).toBeVisible();
+    const error = node.getByText("Error", { exact: true });
+    const destructive = await error.evaluate((element) => {
+      const swatch = document.createElement("span");
+      swatch.style.color = "var(--destructive)";
+      element.append(swatch);
+      const color = getComputedStyle(swatch).color;
+      swatch.remove();
+      return color;
+    });
+    await expect(error).toHaveCSS("color", destructive);
+  });
+
+  test("colors the fleet counts that need an operator’s attention", async ({ page }) => {
+    await page.route("**/api/v1/printers", async (route) => {
+      const response = await route.fetch();
+      const [printer] = await response.json();
+      await route.fulfill({ response, json: [{ ...printer, status: "error" }] });
+    });
+    await page.goto("/printers");
+    const toggle = page.getByRole("button", { name: "Toggle sidebar" });
+    if ((await toggle.getAttribute("aria-expanded")) === "true") await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const fleet = page.getByRole("region", { name: "Fleet summary" });
+    const attention = fleet
+      .getByRole("button", { name: "1 Needs attention" })
+      .getByText("1", { exact: true });
+    const ready = fleet.getByRole("button", { name: "0 Ready" }).getByText("0", { exact: true });
+    await expect(attention).toBeVisible();
+    await expect(ready).toBeVisible();
+    expect(await attention.evaluate((element) => getComputedStyle(element).color)).not.toBe(
+      await ready.evaluate((element) => getComputedStyle(element).color),
+    );
+  });
+
   test("fleet cards contain telemetry when a job has a long filename", async ({ page }) => {
     const currentJob = `workshop-${"continuous-filename-".repeat(10)}.gcode.3mf`;
     await page.addInitScript(() =>

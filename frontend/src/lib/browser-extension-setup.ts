@@ -1,5 +1,8 @@
 import { onAuthChange } from "@/lib/auth-store";
 
+export const CHROME_EXTENSION_URL =
+  "https://chromewebstore.google.com/detail/printstash/dfeakldahcajangoijfldionahhbeajg";
+
 export const BROWSER_EXTENSION_SETUP_STORAGE_KEY = "printstash.browser-extension-setup:v1";
 
 export const BROWSER_EXTENSION_SETUP_TTL_MS = 5 * 60 * 1000;

@@ -1,4 +1,4 @@
-import { currentLocale } from "@/lib/locale";
+import { currentLocale, type MessageKey } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useMemo, useState } from "react";
@@ -12,6 +12,7 @@ import { SettingsCard, SettingsEmptyRow } from "@/components/settings-card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { useQuery } from "@tanstack/react-query";
 import {
+  auditDetailsOptions,
   auditHistoryOptions,
   isActiveAudit as isActive,
   useMaintenanceCommands,
@@ -51,6 +52,14 @@ const FINDING_LABELS = new Map([
   ["backup_member_size_mismatch", "Backup member size differs from its manifest"],
 ]);
 
+const AUDIT_PHASE_LABELS = new Map<string, MessageKey>([
+  ["database", "maintenance.phaseDatabase"],
+  ["ownership_census", "maintenance.phaseStorage"],
+  ["references", "maintenance.phaseReferences"],
+  ["backups", "maintenance.phaseBackups"],
+  ["auto_repair", "maintenance.phaseRepair"],
+]);
+
 function shortOpaque(value: string | null | undefined): string {
   return value ? `${value.slice(0, 16)}…` : uiText("unavailable");
 }
@@ -78,7 +87,16 @@ export function MaintenancePanel() {
   const catalog = useQuery({ ...backupSourcesOptions(), enabled: !commands.retired });
   const denied = commands.retired || [401, 403, 404].includes(parseApiError(history.error).status);
   const run = denied ? null : (history.data?.[0] ?? null);
+  const findingCount = run ? run.critical_count + run.warning_count + run.info_count : 0;
+  const needsDetails =
+    run !== null && !isActive(run) && findingCount > 0 && run.findings.length === 0;
+  const details = useQuery(auditDetailsOptions(needsDetails ? run.id : null));
+  const reportedFindings = needsDetails ? details.data?.findings : run?.findings;
   const busy = commands.busy;
+  const checkActive = isActive(run);
+  const showFindings = !!reportedFindings?.length;
+  const showOutcome =
+    !checkActive && (run?.state === "failed" || (run?.state === "completed" && findingCount === 0));
   const backups = catalog.isError ? [] : (catalog.data ?? []);
   const [severity, setSeverity] = useState<"all" | "critical" | "warning" | "info">("all");
   const [verifications, setVerifications] = useState<Record<string, BackupVerification>>({});
@@ -86,13 +104,17 @@ export function MaintenancePanel() {
   const [repairTarget, setRepairTarget] = useState<VaultAuditFinding | null>(null);
   const [repairing, setRepairing] = useState(false);
 
+  const phase = run && isActive(run) ? run.current_phase : null;
+  const phaseLabel = phase ? AUDIT_PHASE_LABELS.get(phase) : undefined;
+
   const findings = useMemo(
-    () => (run?.findings ?? []).filter((item) => severity === "all" || item.severity === severity),
-    [run, severity],
+    () =>
+      (reportedFindings ?? []).filter((item) => severity === "all" || item.severity === severity),
+    [reportedFindings, severity],
   );
   const unlinkedFindings = useMemo(
-    () => (run?.findings ?? []).filter((item) => item.code === "unowned_blob_detected"),
-    [run],
+    () => (reportedFindings ?? []).filter((item) => item.code === "unowned_blob_detected"),
+    [reportedFindings],
   );
   const measuredUnlinkedBytes = useMemo(
     () =>
@@ -228,7 +250,9 @@ export function MaintenancePanel() {
                 <Badge
                   variant={
                     run.state === "completed"
-                      ? "success"
+                      ? findingCount > 0
+                        ? "warning"
+                        : "success"
                       : run.state === "failed"
                         ? "destructive"
                         : "secondary"
@@ -259,6 +283,16 @@ export function MaintenancePanel() {
                 )}
               </div>
               {isActive(run) && (
+                <p className="text-sm text-muted-foreground" role="status">
+                  {t(
+                    phaseLabel ??
+                      (run.state === "pending"
+                        ? "maintenance.checkQueued"
+                        : "maintenance.checkRunning"),
+                  )}
+                </p>
+              )}
+              {isActive(run) && (
                 <div
                   className="h-2 overflow-hidden rounded-full bg-muted"
                   aria-label={uiText("{value1} percent complete", {
@@ -271,7 +305,22 @@ export function MaintenancePanel() {
                   />
                 </div>
               )}
-              {run.findings.length > 0 && (
+              {findingCount > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  {t("maintenance.findingCount", { count: findingCount })}
+                </p>
+              )}
+              {needsDetails && details.isError ? (
+                <div role="alert" className="flex flex-wrap items-center gap-2 text-sm">
+                  <p>{t("maintenance.findingsUnavailable")}</p>
+                  <Button size="sm" variant="outline" onClick={() => void details.refetch()}>
+                    {t("auditSchedule.retry")}
+                  </Button>
+                </div>
+              ) : needsDetails && details.isPending ? (
+                <p role="status">{t("auditSchedule.loading")}</p>
+              ) : null}
+              {showFindings && (
                 <div className="flex flex-wrap gap-2">
                   {(["all", "critical", "warning", "info"] as const).map((value) => (
                     <Button
@@ -282,7 +331,7 @@ export function MaintenancePanel() {
                     >
                       {value}
                       {value === "all"
-                        ? ` ${run.findings.length}`
+                        ? ` ${findingCount}`
                         : value === "critical"
                           ? ` ${run.critical_count}`
                           : value === "warning"
@@ -328,7 +377,7 @@ export function MaintenancePanel() {
                   </div>
                 </div>
               )}
-              {(run.findings.length > 0 || run.state === "completed" || run.state === "failed") && (
+              {(showFindings || showOutcome) && (
                 <div className="space-y-2">
                   {findings.length === 0 ? (
                     <div className="flex items-center gap-2 rounded-md border border-border p-3 text-sm text-muted-foreground">
@@ -339,7 +388,7 @@ export function MaintenancePanel() {
                       )}
                       {run.state === "failed"
                         ? t("maintenance.checkIncomplete")
-                        : run.findings.length === 0
+                        : findingCount === 0
                           ? t("maintenance.noProblems")
                           : uiText(" No findings in this category.")}
                     </div>

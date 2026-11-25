@@ -189,7 +189,9 @@ describe("MaintenancePanel", () => {
 
     const section = screen.getByRole("region", { name: "Check your files now" });
     expect(
-      within(section).getByText("Find missing or damaged files before they interrupt a print."),
+      within(section).getByText(
+        "Check whether PrintStash can still find the files it tracks and whether the library records match.",
+      ),
     ).toBeVisible();
     expect(await within(section).findByRole("button", { name: "Run quick check" })).toBeVisible();
   });
@@ -368,6 +370,40 @@ describe("MaintenancePanel", () => {
 
       expect(await screen.findByText("1 file · Size unavailable")).toBeVisible();
       expect(screen.getByText("STL file · Size and modification time unavailable")).toBeVisible();
+    });
+
+    it("loads findings omitted from the audit summary", async () => {
+      renderPanel({
+        audit: anAudit({ findings: [] }),
+        routes: { "GET /api/v1/maintenance/audits/1": json(anAudit()) },
+      });
+
+      expect(await screen.findByText("1 finding")).toBeVisible();
+      expect(await screen.findByText("Owned Artifact is missing")).toBeVisible();
+      expect(screen.queryByText("No problems found in this check.")).not.toBeInTheDocument();
+    });
+
+    it("reports when details are unavailable for a check with findings", async () => {
+      renderPanel({
+        audit: anAudit({ findings: [] }),
+        routes: { "GET /api/v1/maintenance/audits/1": json({ detail: "unavailable" }, 503) },
+      });
+
+      expect(await screen.findByText("Could not load the finding details.")).toBeVisible();
+      expect(screen.queryByText("No problems found in this check.")).not.toBeInTheDocument();
+    });
+
+    it("describes the phase of a running check", async () => {
+      renderPanel({
+        audit: anAudit({
+          state: "running",
+          current_phase: "database",
+          critical_count: 0,
+          findings: [],
+        }),
+      });
+
+      expect(await screen.findByText("Checking records in the library catalog…")).toBeVisible();
     });
 
     it("says so when the audit found nothing", async () => {

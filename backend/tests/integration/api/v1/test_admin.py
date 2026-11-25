@@ -328,6 +328,39 @@ class TestDeactivateUser:
         db_session.refresh(target)
         assert target.is_active is False
 
+    @pytest.mark.parametrize("disabled", [False, True])
+    def test_remove_hides_account(
+        self, client: TestClient, db_session: Session, disabled: bool
+    ) -> None:
+        admin = build_user(db_session, "admin-remove", superuser=True)
+        target = build_user(db_session, "remove-me")
+        url = f"/api/v1/admin/users/{target.id}"
+        headers = _headers(admin)
+        if disabled:
+            assert client.delete(url, headers=headers).status_code == 204
+
+        assert client.delete(f"{url}?remove=true", headers=headers).status_code == 204
+
+        rows = client.get("/api/v1/admin/users", headers=headers).json()
+        assert target.id not in [row["id"] for row in rows]
+        db_session.refresh(target)
+        assert not target.is_active
+        assert target.deleted_by == admin.id
+        assert target.deleted_at is not None
+        assert client.delete(f"{url}?remove=true", headers=headers).status_code == 404
+
+    def test_remove_current_account_is_rejected(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        admin = build_user(db_session, "admin-remove-self", superuser=True)
+        build_user(db_session, "other-admin", superuser=True)
+        url = f"/api/v1/admin/users/{admin.id}?remove=true"
+
+        response = client.delete(url, headers=_headers(admin))
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "cannot_delete_current_user"
+
     def test_deactivate_denies_a_later_login(
         self, client: TestClient, db_session: Session
     ) -> None:

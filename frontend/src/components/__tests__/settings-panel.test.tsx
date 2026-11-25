@@ -422,6 +422,7 @@ describe("SettingsPanel", () => {
       await user.paste("maker");
       await user.click(screen.getByLabelText("Initial password"));
       await user.paste("Password123");
+      await user.type(screen.getByLabelText("Confirm password"), "Password123");
 
       await user.click(screen.getByRole("button", { name: "Create" }));
 
@@ -442,10 +443,11 @@ describe("SettingsPanel", () => {
       await openCreateUser();
       await user.click(screen.getByLabelText("Username"));
       await user.paste("maker");
-      await user.click(screen.getByLabelText("Email"));
+      await user.click(screen.getByLabelText("Email (optional)"));
       await user.paste("maker@example.test");
       await user.click(screen.getByLabelText("Initial password"));
       await user.paste("Password123");
+      await user.type(screen.getByLabelText("Confirm password"), "Password123");
 
       await user.click(screen.getByRole("button", { name: "Create" }));
 
@@ -468,8 +470,40 @@ describe("SettingsPanel", () => {
 
       await user.click(screen.getByLabelText("Initial password"));
       await user.paste("short");
+      await user.type(screen.getByLabelText("Confirm password"), "short");
 
       expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+    });
+
+    it("blocks a password confirmation that does not match", async () => {
+      renderSettings({ at: "/settings?section=access" });
+      await openCreateUser();
+      await userEvent.type(screen.getByLabelText("Username"), "maker");
+      await userEvent.type(screen.getByLabelText("Initial password"), "Password123");
+      await userEvent.type(screen.getByLabelText("Confirm password"), "Password124");
+
+      expect(screen.getByText("Passwords do not match.")).toBeVisible();
+      expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+    });
+
+    it("keeps the account when deletion fails", async () => {
+      const user = userEvent.setup();
+      renderSettings({
+        at: "/settings?section=access",
+        routes: {
+          "GET /api/v1/admin/users": json([aUser()]),
+          "DELETE /api/v1/admin/users/2?remove=true": json({ detail: "unavailable" }, 503),
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "More actions for maker" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Delete user…" }));
+      const dialog = screen.getByRole("dialog", { name: "Delete user" });
+      await user.click(within(dialog).getByRole("button", { name: "Delete user" }));
+
+      expect(
+        await screen.findByText("This request could not be completed. Try again."),
+      ).toBeVisible();
+      expect(dialog).toBeVisible();
     });
 
     it("lists the users already in the vault", async () => {
@@ -3713,6 +3747,9 @@ describe("Settings account intent", () => {
     fireEvent.change(screen.getByLabelText("Initial password"), {
       target: { value: "FakePassword123" },
     });
+    fireEvent.change(screen.getByLabelText("Confirm password"), {
+      target: { value: "FakePassword123" },
+    });
     await userEvent.click(screen.getByRole("button", { name: "Create" }));
     expect(
       await screen.findByText("This request could not be completed. Try again."),
@@ -3775,6 +3812,9 @@ describe("Settings account draft lifetime", () => {
     const username = await screen.findByLabelText("Username");
     fireEvent.change(username, { target: { value: "original-maker" } });
     fireEvent.change(screen.getByLabelText("Initial password"), {
+      target: { value: "FakePassword123" },
+    });
+    fireEvent.change(screen.getByLabelText("Confirm password"), {
       target: { value: "FakePassword123" },
     });
     await userEvent.click(screen.getByRole("button", { name: "Create" }));

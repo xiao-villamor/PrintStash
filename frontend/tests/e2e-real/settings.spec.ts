@@ -14,6 +14,7 @@ import {
   openModelPage,
   backupFromAccepted,
   clickModelAction,
+  collapseNavigationSidebar,
   createBackupViaApi,
   seedExpiredStaging,
   uploadGcodeModel,
@@ -196,6 +197,18 @@ test.describe("settings", () => {
       }, path);
       expect(browserResponse.status, `${path} through Vite: ${browserResponse.body}`).toBe(200);
     }
+  });
+
+  test("gives storage usage sections space beside the desktop divider", async ({ page }) => {
+    await page.goto("/settings?section=storage");
+    await collapseNavigationSidebar(page);
+    await expect(page.getByRole("heading", { name: "Current storage" })).toBeVisible();
+    await page.getByRole("tab", { name: "Usage", exact: true }).click();
+    const breakdown = page.getByRole("region", { name: "What uses space" });
+    const history = page.getByRole("region", { name: "Storage over time" });
+    await expect(breakdown).toHaveCSS("padding-inline-end", "24px");
+    await expect(history).toHaveCSS("padding-inline-start", "24px");
+    await expect(page.getByRole("region", { name: "Measurement details" })).toBeVisible();
   });
 
   test("renders the responsive storage settings workflow", async ({ page }, testInfo) => {

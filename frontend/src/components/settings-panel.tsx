@@ -94,6 +94,9 @@ import {
   Database,
   Download,
   Eraser,
+  Eye,
+  EyeOff,
+  ExternalLink,
   Gpu,
   Hourglass,
   Files,
@@ -117,7 +120,6 @@ import {
   Search,
   Server,
   Tag,
-  UserPlus,
   Users,
   Clock,
   RefreshCw,
@@ -133,6 +135,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { TabBar } from "@/components/ui/tabs";
+import { FormField } from "@/components/ui/form-field";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Localized } from "@/components/ui/localized";
@@ -222,6 +225,7 @@ import {
   type ScreenshotScale,
 } from "@/lib/preview-preferences";
 import {
+  CHROME_EXTENSION_URL,
   prepareBrowserExtensionSetup,
   discardBrowserExtensionSetup,
   type BrowserExtensionSetup,
@@ -502,6 +506,8 @@ function TrashExpiry({ expiresAt }: { expiresAt: string | null | undefined }) {
   );
 }
 
+const EMPTY_CREATE_USER = { username: "", email: "", password: "", confirmation: "" };
+
 export function SettingsPanel() {
   const sidebar = useCollectionsPane();
   useUiLocale();
@@ -573,10 +579,18 @@ export function SettingsPanel() {
       ? "create"
       : userCommand.variables.id
     : null;
-  const [createUserDraft, setCreateUserDraft] = useState({ username: "", email: "", password: "" });
+  const [createUserDraft, setCreateUserDraft] = useState(EMPTY_CREATE_USER);
+  const [showNewUserPasswords, setShowNewUserPasswords] = useState(false);
+  const [deleteUserTarget, setDeleteUserTarget] = useState<number | null>(null);
   const [createUserOpen, setCreateUserOpen] = useState(false);
   const [passwordTarget, setPasswordTarget] = useState<number | null>(null);
-  const { username: newUsername, email: newUserEmail, password: newUserPassword } = createUserDraft;
+  const {
+    username: newUsername,
+    email: newUserEmail,
+    password: newUserPassword,
+    confirmation,
+  } = createUserDraft;
+  const passwordsMatch = newUserPassword === confirmation;
   const [passwordDrafts, setPasswordDrafts] = useState<Record<number, string>>({});
   const [accessCollection, setAccessCollection] = useState<CollectionNodeRead | null>(null);
   const [accessPickerOpen, setAccessPickerOpen] = useState(false);
@@ -825,7 +839,9 @@ export function SettingsPanel() {
   useEffect(() => {
     accountLive.current = true;
     const release = onAuthChange(() => {
-      setCreateUserDraft({ username: "", email: "", password: "" });
+      setCreateUserDraft(EMPTY_CREATE_USER);
+      setShowNewUserPasswords(false);
+      setDeleteUserTarget(null);
       setCreateUserOpen(false);
       setPasswordDrafts({});
       setPasswordTarget(null);
@@ -1575,8 +1591,8 @@ export function SettingsPanel() {
       return;
     const captured = createUserDraft;
     const username = captured.username.trim();
-    const password = captured.password.trim();
-    if (!username || password.length < 8) return;
+    const password = captured.password;
+    if (username.length < 3 || password.length < 8 || password !== captured.confirmation) return;
     const session = getSessionVersion();
     try {
       await userCommand.mutateAsync({
@@ -1586,10 +1602,9 @@ export function SettingsPanel() {
         payload: { username, password, email: captured.email.trim() || null },
       });
       if (!accountCurrent(session)) return;
-      setCreateUserDraft((current) =>
-        current === captured ? { username: "", email: "", password: "" } : current,
-      );
+      setCreateUserDraft((current) => (current === captured ? EMPTY_CREATE_USER : current));
       setCreateUserOpen(false);
+      setShowNewUserPasswords(false);
       toast.success(uiText("User created."));
     } catch (error) {
       if (accountCurrent(session)) toast.error(error);
@@ -1635,6 +1650,26 @@ export function SettingsPanel() {
     } catch (error) {
       if (accountCurrent(session)) toast.error(error);
     }
+  }
+
+  async function deleteUser(id: number) {
+    if (!user?.is_superuser || id === user.id || usersBusy !== null || !usersQuery.isSuccess)
+      return;
+    const session = getSessionVersion();
+    try {
+      await userCommand.mutateAsync({ kind: "remove", id, userId: user.id, session });
+      if (!accountCurrent(session)) return;
+      setDeleteUserTarget(null);
+      toast.success(uiText("User deleted."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
+    }
+  }
+
+  function closeCreateUser() {
+    if (usersBusy === "create") return;
+    setCreateUserOpen(false);
+    setShowNewUserPasswords(false);
   }
 
   async function confirmRestart() {
@@ -3216,9 +3251,7 @@ export function SettingsPanel() {
                 {user?.is_superuser && (
                   <SettingsCard
                     title={uiText("Users")}
-                    description={uiText(
-                      "Create users, assign vault admins, disable accounts, and reset passwords.",
-                    )}
+                    description={uiText("Manage accounts, administrator access, and passwords.")}
                     action={
                       <Button
                         size="sm"
@@ -3232,44 +3265,48 @@ export function SettingsPanel() {
                     <div className="space-y-4 py-4">
                       <Modal
                         open={createUserOpen}
-                        onClose={() => {
-                          if (usersBusy !== "create") setCreateUserOpen(false);
-                        }}
+                        onClose={closeCreateUser}
                         title={t("Create user")}
-                        className="settings-dialog"
+                        description={uiText(
+                          "Choose the credentials this person will use to sign in.",
+                        )}
+                        className="settings-dialog sm:max-w-md"
                         footer={
                           <>
                             <Button
                               variant="outline"
-                              onClick={() => setCreateUserOpen(false)}
+                              onClick={closeCreateUser}
                               disabled={usersBusy === "create"}
                             >
                               {t("Cancel")}
                             </Button>
-                            <button
-                              type="button"
-                              onClick={createUser}
+                            <Button
+                              type="submit"
+                              form="create-user-form"
+                              loading={usersBusy === "create"}
                               disabled={
                                 usersBusy !== null ||
-                                usersQuery.isError ||
-                                usersQuery.isPending ||
-                                !newUsername.trim() ||
-                                newUserPassword.trim().length < 8
+                                !usersQuery.isSuccess ||
+                                newUsername.trim().length < 3 ||
+                                newUserPassword.length < 8 ||
+                                !passwordsMatch
                               }
-                              className={cn(BTN_PRIMARY, "h-9")}
                             >
-                              <UserPlus className="h-3.5 w-3.5" />
                               {uiText("Create")}
-                            </button>
+                            </Button>
                           </>
                         }
                       >
-                        <div className="grid gap-4">
-                          <label className="block space-y-1">
-                            <span className="block text-sm font-medium text-foreground">
-                              {uiText("Username")}
-                            </span>
-                            <input
+                        <form
+                          id="create-user-form"
+                          className="grid gap-4"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            void createUser();
+                          }}
+                        >
+                          <FormField htmlFor="new-user-username" label={uiText("Username")}>
+                            <Input
                               id="new-user-username"
                               value={newUsername}
                               onChange={(event) =>
@@ -3278,16 +3315,24 @@ export function SettingsPanel() {
                                   username: event.target.value,
                                 }))
                               }
-                              className={INPUT}
+                              minLength={3}
                               maxLength={128}
-                              autoComplete="username"
+                              autoComplete="off"
+                              required
                             />
-                          </label>
-                          <label className="block space-y-1">
-                            <span className="block text-sm font-medium text-foreground">
-                              {uiText("Email")}
-                            </span>
-                            <input
+                          </FormField>
+                          <FormField
+                            htmlFor="new-user-email"
+                            label={
+                              <>
+                                {uiText("Email")}{" "}
+                                <span className="font-normal text-muted-foreground">
+                                  {uiText("(optional)")}
+                                </span>
+                              </>
+                            }
+                          >
+                            <Input
                               id="new-user-email"
                               value={newUserEmail}
                               onChange={(event) =>
@@ -3296,40 +3341,88 @@ export function SettingsPanel() {
                                   email: event.target.value,
                                 }))
                               }
-                              className={INPUT}
                               type="email"
                               maxLength={255}
-                              autoComplete="email"
+                              autoComplete="off"
                             />
-                          </label>
-                          <label className="block space-y-1">
-                            <span className="block text-sm font-medium text-foreground">
-                              {uiText("Initial password")}
-                            </span>
-                            <input
-                              id="new-user-password"
-                              value={newUserPassword}
+                          </FormField>
+                          <FormField
+                            htmlFor="new-user-password"
+                            label={uiText("Initial password")}
+                            hint={uiText("Initial password: at least 8 characters.")}
+                            hintId="new-user-password-help"
+                          >
+                            <div className="relative">
+                              <Input
+                                id="new-user-password"
+                                value={newUserPassword}
+                                onChange={(event) =>
+                                  setCreateUserDraft((current) => ({
+                                    ...current,
+                                    password: event.target.value,
+                                  }))
+                                }
+                                className="pe-11"
+                                type={showNewUserPasswords ? "text" : "password"}
+                                minLength={8}
+                                maxLength={256}
+                                autoComplete="new-password"
+                                aria-describedby="new-user-password-help"
+                                required
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                className="absolute end-0 top-0"
+                                aria-controls="new-user-password new-user-confirmation"
+                                aria-label={uiText(
+                                  showNewUserPasswords ? "Hide passwords" : "Show passwords",
+                                )}
+                                onClick={() => setShowNewUserPasswords((visible) => !visible)}
+                              >
+                                {showNewUserPasswords ? (
+                                  <EyeOff aria-hidden />
+                                ) : (
+                                  <Eye aria-hidden />
+                                )}
+                              </Button>
+                            </div>
+                          </FormField>
+                          <FormField
+                            htmlFor="new-user-confirmation"
+                            label={uiText("Confirm password")}
+                          >
+                            <Input
+                              id="new-user-confirmation"
+                              value={confirmation}
                               onChange={(event) =>
                                 setCreateUserDraft((current) => ({
                                   ...current,
-                                  password: event.target.value,
+                                  confirmation: event.target.value,
                                 }))
                               }
-                              className={INPUT}
-                              type="password"
-                              minLength={8}
+                              type={showNewUserPasswords ? "text" : "password"}
                               maxLength={256}
                               autoComplete="new-password"
-                              aria-describedby="new-user-password-help"
+                              aria-invalid={confirmation !== "" && !passwordsMatch}
+                              aria-describedby={
+                                confirmation !== "" && !passwordsMatch
+                                  ? "new-user-password-mismatch"
+                                  : undefined
+                              }
+                              required
                             />
-                          </label>
-                        </div>
-                        <p
-                          id="new-user-password-help"
-                          className="mt-2 text-xs text-muted-foreground"
-                        >
-                          {uiText("Initial password: at least 8 characters.")}
-                        </p>
+                            {confirmation !== "" && !passwordsMatch && (
+                              <p
+                                id="new-user-password-mismatch"
+                                className="mt-1 text-xs text-destructive"
+                              >
+                                {uiText("Passwords do not match.")}
+                              </p>
+                            )}
+                          </FormField>
+                        </form>
                       </Modal>
 
                       <div className="space-y-2">
@@ -3452,10 +3545,34 @@ export function SettingsPanel() {
                                               ? deactivateUser(row.id)
                                               : patchUser(row.id, { is_active: true }),
                                         },
+                                        ...(row.id === user.id
+                                          ? []
+                                          : [
+                                              {
+                                                label: uiText("Delete user…"),
+                                                danger: true,
+                                                onSelect: () => setDeleteUserTarget(row.id),
+                                              },
+                                            ]),
                                       ]}
                                     />
                                   </div>
                                 </div>
+                                <ConfirmModal
+                                  open={deleteUserTarget === row.id}
+                                  onClose={() => {
+                                    if (usersBusy !== row.id) setDeleteUserTarget(null);
+                                  }}
+                                  onConfirm={() => void deleteUser(row.id)}
+                                  busy={usersBusy === row.id}
+                                  confirmDisabled={!usersQuery.isSuccess || usersBusy !== null}
+                                  title={uiText("Delete user")}
+                                  description={uiText(
+                                    "{value1} will lose access and disappear from the user list. Their activity history will be kept.",
+                                    { value1: row.username },
+                                  )}
+                                  confirmLabel={uiText("Delete user")}
+                                />
                                 <ConfirmModal
                                   open={passwordTarget === row.id}
                                   onClose={() => setPasswordTarget(null)}
@@ -3973,60 +4090,77 @@ export function SettingsPanel() {
                       </p>
                     ) : (
                       <>
-                        <div className="rounded-lg border border-border bg-muted/30 p-3">
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-foreground">
-                                {uiText("Browser importer")}
-                              </p>
-                              <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                                {uiText(
-                                  "Create a dedicated key and prepare this vault in the browser extension.",
-                                )}
-                              </p>
-                            </div>
+                        <div className="flex flex-wrap items-start gap-3 rounded-lg border border-border bg-muted/30 p-4">
+                          <Puzzle
+                            className="mt-0.5 size-5 shrink-0 text-muted-foreground"
+                            aria-hidden
+                          />
+                          <div className="min-w-44 flex-1 space-y-1">
+                            <p className="text-sm font-semibold text-foreground">
+                              {uiText("Browser extension")}
+                            </p>
                             {extensionSetupReady ? (
-                              <span className="settings-status" role="status">
-                                {uiText("Setup prepared")}
-                              </span>
+                              <>
+                                <span className="settings-status" role="status">
+                                  {uiText("Setup prepared")}
+                                </span>
+                                <p className="text-sm text-muted-foreground">
+                                  {uiText(
+                                    "Open the PrintStash extension on this tab to finish the verified connection.",
+                                  )}
+                                </p>
+                              </>
                             ) : (
-                              <Button
-                                type="button"
-                                size="sm"
-                                onClick={setupBrowserExtension}
-                                loading={keyBusy}
-                                disabled={
-                                  receipt !== null || apiKeysQuery.isError || apiKeysQuery.isPending
-                                }
-                              >
-                                <Puzzle className="h-3.5 w-3.5" />
-                                {uiText("Set up extension")}
-                              </Button>
+                              <>
+                                <p className="text-sm text-muted-foreground">
+                                  {uiText(
+                                    "Install the extension, prepare a connection here, then open the extension in this tab to finish.",
+                                  )}
+                                </p>
+                                <Button
+                                  asChild
+                                  variant="link"
+                                  size="xs"
+                                  className="h-auto px-0 py-1"
+                                >
+                                  <a
+                                    href={CHROME_EXTENSION_URL}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                  >
+                                    {uiText("Install Chrome extension")}
+                                    <ExternalLink className="size-3.5" aria-hidden />
+                                  </a>
+                                </Button>
+                              </>
                             )}
                           </div>
-                          {extensionSetupReady && (
-                            <p className="mt-3 text-xs font-medium text-muted-foreground">
-                              {uiText(
-                                "Open the PrintStash extension on this tab to finish the verified connection.",
-                              )}
-                            </p>
+                          {!extensionSetupReady && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={setupBrowserExtension}
+                              loading={keyBusy}
+                              disabled={
+                                receipt !== null || apiKeysQuery.isError || apiKeysQuery.isPending
+                              }
+                            >
+                              {uiText("Set up extension")}
+                            </Button>
                           )}
                         </div>
 
-                        <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                          <label className="block space-y-1">
-                            <span className="block text-sm font-medium text-foreground">
-                              {uiText("Key name")}
-                            </span>
-                            <input
+                        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                          <FormField htmlFor="api-key-name" label={uiText("Key name")}>
+                            <Input
                               id="api-key-name"
                               value={keyName}
                               onChange={(event) => setKeyName(event.target.value)}
-                              className={INPUT}
+                              className="max-w-none"
                               maxLength={128}
                             />
-                          </label>
-                          <button
+                          </FormField>
+                          <Button
                             type="button"
                             onClick={generateApiKey}
                             disabled={
@@ -4035,11 +4169,10 @@ export function SettingsPanel() {
                               apiKeysQuery.isError ||
                               apiKeysQuery.isPending
                             }
-                            className={BTN_PRIMARY}
                           >
                             <KeyRound className="h-3.5 w-3.5" />
                             {uiText("Generate")}
-                          </button>
+                          </Button>
                         </div>
 
                         {newApiKey && (

@@ -27048,6 +27048,16 @@
               "title": "User Id",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "remove",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Remove",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {

@@ -47,6 +47,7 @@ type Station = Node<
     chosen: boolean;
     image?: string;
     held?: boolean;
+    printerStatus?: Machine["status"];
     printing?: boolean;
     progress?: number | null;
     remaining?: number | null;
@@ -67,6 +68,7 @@ function strategyLabel(strategy: RoutingStrategy) {
       : uiText("Default printer");
 }
 function machineState(row: Machine) {
+  if (row.status === "error") return uiText("Error");
   if (row.maintenance) return uiText("Maintenance");
   if (row.pending_operator_release) return uiText("Operator release required");
   if (row.drain_mode) return uiText("Draining");
@@ -84,6 +86,7 @@ function StationNode({ data }: NodeProps<Station>) {
       data-kind={data.kind}
       data-chosen={data.chosen}
       data-held={data.held}
+      data-printer-status={data.printerStatus}
       data-printing={data.printing}
     >
       {data.kind !== "job" && data.kind !== "inlet" && (
@@ -270,6 +273,7 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
     const active = row.status === "printing" || row.status === "paused";
     node("printer-" + row.printer_id, 650, ypos(index, rows.length), {
       kind: "printer",
+      printerStatus: row.status,
       label: machineState(row),
       title: row.name,
       detail: row.current_job_name
@@ -433,7 +437,9 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
             <>
               <dl>
                 <dt>{uiText("Routing")}</dt>
-                <dd>{machineState(selectedPrinter)}</dd>
+                <dd data-printer-status={selectedPrinter.status}>
+                  {machineState(selectedPrinter)}
+                </dd>
                 <dt>{uiText("Current job")}</dt>
                 <dd>
                   {selectedPrinter.current_job_name
@@ -502,7 +508,7 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
                     <Printer3D size={16} />
                     <span>
                       <strong>{row.name}</strong>
-                      <small>{machineState(row)}</small>
+                      <small data-printer-status={row.status}>{machineState(row)}</small>
                     </span>
                     <ChevronRight size={15} />
                   </button>
