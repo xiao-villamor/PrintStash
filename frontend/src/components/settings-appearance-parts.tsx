@@ -1,6 +1,7 @@
 import { Monitor, Moon, Sun } from "lucide-react";
 import { useId } from "react";
 import metricBracket from "@/assets/metric-bracket.webp";
+import { SettingsSwitch } from "@/components/settings-card";
 import { SETTINGS_FIELD } from "@/components/settings-controls";
 import { formatCalendarDate, formatDuration, formatNumber } from "@/lib/format";
 import { RevisionStatusBadge } from "@/components/revision-status-badge";
@@ -101,8 +102,12 @@ export function ThemeTiles({
 export function CardMetricsEditor({
   metrics,
   onChange,
+  showPreviewLabel,
+  onShowPreviewLabelChange,
 }: {
   metrics: CardMetrics;
+  showPreviewLabel: boolean;
+  onShowPreviewLabelChange: (checked: boolean) => void;
   onChange: (slot: 0 | 1 | 2, metric: CardMetricId) => void;
 }) {
   const id = useId();
@@ -119,7 +124,7 @@ export function CardMetricsEditor({
   return (
     <article
       aria-label={sampleName}
-      className="library-model-card flex w-full max-w-80 flex-col overflow-hidden rounded-lg border border-border bg-card text-card-foreground"
+      className="library-model-card flex w-full max-w-80 flex-col overflow-hidden border border-border bg-card text-card-foreground"
     >
       <div className="library-preview relative shrink-0 overflow-hidden">
         <img
@@ -129,6 +134,11 @@ export function CardMetricsEditor({
           height={240}
           className="library-card-thumbnail"
         />
+        {showPreviewLabel && (
+          <span className="absolute bottom-1.5 left-1.5 rounded-md border border-input bg-card px-1.5 py-1 text-2xs text-card-foreground shadow-md">
+            {uiText("modelPreview.cover")}
+          </span>
+        )}
       </div>
       <div className="library-card-content library-card-standard">
         <h3>
@@ -189,6 +199,14 @@ export function CardMetricsEditor({
             <time dateTime={sampleDate}>{formatCalendarDate(sampleDate)}</time>
           </div>
         </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-2 text-sm">
+        <span>{uiText("Show preview label")}</span>
+        <SettingsSwitch
+          label={uiText("Show preview label")}
+          checked={showPreviewLabel}
+          onChange={onShowPreviewLabelChange}
+        />
       </div>
     </article>
   );

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { LibraryPreviewPlaceholder } from "@/components/library-card-placeholder";
+import { usePreviewPreferences } from "@/lib/preview-preferences";
 import { keepOffCard } from "@/lib/card-overlay";
 import { previewTransferPolicy, type PreviewSelection } from "@/lib/use-model-previews";
 import { useModelPreviewCard, type PreviewCard } from "@/lib/use-model-preview-card";
@@ -241,6 +242,7 @@ export function ModelPreviewControls({
   children: ReactNode;
 }) {
   useUiLocale();
+  const { showCardPreviewLabel } = usePreviewPreferences();
   const { preview, views } = state;
   const { navigationViews } = preview;
   const shown = state.view?.id ?? "cover";
@@ -282,13 +284,19 @@ export function ModelPreviewControls({
                 state.setOpen(true);
               }}
             >
-              <span className={showPosition ? "library-preview-view-label" : undefined}>
-                {viewLabel}
-              </span>
-              {showPosition && (
-                <span className="font-mono">
-                  {viewIndex + 1}/{navigationViews.length}
-                </span>
+              {showCardPreviewLabel ? (
+                <>
+                  <span className={showPosition ? "library-preview-view-label" : undefined}>
+                    {viewLabel}
+                  </span>
+                  {showPosition && (
+                    <span className="font-mono">
+                      {viewIndex + 1}/{navigationViews.length}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <Images className="size-3.5" aria-hidden />
               )}
             </Button>
           </div>

@@ -1,6 +1,9 @@
 .library-virtual-row {
   display: grid;
   align-items: stretch;
+}
+:root[data-pane-moving] .library-virtual-row,
+[data-inspector-moving] .library-virtual-row {
   /* For the one frame before the column count catches up with a narrowing
      pane, the last card is clipped instead of scrolling the page sideways. */
   overflow-x: clip;
@@ -350,7 +353,7 @@
 :where(.dark) .library-model-card:not([data-inspected]):hover {
   border-color: var(--border-strong);
   box-shadow:
-    0 14px 28px -12px var(--dialog-shadow),
+    0 14px 28px -12px color-mix(in srgb, var(--foreground) 22%, transparent),
     0 3px 7px var(--dialog-shadow);
 }
 

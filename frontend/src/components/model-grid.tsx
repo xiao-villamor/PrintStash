@@ -3524,6 +3524,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           tabIndex={-1}
           aria-busy={reading.status === "restoring"}
           data-inspector-open={inspectorOpen || undefined}
+          data-inspector-moving={inspectorMotion.moving || undefined}
           data-inspector-grid={(docView === "models" && viewMode === "grid") || undefined}
           data-inspector-layout={docView === "models" ? viewMode : undefined}
           data-inspector-compact-dock={

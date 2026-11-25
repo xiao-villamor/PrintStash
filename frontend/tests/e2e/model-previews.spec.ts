@@ -424,12 +424,33 @@ test.describe("Model preview browsing", () => {
       reference.remove();
       return {
         radius: style.borderRadius,
+        overflow: getComputedStyle(element.closest(".library-virtual-row")!).overflowX,
         neutral: style.borderTopColor === neutral,
         shadow: style.boxShadow,
       };
     });
-    expect(shadow).toMatchObject({ radius: "6px", neutral: true });
+    expect(shadow).toMatchObject({ radius: "6px", neutral: true, overflow: "visible" });
     expect(shadow.shadow).toContain("0px 14px 28px -12px");
+  });
+
+  test("persists a hidden card preview label across reload", async ({ page }) => {
+    await page.goto("/settings?section=design");
+    await collapseNavigationSidebar(page);
+    const label = page.getByRole("switch", { name: "Show preview label" });
+    await expect(label).toBeChecked();
+
+    await label.click();
+    await expect(
+      page.getByRole("article", { name: "Example bracket" }).getByText("Cover", { exact: true }),
+    ).toHaveCount(0);
+    await page.reload();
+    await expect(label).not.toBeChecked();
+    const { card } = await library(page);
+    const gallery = card.getByRole("button", { name: "Model views", exact: true });
+    await expect(gallery).toHaveText("");
+    await gallery.press("Enter");
+
+    await expect(page.getByRole("dialog", { name: "Model views" })).toBeVisible();
   });
 
   test("keeps card arrows compact over the image", async ({ page }) => {

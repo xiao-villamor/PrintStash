@@ -5414,6 +5414,10 @@ export function SettingsPanel() {
                   <CardMetricsEditor
                     metrics={cardMetricsInDisplayOrder(cardMetrics)}
                     onChange={updateCardMetric}
+                    showPreviewLabel={previewPreferences.showCardPreviewLabel}
+                    onShowPreviewLabelChange={(showCardPreviewLabel) =>
+                      savePreviewPreference({ showCardPreviewLabel })
+                    }
                   />
                 </section>
 
