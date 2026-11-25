@@ -5,6 +5,7 @@ import { LibraryStatusFilters } from "@/components/library-status-filters";
 import { CollectionHeaderTags } from "@/components/collection-header-tags";
 import "./library-header.css";
 import { LibraryCollectionGroup } from "@/components/library-collection-group";
+import { LibraryFindBar } from "@/components/library-find-bar";
 import { LibraryCollectionsRegion } from "@/components/library-collections-region";
 
 import { arrivingKeys, entryKeys } from "@/lib/library-arrivals";
@@ -1584,6 +1585,52 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const startupContent = useRef<HTMLElement>(null);
   const listContent = useRef<HTMLDivElement>(null);
   const readingRenderers = useRef(new Map<string, LibraryReadingRenderer>());
+  const [findOpen, setFindOpen] = useState(false);
+  const findHighlight = useRef<HTMLElement | null>(null);
+  const findFrame = useRef(0);
+  // Bring one find match into view and ring it. The list is virtual, so a match
+  // far down is first scrolled into existence and then located.
+  const revealFound = useCallback((id: number | null) => {
+    cancelAnimationFrame(findFrame.current);
+    findHighlight.current?.classList.remove("library-find-current");
+    findHighlight.current = null;
+    if (id === null) return;
+    const key = `/models/${id}`;
+    let attempts = 0;
+    function reveal() {
+      const anchor = startupContent.current?.querySelector<HTMLElement>(libraryReadingSelector(key));
+      const card = anchor?.closest<HTMLElement>("[data-library-key]") ?? anchor;
+      if (card) {
+        card.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
+        card.classList.add("library-find-current");
+        findHighlight.current = card;
+        return;
+      }
+      attempts += 1;
+      if (attempts > 60) return;
+      readingRenderers.current.get("models")?.reveal(key);
+      findFrame.current = requestAnimationFrame(reveal);
+    }
+    reveal();
+  }, []);
+  useEffect(() => {
+    function keydown(event: KeyboardEvent) {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.key.toLowerCase() !== "f" ||
+        !(event.metaKey || event.ctrlKey) ||
+        event.shiftKey ||
+        event.altKey ||
+        modalOverlayOpen()
+      )
+        return;
+      event.preventDefault();
+      setFindOpen(true);
+    }
+    window.addEventListener("keydown", keydown);
+    return () => window.removeEventListener("keydown", keydown);
+  }, []);
   const reading = useLibraryReadingPosition(
     snapshot?.entry,
     viewMode,
@@ -3498,6 +3545,16 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         </LibraryCollectionsPane>
         {savedViewsHost && auth.isAuthenticated && createPortal(savedViewControl(), savedViewsHost)}
 
+        {findOpen && docView === "models" && (
+          <LibraryFindBar
+            models={visibleModels}
+            onReveal={revealFound}
+            onClose={() => {
+              setFindOpen(false);
+              startupContent.current?.focus({ preventScroll: true });
+            }}
+          />
+        )}
         <main
           ref={startupContent}
           tabIndex={-1}

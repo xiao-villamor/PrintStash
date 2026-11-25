@@ -204,6 +204,7 @@ export function KeyboardShortcuts() {
       rows: [
         { labelKey: "Search", keys: ["/"] },
         { labelKey: "Search panel", keys: [mod, shift, "F"] },
+        { labelKey: "Find in collection", keys: [mod, "F"] },
         { labelKey: "Collections panel", keys: [mod, shift, "E"] },
         { labelKey: "Show or hide the sidebar", keys: [mod, "B"] },
         { labelKey: "Show or hide details", keys: [mod, alt, "B"] },

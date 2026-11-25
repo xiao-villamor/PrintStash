@@ -379,6 +379,21 @@
   background: var(--card);
 }
 
+/* The find bar's current match: a steady ring, unlike the tree spotlight's fade. */
+.library-find-current {
+  position: relative;
+}
+
+.library-find-current::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  pointer-events: none;
+  border: 2px solid var(--primary);
+  border-radius: inherit;
+  content: "";
+}
+
 .library-tree-spotlight {
   position: relative;
 }

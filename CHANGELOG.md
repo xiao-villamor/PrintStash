@@ -14,6 +14,8 @@
 
 ### Added
 
+- Press Ctrl+F (⌘F on Mac) in a collection to open an editor-style find bar. It counts the matching models, steps through them with Enter and Shift+Enter, rings the current one, and closes with Esc.
+
 - Assign a printer cost profile to a connected printer. Prints launched from PrintStash show an estimated production cost, then record the cost of the completed, failed, or stopped run using available measurements. History identifies estimates and partial costs.
 
 - Model costing saves per-piece production estimates for STL and G-code Artifacts. Use filament presets or individual Spoolman spools, enter print time or copy it from measured print history, and include printer amortization, maintenance, electricity, and other hourly costs. Apply reusable profit margin and tax templates to calculate a price.

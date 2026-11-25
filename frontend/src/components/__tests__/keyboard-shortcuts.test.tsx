@@ -80,6 +80,7 @@ describe("KeyboardShortcuts", () => {
       expect(within(dialog).getByRole("heading", { name })).toBeVisible();
     for (const name of [
       "Search panel",
+      "Find in collection",
       "Collections panel",
       "Show or hide the sidebar",
       "Show or hide details",
