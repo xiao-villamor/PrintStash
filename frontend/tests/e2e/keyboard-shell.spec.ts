@@ -193,13 +193,13 @@ test.describe("Shared keyboard commands", () => {
     expect(new URL(page.url()).searchParams.get("sort")).toBe("name-asc");
   });
 
-  test("F2 opens the containing collection editor after returning", async ({ page }) => {
+  test("F2 edits the Model title from its detail page", async ({ page }) => {
     await page.goto("/models/1");
     await expect(
       page.getByRole("heading", { name: "skadis_kitchen-roll_screw", exact: true }),
     ).toBeVisible();
     await page.keyboard.press("F2");
-    await expect(page.getByRole("textbox", { name: "Collection name" })).toBeFocused();
-    expect(new URL(page.url()).searchParams.get("c")).toBe("maraio");
+    await expect(page.getByRole("textbox", { name: "Model name" })).toBeFocused();
+    await expect(page).toHaveURL(/\/models\/1$/);
   });
 });
