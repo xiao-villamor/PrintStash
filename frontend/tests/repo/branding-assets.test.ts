@@ -70,7 +70,7 @@ describe("README logo", () => {
   });
 
   it("renders the slogan as README text", () => {
-    expect(readme).toContain("**Your 3D printing workflow in one place.**");
+    expect(readme).toContain("### Save what worked. Print it again.");
   });
 
   describe.each(["light", "dark"])("in %s mode", (theme) => {

@@ -2,7 +2,8 @@
 
 <a href="screenshots/printstash-logo-dark.gif#gh-dark-mode-only"><img src="screenshots/printstash-logo-dark.gif" alt="PrintStash logo" height="160" /></a><a href="screenshots/printstash-logo-light.gif#gh-light-mode-only"><img src="screenshots/printstash-logo-light.gif" alt="PrintStash logo" height="160" /></a>
 
-**Your 3D printing workflow in one place.**<br />
+### Save what worked. Print it again.
+
 A self-hosted library for 3D models, G-code revisions, slicer settings, and print history.
 
 [![Release](https://img.shields.io/github/v/release/xiao-villamor/PrintStash?style=flat&label=Release&labelColor=252c36&color=414b5b)](https://github.com/xiao-villamor/PrintStash/releases/latest)
