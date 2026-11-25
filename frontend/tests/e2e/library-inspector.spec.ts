@@ -317,6 +317,45 @@ test.describe("Library inline inspector", () => {
     expect(problems).toEqual([]);
   });
 
+  test("returns Escape focus to the model card after a pointer opening", async ({ page }) => {
+    await page.goto("/?c=maraio&type=all");
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+    await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+    const card = page
+      .getByRole("main")
+      .getByRole("link", { name: "skadis_kitchen-roll_screw", exact: true });
+    await card.click();
+    const drawer = page.locator("#model-drawer");
+    await expect(drawer).toBeVisible();
+
+    await page.keyboard.press("Escape");
+
+    await expect(drawer).toBeHidden();
+    await expect(card).toBeFocused();
+  });
+
+  test("returns Escape focus to the inspected card when details opened from the workspace", async ({
+    page,
+  }) => {
+    await page.goto("/?c=maraio&type=all");
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+    await sidebar.click();
+    await expect(sidebar).toHaveAttribute("aria-expanded", "false");
+    const main = page.getByRole("main");
+    const card = main.getByRole("link", { name: "skadis_kitchen-roll_screw", exact: true });
+    await expect(card).toBeVisible();
+    await main.focus();
+    await page.keyboard.press("Control+Alt+b");
+    const drawer = page.locator("#model-drawer");
+    await expect(drawer).toBeVisible();
+
+    await page.keyboard.press("Escape");
+
+    await expect(drawer).toBeHidden();
+    await expect(card).toBeFocused();
+  });
+
   test("cancels failure before closing details before clearing selection", async ({ page }) => {
     const problems = await collectPageProblems(page);
     await page.goto("/?c=maraio&type=all");

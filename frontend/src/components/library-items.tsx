@@ -10,6 +10,7 @@ import {
 } from "react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import {
+  INSPECTOR_LAYOUT_WILL_CHANGE_EVENT,
   PANE_MOVING_EVENT,
   PANE_SETTLED_EVENT,
   PaneMovingEvent,
@@ -141,7 +142,7 @@ export function LibraryItems<T>({
   // Card positions captured when the pane starts moving, consumed after the
   // grid commits its resting tracks. Flights are the running card motions.
   const flip = useRef<{
-    before: Map<string, DOMRect>;
+    before: Map<string, { x: number; y: number }>;
     motion: PaneMotion;
     /** The columns and cell pitch the captured positions were laid out in. */
     columns: number;
@@ -153,6 +154,8 @@ export function LibraryItems<T>({
     pitch: 0,
     keys: [],
   });
+  const inspectorOrigin = useRef<Map<string, { x: number; y: number }> | null>(null);
+  const sidebarTarget = useRef<number | null>(null);
   const flights = useRef<Animation[]>([]);
   const gap = layout === "list" ? 0 : compact ? 8 : 16;
   const preferredWidth = minCardWidth ?? preferredCardWidth(compact);
@@ -162,7 +165,7 @@ export function LibraryItems<T>({
   const virtual =
     virtualize && items.length > NATIVE_RENDER_LIMIT && "ResizeObserver" in globalThis;
   const columns = layout === "list" ? 1 : geometry.columns + extraColumns;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (geometry.width > 0) onColumnsChange?.(layout === "list" ? 1 : geometry.columns);
   }, [layout, geometry.columns, geometry.width, onColumnsChange]);
   const keys = useMemo(() => items.map(itemKey), [items, itemKey]);
@@ -203,10 +206,21 @@ export function LibraryItems<T>({
     const node = root.current;
     const scroll = scrollRef.current;
     if (!node || !scroll) return;
-    const measure = () => {
-      const measuredWidth = node.clientWidth;
-      // Hidden surfaces have no layout yet; observe again when they become visible.
-      if (measuredWidth === 0 || "paneMoving" in document.documentElement.dataset) return;
+    const measure = (paneMotion = false) => {
+      if (node.clientWidth === 0) return;
+      const sidebarMoving = "paneMoving" in document.documentElement.dataset;
+      if (sidebarMoving && !paneMotion) return;
+      const sidebarWidth =
+        sidebarMoving || keepCollectionCardWidth
+          ? (document.querySelector<HTMLElement>("[data-collections-pane]")?.offsetWidth ?? 0)
+          : 0;
+      const restingSidebarWidth = sidebarMoving
+        ? (sidebarTarget.current ?? sidebarWidth)
+        : sidebarWidth;
+      const measuredWidth = Math.max(
+        1,
+        Math.round(node.clientWidth + sidebarWidth - restingSidebarWidth),
+      );
       // The scroll surface docks the inspector with right padding. Recover the
       // closed width, including when the Collections pane targets a new width.
       const style =
@@ -217,9 +231,7 @@ export function LibraryItems<T>({
       // A scrollbar can appear as the cards rewrap. The outer frame tells us
       // whether the closed layout itself changed or just the open grid did.
       const scrollbarWidth = scroll.offsetWidth - scroll.clientWidth;
-      const collectionsPaneWidth = keepCollectionCardWidth
-        ? (document.querySelector<HTMLElement>("[data-collections-pane]")?.offsetWidth ?? 0)
-        : 0;
+      const collectionsPaneWidth = keepCollectionCardWidth ? restingSidebarWidth : 0;
       const closedFrameWidth = measuredWidth + dockWidth + scrollbarWidth;
       const inset = style?.getPropertyValue("--library-inspector-inset");
       const gutter = style?.getPropertyValue("--library-inspector-gutter");
@@ -372,24 +384,44 @@ export function LibraryItems<T>({
     });
     observer.observe(node);
     observer.observe(scroll);
-    const settled = () => measure();
-    const moving = (event: Event) => {
-      if (!(event instanceof PaneMovingEvent) || "paneMoving" in document.documentElement.dataset)
-        return;
-      if (node.clientWidth === 0) return;
-      // Visual positions, including any flight a reversed pane interrupts.
-      const before = new Map<string, DOMRect>();
-      for (const card of node.querySelectorAll<HTMLElement>("[data-library-key]"))
-        before.set(card.dataset.libraryKey!, card.getBoundingClientRect());
-      for (const flight of flights.current) flight.cancel();
-      flights.current = [];
-      flip.current = { before, motion: event.motion, ...painted.current };
+    const snapshot = () => {
+      const left = scroll.getBoundingClientRect().left;
+      const cards = new Map<string, { x: number; y: number }>();
+      for (const card of node.querySelectorAll<HTMLElement>("[data-library-key]")) {
+        const bounds = card.getBoundingClientRect();
+        cards.set(card.dataset.libraryKey!, { x: bounds.left - left, y: bounds.top });
+      }
+      return cards;
+    };
+    const captureInspectorOrigin = () => {
+      if (node.clientWidth > 0) inspectorOrigin.current = snapshot();
+    };
+    const settled = () => {
+      if ("paneMoving" in document.documentElement.dataset) return;
+      sidebarTarget.current = null;
+      inspectorOrigin.current = null;
+      flip.current = null;
       measure();
     };
-    window.addEventListener(PANE_SETTLED_EVENT, settled);
+    const moving = (event: Event) => {
+      if (!(event instanceof PaneMovingEvent) || node.clientWidth === 0) return;
+      const { motion } = event;
+      // A sidebar transition also moves the workspace. Card offsets are
+      // relative to the workspace so that movement contributes only once.
+      const before =
+        motion.targetSidebarWidth === null ? (inspectorOrigin.current ?? snapshot()) : snapshot();
+      if (motion.targetSidebarWidth === null) inspectorOrigin.current = null;
+      else sidebarTarget.current = motion.targetSidebarWidth;
+      for (const flight of flights.current) flight.cancel();
+      flights.current = [];
+      flip.current = { before, motion, ...painted.current };
+      measure(true);
+    };
+    window.addEventListener(INSPECTOR_LAYOUT_WILL_CHANGE_EVENT, captureInspectorOrigin);
     window.addEventListener(PANE_MOVING_EVENT, moving);
     return () => {
       window.removeEventListener(PANE_SETTLED_EVENT, settled);
+      window.removeEventListener(INSPECTOR_LAYOUT_WILL_CHANGE_EVENT, captureInspectorOrigin);
       window.removeEventListener(PANE_MOVING_EVENT, moving);
       observer.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
@@ -462,10 +494,10 @@ export function LibraryItems<T>({
     flip.current = null;
     const node = root.current;
     const scroll = scrollRef.current;
-    if (!pending || !node) return;
+    if (!pending || !node || !scroll) return;
     const saved = restore.current;
     restore.current = null;
-    if (saved && scroll) {
+    if (saved) {
       const anchor = node.querySelector<HTMLElement>(
         `[data-library-key="${CSS.escape(saved.key)}"]`,
       );
@@ -485,6 +517,7 @@ export function LibraryItems<T>({
     const indexes = new Map(keys.map((key, index) => [key, index]));
     const last = progress.length - 1;
     if (last < 1 || durationMs <= 0) return;
+    const workspaceLeft = scroll.getBoundingClientRect().left;
     for (const card of node.querySelectorAll<HTMLElement>("[data-library-key]")) {
       const after = card.getBoundingClientRect();
       const key = card.dataset.libraryKey!;
@@ -501,8 +534,9 @@ export function LibraryItems<T>({
         if (Math.abs(rows) > 1) {
           keyframes = fadeIn(progress, last);
         } else {
-          const dx = before.left - after.left + rows * pending.columns * pending.pitch;
-          const dy = wraps ? 0 : before.top - after.top;
+          const dx =
+            before.x - (after.left - workspaceLeft) + rows * pending.columns * pending.pitch;
+          const dy = wraps ? 0 : before.y - after.top;
           if (!wraps && Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
           // Transform only: it runs on the compositor. Animating width would
           // relayout every card on every frame of the pane motion.

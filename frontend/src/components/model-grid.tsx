@@ -36,7 +36,11 @@ import {
   LIBRARY_INSPECTOR_MAX_WIDTH,
   LIBRARY_INSPECTOR_MIN_WIDTH,
 } from "@/components/use-inspector-motion";
-import { PANE_MOVING_EVENT, PANE_SETTLED_EVENT } from "@/components/use-collections-pane-motion";
+import {
+  INSPECTOR_LAYOUT_WILL_CHANGE_EVENT,
+  PANE_MOVING_EVENT,
+  PANE_SETTLED_EVENT,
+} from "@/components/use-collections-pane-motion";
 import { LibraryItemLink } from "@/features/library/navigation";
 import { useModelOpenIntent } from "@/features/library/model-detail";
 import { useLibraryEntry, type LibraryEntry } from "@/features/library/navigation-state";
@@ -345,8 +349,8 @@ function CollectionStrip({
   const [expandedFor, setExpandedFor] = useState<string | null>(null);
   const [rowSize, setRowSize] = useState(4);
   const expanded = expandedFor === resetKey;
-  // The right inspector moves the grid on its resting tracks. Keep one extra
-  // collection beyond the clipped edge until the inspector settles.
+  // Both panes move the grid on its resting tracks. Keep one extra
+  // collection beyond the clipped edge until the pane settles.
   const [extra, setExtra] = useState(0);
   useEffect(() => {
     const moving = () => setExtra(1);
@@ -1597,7 +1601,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const key = `/models/${id}`;
     let attempts = 0;
     function reveal() {
-      const anchor = startupContent.current?.querySelector<HTMLElement>(libraryReadingSelector(key));
+      const anchor = startupContent.current?.querySelector<HTMLElement>(
+        libraryReadingSelector(key),
+      );
       const card = anchor?.closest<HTMLElement>("[data-library-key]") ?? anchor;
       if (card) {
         card.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
@@ -2376,9 +2382,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         "--library-inspector-padding-offset": `${appliedDock.paddingOffset}px`,
       }
     : {};
-  const inspectorKeyboardOpener = useRef<HTMLElement | null>(null);
+  const inspectorOpener = useRef<HTMLElement | null>(null);
   const setInspector = useCallback(
     (intent: InspectorIntent) => {
+      const wasOpen = libraryInspectorIntents.get(inspectorScope)?.open ?? false;
+      if (intent.open !== wasOpen && !window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+        window.dispatchEvent(new Event(INSPECTOR_LAYOUT_WILL_CHANGE_EVENT));
       libraryInspectorIntents.set(inspectorScope, intent);
       while (libraryInspectorIntents.size > 20)
         libraryInspectorIntents.delete(libraryInspectorIntents.keys().next().value!);
@@ -2388,8 +2397,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   );
   const inspectModel = useCallback(
     (id: number, opener: HTMLElement | null) => {
-      // Capture focus modality before the drawer moves focus to its title.
-      inspectorKeyboardOpener.current = opener?.matches(":focus-visible") ? opener : null;
+      inspectorOpener.current = opener;
       setInspector({ id, open: true });
     },
     [setInspector],
@@ -2513,11 +2521,28 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const closeInspector = useCallback(() => {
     if (inspectorIntent) setInspector({ ...inspectorIntent, open: false });
     requestAnimationFrame(() => {
-      const opener = inspectorKeyboardOpener.current;
-      if (opener?.isConnected) opener.focus({ preventScroll: true });
-      else startupContent.current?.focus({ preventScroll: true });
+      if (libraryInspectorIntents.get(inspectorScope)?.open) return;
+      const opener = inspectorOpener.current;
+      const main = startupContent.current;
+      if (
+        opener?.isConnected &&
+        opener !== document.body &&
+        opener !== main &&
+        !opener.closest("[inert]") &&
+        opener.getClientRects().length > 0
+      ) {
+        opener.focus({ preventScroll: true });
+        return;
+      }
+      // Reflow can replace a card's DOM node while the inspector is open.
+      const card = inspectorIntent
+        ? main?.querySelector<HTMLElement>(libraryReadingSelector(`/models/${inspectorIntent.id}`))
+        : null;
+      const control =
+        card ?? document.querySelector<HTMLButtonElement>('button[aria-controls="model-drawer"]');
+      control?.focus({ preventScroll: true });
     });
-  }, [inspectorIntent, setInspector]);
+  }, [inspectorIntent, inspectorScope, setInspector]);
   const toggleInspector = useCallback(() => {
     if (!inspectorAvailable) return;
     if (inspectorOpen) closeInspector();
@@ -4168,81 +4193,86 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       }}
                     />
                   ) : (
-                  <EmptyState
-                    title={uiText(
-                      emptyFavorites
-                        ? "No favorites yet"
-                        : selectedCollection && !hasActiveFilters
-                          ? "library.collectionEmpty"
-                          : "No models found",
-                    )}
-                    description={
-                      emptyFavorites
-                        ? uiText("Star a model or multipart set to see it here.")
-                        : hasActiveFilters
-                          ? uiText("Try clearing some filters.")
-                          : selectedCollection
-                            ? uiText(
-                                canUploadHere
-                                  ? "library.collectionEmptyHelp"
-                                  : "library.collectionReadOnlyEmptyHelp",
-                              )
-                            : uiText(
-                                "Upload a model when you're ready, or skim the wiki first if this is a new install.",
-                              )
-                    }
-                    action={
-                      emptyFavorites ? (
-                        <Button type="button" variant="outline" size="xs" onClick={toggleFavorites}>
-                          {uiText("aiSearch.backToLibrary")}
-                        </Button>
-                      ) : hasActiveFilters ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="xs"
-                          onClick={() => clearAllFilters()}
-                        >
-                          {uiText("Clear all filters")}
-                        </Button>
-                      ) : selectedCollection && !canUploadHere ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleCollectionChange(null)}
-                        >
-                          {uiText("aiSearch.backToLibrary")}
-                        </Button>
-                      ) : (
-                        <div className="flex flex-wrap items-center justify-center gap-2">
-                          <GettingStartedReminder />
+                    <EmptyState
+                      title={uiText(
+                        emptyFavorites
+                          ? "No favorites yet"
+                          : selectedCollection && !hasActiveFilters
+                            ? "library.collectionEmpty"
+                            : "No models found",
+                      )}
+                      description={
+                        emptyFavorites
+                          ? uiText("Star a model or multipart set to see it here.")
+                          : hasActiveFilters
+                            ? uiText("Try clearing some filters.")
+                            : selectedCollection
+                              ? uiText(
+                                  canUploadHere
+                                    ? "library.collectionEmptyHelp"
+                                    : "library.collectionReadOnlyEmptyHelp",
+                                )
+                              : uiText(
+                                  "Upload a model when you're ready, or skim the wiki first if this is a new install.",
+                                )
+                      }
+                      action={
+                        emptyFavorites ? (
                           <Button
                             type="button"
-                            size="sm"
-                            disabled={!canUploadToVault}
-                            onClick={() => {
-                              setDropPreload({ files: [], mode: "files" });
-                              setUploadOpen(true);
-                            }}
+                            variant="outline"
+                            size="xs"
+                            onClick={toggleFavorites}
                           >
-                            {uiText("Upload files")}
+                            {uiText("aiSearch.backToLibrary")}
                           </Button>
-                          {canUploadToVault && (
-                            <Button asChild variant="outline" size="sm">
-                              <Link href="/inbox">{uiText("Import from URL")}</Link>
+                        ) : hasActiveFilters ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="xs"
+                            onClick={() => clearAllFilters()}
+                          >
+                            {uiText("Clear all filters")}
+                          </Button>
+                        ) : selectedCollection && !canUploadHere ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleCollectionChange(null)}
+                          >
+                            {uiText("aiSearch.backToLibrary")}
+                          </Button>
+                        ) : (
+                          <div className="flex flex-wrap items-center justify-center gap-2">
+                            <GettingStartedReminder />
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={!canUploadToVault}
+                              onClick={() => {
+                                setDropPreload({ files: [], mode: "files" });
+                                setUploadOpen(true);
+                              }}
+                            >
+                              {uiText("Upload files")}
                             </Button>
-                          )}
-                          {user?.is_superuser && (
-                            <Button asChild variant="outline" size="sm">
-                              <Link href="/settings">{uiText("Connect folder or NAS")}</Link>
-                            </Button>
-                          )}
-                        </div>
-                      )
-                    }
-                    className="flex-1 py-20"
-                  />
+                            {canUploadToVault && (
+                              <Button asChild variant="outline" size="sm">
+                                <Link href="/inbox">{uiText("Import from URL")}</Link>
+                              </Button>
+                            )}
+                            {user?.is_superuser && (
+                              <Button asChild variant="outline" size="sm">
+                                <Link href="/settings">{uiText("Connect folder or NAS")}</Link>
+                              </Button>
+                            )}
+                          </div>
+                        )
+                      }
+                      className="flex-1 py-20"
+                    />
                   )
                 ) : viewMode === "grid" ? (
                   <div

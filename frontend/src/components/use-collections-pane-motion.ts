@@ -5,7 +5,8 @@ const KEYFRAME_COUNT = 60;
 /** A continuous ease into rest, with no spring response or oscillation.
  * A reversal carries its current velocity through a short, smooth turn.
  * Both docked panels (Collections and the Model inspector) use it. */
-export function dockMotion(from: number, velocity: number, target: number, duration: number) {
+export function dockMotion(element: Element, from: number, velocity: number, target: number) {
+  const duration = durationToken(element, "--duration-fast");
   const distance = target - from;
   const tangent = velocity * duration;
   const sample = (seconds: number) => {
@@ -30,10 +31,13 @@ export function dockMotion(from: number, velocity: number, target: number, durat
 
 /** Re-measure layouts after a dock width is committed. */
 export const PANE_SETTLED_EVENT = "printstash:pane-settled";
-/** The right inspector can carry the grid along its own motion. */
+/** Both docks carry the grid to its resting tracks during the pane motion. */
 export const PANE_MOVING_EVENT = "printstash:pane-moving";
+/** Capture the painted grid before React changes the right dock's padding. */
+export const INSPECTOR_LAYOUT_WILL_CHANGE_EVENT = "printstash:inspector-layout-will-change";
 
 export interface PaneMotion {
+  targetSidebarWidth: number | null;
   durationMs: number;
   /** Normalised progress 0→1 at evenly spaced times across `durationMs`. */
   progress: readonly number[];
@@ -45,6 +49,24 @@ export class PaneMovingEvent extends Event {
   }
 }
 
+export function announcePaneMotion(
+  motion: ReturnType<typeof dockMotion>,
+  target: number,
+  targetSidebarWidth: number | null,
+) {
+  const from = motion.samples[0]!.position;
+  const span = target - from;
+  window.dispatchEvent(
+    new PaneMovingEvent({
+      targetSidebarWidth,
+      durationMs: motion.duration * 1000,
+      progress: motion.samples.map((sample) =>
+        Math.abs(span) < 1e-6 ? 1 : (sample.position - from) / span,
+      ),
+    }),
+  );
+}
+
 function setMoving(moving: boolean) {
   const root = document.documentElement;
   if (moving) root.dataset.paneMoving = "";
@@ -54,8 +76,7 @@ function setMoving(moving: boolean) {
   }
 }
 
-/** The shell edge carries the workspace with it. Consumers keep their track
- * measurements during the glide and re-measure at the final width. */
+/** Move the shell edge with the workspace while cards glide to their final tracks. */
 export function useCollectionsPaneMotion(open: boolean) {
   const viewport = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -91,19 +112,15 @@ export function useCollectionsPaneMotion(open: boolean) {
       initialized.current = true;
       finish();
     } else {
-      const duration = durationToken(shell, "--duration-fast");
-      const motion = dockMotion(
-        fromWidth / fullWidth,
-        velocity.current / fullWidth,
-        open ? 1 : 0,
-        duration,
-      );
+      const target = open ? 1 : 0;
+      const targetWidth = target * fullWidth;
+      const motion = dockMotion(shell, fromWidth / fullWidth, velocity.current / fullWidth, target);
       trajectory = motion;
-      if (Math.abs(fromWidth - (open ? fullWidth : 0)) < 0.5 && Math.abs(velocity.current) < 1)
-        finish();
+      if (Math.abs(fromWidth - targetWidth) < 0.5 && Math.abs(velocity.current) < 1) finish();
       else {
         body.style.visibility = "visible";
         setMoving(true);
+        announcePaneMotion(motion, target, targetWidth);
         const timing = {
           duration: motion.duration * 1000,
           easing: "linear",

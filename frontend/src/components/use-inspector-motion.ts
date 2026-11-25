@@ -2,10 +2,9 @@ import { useLayoutEffect, useRef, useState } from "react";
 
 import {
   PANE_SETTLED_EVENT,
-  PaneMovingEvent,
+  announcePaneMotion,
   dockMotion,
 } from "@/components/use-collections-pane-motion";
-import { cssTimeSeconds } from "@/lib/css-time";
 
 export const LIBRARY_INSPECTOR_MIN_WIDTH = 320;
 export const LIBRARY_INSPECTOR_MAX_WIDTH = 800;
@@ -19,7 +18,7 @@ const VELOCITY_SETTLED = 0.03;
 
 /** Compositor keyframes keep moving while the 3D preview initializes. Presence
  * follows completion, and reversals inherit the presentation and its velocity.
- * The panel shares the Collections pane's dock curve. */
+ * Both docks share the same curve and duration. */
 export function useInspectorMotion(open: boolean, onSettled?: () => void) {
   const panel = useRef<HTMLElement>(null);
   const position = useRef(1);
@@ -60,9 +59,7 @@ export function useInspectorMotion(open: boolean, onSettled?: () => void) {
       return;
     }
 
-    const tokens = getComputedStyle(element);
-    const duration = cssTimeSeconds(tokens.getPropertyValue("--duration-slow"));
-    const spring = dockMotion(position.current, velocity.current, target, duration);
+    const spring = dockMotion(element, position.current, velocity.current, target);
     paint();
     element.style.willChange = "transform";
     animation = element.animate(
@@ -75,16 +72,7 @@ export function useInspectorMotion(open: boolean, onSettled?: () => void) {
     animation.onfinish = settle;
     // The inspector has already reserved or released its column. Carry cards
     // from their painted position along the inspector's progress.
-    const from = spring.samples[0]?.position ?? position.current;
-    const span = target - from;
-    window.dispatchEvent(
-      new PaneMovingEvent({
-        durationMs: spring.duration * 1000,
-        progress: spring.samples.map((sample) =>
-          Math.abs(span) < 1e-6 ? 1 : (sample.position - from) / span,
-        ),
-      }),
-    );
+    announcePaneMotion(spring, target, null);
     announced = true;
     reduced.addEventListener("change", onPreference);
     return () => {

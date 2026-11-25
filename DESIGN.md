@@ -387,7 +387,7 @@ only for missing or failed assets. Counts update in place without motion.
 
 The Library model inspector is a solid, non-modal surface docked to the right.
 It enters from beyond that edge and returns along the same path, including on
-mobile. It uses the shared dock curve over the slow timing, sampled into
+mobile. It uses the shared dock curve over the fast timing, sampled into
 compositor keyframes so preview initialization does not drive its frame loop.
 Reversing open/close preserves its current displacement and velocity.
 Hide only when the motion reaches the closed position, never on a fixed exit timer. When the docked
@@ -398,13 +398,16 @@ previous row never crosses the grid: it rides its new row like a conveyor,
 entering from the grid edge right behind the neighbour it follows, so no cell
 empties mid-motion. Cards entering view fade in on the same progress; reduced motion keeps the reflow immediate. Switching Models
 keeps the panel stationary. Closed panels become inert immediately. Reduced motion
-uses immediate visibility changes and retains the existing focus handoff.
+uses immediate visibility changes. Closing details returns focus to the opener,
+the inspected Model card if it was remounted, or the Details button.
 
-The left Collections pane uses a smooth cubic ease into rest over the fast timing (200 ms),
-with zero starting/ending velocity at rest and inherited velocity on interruption.
-The shell edge and the workspace move together. The Library holds its card tracks
-throughout the motion, then fits the final width once the pane settles. The inner
-outliner keeps its intrinsic width, clipped and anchored to the shell's moving edge.
+Both docks use the same smooth cubic ease over the fast timing (200 ms),
+with zero starting and ending velocity at rest and inherited velocity on interruption.
+For each opening or closing gesture, the Library captures the painted card positions,
+commits its resting tracks once, and animates the cards on the dock's progress.
+The Collections shell edge and workspace move together. Card offsets are relative
+to the workspace, so the shell's movement contributes only once. The inner outliner
+keeps its intrinsic width, clipped and anchored to the shell's moving edge.
 Retain the outliner DOM, filter, expansion and scroll state while closed; make it
 inert immediately and hide its contents only at rest. Drag resizing remains 1:1,
 initial page layout does not replay entry, and reduced motion settles immediately.

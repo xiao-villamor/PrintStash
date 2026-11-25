@@ -120,21 +120,28 @@ describe("LibraryItems", () => {
     expect(screen.getByText("Card 5").closest("[data-library-key]")).toBe(card);
   });
 
-  it("fits the new Collections width without animating the cards", () => {
-    render(<Grid />);
+  it("commits the resting columns as Collections starts closing", () => {
+    render(
+      <>
+        <aside data-collections-pane />
+        <Grid />
+      </>,
+    );
+    const sidebar = document.querySelector<HTMLElement>("[data-collections-pane]")!;
+    vi.spyOn(sidebar, "offsetWidth", "get").mockReturnValue(250);
     document.documentElement.dataset.paneMoving = "";
-    width = 1250;
-    act(() => {
-      window.dispatchEvent(new Event(PANE_SETTLED_EVENT));
-    });
-    expect(grid().style.gridTemplateColumns).toBe("repeat(3, 322px)");
 
-    delete document.documentElement.dataset.paneMoving;
     act(() => {
-      window.dispatchEvent(new Event(PANE_SETTLED_EVENT));
+      window.dispatchEvent(
+        new PaneMovingEvent({
+          targetSidebarWidth: 0,
+          durationMs: 200,
+          progress: [0, 0.5, 1],
+        }),
+      );
     });
+
     expect(grid().style.gridTemplateColumns).toBe("repeat(4, 300px)");
-    expect(flights.size).toBe(0);
   });
 
   it("preserves collection card width when the sidebar changes how many columns fit", () => {
@@ -207,7 +214,8 @@ describe("LibraryItems", () => {
     act(() => {
       window.dispatchEvent(
         new PaneMovingEvent({
-          durationMs: 300,
+          targetSidebarWidth: null,
+          durationMs: 200,
           progress: [0, 0.5, 1],
         }),
       );
