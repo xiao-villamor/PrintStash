@@ -86,8 +86,12 @@ describe("README logo", () => {
 
     it("matches the GIF to the GitHub theme", () => {
       expect(readme).toContain(`href="${file}#gh-${theme}-mode-only"`);
-      expect(readme).toContain(`src="${file}"`);
       expect(asset.subarray(0, 6).toString()).toBe("GIF89a");
+    });
+
+    it("lets the hidden GIF take no horizontal space", () => {
+      // GitHub gives its GIF wrapper any width specified on the image.
+      expect(readme).toContain(`<img src="${file}" alt="PrintStash logo" height="160" />`);
     });
 
     it("allows a transparent background on every frame", () => {
