@@ -1603,8 +1603,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       const card = anchor?.closest<HTMLElement>("[data-library-key]") ?? anchor;
       if (card) {
         card.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
-        card.classList.add("library-find-current");
-        findHighlight.current = card;
+        // The ring belongs on the rounded card, not on the grid cell around it.
+        const ringed = card.matches(".library-model-card")
+          ? card
+          : (card.querySelector<HTMLElement>(".library-model-card") ?? card);
+        ringed.classList.add("library-find-current");
+        findHighlight.current = ringed;
         return;
       }
       attempts += 1;
