@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { useLibraryStar } from "@/features/library/mutations";
 import { toast } from "@/lib/toast";
 import { ModelPreviewControls, ModelPreviewFrame } from "@/components/model-preview";
+import { useRegenerateModelPreviews } from "@/features/library/model-previews";
 import { keepOffCard } from "@/lib/card-overlay";
 import { useModelPreviewCard } from "@/lib/use-model-preview-card";
 import { Localized } from "@/components/ui/localized";
@@ -159,6 +160,7 @@ function ModelCardInner({
       : model.starred;
   const starBusy = starMutation.isPending;
   const [previewAdmission, preview] = useModelPreviewCard(model.thumbnail_url, model.previews);
+  const regeneratePreviews = useRegenerateModelPreviews();
   const menuOpener = useRef<HTMLAnchorElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPoint, setMenuPoint] = useState<{ x: number; y: number } | null>(null);
@@ -184,6 +186,14 @@ function ModelCardInner({
   const canEditTags = model.effective_role === "edit" || model.effective_role === "admin";
   // A plain click already opens the page when no inspector takes it.
   const opensPage = Boolean(onInspect) && !selectable;
+
+  async function recreatePreviews() {
+    try {
+      await regeneratePreviews(model.id);
+    } catch (error) {
+      toast.error(error);
+    }
+  }
 
   async function toggleStar() {
     if (starBusy) return;
@@ -352,7 +362,7 @@ function ModelCardInner({
               )}
             </LibraryItemLink>
             {!selectable && (
-              <ModelPreviewControls name={model.name} state={preview}>
+              <ModelPreviewControls name={model.name} state={preview} onRecreate={recreatePreviews}>
                 {opensPage && (
                   <Button
                     variant="outline"

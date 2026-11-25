@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, type MouseEvent, type ReactNode, type Ref } from "react";
-import { Box, ChevronLeft, ChevronRight, FileText, Images } from "lucide-react";
+import { Box, ChevronLeft, ChevronRight, FileText, Images, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
@@ -232,10 +232,13 @@ function PreviewArrows({ state, size }: { state: PreviewCard; size: "card" | "ga
 export function ModelPreviewControls({
   name,
   state,
+  onRecreate,
   children,
 }: {
   name: string;
   state: PreviewCard;
+  /** Asks for new views when the published ones cannot be shown. */
+  onRecreate?: () => void;
   children: ReactNode;
 }) {
   useUiLocale();
@@ -299,13 +302,18 @@ export function ModelPreviewControls({
           <Button
             {...keepOffCard}
             variant="outline"
-            className="pointer-events-auto absolute right-1 top-1 h-11"
+            size="icon-sm"
+            className="pointer-events-auto absolute right-1.5 top-1.5 h-8 w-8 border-input bg-card shadow-md"
+            aria-label={uiText("modelPreview.retry")}
+            title={uiText("modelPreview.retry")}
             onClick={(event) => {
               stop(event);
+              // The bytes may be gone, not just late: ask for new views, then look again.
+              void onRecreate?.();
               preview.retry();
             }}
           >
-            {uiText("modelPreview.retry")}
+            <RotateCw className="h-4 w-4" strokeWidth={1.5} aria-hidden />
           </Button>
         )}
       </div>

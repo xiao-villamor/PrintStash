@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- A card whose published views cannot be read now offers a compact retry icon that asks the server to recreate the Model's views (`POST /api/v1/models/{id}/previews/regenerate`), then looks again. The request is refused while multi-angle views are switched off.
+
 - Library card controls stay visible over any cover. The selection box, the previous and next arrows and the view label are outlined chips with their own fill, so they no longer disappear into the dark area around a photo or render.
 
 - Model details lead with the next print action, group revisions and production costs under Print, and keep source files, publication data, and recorded results in their own sections. Opening a source or profile preserves the return to the original library view. Overview shows the current revision, the estimate source, and the next print action. Tags save from the inline picker, and Prepare print carries over the selected preview plate.

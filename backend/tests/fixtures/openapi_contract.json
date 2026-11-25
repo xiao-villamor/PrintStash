@@ -358,6 +358,21 @@
                 "type": "null"
               }
             ]
+          },
+          "multiple_filaments": {
+            "title": "Multiple Filaments",
+            "type": "boolean"
+          },
+          "slicer_filament_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slicer Filament Cost"
           }
         },
         "required": [
@@ -365,7 +380,9 @@
           "edit_version",
           "currency",
           "estimate",
-          "costs"
+          "costs",
+          "slicer_filament_cost",
+          "multiple_filaments"
         ],
         "title": "ArtifactCostingRead",
         "type": "object"
@@ -6178,6 +6195,18 @@
               }
             ],
             "title": "Collection Id"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
           },
           "multipart_model_id": {
             "anyOf": [
@@ -26152,6 +26181,322 @@
         "title": "VolumeUnavailableCause",
         "type": "string"
       },
+      "WorkFailure": {
+        "properties": {
+          "artifact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkFailureArtifact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "committed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Committed At"
+          },
+          "completion": {
+            "anyOf": [
+              {
+                "enum": [
+                  "complete",
+                  "partial"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completion"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_item": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Item"
+          },
+          "deduplicated": {
+            "default": 0,
+            "title": "Deduplicated",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "failed": {
+            "default": 0,
+            "title": "Failed",
+            "type": "integer"
+          },
+          "failed_items": {
+            "items": {
+              "$ref": "#/components/schemas/JobFailedItem"
+            },
+            "title": "Failed Items",
+            "type": "array"
+          },
+          "file_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Id"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/JobKind"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/WorkPriority"
+          },
+          "processed": {
+            "default": 0,
+            "title": "Processed",
+            "type": "integer"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "resubmits": {
+            "title": "Resubmits",
+            "type": "integer"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "retryable": {
+            "default": false,
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "skipped": {
+            "default": 0,
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "enum": [
+                  "resolving",
+                  "discovering",
+                  "downloading",
+                  "inspecting",
+                  "extracting",
+                  "hashing",
+                  "ingesting",
+                  "snapshotting",
+                  "archiving",
+                  "verifying",
+                  "publishing",
+                  "finalizing",
+                  "completed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "staging": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobStagingSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          },
+          "succeeded": {
+            "default": 0,
+            "title": "Succeeded",
+            "type": "integer"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "total_steps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Steps"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "staging",
+          "kind",
+          "state",
+          "priority",
+          "attempts",
+          "resubmits",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "WorkFailure",
+        "type": "object"
+      },
+      "WorkFailureArtifact": {
+        "properties": {
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "integer"
+          },
+          "model_name": {
+            "title": "Model Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_id",
+          "model_name",
+          "filename"
+        ],
+        "title": "WorkFailureArtifact",
+        "type": "object"
+      },
       "WorkOverview": {
         "properties": {
           "definitions": {
@@ -26174,7 +26519,7 @@
           },
           "failed_jobs": {
             "items": {
-              "$ref": "#/components/schemas/JobStatus"
+              "$ref": "#/components/schemas/WorkFailure"
             },
             "title": "Failed Jobs",
             "type": "array"
@@ -41356,6 +41701,57 @@
           }
         ],
         "summary": "Add a G-code revision to an existing model",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/previews/regenerate": {
+      "post": {
+        "operationId": "regenerate_model_previews_api_v1_models__model_id__previews_regenerate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Regenerate Model Previews Api V1 Models  Model Id  Previews Regenerate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Recreate a Model's multi-angle views",
         "tags": [
           "models"
         ]

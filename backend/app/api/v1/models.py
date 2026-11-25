@@ -1941,6 +1941,22 @@ def delete_model(
     return Response(status_code=204)
 
 
+@router.post(
+    "/{model_id}/previews/regenerate",
+    status_code=202,
+    summary="Recreate a Model's multi-angle views",
+)
+def regenerate_model_previews(
+    model_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> dict[str, int]:
+    from app.modules.derivatives import repair
+
+    _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
+    return {"queued": repair.request_model_previews(session, model_id)}
+
+
 @router.get("/{model_id}/previews/{generation}")
 def get_model_preview_manifest(
     model_id: int,
