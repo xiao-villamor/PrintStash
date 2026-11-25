@@ -4501,6 +4501,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             key={entry.session}
             id={inspectorIntent.id}
             open={inspectorOpen}
+            motionLocked={inspectorMotion.locked !== null}
+            summary={visibleModels.find((model) => model.id === inspectorIntent.id)}
             style={inspectorDockStyle}
             onMotionSettled={settleInspectorDock}
             resize={

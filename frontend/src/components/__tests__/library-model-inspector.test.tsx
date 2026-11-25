@@ -38,19 +38,28 @@ function record(state: "completed" | "failed" = "completed"): ModelPrintJobRead 
     created_at: "2026-06-04T00:00:00Z",
   };
 }
-function setup(routes: RouteTable = {}, canWrite = true) {
+function setup(routes: RouteTable = {}, canWrite = true, motionLocked = false) {
   const onClose = vi.fn<() => void>();
   return {
     onClose,
-    ...renderApp(<LibraryModelInspector id={1} open canWrite={canWrite} onClose={onClose} />, {
-      routes: {
-        "GET /api/v1/models/1": json(model),
-        "GET /api/v1/models/1/print-jobs": json([]),
-        "GET /api/v1/printers": json([printer]),
-        "POST /api/v1/models/1/print-jobs": json(record()),
-        ...routes,
+    ...renderApp(
+      <LibraryModelInspector
+        id={1}
+        open
+        motionLocked={motionLocked}
+        canWrite={canWrite}
+        onClose={onClose}
+      />,
+      {
+        routes: {
+          "GET /api/v1/models/1": json(model),
+          "GET /api/v1/models/1/print-jobs": json([]),
+          "GET /api/v1/printers": json([printer]),
+          "POST /api/v1/models/1/print-jobs": json(record()),
+          ...routes,
+        },
       },
-    }),
+    ),
   };
 }
 async function ready() {
@@ -66,6 +75,16 @@ beforeAll(async () => {
 beforeEach(() => window.localStorage.clear());
 
 describe("Library model inspector", () => {
+  it("mounts the interactive details after the opening motion settles", async () => {
+    const app = setup({}, true, true);
+    await screen.findByRole("heading", { name: "Bracket" });
+    expect(screen.queryByRole("tab", { name: "Print" })).not.toBeInTheDocument();
+
+    app.rerender(<LibraryModelInspector id={1} open canWrite onClose={app.onClose} />);
+
+    expect(await screen.findByRole("tab", { name: "Print" })).toBeVisible();
+  });
+
   it("renders a Markdown description in the inspector", async () => {
     setup({
       "GET /api/v1/models/1": json(

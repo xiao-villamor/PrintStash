@@ -220,6 +220,30 @@ describe("LibraryItems", () => {
     expect(flights.has("item:0")).toBe(false);
   });
 
+  it("omits animations for cards that stay below the viewport", () => {
+    render(<Grid />);
+    const card = screen.getByText("Card 0").closest("[data-library-key]")!;
+    const scroller = grid().closest("[data-library-renderer]")!.parentElement!;
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 1000, 800));
+    vi.spyOn(card, "getBoundingClientRect").mockImplementation(
+      () => new DOMRect(0, width === 1000 ? 1400 : 1100, 300, 200),
+    );
+
+    act(() => {
+      window.dispatchEvent(new Event(INSPECTOR_LAYOUT_WILL_CHANGE_EVENT));
+      width = 1250;
+      window.dispatchEvent(
+        new PaneMovingEvent({
+          targetSidebarWidth: null,
+          durationMs: 200,
+          progress: [0, 0.5, 1],
+        }),
+      );
+    });
+
+    expect(flights.has("item:0")).toBe(false);
+  });
+
   it("carries a card that wraps a row in behind its new neighbour, without crossing the grid", () => {
     // Cards sit on the grid's current tracks (16 px gap), 200 px tall.
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(

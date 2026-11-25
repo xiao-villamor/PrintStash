@@ -43,6 +43,12 @@ function fadeIn(progress: readonly number[], last: number): Keyframe[] {
   return progress.map((value, index) => ({ offset: index / last, opacity: value }));
 }
 
+function touchesViewport(card: DOMRect, viewport: DOMRect) {
+  // A grid can be measured before its host has received a layout box.
+  if (viewport.height === 0) return true;
+  return card.bottom > viewport.top && card.top < viewport.bottom;
+}
+
 function fittingColumns(width: number, track: number, gap: number) {
   return Math.max(1, Math.floor((width + gap) / (track + gap)));
 }
@@ -142,7 +148,7 @@ export function LibraryItems<T>({
   // Card positions captured when the pane starts moving, consumed after the
   // grid commits its resting tracks. Flights are the running card motions.
   const flip = useRef<{
-    before: Map<string, { x: number; y: number }>;
+    before: Map<string, { x: number; y: number; visible: boolean }>;
     motion: PaneMotion;
     /** The columns and cell pitch the captured positions were laid out in. */
     columns: number;
@@ -154,7 +160,9 @@ export function LibraryItems<T>({
     pitch: 0,
     keys: [],
   });
-  const inspectorOrigin = useRef<Map<string, { x: number; y: number }> | null>(null);
+  const inspectorOrigin = useRef<Map<string, { x: number; y: number; visible: boolean }> | null>(
+    null,
+  );
   const sidebarTarget = useRef<number | null>(null);
   const flights = useRef<Animation[]>([]);
   const gap = layout === "list" ? 0 : compact ? 8 : 16;
@@ -385,11 +393,15 @@ export function LibraryItems<T>({
     observer.observe(node);
     observer.observe(scroll);
     const snapshot = () => {
-      const left = scroll.getBoundingClientRect().left;
-      const cards = new Map<string, { x: number; y: number }>();
+      const viewport = scroll.getBoundingClientRect();
+      const cards = new Map<string, { x: number; y: number; visible: boolean }>();
       for (const card of node.querySelectorAll<HTMLElement>("[data-library-key]")) {
         const bounds = card.getBoundingClientRect();
-        cards.set(card.dataset.libraryKey!, { x: bounds.left - left, y: bounds.top });
+        cards.set(card.dataset.libraryKey!, {
+          x: bounds.left - viewport.left,
+          y: bounds.top,
+          visible: touchesViewport(bounds, viewport),
+        });
       }
       return cards;
     };
@@ -517,11 +529,14 @@ export function LibraryItems<T>({
     const indexes = new Map(keys.map((key, index) => [key, index]));
     const last = progress.length - 1;
     if (last < 1 || durationMs <= 0) return;
-    const workspaceLeft = scroll.getBoundingClientRect().left;
+    const viewport = scroll.getBoundingClientRect();
     for (const card of node.querySelectorAll<HTMLElement>("[data-library-key]")) {
       const after = card.getBoundingClientRect();
       const key = card.dataset.libraryKey!;
       const before = pending.before.get(key);
+      // Offscreen cards can commit instantly. Avoid allocating compositor
+      // animations for every loaded card on the input frame.
+      if (!before?.visible && !touchesViewport(after, viewport)) continue;
       const index = indexes.get(key);
       let keyframes: Keyframe[];
       if (before && index !== undefined) {
@@ -535,7 +550,7 @@ export function LibraryItems<T>({
           keyframes = fadeIn(progress, last);
         } else {
           const dx =
-            before.x - (after.left - workspaceLeft) + rows * pending.columns * pending.pitch;
+            before.x - (after.left - viewport.left) + rows * pending.columns * pending.pitch;
           const dy = wraps ? 0 : before.y - after.top;
           if (!wraps && Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
           // Transform only: it runs on the compositor. Animating width would

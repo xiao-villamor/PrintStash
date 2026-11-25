@@ -6,6 +6,10 @@
 
 - Model details lead with the next print action, group revisions and production costs under Print, and keep source files, publication data, and recorded results in their own sections. Opening a source or profile preserves the return to the original library view. Overview shows the current revision, the estimate source, and the next print action. Tags save from the inline picker, and Prepare print carries over the selected preview plate.
 
+### Performance
+
+- Model details shows the selected cover during opening and initializes the interactive body after the pane docks. Card reflow animates cards that touch the viewport.
+
 ### Changed
 
 - Opening or closing Collections or Model details moves cards into their final grid positions during the same 200 ms transition. Closing Model details returns focus to a card or control in the library.

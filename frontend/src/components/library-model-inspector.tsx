@@ -22,6 +22,8 @@ import {
   useInspectorMotion,
 } from "./use-inspector-motion";
 import { Button } from "@/components/ui/button";
+import { ProtectedThumbnail } from "@/components/protected-thumbnail";
+import type { ModelListItem } from "@/types";
 import { RevisionStatusBadge } from "@/components/revision-status-badge";
 import "./library-model-inspector.css";
 
@@ -44,6 +46,8 @@ function InspectorLoading() {
 export function LibraryModelInspector({
   id,
   open,
+  motionLocked = false,
+  summary,
   origin,
   canWrite,
   onClose,
@@ -54,6 +58,8 @@ export function LibraryModelInspector({
 }: {
   id: number;
   open: boolean;
+  motionLocked?: boolean;
+  summary?: Pick<ModelListItem, "name" | "thumbnail_url">;
   origin?: LibraryEntry;
   canWrite: boolean;
   onClose: () => void;
@@ -75,6 +81,31 @@ export function LibraryModelInspector({
   const { panel, present } = useInspectorMotion(open, onMotionSettled);
   const scroll = useRef<HTMLDivElement>(null);
   const previewSize = useInspectorPreviewHeight(scroll);
+  // The shell and cached cover are cheap to paint. Mount the interactive
+  // body after opening settles, retaining an existing body through close.
+  const [bodyId, setBodyId] = useState<number | null>(null);
+  if (open && !motionLocked && bodyId !== id) setBodyId(id);
+  const name = detail.data?.name ?? summary?.name;
+  const cover = summary?.thumbnail_url ?? detail.data?.thumbnail_url;
+  const loading =
+    cover && name ? (
+      <div className="library-inspector-body" aria-busy="true">
+        <div
+          className="library-inspector-preview library-preview"
+          style={{ height: previewSize.height }}
+        >
+          <ProtectedThumbnail
+            path={cover}
+            alt={displayModelName(name)}
+            className="h-full w-full"
+            imageClassName="h-full w-full object-contain"
+            placeholder={<Loader2 className="h-5 w-5 animate-spin" />}
+          />
+        </div>
+      </div>
+    ) : (
+      <InspectorLoading />
+    );
   const [downloading, setDownloading] = useState(false);
   const revisions = cardRevisions(detail.data);
   const recommended = revisions.find((file) => file.is_recommended) ?? revisions[0];
@@ -182,8 +213,8 @@ export function LibraryModelInspector({
       {widthHandle("panel")}
       <div ref={scroll} className="library-inspector-scroll">
         <header className="library-inspector-header">
-          <h2 ref={title} tabIndex={-1} title={detail.data?.name}>
-            {detail.data ? displayModelName(detail.data.name) : uiText("Model details")}
+          <h2 ref={title} tabIndex={-1} title={name}>
+            {name ? displayModelName(name) : uiText("Model details")}
           </h2>
           {recommended?.revision_status && (
             <RevisionStatusBadge
@@ -252,8 +283,8 @@ export function LibraryModelInspector({
               {uiText("Retry")}
             </Button>
           </div>
-        ) : detail.data ? (
-          <Suspense fallback={<InspectorLoading />}>
+        ) : detail.data && bodyId === id ? (
+          <Suspense fallback={loading}>
             <InspectorContent
               key={`${id}:${origin?.session ?? getSessionVersion()}`}
               model={detail.data}
@@ -266,7 +297,7 @@ export function LibraryModelInspector({
             />
           </Suspense>
         ) : (
-          <InspectorLoading />
+          loading
         )}
       </div>
     </aside>
