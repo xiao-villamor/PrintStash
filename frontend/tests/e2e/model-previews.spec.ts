@@ -441,6 +441,20 @@ test.describe("Model preview browsing", () => {
     expect(Math.abs(stage!.width - strip!.width)).toBeLessThan(1);
   });
 
+  test("rounds the gallery view indicator", async ({ page }, testInfo) => {
+    await page.emulateMedia({ colorScheme: "dark" });
+    const { card } = await library(page);
+    await collapseNavigationSidebar(page);
+
+    await card.getByRole("button", { name: "Model views", exact: true }).press("Enter");
+
+    const dialog = page.getByRole("dialog", { name: "Model views" });
+    const indicator = dialog.locator('[aria-live="polite"]');
+    await expect(indicator).toBeVisible();
+    await dialog.screenshot({ path: testInfo.outputPath("gallery-indicator.png") });
+    await expect(indicator).toHaveCSS("border-radius", "6px", { timeout: 1000 });
+  });
+
   test("centers the gallery view indicator", async ({ page }) => {
     const { card } = await library(page);
     await card.getByRole("button", { name: "Model views", exact: true }).press("Enter");

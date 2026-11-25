@@ -109,7 +109,7 @@ function ViewIndicator({ state, className }: { state: PreviewCard; className?: s
   return (
     <div
       className={cn(
-        "pointer-events-none flex min-w-0 items-center gap-2 bg-card px-2 py-1 text-2xs text-card-foreground dark:bg-card/75",
+        "pointer-events-none flex min-w-0 items-center gap-2 rounded-md bg-card px-2 py-1 text-2xs text-card-foreground dark:bg-card/75",
         className,
       )}
       aria-live="polite"
