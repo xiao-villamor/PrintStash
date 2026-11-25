@@ -1,4 +1,5 @@
 import type { EditingBase } from "./editing";
+import type { PricingRates } from "./production-costing";
 
 export interface SetupStatus {
   configured: boolean;
@@ -136,6 +137,7 @@ export interface VaultConfigRead extends EditingBase, PreviewAppearance {
   auto_mark_known_good: boolean;
   external_libraries_enabled: boolean;
   currency: string;
+  pricing_defaults: PricingRates;
   model_thumbnail_width: number;
   oidc_enabled: boolean;
   oidc_issuer_url: string;
@@ -182,6 +184,7 @@ export interface VaultConfigUpdate extends Partial<PreviewAppearance> {
   auto_mark_known_good?: boolean;
   external_libraries_enabled?: boolean;
   currency?: string;
+  pricing_defaults?: PricingRates;
   model_thumbnail_width?: 320 | 640 | 1280;
   oidc_enabled?: boolean;
   oidc_issuer_url?: string;

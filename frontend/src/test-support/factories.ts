@@ -887,6 +887,7 @@ export function aVaultConfig(
     auto_mark_known_good: true,
     external_libraries_enabled: false,
     currency: "USD",
+    pricing_defaults: { margin_percent: 0, tax_percent: 0 },
     model_thumbnail_width: 640,
     oidc_enabled: false,
     oidc_issuer_url: "",

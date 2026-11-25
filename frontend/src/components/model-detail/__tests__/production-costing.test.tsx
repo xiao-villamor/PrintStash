@@ -38,6 +38,7 @@ describe("ProductionCosting", () => {
     const receipt: ArtifactCostingRead = {
       ...anEditingBase(),
       currency: "USD",
+      pricing_defaults: { margin_percent: 0, tax_percent: 0 },
       estimate: {
         currency: "USD",
         pieces: 1,
@@ -52,8 +53,10 @@ describe("ProductionCosting", () => {
         maintenance: 0,
         electricity: 0,
         extra: 0,
+        reprints: 0,
         production: 0,
         price_before_tax: 0,
+        profit: 0,
         tax: 0,
         final_price: 0,
       },
@@ -79,6 +82,7 @@ describe("ProductionCosting", () => {
     const receipt: ArtifactCostingRead = {
       ...anEditingBase(),
       currency: "USD",
+      pricing_defaults: { margin_percent: 18.5, tax_percent: 7.25 },
       estimate: null,
       costs: null,
     };
@@ -102,7 +106,117 @@ describe("ProductionCosting", () => {
     );
     expect(form.queryByRole("button", { name: "Save pricing template" })).toBeNull();
     expect(form.getByLabelText("Estimated time per copy")).not.toBeVisible();
+    expect(form.queryByLabelText("Tax (%)")).not.toBeInTheDocument();
+    expect(form.queryByLabelText("Profit margin (%)")).not.toBeInTheDocument();
+    expect(form.queryByRole("combobox", { name: "Pricing template" })).not.toBeInTheDocument();
     expect(screen.getByText("No production estimate saved for this artifact.")).toBeVisible();
+    expect(view.requestsWithMethod("PUT")).toHaveLength(0);
+  });
+
+  it("uses vault pricing for an unsaved estimate", async () => {
+    renderApp(
+      <ProductionCosting
+        modelId={1}
+        files={[
+          aRevision({ metadata: aMetadata({ filament_weight_g: 100, estimated_time_s: 3600 }) }),
+        ]}
+        initialFileId={1}
+        jobs={[]}
+        canEdit
+        admin={false}
+      />,
+      {
+        routes: {
+          "GET /api/v1/files/1/production-cost": json({
+            ...anEditingBase(),
+            currency: "USD",
+            pricing_defaults: { margin_percent: 20, tax_percent: 10 },
+            estimate: null,
+            costs: null,
+            slicer_filament_cost: 2,
+          }),
+        },
+      },
+    );
+
+    const summary = within(await screen.findByLabelText("Cost per piece"));
+    expect(summary.getByText("$2.75")).toBeVisible();
+    expect(summary.getByText("Tax (10%)")).toBeVisible();
+    expect(summary.getByText("$2.00 to make · $0.50 profit per piece")).toBeVisible();
+  });
+
+  it("lets an editor apply an updated printer failure rate to a saved estimate", async () => {
+    const user = userEvent.setup();
+    const expenses = {
+      acquisition_cost: 1000,
+      lifetime_hours: 1000,
+      lifetime_maintenance: 0,
+      power_watts: 0,
+      electricity_per_kwh: 0,
+      extra_per_hour: 0,
+      failure_rate_percent: 0,
+    };
+    const receipt: ArtifactCostingRead = {
+      ...anEditingBase(),
+      currency: "USD",
+      pricing_defaults: { margin_percent: 35, tax_percent: 30 },
+      estimate: {
+        currency: "USD",
+        pieces: 2,
+        print_minutes: 120,
+        materials: [{ name: "PLA", grams: 200, cost_per_kg: 40, spool_id: null }],
+        printer: { name: "Workshop", expenses },
+        pricing: { margin_percent: 20, tax_percent: 10 },
+      },
+      costs: {
+        material: 4,
+        amortization: 1,
+        maintenance: 0,
+        electricity: 0,
+        extra: 0,
+        reprints: 0,
+        production: 5,
+        price_before_tax: 6.25,
+        profit: 1.25,
+        tax: 0.625,
+        final_price: 6.875,
+      },
+    };
+    const view = renderApp(
+      <ProductionCosting
+        modelId={1}
+        files={[aRevision()]}
+        initialFileId={1}
+        jobs={[]}
+        canEdit
+        admin={false}
+      />,
+      {
+        routes: {
+          "GET /api/v1/files/1/production-cost": json(receipt),
+          "GET /api/v1/printer-profiles": json([
+            {
+              id: 1,
+              name: "Workshop",
+              expenses: { ...expenses, failure_rate_percent: 20 },
+            },
+          ]),
+        },
+      },
+    );
+
+    const apply = await screen.findByRole("button", { name: "Apply current printer costs" });
+    const summary = within(screen.getByLabelText("Cost per piece"));
+    expect(summary.getByText("Tax (10%)")).toBeVisible();
+    expect(summary.queryByText("Expected reprints")).toBeNull();
+    await user.click(apply);
+
+    expect(summary.getByText("Expected reprints")).toBeVisible();
+    expect(summary.getByText("$6.25 to make · $1.56 profit per piece")).toBeVisible();
+    expect(summary.getByText("$0.78")).toBeVisible();
+    expect(summary.getByText("Tax (10%)")).toBeVisible();
+    expect(summary.getByText("$8.59")).toBeVisible();
+    expect(apply).not.toBeInTheDocument();
     expect(view.requestsWithMethod("PUT")).toHaveLength(0);
   });
 
@@ -181,6 +295,7 @@ describe("ProductionCosting", () => {
                 power_watts: 0,
                 electricity_per_kwh: 0,
                 extra_per_hour: 0,
+                failure_rate_percent: 0,
               },
             },
           ]),
@@ -231,6 +346,7 @@ describe("ProductionCosting", () => {
       power_watts: 0,
       electricity_per_kwh: 0,
       extra_per_hour: 0,
+      failure_rate_percent: 0,
     };
 
     function openEstimate(printers: PrinterRead[], jobs: ModelPrintJobRead[] = []) {
@@ -350,6 +466,7 @@ describe("ProductionCosting", () => {
     const base: ArtifactCostingRead = {
       ...anEditingBase(),
       currency: "USD",
+      pricing_defaults: { margin_percent: 0, tax_percent: 0 },
       estimate: null,
       costs: null,
     };

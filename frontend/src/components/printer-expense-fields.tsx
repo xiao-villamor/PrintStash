@@ -31,6 +31,9 @@ export function PrinterExpenseFields({
   const problem = expenseProblem(parseExpenses(draft, model));
   const power = averagePrintPower(model);
   const hints = {
+    failure_rate_percent: uiText(
+      "Share of prints you expect to fail. Estimates budget for a full reprint.",
+    ),
     lifetime_hours: uiText(
       "Defaults to {value1} print hours. Use your planned replacement interval.",
       {
@@ -58,6 +61,7 @@ export function PrinterExpenseFields({
     ),
   };
   const placeholders = {
+    failure_rate_percent: "0",
     lifetime_hours: String(DEFAULT_LIFETIME_HOURS),
     power_watts: power ? String(power.watts) : undefined,
   };
@@ -71,7 +75,8 @@ export function PrinterExpenseFields({
       </p>
       <div className="grid gap-3 sm:grid-cols-2">
         {expenseFields.map(({ key, label, money }) => {
-          const hasHint = key === "lifetime_hours" || key === "power_watts";
+          const hasHint =
+            key === "lifetime_hours" || key === "power_watts" || key === "failure_rate_percent";
           const fieldHintId = hasHint ? `${hintId}-${key}` : undefined;
           return (
             <FormField
@@ -86,7 +91,7 @@ export function PrinterExpenseFields({
                 placeholder={hasHint ? placeholders[key] : undefined}
                 data-autofocus={focus && key === "acquisition_cost" ? true : undefined}
                 min={key === "lifetime_hours" ? 1 : 0}
-                max={1000000}
+                max={key === "failure_rate_percent" ? 99.99 : 1000000}
                 step="any"
                 value={draft[key]}
                 onChange={(event) => onChange({ ...draft, [key]: event.target.value })}

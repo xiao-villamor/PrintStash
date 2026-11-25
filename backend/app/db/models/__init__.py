@@ -5,7 +5,7 @@ from app.db import (
     browser_edit_contracts_v1 as _browser_edit_contracts_v1,  # noqa: F401, E402
 )
 from app.db import (
-    config_edit_contracts_v5 as _config_edit_contracts_v5,  # noqa: F401, E402
+    config_edit_contracts_v6 as _config_edit_contracts_v6,  # noqa: F401, E402
 )
 from app.db import (
     connection_edit_contracts_v1 as _connection_edit_contracts_v1,  # noqa: F401, E402

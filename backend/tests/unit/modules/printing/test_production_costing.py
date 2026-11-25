@@ -18,6 +18,38 @@ from tests.factories import print_job_config
 
 
 class TestPieceCosts:
+    def test_spreads_expected_reprints_across_successfully_printed_pieces(self):
+        estimate = ProductionEstimate(
+            currency="USD",
+            pieces=2,
+            print_minutes=120,
+            materials=[CostedMaterial(name="PLA", grams=200, cost_per_kg=40)],
+            printer=CostedPrinter(
+                name="Voron",
+                expenses=PrinterExpenses(
+                    acquisition_cost=1000,
+                    lifetime_hours=1000,
+                    lifetime_maintenance=0,
+                    power_watts=0,
+                    electricity_per_kwh=0,
+                    extra_per_hour=0,
+                    failure_rate_percent=20,
+                ),
+            ),
+            pricing=PricingRates(margin_percent=20, tax_percent=10),
+        )
+
+        costs = piece_costs(estimate)
+
+        assert costs.material == 4
+        assert costs.amortization == 1
+        assert costs.reprints == 1.25
+        assert costs.production == 6.25
+        assert costs.price_before_tax == 7.8125
+        assert costs.profit == 1.5625
+        assert costs.tax == 0.7813
+        assert costs.final_price == 8.5938
+
     def test_prorates_full_print_cost(self):
         estimate = ProductionEstimate(
             currency="EUR",
@@ -49,8 +81,10 @@ class TestPieceCosts:
             "maintenance": 0.1,
             "electricity": 0.05,
             "extra": 1.0,
+            "reprints": 0,
             "production": 3.4,
             "price_before_tax": 4.25,
+            "profit": 0.85,
             "tax": 0.425,
             "final_price": 4.675,
         }

@@ -25,7 +25,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FilamentProfilesCard } from "@/components/filament-profiles-card";
 import { PricingTemplatesPanel } from "@/components/pricing-templates";
-import { anEditingBase, aVaultConfig } from "@/test-support/factories";
+import { anEditingBase, aPrinter, aVaultConfig } from "@/test-support/factories";
 import { clearLogin } from "@/lib/auth-store";
 import { queryClient, queryKeys } from "@/lib/query-client";
 import { json, memberSession, renderApp, type RenderAppOptions } from "@/test-support/render";
@@ -126,6 +126,7 @@ async function renderCard(
       "GET /api/v1/printer-profiles": json(printers),
       "GET /api/v1/spoolman/status": json({ enabled: spoolman, url: null, reachable: spoolman }),
       "GET /api/v1/slicer-profiles": json({ items: [], next_before_id: null }),
+      "GET /api/v1/fleet/summary": json({ printers: [] }),
       ...routes,
     },
     ...rest,
@@ -144,6 +145,83 @@ afterEach(() => {
 });
 
 describe("FilamentProfilesCard", () => {
+  describe("printer links", () => {
+    it("links to settings for printers using the selected cost profile", async () => {
+      await renderCard({
+        at: "/profiles?tab=printers",
+        expand: false,
+        routes: {
+          "GET /api/v1/printers": json([
+            aPrinter({ id: 6, name: "Bench printer", cost_profile_id: 1 }),
+            aPrinter({ id: 7, name: "Spare printer", cost_profile_id: null }),
+          ]),
+        },
+      });
+      const section = within(await screen.findByRole("region", { name: "Assigned printers" }));
+      expect(section.getByRole("link", { name: "Bench printer" })).toHaveAttribute(
+        "href",
+        "/printers/6?tab=settings",
+      );
+      expect(section.queryByRole("link", { name: "Spare printer" })).not.toBeInTheDocument();
+    });
+
+    it.each([
+      { kind: "local", profile: aFilamentProfile(), matchingId: 6, slot: "AMS 1" },
+      {
+        kind: "synced",
+        profile: aFilamentProfile({ spoolman_filament_id: 11 }),
+        matchingId: 7,
+        slot: "AMS 2",
+      },
+    ])(
+      "links to the loaded slot for a $kind filament preset",
+      async ({ profile, matchingId, slot }) => {
+        await renderCard({
+          filaments: [profile],
+          expand: false,
+          routes: {
+            "GET /api/v1/fleet/summary": json({
+              printers: [
+                {
+                  printer_id: 6,
+                  name: "Bench printer",
+                  loaded_material_slots: [
+                    {
+                      label: "AMS 1",
+                      material_type: "pla",
+                      material_brand: "Prusament",
+                      spool_filament_id: 8,
+                    },
+                  ],
+                },
+                {
+                  printer_id: 7,
+                  name: "Spare printer",
+                  loaded_material_slots: [
+                    {
+                      label: "AMS 2",
+                      material_type: "PLA",
+                      material_brand: "Generic",
+                      spool_filament_id: 11,
+                    },
+                  ],
+                },
+              ],
+            }),
+          },
+        });
+        const section = within(
+          await screen.findByRole("region", { name: "Printers with matching filament" }),
+        );
+        expect(section.getByRole("link", { name: new RegExp(slot) })).toHaveAttribute(
+          "href",
+          `/printers/${matchingId}?tab=materials`,
+        );
+        expect(section.getAllByRole("link")).toHaveLength(1);
+      },
+    );
+  });
+
   describe("listing presets", () => {
     it.each(["filament", "printer"] as const)("hides a denied %s catalog", async (kind) => {
       const app = await renderCard();
@@ -1812,6 +1890,7 @@ describe("Profile consultation and editing", () => {
             power_watts: 200,
             electricity_per_kwh: 0.25,
             extra_per_hour: 1,
+            failure_rate_percent: 0,
           },
         }),
       ],

@@ -18,6 +18,9 @@
 - Anchor dropdowns below their controls when there is room, with upward placement near the viewport edge.
 - Keep reusable pricing templates in Profiles and show the rates applied to each Model revision. Use a separate editing view for one-off estimate inputs.
 - Let cost estimates use printers with a linked cost profile. Prefer the printer recorded for that revision or an unambiguous match from the G-code.
+- Select catalog printer models and common nozzle sizes in Profiles. Operating costs offer editable lifetime and published power defaults.
+- Link printer profiles to assigned machines and filament profiles to printers with matching loaded material.
+- Set default margin and tax in Settings → Pricing. Model estimates show their pricing breakdown with two decimal places.
 - Give dark Library cards a neutral hover border and a shadow that follows the rounded corners. Use the same tighter corners on Models, Multipart Models, and their loading cards.
 - Show all AI Search preparation steps with the current step highlighted. Put location choices in view when changing setup and use the shared Settings layout for readiness, index checks, and actions. Open search types, servers, and technical settings as dedicated views.
 - Give the multi-plate tray its own row and keep the selected plate visible when switching views. Improve lighting on dark filament.
@@ -70,6 +73,7 @@
 
 ### Added
 
+- Set a printer failure rate to include expected reprints in production estimates.
 - Fleet can show printer cards inside dotted frames labelled by their configured groups. The browser remembers the layout.
 - Model guides and attachments have their own Documentation tab.
 - Model attachments accept file drops and clicks on the empty upload area, and the Markdown editor shows a live preview beside the draft.

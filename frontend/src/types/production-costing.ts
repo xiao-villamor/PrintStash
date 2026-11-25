@@ -7,6 +7,7 @@ export interface PrinterExpenses {
   power_watts: number;
   electricity_per_kwh: number;
   extra_per_hour: number;
+  failure_rate_percent: number;
 }
 
 export interface PricingRates {
@@ -44,14 +45,17 @@ export interface PieceCosts {
   maintenance: number;
   electricity: number;
   extra: number;
+  reprints: number;
   production: number;
   price_before_tax: number;
+  profit: number;
   tax: number;
   final_price: number;
 }
 
 export interface ArtifactCostingRead extends EditingBase {
   currency: string;
+  pricing_defaults: PricingRates;
   estimate: ProductionEstimate | null;
   costs: PieceCosts | null;
   slicer_filament_cost?: number | null;

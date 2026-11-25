@@ -363,6 +363,9 @@
             "title": "Multiple Filaments",
             "type": "boolean"
           },
+          "pricing_defaults": {
+            "$ref": "#/components/schemas/PricingRates"
+          },
           "slicer_filament_cost": {
             "anyOf": [
               {
@@ -379,6 +382,7 @@
           "edit_epoch",
           "edit_version",
           "currency",
+          "pricing_defaults",
           "estimate",
           "costs",
           "slicer_filament_cost",
@@ -7610,6 +7614,17 @@
             "title": "Label",
             "type": "string"
           },
+          "material_brand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Brand"
+          },
           "material_type": {
             "anyOf": [
               {
@@ -7624,12 +7639,25 @@
           "slot_key": {
             "title": "Slot Key",
             "type": "string"
+          },
+          "spool_filament_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spool Filament Id"
           }
         },
         "required": [
           "slot_key",
           "label",
           "material_type",
+          "material_brand",
+          "spool_filament_id",
           "color_hex"
         ],
         "title": "FleetLoadedSlot",
@@ -16598,6 +16626,14 @@
             "title": "Production",
             "type": "number"
           },
+          "profit": {
+            "title": "Profit",
+            "type": "number"
+          },
+          "reprints": {
+            "title": "Reprints",
+            "type": "number"
+          },
           "tax": {
             "title": "Tax",
             "type": "number"
@@ -16609,8 +16645,10 @@
           "maintenance",
           "electricity",
           "extra",
+          "reprints",
           "production",
           "price_before_tax",
+          "profit",
           "tax",
           "final_price"
         ],
@@ -18567,6 +18605,13 @@
             "maximum": 1000000.0,
             "minimum": 0.0,
             "title": "Extra Per Hour",
+            "type": "number"
+          },
+          "failure_rate_percent": {
+            "default": 0,
+            "maximum": 99.99,
+            "minimum": 0.0,
+            "title": "Failure Rate Percent",
             "type": "number"
           },
           "lifetime_hours": {
@@ -25416,6 +25461,9 @@
           "preview_look": {
             "$ref": "#/components/schemas/PreviewLook"
           },
+          "pricing_defaults": {
+            "$ref": "#/components/schemas/PricingRates"
+          },
           "s3_access_key": {
             "default": "",
             "title": "S3 Access Key",
@@ -25514,7 +25562,8 @@
           "derivatives_previews_include_poles",
           "prefer_rendered_3mf_preview",
           "preview_look",
-          "preview_floor_grid"
+          "preview_floor_grid",
+          "pricing_defaults"
         ],
         "title": "VaultConfigRead",
         "type": "object"
@@ -25907,6 +25956,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/PreviewLook"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pricing_defaults": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PricingRates"
               },
               {
                 "type": "null"

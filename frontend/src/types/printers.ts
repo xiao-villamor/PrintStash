@@ -435,7 +435,7 @@ export interface FleetSummary {
     loaded_slots: string[];
     loaded_material_slots?: Pick<
       MaterialSlotRead,
-      "slot_key" | "label" | "material_type" | "color_hex"
+      "slot_key" | "label" | "material_type" | "material_brand" | "spool_filament_id" | "color_hex"
     >[];
     telemetry?: FleetPrinterTelemetry | null;
     nozzle_diameter_mm: number | null;

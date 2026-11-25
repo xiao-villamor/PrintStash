@@ -16,6 +16,7 @@ EXPENSES = {
     "power_watts": 200,
     "electricity_per_kwh": 0.25,
     "extra_per_hour": 1,
+    "failure_rate_percent": 0,
 }
 ESTIMATE = {
     "pieces": 2,
@@ -102,6 +103,30 @@ class TestProductionCosting:
         assert saved.status_code == 200
         assert stale.status_code == 412
         assert client.get(url, headers=auth_headers).json() == saved.json()
+
+    def test_reads_a_saved_estimate_from_before_failure_rates(
+        self, client, auth_headers, make_model, make_file
+    ):
+        legacy_printer = {
+            "name": "Voron",
+            "expenses": {
+                key: value
+                for key, value in EXPENSES.items()
+                if key != "failure_rate_percent"
+            },
+        }
+        artifact = make_file(
+            make_model(),
+            file_type=FileType.STL,
+            production_estimate=ESTIMATE
+            | {"printer": legacy_printer, "currency": "USD"},
+        )
+
+        receipt = client.get(_cost_url(artifact), headers=auth_headers).json()
+
+        assert receipt["estimate"]["printer"]["expenses"]["failure_rate_percent"] == 0
+        assert receipt["costs"]["reprints"] == 0
+        assert receipt["costs"]["final_price"] == 3.6438
 
     def test_clears_a_saved_estimate(self, client, auth_headers, make_model, make_file):
         model = make_model()

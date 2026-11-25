@@ -375,6 +375,7 @@ def _costing_read(
         slicer_filament_cost=metadata.filament_cost if metadata is not None else None,
         multiple_filaments=len(tools) > 1,
         currency=currency,
+        pricing_defaults=runtime_config.pricing_defaults(session),
         estimate=estimate,
         costs=piece_costs(estimate) if estimate is not None else None,
         edit_epoch=model.edit_epoch,

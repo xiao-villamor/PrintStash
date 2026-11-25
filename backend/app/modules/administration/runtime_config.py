@@ -31,6 +31,7 @@ from app.modules.storage.storage_providers import (
 )
 from app.runtime.maintenance import guarded_storage_configuration
 from app.schemas.editing import EditingBase
+from app.schemas.production_costing import PricingRates
 
 from .config_repository import get_or_create
 
@@ -1079,6 +1080,23 @@ def currency(session: Session) -> str:
     return (config.currency if config and config.currency else None) or "USD"
 
 
+def _pricing_rates(config: SystemConfig | None) -> PricingRates:
+    if config is None or config.pricing_defaults is None:
+        return PricingRates(margin_percent=0, tax_percent=0)
+    return PricingRates.model_validate(config.pricing_defaults)
+
+
+def pricing_defaults(session: Session) -> PricingRates:
+    return _pricing_rates(session.get(SystemConfig, 1))
+
+
+def set_pricing_defaults(session: Session, rates: PricingRates) -> None:
+    config = get_or_create(session, commit=False)
+    config.pricing_defaults = rates.model_dump()
+    config.updated_at = utcnow()
+    session.add(config)
+
+
 def set_currency(session: Session, code: str, *, commit: bool = True) -> SystemConfig:
     config = get_or_create(session, commit=commit)
     config.currency = code.upper() if code else None
@@ -1218,6 +1236,7 @@ def _configuration_values(config: SystemConfig | None, *, for_editing: bool) -> 
         "notifications_enabled": bool(config and config.notifications_enabled),
         "spoolman_enabled": bool(config and config.spoolman_enabled),
         "currency": config.currency if config and config.currency else "USD",
+        "pricing_defaults": _pricing_rates(config),
         "oidc_enabled": bool(value("oidc_enabled")),
         "oidc_issuer_url": str(value("oidc_issuer_url")),
         "oidc_client_id": str(value("oidc_client_id")),

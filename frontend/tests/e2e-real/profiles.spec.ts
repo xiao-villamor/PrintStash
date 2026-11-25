@@ -44,6 +44,70 @@ function rowOf(input: Locator): Locator {
 }
 
 test.describe("profiles", () => {
+  test("links both preset types to the connected printer", async ({ page }) => {
+    const name = `e2e-profile-links-${Date.now()}`;
+    const api = `http://127.0.0.1:${process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410}/api/v1`;
+    const moonraker = `http://127.0.0.1:${process.env.PLAYWRIGHT_MOCK_PRINTER_PORT ?? 7530}`;
+    const { token } = await authBundleFor(ADMIN.username, ADMIN.password);
+    const headers = { Authorization: `Bearer ${token}` };
+    const profile = await page.request.post(`${api}/printer-profiles`, { headers, data: { name } });
+    expect(profile.ok()).toBe(true);
+    const { id: profileId } = await profile.json();
+    const filament = await page.request.post(`${api}/filament-profiles`, {
+      headers,
+      data: { name, material_type: "PLA", material_brand: name },
+    });
+    expect(filament.ok()).toBe(true);
+    const { id: filamentId } = await filament.json();
+    let printerId: number | undefined;
+    try {
+      const connected = await page.request.post(`${api}/printers`, {
+        headers,
+        data: { name, provider: "moonraker", moonraker_url: moonraker, cost_profile_id: profileId },
+      });
+      expect(connected.ok()).toBe(true);
+      printerId = (await connected.json()).id;
+      const material = await page.request.put(
+        `${api}/printers/${printerId}/material-state/manual`,
+        {
+          headers,
+          data: {
+            slots: [
+              {
+                slot_key: "manual0",
+                label: "Feed 1",
+                state: "loaded",
+                material_type: "PLA",
+                material_brand: name,
+              },
+            ],
+          },
+        },
+      );
+      expect(material.ok()).toBe(true);
+
+      await page.goto(`/profiles?tab=printers&profile=${profileId}`);
+      await collapseNavigationSidebar(page);
+      const assigned = page.getByRole("region", { name: "Assigned printers" });
+      await assigned.getByRole("link", { name, exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`/printers/${printerId}\\?tab=settings`));
+
+      await page.goto("/profiles?tab=filaments");
+      await page
+        .getByRole("region", { name: `Preset: ${name}` })
+        .getByRole("button")
+        .click();
+      const matching = page.getByRole("region", { name: "Printers with matching filament" });
+      await expect(matching.getByText("Feed 1")).toBeVisible();
+      await matching.getByRole("link", { name: new RegExp(name) }).click();
+      await expect(page).toHaveURL(new RegExp(`/printers/${printerId}\\?tab=materials`));
+    } finally {
+      if (printerId) await page.request.delete(`${api}/printers/${printerId}`, { headers });
+      await page.request.delete(`${api}/printer-profiles/${profileId}`, { headers });
+      await page.request.delete(`${api}/filament-profiles/${filamentId}`, { headers });
+    }
+  });
+
   for (const kind of ["filament", "printer"] as const) {
     test(`discards a canceled new ${kind} preset`, async ({ page }) => {
       await page.setViewportSize({ width: 1440, height: 1000 });

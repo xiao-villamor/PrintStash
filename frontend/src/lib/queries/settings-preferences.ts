@@ -4,12 +4,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import { captureEditingBase } from "@/lib/api/editing";
 import { onAuthChange } from "@/lib/auth-store";
 import { parseApiError } from "@/lib/errors";
+import { formatNumber } from "@/lib/format";
+import { uiText } from "@/lib/locale";
 import { queryKeys } from "@/lib/query-client";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { useVaultConfigCommand, vaultConfigOptions } from "./settings-config";
 import { settingsTrashKeys } from "./settings-trash";
 import type { EditingBase } from "@/types/editing";
 import type { VaultConfigRead, VaultConfigUpdate } from "@/types";
+import type { PricingRates } from "@/types/production-costing";
 
 export type PreviewMode = "single" | "oblique" | "oblique-poles";
 export function previewMode(
@@ -27,6 +30,7 @@ export type PreferenceIntent =
   | { kind: "multi-angle"; value: PreviewMode }
   | { kind: "recreate-embedded-covers" | "auto-mark"; value: boolean }
   | { kind: "currency"; value: string }
+  | { kind: "pricing"; value: PricingRates }
   | { kind: "backup-retention" | "trash-retention"; value: number; draft: string }
   | { kind: "thumbnail-width"; value: NonNullable<VaultConfigUpdate["model_thumbnail_width"]> };
 type PendingPreference = { intent: PreferenceIntent; base: EditingBase };
@@ -53,6 +57,8 @@ function payload(intent: PreferenceIntent): VaultConfigUpdate {
       return { auto_mark_known_good: intent.value };
     case "currency":
       return { currency: intent.value };
+    case "pricing":
+      return { pricing_defaults: intent.value };
     case "backup-retention":
       return { backup_retention_days: intent.value };
     case "trash-retention":
@@ -71,6 +77,14 @@ export function savedPreference(snapshot: VaultConfigRead, intent: PreferenceInt
       return snapshot.auto_mark_known_good;
     case "currency":
       return snapshot.currency;
+    case "pricing": {
+      const percent = (rate: number) =>
+        formatNumber(rate / 100, { style: "percent", maximumFractionDigits: 2 });
+      return uiText("Margin {value1} · Tax {value2}", {
+        value1: percent(snapshot.pricing_defaults.margin_percent),
+        value2: percent(snapshot.pricing_defaults.tax_percent),
+      });
+    }
     case "backup-retention":
       return snapshot.backup_retention_days;
     case "trash-retention":
@@ -112,6 +126,12 @@ export function useSettingsPreferenceCommand() {
       assertCurrent();
       if (intent.kind === "trash-retention") {
         await client.invalidateQueries({ queryKey: settingsTrashKeys.rows, exact: true });
+        assertCurrent();
+      }
+      if (intent.kind === "pricing") {
+        await client.invalidateQueries({
+          predicate: ({ meta }) => meta?.usesVaultPricingDefaults === true,
+        });
         assertCurrent();
       }
       setState({ phase: "idle" });

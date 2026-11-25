@@ -44,6 +44,13 @@ export const expenseFields = [
     },
     money: true,
   },
+  {
+    key: "failure_rate_percent",
+    get label() {
+      return uiText("Print failure rate (%)");
+    },
+    money: false,
+  },
 ] as const;
 
 export type ExpenseDraft = { [Key in keyof PrinterExpenses]: string };
@@ -98,6 +105,7 @@ export function expenseDraft(expenses: PrinterExpenses | null) {
     power_watts: expenses ? String(expenses.power_watts) : "",
     electricity_per_kwh: expenses ? String(expenses.electricity_per_kwh) : "",
     extra_per_hour: expenses ? String(expenses.extra_per_hour) : "",
+    failure_rate_percent: expenses ? String(expenses.failure_rate_percent) : "",
   };
 }
 
@@ -118,6 +126,7 @@ export function parseExpenses(draft: ExpenseDraft, model: string): PrinterExpens
       : (averagePrintPower(model)?.watts ?? 0),
     electricity_per_kwh: Number(draft.electricity_per_kwh),
     extra_per_hour: Number(draft.extra_per_hour),
+    failure_rate_percent: Number(draft.failure_rate_percent),
   };
 }
 
@@ -125,6 +134,12 @@ export function expenseProblem(expenses: PrinterExpenses | null) {
   if (expenses === null) return null;
   if (expenses.lifetime_hours < 1)
     return uiText("Enter an expected lifetime of at least one print hour.");
+  if (
+    !Number.isFinite(expenses.failure_rate_percent) ||
+    expenses.failure_rate_percent < 0 ||
+    expenses.failure_rate_percent > 99.99
+  )
+    return uiText("Enter a failure rate from 0 to 99.99%.");
   if (
     expenseFields.some(
       ({ key }) => !Number.isFinite(expenses[key]) || expenses[key] < 0 || expenses[key] > 1000000,

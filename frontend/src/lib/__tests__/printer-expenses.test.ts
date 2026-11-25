@@ -46,4 +46,12 @@ describe("printer expense defaults", () => {
       expenseProblem(parseExpenses({ ...expenseDraft(null), lifetime_hours: "0" }, "Prusa MK4")),
     ).toContain("at least one print hour");
   });
+
+  it.each(["-1", "100"])("rejects a failure rate of %s percent", (rate) => {
+    expect(
+      expenseProblem(
+        parseExpenses({ ...expenseDraft(null), failure_rate_percent: rate }, "Prusa MK4"),
+      ),
+    ).toContain("Enter a failure rate");
+  });
 });

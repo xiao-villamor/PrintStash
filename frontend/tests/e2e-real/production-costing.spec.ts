@@ -64,6 +64,7 @@ test.describe("production costing", () => {
     await editor.getByLabel("Average power (W)").fill("200");
     await editor.getByLabel(/Electricity per kWh/).fill("0.25");
     await editor.getByLabel(/Additional cost per print hour/).fill("1");
+    await editor.getByLabel("Print failure rate (%)").fill("20");
     const expenseWrite = page.waitForResponse(
       (response) =>
         response.url().endsWith(`/printer-profiles/${preset.id}`) &&
@@ -79,6 +80,7 @@ test.describe("production costing", () => {
       power_watts: 200,
       electricity_per_kwh: 0.25,
       extra_per_hour: 1,
+      failure_rate_percent: 20,
     });
 
     // Produce and import a real Moonraker history record from the emulator.
@@ -136,91 +138,144 @@ test.describe("production costing", () => {
     await page.getByRole("button", { name: "Save pricing template" }).click();
     await expect(page.getByRole("main").getByText(name, { exact: true })).toBeVisible();
 
-    await page.goto(`${modelPath}?tab=costing`);
-    const form = page.getByRole("form", { name: "Production estimate" });
-    const saveEstimate = form.getByRole("button", { name: "Save estimate" });
-    await expect(saveEstimate).toBeEnabled();
-    await expect(form.getByRole("button", { name: "Save pricing template" })).toHaveCount(0);
-    await form.getByRole("button", { name: "Edit inputs" }).click();
-    const time = form.getByLabel("Estimated time per copy");
-    const grams = form.getByLabel("Filament per copy");
-    await expect(time).toHaveValue("30.2");
-    await expect(grams).toHaveValue("6.8");
-    await expect(form.getByLabel(/Cost per kg/)).toHaveValue("20");
-    const printerChoice = form.getByLabel("Printer or cost profile");
-    await expect(printerChoice).toHaveValue(`printer-${printer.id}`);
-    await expect(form.getByLabel("Filament preset or spool")).toHaveValue(`preset-${filament.id}`);
-    await expect(page.getByRole("heading", { name: "Production cost preview" })).toBeVisible();
-    await time.fill("20");
-    await grams.fill("1");
-    await form.getByRole("button", { name: /Use latest print measurements/ }).click();
-    await expect(time).toHaveValue("10");
-    await expect(grams).toHaveValue("3.58");
-    await form.getByLabel("Pieces per print").fill("2");
-    await time.fill("120");
-    await form.getByLabel("Filament per copy").fill("100");
+    const configUrl = `${api}/config`;
+    const originalConfig = await page.request.get(configUrl, { headers });
+    expect(originalConfig.ok()).toBe(true);
+    const originalPricing = (await originalConfig.json()).pricing_defaults;
+    async function restorePricing() {
+      const current = await page.request.get(configUrl, { headers });
+      const pricing = (await current.json()).pricing_defaults;
+      if (
+        pricing.margin_percent === originalPricing.margin_percent &&
+        pricing.tax_percent === originalPricing.tax_percent
+      )
+        return;
+      const restored = await page.request.put(configUrl, {
+        headers: {
+          ...headers,
+          "If-Match": current.headers()["etag"],
+          "X-PrintStash-Edit-Contract": "conditional-v1",
+        },
+        data: { pricing_defaults: originalPricing },
+      });
+      expect(restored.ok()).toBe(true);
+    }
 
-    // Apply pricing rates from Profiles to this revision.
-    await form.getByLabel("Profit margin (%)").fill("0");
-    await form.getByLabel("Tax (%)").fill("0");
-    await form.getByRole("button", { name: "Cost sources" }).click();
-    await form.getByLabel("Pricing template", { exact: true }).selectOption({ label: name });
-    await form.getByRole("button", { name: "Edit inputs" }).click();
-    await expect(form.getByLabel("Profit margin (%)")).toHaveValue("20");
-    await expect(form.getByLabel("Tax (%)")).toHaveValue("10");
-
-    const saveResponse = page.waitForResponse(
-      (response) =>
-        response.url().endsWith("/production-cost") && response.request().method() === "PUT",
-    );
-    await saveEstimate.click();
-    const saved = await saveResponse;
-    expect(saved.ok()).toBe(true);
-    const savedEstimate = await saved.json();
-    expect(savedEstimate.costs.final_price).toBe(3.6438);
-    expect(savedEstimate.estimate.printer.name).toBe(`Machine ${name}`);
-    const cost = page.getByLabel("Cost per piece");
-    await expect(cost.getByText("$3.64", { exact: true })).toBeVisible();
-    await page.reload();
-    await expect(printerChoice).toHaveValue(`printer-${printer.id}`);
-    await expect(cost.getByText("$3.64", { exact: true })).toBeVisible();
-    await expect(cost.getByText("$2.65", { exact: true })).toBeVisible();
-    const legend = cost
-      .getByText("Additional hourly costs", { exact: true })
-      .locator("xpath=../..");
-    await expect(legend.getByText("$1.00")).toBeVisible();
-    await expect(legend.getByText("38%")).toBeVisible();
-    const segmentColors = await cost
-      .locator(".h-3 > span")
-      .evaluateAll((segments) =>
-        segments.map((segment) => getComputedStyle(segment).backgroundColor),
+    try {
+      await page.goto("/settings");
+      await page
+        .getByRole("navigation", { name: "Settings sections" })
+        .getByRole("button", { name: "Pricing", exact: true })
+        .click();
+      const defaults = page.getByRole("form", { name: "Default pricing" });
+      await defaults.getByLabel("Pricing template", { exact: true }).selectOption({ label: name });
+      await expect(defaults.getByLabel("Default profit margin (%)")).toHaveValue("20");
+      await expect(defaults.getByLabel("Default sales tax (%)")).toHaveValue("10");
+      const defaultsWrite = page.waitForResponse(
+        (response) => response.url().endsWith("/config") && response.request().method() === "PUT",
       );
-    expect(new Set(segmentColors).size).toBe(5);
-    await cost.screenshot({ path: testInfo.outputPath("costing-breakdown.png") });
+      await defaults.getByRole("button", { name: "Save default pricing" }).click();
+      expect((await defaultsWrite).ok()).toBe(true);
+      await page.reload();
+      await expect(defaults.getByLabel("Default profit margin (%)")).toHaveValue("20");
+      await expect(defaults.getByLabel("Default sales tax (%)")).toHaveValue("10");
 
-    await expect(form.getByLabel("Filament per copy")).toHaveValue("100");
-    await form.getByRole("link", { name: "Manage profiles" }).click();
-    await page.getByRole("tab", { name: "Pricing templates" }).click();
-    await page.getByRole("button", { name: `Delete ${name}`, exact: true }).click();
-    await page
-      .getByRole("dialog", { name: "Delete pricing template?" })
-      .getByRole("button", { name: "Delete template" })
-      .click();
-    await expect(page.getByRole("main").getByText(name, { exact: true })).toHaveCount(0);
-    await page.goto(`${modelPath}?tab=costing`);
-    await expect(cost.getByText("$3.64", { exact: true })).toBeVisible();
+      await page.goto(`${modelPath}?tab=costing`);
+      const form = page.getByRole("form", { name: "Production estimate" });
+      const saveEstimate = form.getByRole("button", { name: "Save estimate" });
+      await expect(saveEstimate).toBeEnabled();
+      await expect(form.getByRole("button", { name: "Save pricing template" })).toHaveCount(0);
+      await expect(form.getByLabel("Tax (%)")).toHaveCount(0);
+      await expect(form.getByLabel("Profit margin (%)")).toHaveCount(0);
+      await expect(form.getByLabel("Pricing template", { exact: true })).toHaveCount(0);
+      await expect(form.getByLabel("Cost per piece").getByText("Tax (10%)")).toBeVisible();
+      await form.getByRole("button", { name: "Edit inputs" }).click();
+      const time = form.getByLabel("Estimated time per copy");
+      const grams = form.getByLabel("Filament per copy");
+      await expect(time).toHaveValue("30.2");
+      await expect(grams).toHaveValue("6.8");
+      await expect(form.getByLabel(/Cost per kg/)).toHaveValue("20");
+      const printerChoice = form.getByLabel("Printer or cost profile");
+      await expect(printerChoice).toHaveValue(`printer-${printer.id}`);
+      await expect(form.getByLabel("Filament preset or spool")).toHaveValue(
+        `preset-${filament.id}`,
+      );
+      await expect(page.getByRole("heading", { name: "Production cost preview" })).toBeVisible();
+      await time.fill("20");
+      await grams.fill("1");
+      await form.getByRole("button", { name: /Use latest print measurements/ }).click();
+      await expect(time).toHaveValue("10");
+      await expect(grams).toHaveValue("3.58");
+      await form.getByLabel("Pieces per print").fill("2");
+      await time.fill("120");
+      await form.getByLabel("Filament per copy").fill("100");
 
-    await clickModelAction(page, "Delete model");
-    await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
-    expect((await page.request.delete(`${api}/printers/${printer.id}`, { headers })).ok()).toBe(
-      true,
-    );
-    expect(
-      (await page.request.delete(`${api}/filament-profiles/${filament.id}`, { headers })).ok(),
-    ).toBe(true);
-    expect(
-      (await page.request.delete(`${api}/printer-profiles/${preset.id}`, { headers })).ok(),
-    ).toBe(true);
+      const saveResponse = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/production-cost") && response.request().method() === "PUT",
+      );
+      await saveEstimate.click();
+      const saved = await saveResponse;
+      expect(saved.ok()).toBe(true);
+      const savedEstimate = await saved.json();
+      expect(savedEstimate.costs).toMatchObject({
+        reprints: 0.6625,
+        production: 3.3125,
+        profit: 0.8281,
+        tax: 0.4141,
+        final_price: 4.5547,
+      });
+      expect(savedEstimate.estimate.pricing).toEqual({ margin_percent: 20, tax_percent: 10 });
+      expect(savedEstimate.estimate.printer.name).toBe(`Machine ${name}`);
+      const cost = page.getByLabel("Cost per piece");
+      await expect(cost.getByText("$4.55", { exact: true })).toBeVisible();
+      await page.reload();
+      await expect(printerChoice).toHaveValue(`printer-${printer.id}`);
+      await expect(cost.getByText("$4.55", { exact: true })).toBeVisible();
+      await expect(cost.getByText("$3.31 to make · $0.83 profit per piece")).toBeVisible();
+      await expect(cost.getByText("Tax (10%)")).toBeVisible();
+      await expect(cost.getByText("$0.41", { exact: true })).toBeVisible();
+      await expect(cost.getByText("Expected reprints")).toBeVisible();
+      const legend = cost
+        .getByText("Additional hourly costs", { exact: true })
+        .locator("xpath=../..");
+      await expect(legend.getByText("$1.00")).toBeVisible();
+      await expect(legend.getByText("30%")).toBeVisible();
+      const segmentColors = await cost
+        .locator(".h-3 > span")
+        .evaluateAll((segments) =>
+          segments.map((segment) => getComputedStyle(segment).backgroundColor),
+        );
+      expect(new Set(segmentColors).size).toBe(6);
+      await cost.screenshot({ path: testInfo.outputPath("costing-breakdown.png") });
+
+      await expect(form.getByLabel("Filament per copy")).toHaveValue("100");
+      await form.getByRole("link", { name: "Manage profiles" }).click();
+      await page.getByRole("tab", { name: "Pricing templates" }).click();
+      await page.getByRole("button", { name: `Delete ${name}`, exact: true }).click();
+      await page
+        .getByRole("dialog", { name: "Delete pricing template?" })
+        .getByRole("button", { name: "Delete template" })
+        .click();
+      await expect(page.getByRole("main").getByText(name, { exact: true })).toHaveCount(0);
+      await restorePricing();
+      await page.goto(`${modelPath}?tab=costing`);
+      await expect(cost.getByText("$4.55", { exact: true })).toBeVisible();
+
+      await clickModelAction(page, "Delete model");
+      await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
+      expect((await page.request.delete(`${api}/printers/${printer.id}`, { headers })).ok()).toBe(
+        true,
+      );
+      expect(
+        (await page.request.delete(`${api}/filament-profiles/${filament.id}`, { headers })).ok(),
+      ).toBe(true);
+      expect(
+        (await page.request.delete(`${api}/printer-profiles/${preset.id}`, { headers })).ok(),
+      ).toBe(true);
+    } finally {
+      await restorePricing();
+    }
   });
   test("records a stopped print using the assigned cost profile", async ({ page }, testInfo) => {
     const name = `connected-cost-${Date.now()}`;

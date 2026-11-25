@@ -420,6 +420,7 @@ EXPENSES = {
     "power_watts": 200,
     "electricity_per_kwh": 0.25,
     "extra_per_hour": 1,
+    "failure_rate_percent": 12.5,
 }
 
 
@@ -454,3 +455,18 @@ class TestPrinterExpenses:
         )
         assert response.status_code == 201, response.text
         assert response.json()["expenses"] == expenses
+
+    @pytest.mark.parametrize("rate", [-1, 100])
+    def test_rejects_failure_rates_outside_the_valid_range(
+        self, client, auth_headers, rate
+    ):
+        response = client.post(
+            "/api/v1/printer-profiles",
+            headers=auth_headers,
+            json={
+                "name": "Voron",
+                "expenses": EXPENSES | {"failure_rate_percent": rate},
+            },
+        )
+
+        assert response.status_code == 422

@@ -14,6 +14,7 @@ import { uiText } from "@/lib/locale";
 import { usePrinters, useSpoolmanStatus, useSpools } from "@/lib/queries";
 import { filamentProfilesOptions, printerProfilesOptions } from "@/lib/queries/profiles";
 import { getSessionVersion } from "@/lib/session-transport";
+import { expenseFields } from "@/lib/printer-expenses";
 import { toast } from "@/lib/toast";
 import type { FileRead, ModelPrintJobRead } from "@/types";
 import type {
@@ -32,7 +33,6 @@ import {
   matchingPrinterPresets,
   previewPieceCosts,
 } from "./costing-defaults";
-import { PricingTemplatePicker } from "@/components/pricing-templates";
 import { Link } from "@/lib/link";
 
 type PlateCostInput = {
@@ -53,8 +53,6 @@ type Draft = {
   minutes: string;
   materials: MaterialDraft[];
   printer: ProductionInputs["printer"] | undefined;
-  margin: string;
-  tax: string;
 };
 
 function blankMaterial(key: number): MaterialDraft {
@@ -87,8 +85,6 @@ function makeDraft(
         spoolId: line.spool_id,
       })),
       printer: saved.printer,
-      margin: String(saved.pricing.margin_percent),
-      tax: String(saved.pricing.tax_percent),
     };
   }
   const metadata = plate?.metadata ?? fileEstimate?.plateMetadata[0] ?? file.metadata;
@@ -118,8 +114,6 @@ function makeDraft(
       },
     ],
     printer: undefined,
-    margin: "0",
-    tax: "0",
   };
 }
 
@@ -129,16 +123,10 @@ function numberInRange(value: string, minimum: number, maximum: number) {
   return Number.isFinite(number) && number >= minimum && number <= maximum ? number : null;
 }
 
-function toRates(draft: Draft): PricingRates | null {
-  const margin = numberInRange(draft.margin, 0, 99.99);
-  const tax = numberInRange(draft.tax, 0, 100);
-  return margin === null || tax === null ? null : { margin_percent: margin, tax_percent: tax };
-}
-
-function toEstimate(draft: Draft, rates: PricingRates | null): ProductionInputs | null {
+function toEstimate(draft: Draft, rates: PricingRates): ProductionInputs | null {
   const pieces = numberInRange(draft.pieces, 1, 100000);
   const minutes = numberInRange(draft.minutes, 0, 1000000);
-  if (pieces === null || !Number.isInteger(pieces) || minutes === null || !rates) return null;
+  if (pieces === null || !Number.isInteger(pieces) || minutes === null) return null;
   const materials: CostedMaterial[] = [];
   for (const line of draft.materials) {
     const grams = numberInRange(line.grams, 0, 1000000);
@@ -161,6 +149,7 @@ const costComponents = [
   ["amortization", "Amortization", "bg-chart-violet"],
   ["maintenance", "Maintenance", "bg-chart-amber"],
   ["extra", "Additional hourly costs", "bg-chart-rose"],
+  ["reprints", "Expected reprints", "bg-muted-foreground"],
 ] as const satisfies readonly [keyof PieceCosts, string, string][];
 
 function CostBreakdown({
@@ -183,28 +172,29 @@ function CostBreakdown({
     );
   }
 
-  const money = (value: number, maximumFractionDigits = 4) =>
+  const money = (value: number) =>
     formatNumber(value, {
       style: "currency",
       currency: estimate.currency,
-      maximumFractionDigits,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
     });
   const percent = (value: number) =>
     formatNumber(value, { style: "percent", maximumFractionDigits: 0 });
   const hasMachine = estimate.printer !== null;
-  const components = costComponents.filter(([key]) => hasMachine || key === "material");
+  const components = costComponents.filter(([key]) =>
+    key === "reprints" ? costs.reprints > 0 : hasMachine || key === "material",
+  );
   const total = components.reduce((sum, [key]) => sum + costs[key], 0);
-  const profit = Math.max(0, costs.price_before_tax - costs.production);
+  const pricingPercent = (rate: number) =>
+    formatNumber(rate / 100, { style: "percent", maximumFractionDigits: 2 });
   const charge = [
-    [
-      uiText("Profit margin (%)"),
-      formatNumber(estimate.pricing.margin_percent / 100, {
-        style: "percent",
-        maximumFractionDigits: 2,
-      }),
-    ],
+    [uiText("Profit margin (%)"), pricingPercent(estimate.pricing.margin_percent)],
     [uiText("Price before tax"), money(costs.price_before_tax)],
-    [uiText("Tax"), money(costs.tax)],
+    [
+      uiText("Tax ({value1})", { value1: pricingPercent(estimate.pricing.tax_percent) }),
+      money(costs.tax),
+    ],
     [uiText("Print time"), formatDuration(estimate.print_minutes * 60)],
   ];
 
@@ -215,12 +205,12 @@ function CostBreakdown({
           <div className="rounded-md border border-outline-variant bg-surface-container-low p-3">
             <dt className="text-sm text-muted-foreground">{uiText("Final price")}</dt>
             <dd className="text-3xl font-bold tracking-tight tabular-nums">
-              {money(costs.final_price, 2)}
+              {money(costs.final_price)}
             </dd>
             <dd className="mt-1 text-xs text-muted-foreground">
               {uiText("{value1} to make · {value2} profit per piece", {
                 value1: money(costs.production),
-                value2: money(profit),
+                value2: money(costs.profit),
               })}
             </dd>
           </div>
@@ -547,7 +537,8 @@ function EstimateForm({
     (job) => job.file_id === file.id && job.state === "completed" && job.actual_duration_s != null,
   );
   const duration = measured?.actual_duration_s;
-  const rates = toRates(draft);
+  const rates = row.estimate?.pricing ??
+    row.pricing_defaults ?? { margin_percent: 0, tax_percent: 0 };
   const plateMetadata = estimatePlate
     ? [estimatePlate.metadata]
     : (fileEstimate?.plateMetadata ?? []);
@@ -629,6 +620,18 @@ function EstimateForm({
           ? savedChoices[0]
           : undefined
         : printerChoices.find(({ value }) => value === manualPrinterChoice);
+  const updatedPrinter =
+    sameCurrency &&
+    printer &&
+    selectedPrinter &&
+    expenseFields.some(({ key }) => printer.expenses[key] !== selectedPrinter.expenses[key])
+      ? selectedPrinter
+      : undefined;
+
+  function applyPrinter(choice: (typeof printerChoices)[number]) {
+    setManualPrinterChoice(choice.value);
+    setDraft({ ...draft, printer: { name: choice.name, expenses: choice.expenses } });
+  }
 
   function updateMaterial(key: number, patch: Partial<MaterialDraft>) {
     setDraft((old) => ({
@@ -705,11 +708,7 @@ function EstimateForm({
                         ({ value }) => value === event.target.value,
                       );
                       if (!choice) return;
-                      setManualPrinterChoice(choice.value);
-                      setDraft({
-                        ...draft,
-                        printer: { name: choice.name, expenses: choice.expenses },
-                      });
+                      applyPrinter(choice);
                     }}
                   >
                     <option value="">{uiText("No machine costs")}</option>
@@ -734,6 +733,17 @@ function EstimateForm({
                     )}
                   </select>
                 </FormField>
+                {updatedPrinter && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="col-span-2 justify-self-start"
+                    onClick={() => applyPrinter(updatedPrinter)}
+                  >
+                    {uiText("Apply current printer costs")}
+                  </Button>
+                )}
                 {materials.map((line) => (
                   <div key={line.key} className="col-span-2 space-y-1.5">
                     <p className="text-sm text-foreground">
@@ -821,16 +831,6 @@ function EstimateForm({
                     )}
                   </div>
                 ))}
-                <PricingTemplatePicker
-                  rates={rates}
-                  onApply={(value) =>
-                    setDraft({
-                      ...draft,
-                      margin: String(value.margin_percent),
-                      tax: String(value.tax_percent),
-                    })
-                  }
-                />
                 <p className="col-span-2 text-sm text-muted-foreground">
                   <Link
                     href={`/profiles?tab=printers${selectedPrinter ? `&profile=${selectedPrinter.profile.id}` : ""}`}
@@ -1012,36 +1012,6 @@ function EstimateForm({
                   >
                     {uiText("Add material")}
                   </Button>
-                </div>
-              </div>
-              <div className="space-y-3 border-t border-border p-4">
-                <h3 className="text-sm font-medium text-muted-foreground">{uiText("Pricing")}</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <FormField
-                    label={uiText("Profit margin (%)")}
-                    hint={uiText("Profit as a share of the price before tax.")}
-                  >
-                    <Input
-                      type="number"
-                      min={0}
-                      max={99.99}
-                      step="any"
-                      value={draft.margin}
-                      required
-                      onChange={(event) => setDraft({ ...draft, margin: event.target.value })}
-                    />
-                  </FormField>
-                  <FormField label={uiText("Tax (%)")}>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step="any"
-                      value={draft.tax}
-                      required
-                      onChange={(event) => setDraft({ ...draft, tax: event.target.value })}
-                    />
-                  </FormField>
                 </div>
               </div>
             </div>

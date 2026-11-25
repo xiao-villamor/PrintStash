@@ -203,6 +203,13 @@ class TestGetConfig:
 
         assert body["currency"] == "USD"
 
+    def test_defaults_pricing_rates_to_zero(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        body = client.get("/api/v1/config", headers=auth_headers).json()
+
+        assert body["pricing_defaults"] == {"margin_percent": 0, "tax_percent": 0}
+
     def test_rejects_an_unauthenticated_caller(self, client: TestClient) -> None:
         assert client.get("/api/v1/config").status_code == 401
 
@@ -215,6 +222,43 @@ class TestGetConfig:
 
 
 class TestUpdateConfig:
+    def test_persists_vault_pricing_defaults(
+        self, client, auth_headers, make_model, make_file
+    ):
+        config_url = "/api/v1/config"
+        rates = {"margin_percent": 18.5, "tax_percent": 7.25}
+        artifact = make_file(make_model(), file_type=FileType.STL)
+
+        response = client.put(
+            config_url, headers=auth_headers, json={"pricing_defaults": rates}
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["pricing_defaults"] == rates
+        assert (
+            client.get(config_url, headers=auth_headers).json()["pricing_defaults"]
+            == rates
+        )
+        receipt = client.get(
+            f"/api/v1/files/{artifact.id}/production-cost", headers=auth_headers
+        )
+        assert receipt.json()["pricing_defaults"] == rates
+        assert receipt.json()["estimate"] is None
+
+    @pytest.mark.parametrize(
+        "rates",
+        [
+            {"margin_percent": 100, "tax_percent": 0},
+            {"margin_percent": 5, "tax_percent": -1},
+        ],
+    )
+    def test_rejects_invalid_vault_pricing_defaults(self, client, auth_headers, rates):
+        response = client.put(
+            "/api/v1/config", headers=auth_headers, json={"pricing_defaults": rates}
+        )
+
+        assert response.status_code == 422
+
     def test_persists_the_automatic_backup_schedule(
         self, client: TestClient, auth_headers: dict[str, str]
     ) -> None:

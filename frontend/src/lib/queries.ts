@@ -319,11 +319,12 @@ export function useFleetQueue(options?: { refetchInterval?: number; historyLimit
   });
 }
 
-export function useFleetSummary(options?: { refetchInterval?: number }) {
+export function useFleetSummary(options?: { enabled?: boolean; refetchInterval?: number }) {
   const api = useQueryApi();
   return useQuery<FleetSummary>({
     queryKey: queryKeys.fleetSummary,
     queryFn: ({ signal }) => api.getFleetSummary({ signal }),
+    enabled: options?.enabled ?? true,
     refetchInterval: options?.refetchInterval,
   });
 }

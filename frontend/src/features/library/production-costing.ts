@@ -16,6 +16,7 @@ const templatesKey = ["pricing-templates"] as const;
 export function productionCostOptions(modelId: number, fileId: number) {
   return queryOptions({
     queryKey: [...queryKeys.model(modelId), "production-cost", fileId],
+    meta: { usesVaultPricingDefaults: true },
     queryFn: ({ signal }) => readProductionCost(fileId, signal),
   });
 }

@@ -86,7 +86,10 @@ export function previewPieceCosts(estimate: ProductionInputs): PieceCosts {
   const maintenance = (machine?.maintenance ?? 0) * hoursPerPiece;
   const electricity = (machine?.electricity ?? 0) * hoursPerPiece;
   const extra = (machine?.additional ?? 0) * hoursPerPiece;
-  const production = material + amortization + maintenance + electricity + extra;
+  const attempt = material + amortization + maintenance + electricity + extra;
+  const failureRate = (estimate.printer?.expenses.failure_rate_percent ?? 0) / 100;
+  const reprints = (attempt * failureRate) / (1 - failureRate);
+  const production = attempt + reprints;
   const price_before_tax = production / (1 - estimate.pricing.margin_percent / 100);
   const tax = (price_before_tax * estimate.pricing.tax_percent) / 100;
   return {
@@ -95,8 +98,10 @@ export function previewPieceCosts(estimate: ProductionInputs): PieceCosts {
     maintenance,
     electricity,
     extra,
+    reprints,
     production,
     price_before_tax,
+    profit: price_before_tax - production,
     tax,
     final_price: price_before_tax + tax,
   };

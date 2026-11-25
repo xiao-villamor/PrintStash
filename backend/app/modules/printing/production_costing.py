@@ -53,18 +53,23 @@ def piece_costs(estimate: ProductionEstimate) -> PieceCosts:
         start=Decimal(0),
     )
     amortization = maintenance = electricity = extra = Decimal(0)
+    failure_rate = Decimal(0)
     if estimate.printer is not None:
         hours = Decimal(str(estimate.print_minutes)) / 60
+        expenses = estimate.printer.expenses
+        failure_rate = Decimal(str(expenses.failure_rate_percent)) / 100
         acquisition_rate, maintenance_rate, electricity_rate, extra_rate = (
-            _machine_rates(estimate.printer.expenses)
+            _machine_rates(expenses)
         )
         amortization = acquisition_rate * hours
         maintenance = maintenance_rate * hours
         electricity = electricity_rate * hours
         extra = extra_rate * hours
-    production = (
+    attempt = (
         material + amortization + maintenance + electricity + extra
     ) / estimate.pieces
+    reprints = attempt * failure_rate / (1 - failure_rate)
+    production = attempt + reprints
     price = production / (1 - Decimal(str(estimate.pricing.margin_percent)) / 100)
     tax = price * Decimal(str(estimate.pricing.tax_percent)) / 100
     return PieceCosts(
@@ -73,8 +78,10 @@ def piece_costs(estimate: ProductionEstimate) -> PieceCosts:
         maintenance=_rounded(maintenance / estimate.pieces),
         electricity=_rounded(electricity / estimate.pieces),
         extra=_rounded(extra / estimate.pieces),
+        reprints=_rounded(reprints),
         production=_rounded(production),
         price_before_tax=_rounded(price),
+        profit=_rounded(price - production),
         tax=_rounded(tax),
         final_price=_rounded(price + tax),
     )

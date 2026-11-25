@@ -8,6 +8,7 @@ export const SETTINGS_SECTION_LABELS = {
   "remote-storage": "settings.remoteStorage",
   imports: "settings.imports",
   "ai-search": "aiSearch.settingsTitle",
+  pricing: "Pricing",
   maintenance: "settings.maintenance",
   work: "settings.backgroundWork",
   libraries: "settings.libraries",

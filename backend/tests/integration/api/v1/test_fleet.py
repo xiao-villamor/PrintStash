@@ -2112,6 +2112,8 @@ class TestFleet:
             slot_key="duplicate",
             label="Right · rear",
             material_type="PETG",
+            material_brand="Prusament",
+            spool_filament_id=34,
             color_hex="#D42C2C",
         )
         build_material_slot(
@@ -2124,12 +2126,18 @@ class TestFleet:
         assert response.status_code == 200
         slots = response.json()["printers"][0]["loaded_material_slots"]
         assert {
-            row["slot_key"]: (row["label"], row["material_type"], row["color_hex"])
+            row["slot_key"]: (
+                row["label"],
+                row["material_type"],
+                row["material_brand"],
+                row["spool_filament_id"],
+                row["color_hex"],
+            )
             for row in slots
         } == {
-            "red": ("red", "PLA", "#D42C2C"),
-            "duplicate": ("Right · rear", "PETG", "#D42C2C"),
-            "colorless": ("colorless", "PLA", None),
+            "red": ("red", "PLA", None, None, "#D42C2C"),
+            "duplicate": ("Right · rear", "PETG", "Prusament", 34, "#D42C2C"),
+            "colorless": ("colorless", "PLA", None, None, None),
         }
 
     def test_summarises_every_state_that_makes_a_printer_unavailable(
