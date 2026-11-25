@@ -34,7 +34,6 @@ test.describe("confirmed favorite removal", () => {
       const targetHref = `/models/${models[9].id}`;
       const neighborHref = `/models/${models[10].id}`;
       const targetLink = page.locator(`main [data-library-entry="${targetHref}"]`);
-      const target = targetLink.locator("xpath=ancestor::article");
       await scrollToLibraryEntry(page, targetLink);
       // The removed card is the first visible anchor in the virtual scroll surface.
       await targetLink.evaluate((node) => {
@@ -53,7 +52,8 @@ test.describe("confirmed favorite removal", () => {
         await route.fulfill({ response: saved });
       });
       const removed = page.locator(`main [data-library-entry="${targetHref}"]`);
-      await target.getByRole("button", { name: /Remove .* from favorites/ }).click();
+      await targetLink.click({ button: "right" });
+      await page.getByRole("menuitem", { name: /Remove .* from favorites/ }).click();
       await expect.poll(() => committed).toBe(true);
       await expect(removed).toHaveCount(1);
       const before = await surviving.boundingBox();

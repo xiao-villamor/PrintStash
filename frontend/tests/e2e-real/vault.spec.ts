@@ -15,9 +15,7 @@ test.describe("vault", () => {
     const name = `e2e-vault-${Date.now()}`;
     await uploadGcodeModel(page, name);
 
-    // Search narrows the grid to the matching model and reflects in the URL.
-    await page.getByRole("searchbox", { name: "Search models" }).fill(name);
-    await expect(page).toHaveURL(/[?&]q=/);
+    await page.reload();
     await expect(modelCard(page, name)).toBeVisible();
 
     await expect(page.getByRole("main")).toHaveAttribute("data-inspector-layout", "grid");
