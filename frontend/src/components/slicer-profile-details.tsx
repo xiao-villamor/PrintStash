@@ -16,7 +16,13 @@ import type { ProfileSettingsKind } from "@/types/slicer-profiles";
 
 type Profile = Pick<FilamentProfileRead, "id" | "name" | "edit_epoch" | "edit_version">;
 
-function SettingsTable({ settings }: { settings: Record<string, string> }) {
+function SettingsTable({
+  settings,
+  contained = false,
+}: {
+  settings: Record<string, string>;
+  contained?: boolean;
+}) {
   const [search, setSearch] = useState("");
   const rows = Object.entries(settings).filter(([key, value]) =>
     `${key} ${value}`.toLowerCase().includes(search.toLowerCase().trim()),
@@ -32,7 +38,7 @@ function SettingsTable({ settings }: { settings: Record<string, string> }) {
       {rows.length === 0 ? (
         <p className="py-3 text-sm text-muted-foreground">{uiText("profiles.noSettings")}</p>
       ) : (
-        <dl className="divide-y divide-border">
+        <dl className={`divide-y divide-border ${contained ? "max-h-80 overflow-y-auto pr-2" : ""}`}>
           {rows.map(([key, value]) => (
             <div key={key} className="grid gap-1 py-2 text-sm sm:grid-cols-2 sm:gap-4">
               <dt className="min-w-0 break-words font-mono text-xs text-muted-foreground">{key}</dt>
@@ -42,6 +48,50 @@ function SettingsTable({ settings }: { settings: Record<string, string> }) {
         </dl>
       )}
     </div>
+  );
+}
+
+type SourceFileCapture = SettingsVariant["sources"][number];
+
+function SourceFile({ file, locale }: { file: SourceFileCapture; locale: string }) {
+  const [open, setOpen] = useState(false);
+  const hasProcess = Object.keys(file.settings.process).length > 0;
+  return (
+    <li className="min-w-0 rounded-lg border border-border bg-muted/30">
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3">
+        <div className="min-w-0">
+          <Link
+            className="break-words text-sm font-medium hover:underline"
+            href={`/models/${file.model_id}`}
+          >
+            {file.model_name}
+          </Link>
+          <p className="break-all text-xs text-muted-foreground">{file.filename}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {new Date(file.uploaded_at).toLocaleString(locale)}
+          </p>
+        </div>
+        {hasProcess && (
+          <Button
+            variant="outline"
+            size="xs"
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+          >
+            {uiText("profiles.fileProcess")}
+            <ChevronDown
+              aria-hidden
+              className={`h-3.5 w-3.5 transition-transform duration-press ${open ? "rotate-180" : ""}`}
+            />
+          </Button>
+        )}
+      </div>
+      {open && (
+        <div className="border-t border-border p-3">
+          <SettingsTable settings={file.settings.process} contained />
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -116,28 +166,12 @@ function Variant({
           </dl>
           <SettingsTable settings={variant.settings} />
           <p className="text-xs text-muted-foreground">{uiText("profiles.valuesHelp")}</p>
-          <h5 className="text-xs font-semibold">{uiText("profiles.sourceFiles")}</h5>
-          <ul className="space-y-3">
+          <h5 className="pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            {uiText("profiles.sourceFiles")}
+          </h5>
+          <ul className="space-y-2">
             {variant.sources.map((file) => (
-              <li key={file.file_id} className="min-w-0 space-y-1 rounded-md bg-muted/30 p-3">
-                <Link
-                  className="break-words text-sm text-primary underline underline-offset-2"
-                  href={`/models/${file.model_id}`}
-                >
-                  {file.filename} · {file.model_name}
-                </Link>
-                <p className="text-xs text-muted-foreground">
-                  {new Date(file.uploaded_at).toLocaleString(locale)}
-                </p>
-                {Object.keys(file.settings.process).length > 0 && (
-                  <details className="text-sm">
-                    <summary className="cursor-action py-1">
-                      {uiText("profiles.fileProcess")}
-                    </summary>
-                    <SettingsTable settings={file.settings.process} />
-                  </details>
-                )}
-              </li>
+              <SourceFile key={file.file_id} file={file} locale={locale} />
             ))}
           </ul>
         </div>
