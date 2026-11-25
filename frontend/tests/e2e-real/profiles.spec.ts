@@ -6,7 +6,8 @@
  * edit, and delete rather than stopping at the first green tick.
  */
 import { type Locator } from "@playwright/test";
-import { test, expect, authBundleFor, ADMIN } from "./helpers";
+import { test, expect, authBundleFor, authedContext, ADMIN } from "./helpers";
+import { DESKTOP_CHROMIUM } from "../playwright-desktop";
 import { collapseNavigationSidebar } from "./util";
 
 // Resolve the unique name to the server-ID label in one DOM read. Retaining
@@ -271,7 +272,7 @@ test.describe("profiles", () => {
     );
   });
   for (const kind of ["filament", "printer"] as const) {
-    test(`two ${kind} preset editors recover a competing save`, async ({ page }) => {
+    test(`two ${kind} preset editors recover a competing save`, async ({ page, browser }) => {
       const api = `http://127.0.0.1:${process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410}`;
       const bundle = await authBundleFor(ADMIN.username, ADMIN.password);
       const headers = { Authorization: `Bearer ${bundle.token}` };
@@ -286,13 +287,15 @@ test.describe("profiles", () => {
       });
       expect(response.status()).toBe(201);
       const profile: { id: number } = await response.json();
-      const second = await page.context().newPage();
+      const { context, page: second } = await authedContext(browser, bundle);
       const numericLabel =
         kind === "filament" ? `Filament cost per kg ${profile.id}` : "Custom nozzle diameter (mm)";
       const nextValue = kind === "filament" ? "42" : "0.65";
       try {
         await page.goto("/profiles");
-        await second.goto("/profiles");
+        await second.setViewportSize(DESKTOP_CHROMIUM.viewport);
+        await second.goto(page.url());
+        await expect(second.getByRole("heading", { name: "Profiles", exact: true })).toBeVisible();
         if (kind === "printer") {
           await page.getByRole("tab", { name: /Printers/ }).click();
           await second.getByRole("tab", { name: /Printers/ }).click();
@@ -325,7 +328,7 @@ test.describe("profiles", () => {
         );
         await page
           .getByRole("dialog", { name: `Edit ${kind} preset`, exact: true })
-          .getByRole("heading")
+          .getByRole("button", { name: "Close", exact: true })
           .click();
         expect((await firstSave).status()).toBe(200);
         await second.getByRole("textbox", { name: numericLabel, exact: true }).fill(nextValue);
@@ -336,9 +339,10 @@ test.describe("profiles", () => {
         );
         await second
           .getByRole("dialog", { name: `Edit ${kind} preset`, exact: true })
-          .getByRole("heading")
+          .getByRole("button", { name: "Close", exact: true })
           .click();
         expect((await staleSave).status()).toBe(412);
+        await second.getByRole("button", { name: `Edit preset ${name}`, exact: true }).click();
         await expect(second.getByRole("textbox", { name: numericLabel, exact: true })).toHaveValue(
           nextValue,
         );
@@ -369,7 +373,7 @@ test.describe("profiles", () => {
           second.getByRole("textbox", { name: `${label} notes ${profile.id}`, exact: true }),
         ).toHaveValue("Keep the first editor notes");
       } finally {
-        await second.close();
+        await context.close();
         await page.request.delete(`${api}/api/v1/${kind}-profiles/${profile.id}`, { headers });
       }
     });
