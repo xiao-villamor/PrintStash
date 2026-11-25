@@ -582,6 +582,7 @@ export function SettingsPanel() {
   const [createUserDraft, setCreateUserDraft] = useState(EMPTY_CREATE_USER);
   const [showNewUserPasswords, setShowNewUserPasswords] = useState(false);
   const [deleteUserTarget, setDeleteUserTarget] = useState<number | null>(null);
+  const [deleteUserError, setDeleteUserError] = useState<string | null>(null);
   const [createUserOpen, setCreateUserOpen] = useState(false);
   const [passwordTarget, setPasswordTarget] = useState<number | null>(null);
   const {
@@ -842,6 +843,7 @@ export function SettingsPanel() {
       setCreateUserDraft(EMPTY_CREATE_USER);
       setShowNewUserPasswords(false);
       setDeleteUserTarget(null);
+      setDeleteUserError(null);
       setCreateUserOpen(false);
       setPasswordDrafts({});
       setPasswordTarget(null);
@@ -1655,6 +1657,7 @@ export function SettingsPanel() {
   async function deleteUser(id: number) {
     if (!user?.is_superuser || id === user.id || usersBusy !== null || !usersQuery.isSuccess)
       return;
+    setDeleteUserError(null);
     const session = getSessionVersion();
     try {
       await userCommand.mutateAsync({ kind: "remove", id, userId: user.id, session });
@@ -1662,7 +1665,7 @@ export function SettingsPanel() {
       setDeleteUserTarget(null);
       toast.success(uiText("User deleted."));
     } catch (error) {
-      if (accountCurrent(session)) toast.error(error);
+      if (accountCurrent(session)) setDeleteUserError(userMessage(error));
     }
   }
 
@@ -3551,7 +3554,10 @@ export function SettingsPanel() {
                                               {
                                                 label: uiText("Delete user…"),
                                                 danger: true,
-                                                onSelect: () => setDeleteUserTarget(row.id),
+                                                onSelect: () => {
+                                                  setDeleteUserError(null);
+                                                  setDeleteUserTarget(row.id);
+                                                },
                                               },
                                             ]),
                                       ]}
@@ -3572,7 +3578,13 @@ export function SettingsPanel() {
                                     { value1: row.username },
                                   )}
                                   confirmLabel={uiText("Delete user")}
-                                />
+                                >
+                                  {deleteUserTarget === row.id && deleteUserError && (
+                                    <p role="alert" className="text-sm text-destructive">
+                                      {deleteUserError}
+                                    </p>
+                                  )}
+                                </ConfirmModal>
                                 <ConfirmModal
                                   open={passwordTarget === row.id}
                                   onClose={() => setPasswordTarget(null)}

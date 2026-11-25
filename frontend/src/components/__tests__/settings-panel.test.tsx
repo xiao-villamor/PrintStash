@@ -500,9 +500,7 @@ describe("SettingsPanel", () => {
       const dialog = screen.getByRole("dialog", { name: "Delete user" });
       await user.click(within(dialog).getByRole("button", { name: "Delete user" }));
 
-      expect(
-        await screen.findByText("This request could not be completed. Try again."),
-      ).toBeVisible();
+      expect(await within(dialog).findByRole("alert")).toBeVisible();
       expect(dialog).toBeVisible();
     });
 
