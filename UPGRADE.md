@@ -1,5 +1,19 @@
 # PrintStash Upgrade Guide
 
+## Upgrading with legacy background jobs
+
+When upgrading from 0.13 or earlier to a build with the fix for issue #656,
+PrintStash preserves jobs recorded with the old `generic` kind as upload
+history. The container applies the repair on startup. For source installs,
+run `uv run python -m app.db.migrate` from `backend/`. The
+[0.14.0 volume-layout instructions](#0140-one-data-volume) still apply.
+
+If an earlier attempt failed with `ck_jobs_kind_values` or a retry reports
+that `_alembic_tmp_artifact_derivatives` already exists, stop all API and
+worker processes. Restore the pre-upgrade database from your verified backup
+before starting the fixed build. If the failed attempt also changed the
+managed files, restore those from the same backup.
+
 ## 0.15.1 notes
 
 [PrintStash v0.15.1](https://github.com/xiao-villamor/PrintStash/releases/tag/v0.15.1)

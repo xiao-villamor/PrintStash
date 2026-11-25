@@ -24,7 +24,8 @@ from typing import Any
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import CheckConstraint, UniqueConstraint, create_engine, inspect
+from alembic.script import ScriptDirectory
+from sqlalchemy import CheckConstraint, UniqueConstraint, create_engine, inspect, text
 from sqlmodel import SQLModel
 
 from alembic import command
@@ -37,6 +38,8 @@ logger = get_logger(__name__)
 # backend/app/db/migrate.py -> parents[2] == backend/
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 _SCRIPT_LOCATION = _BACKEND_DIR / "alembic"
+_BEFORE_JOB_KIND_CHECK = "ca576b5337d2"
+_JOB_KIND_CHECK = "0fee449176a0"
 
 
 class OrphanSchemaError(RuntimeError):
@@ -66,8 +69,6 @@ def schema_is_current(database_url: str) -> bool:
     A worker process never migrates; it waits for this to hold, so it cannot
     run against a schema older (or newer) than the code it executes.
     """
-    from alembic.script import ScriptDirectory
-
     url = normalize_database_url(database_url)
     heads = set(ScriptDirectory.from_config(_alembic_config(url)).get_heads())
     engine = create_engine(url)
@@ -269,6 +270,28 @@ def _create_all(url: str) -> None:
         engine.dispose()
 
 
+def _upgrade_managed_database(cfg: Config, url: str, revision: str) -> None:
+    scripts = ScriptDirectory.from_config(cfg)
+    pending = scripts.iterate_revisions("head", revision, implicit_base=True)
+    if any(script.revision == _JOB_KIND_CHECK for script in pending):
+        # Stop after the historical rename and before the published CHECK.
+        # The old Job registry defaulted to ingestion even though the table
+        # default was "generic". Preserve IDs and the settled job states.
+        command.upgrade(cfg, _BEFORE_JOB_KIND_CHECK)
+        engine = create_engine(url)
+        try:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "UPDATE jobs SET kind = 'ingestion.upload' WHERE kind = 'generic'"
+                    )
+                )
+        finally:
+            engine.dispose()
+
+    command.upgrade(cfg, "head")
+
+
 def run_migrations(database_url: str | None = None) -> None:
     """Bring *database_url* (default: configured DB) to the latest revision.
 
@@ -298,8 +321,7 @@ def run_migrations(database_url: str | None = None) -> None:
     cfg = _alembic_config(url)
 
     if revision is not None:
-        # Already managed by Alembic — apply any pending migrations.
-        command.upgrade(cfg, "head")
+        _upgrade_managed_database(cfg, url, revision)
     elif has_tables:
         # Orphan: only a full schema built from the current models is safe to
         # adopt at head. Any older/partial shape has an unknown baseline and
