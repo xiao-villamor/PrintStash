@@ -1,13 +1,18 @@
 "use client";
 
-import { SettingsGroupHead, SettingsSwitch } from "@/components/settings-card";
-import { SETTINGS_BUTTON, SETTINGS_FIELD } from "@/components/settings-controls";
+import { SettingsCard, SettingsEmptyRow, SettingsSwitch } from "@/components/settings-card";
+import {
+  SETTINGS_BUTTON,
+  SETTINGS_BUTTON_PRIMARY,
+  SETTINGS_FIELD,
+} from "@/components/settings-controls";
+import { cn } from "@/lib/utils";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Bell, Loader2, Send, Trash2, Pencil } from "lucide-react";
+import { Loader2, Plus, Send, Trash2, Pencil } from "lucide-react";
 import {
   createNotificationChannel,
   deleteNotificationChannel,
@@ -631,29 +636,13 @@ export function NotificationsPanel({
           </p>
         )}
         <fieldset className="min-w-0" disabled={busy !== null || Boolean(settingsQuery.error)}>
-          {/* Master switch */}
-          <SettingsGroupHead
-            level={3}
-            title={uiText("Channels")}
-            description={uiText(
-              "Send webhook, Discord, Telegram, or ntfy alerts on print and printer events.",
-            )}
-            action={
-              canEdit ? (
-                <Button size="sm" onClick={() => setDraft(emptyDraft())}>
-                  {uiText("Add channel")}
-                </Button>
-              ) : undefined
-            }
-            className="settings-card-head--flush"
-          />
-          <div className="px-4 sm:pl-16 sm:pr-5">
+          <SettingsCard hideHeader title={uiText("Notifications")}>
             <div className="settings-preference-row">
               <span>
                 <span className="block">{uiText("Notifications")}</span>
                 <span
                   id={masterDescriptionId}
-                  className="mt-1 block text-xs font-normal text-muted-foreground"
+                  className="mt-1 block text-sm font-normal text-muted-foreground"
                 >
                   {uiText("Turn every channel on or off at once. Channels keep their settings.")}
                 </span>
@@ -666,7 +655,7 @@ export function NotificationsPanel({
                 disabled={!canEdit || busy === "switch" || switchReview !== null}
               />
             </div>
-          </div>
+          </SettingsCard>
 
           {switchReview && (
             <div role="status" className="space-y-2 text-sm">
@@ -715,16 +704,30 @@ export function NotificationsPanel({
 
           {/* Channel list */}
           {canEdit && (
-            <div className="px-4 sm:pl-16 sm:pr-5">
+            <SettingsCard
+              title={uiText("Channels")}
+              description={uiText(
+                "Send webhook, Discord, Telegram, or ntfy alerts on print and printer events.",
+              )}
+              action={
+                canEdit ? (
+                  <Button
+                    size="sm"
+                    onClick={() => setDraft(emptyDraft())}
+                  >
+                    <Plus className="size-3.5" aria-hidden />
+                    {uiText("Add channel")}
+                  </Button>
+                ) : undefined
+              }
+            >
               {channels.length === 0 && !draft && (
-                <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center">
-                  <Bell className="h-7 w-7 text-muted-foreground/50" />
-                  <p className="text-sm font-medium text-foreground">
+                <div className={cn(!enabled && "opacity-50")}>
+                  <SettingsEmptyRow>
                     {uiText("No notification channels yet")}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
+                    {". "}
                     {uiText("Add a channel to start receiving print and printer alerts.")}
-                  </p>
+                  </SettingsEmptyRow>
                 </div>
               )}
               {channels.map((ch) => {
@@ -901,7 +904,7 @@ export function NotificationsPanel({
                   </fieldset>
                 </Modal>
               ) : null}
-            </div>
+            </SettingsCard>
           )}
 
           {/* Recent deliveries */}
@@ -916,16 +919,12 @@ export function NotificationsPanel({
         )}
         {deliveriesQuery.isPending && <p role="status">{uiText("Loading delivery history…")}</p>}
         {canEdit && !deliveriesQuery.error && deliveries && (
-          <div className="border-t border-border">
-            <div className="px-4 py-4 sm:px-5">
-              <h4 className="text-sm font-semibold text-foreground">
-                {uiText("Recent deliveries")}
-              </h4>
-            </div>
+<SettingsCard
+            title={uiText("Recent deliveries")}
+            description={uiText("The last delivery attempts and the response from each channel.")}
+          >
             {deliveries.length === 0 && (
-              <p className="px-4 pb-4 text-sm text-muted-foreground sm:pl-16">
-                {uiText("No notification deliveries yet.")}
-              </p>
+              <SettingsEmptyRow>{uiText("No notification deliveries yet.")}</SettingsEmptyRow>
             )}
             <div className="divide-y divide-border">
               {deliveries.map((d) => {
@@ -957,7 +956,8 @@ export function NotificationsPanel({
                 );
               })}
             </div>
-          </div>
+          
+          </SettingsCard>
         )}
       </div>
     </Localized>

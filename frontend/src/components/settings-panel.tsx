@@ -117,6 +117,8 @@ import {
   Tag,
   UserPlus,
   Users,
+  Clock,
+  RefreshCw,
 } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { FilamentSpool } from "@/components/ui/filament-spool";

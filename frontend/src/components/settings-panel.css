@@ -384,17 +384,13 @@
 
 /* Body of a group inside panels that do not use the grouped indent rule. */
 .settings-section-body {
-  padding: 0 20px 16px 64px;
+  padding: 0 20px 16px;
 }
 
 @media (max-width: 767px) {
   .settings-section-body {
     padding: 0 16px 16px;
   }
-}
-
-.settings-grouped > .settings-card > .settings-section-body {
-  padding-left: 0;
 }
 
 .settings-main [role="alert"],
@@ -425,7 +421,6 @@
 /* A group head outside a SettingsCard: no rule under it, like grouped cards. */
 .settings-card-head.settings-card-head--flush {
   border-bottom: 0;
-  padding-bottom: 12px;
 }
 
 .settings-main {

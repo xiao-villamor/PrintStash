@@ -2,7 +2,7 @@
 
 import { ImportReadiness } from "./import-readiness";
 
-import { SettingsGroupHead } from "@/components/settings-card";
+import { SettingsGroupHead, SettingsCard } from "@/components/settings-card";
 import { currentLocale } from "@/lib/locale";
 
 import { useEffect, useRef, useState } from "react";
@@ -242,18 +242,10 @@ export function ProviderConnectionsPanel({
         checkedAt={Math.min(devicesQuery.dataUpdatedAt, connectionsQuery.dataUpdatedAt)}
       />
       <fieldset disabled={busy !== null || Boolean(loadError)} className="min-w-0">
-        <section
-          aria-labelledby="provider-connections-title"
-          className="overflow-hidden rounded-none border border-border bg-card"
-        >
-          <SettingsGroupHead
-            level={2}
-            id="provider-connections-title"
+        <SettingsCard
             title={t("settings.providerConnections.title")}
-            description={t("settings.providerConnections.description")}
-            className="settings-card-head--flush"
-          />
-          <div className="space-y-0 px-4 pb-4 sm:pl-16 sm:pr-5">
+            description={t("settings.providerConnections.description")}>
+          <div className="space-y-0 px-4 pb-4 sm:px-5">
             {error && (
               <p role="alert" className="text-sm text-destructive">
                 {error}
@@ -361,15 +353,9 @@ export function ProviderConnectionsPanel({
               </Modal>
             </div>
           </div>
-        </section>
+        </SettingsCard>
 
-        <section
-          aria-labelledby="paired-browsers-title"
-          className="overflow-hidden rounded-none border border-border bg-card"
-        >
-          <SettingsGroupHead
-            level={2}
-            id="paired-browsers-title"
+        <SettingsCard
             title={t("settings.pairedBrowsers.title")}
             description={t("settings.pairedBrowsers.description")}
             action={
@@ -381,10 +367,8 @@ export function ProviderConnectionsPanel({
               >
                 {t("settings.pairedBrowsers.createCode")}
               </Button>
-            }
-            className="settings-card-head--flush"
-          />
-          <div className="space-y-4 px-4 pb-4 sm:pl-16 sm:pr-5">
+            }>
+          <div className="space-y-4 px-4 pb-4 sm:px-5">
             {pairing && (
               <div className="border border-border bg-card p-3" role="status">
                 <p className="text-xs text-muted-foreground">
@@ -427,7 +411,7 @@ export function ProviderConnectionsPanel({
               </div>
             )}
           </div>
-        </section>
+        </SettingsCard>
 
         <ConfirmModal
           open={disconnectTarget !== null}

@@ -1,5 +1,5 @@
 import { captureEditingBase } from "@/lib/api/editing";
-import { SettingsGroupHead } from "@/components/settings-card";
+import { SettingsGroupHead, SettingsCard } from "@/components/settings-card";
 import { StorageConnectionReview } from "@/components/storage-connection-review";
 import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
@@ -446,13 +446,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
 
   return (
     <Localized>
-      <section
-        role="region"
-        aria-label={uiText("Remote storage")}
-        className="overflow-hidden rounded-none border border-border bg-card text-card-foreground shadow-sm"
-      >
-        <SettingsGroupHead
-          level={2}
+      <SettingsCard
           title={uiText("Connections")}
           description={uiText(
             "Pausing a connection stops new backup copies and library scans without forgetting its credentials.",
@@ -468,9 +462,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
             >
               {uiText("Add remote connection")}
             </Button>
-          }
-          className="settings-card-head--flush"
-        />
+          }>
 
         {!formOpen && connectionReview}
         {connectionsFailed && connections.length > 0 && (
@@ -922,7 +914,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
             busy={removeTarget !== null && busy === removeTarget.id}
           />
         )}
-      </section>
+      </SettingsCard>
     </Localized>
   );
 }

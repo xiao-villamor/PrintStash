@@ -513,7 +513,7 @@ export function AiSearchSettings() {
               description={t("Search types, AI servers and technical limits.")}
               className="settings-card-head--flush"
             />
-            <div className="divide-y divide-border px-4 pb-4 sm:pl-16 sm:pr-5">
+            <div className="divide-y divide-border px-4 pb-4 sm:px-5">
               <div className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <div>
                   <p className="text-sm font-medium">{t("Guided setup")}</p>

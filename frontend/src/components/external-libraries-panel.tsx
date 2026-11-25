@@ -6,7 +6,12 @@ import {
   SETTINGS_BUTTON_PRIMARY,
   SETTINGS_FIELD,
 } from "@/components/settings-controls";
-import { SettingsNotice, SettingsStatus, SettingsGroupHead } from "@/components/settings-card";
+import {
+  SettingsCard,
+  SettingsEmptyRow,
+  SettingsNotice,
+  SettingsStatus,
+} from "@/components/settings-card";
 import { Switch } from "@/components/ui/switch";
 import { describeSourceLocation } from "@/lib/library-source-location";
 import {
@@ -620,13 +625,9 @@ function AdminLibrarySourcesPanel({
 
   return (
     <Localized>
-      <div className="overflow-hidden border border-border bg-card">
-        <SettingsGroupHead
-          level={3}
+      <SettingsCard
           title={uiText("Scanning")}
-          description={uiText("Applies to every Library source.")}
-          className="settings-card-head--flush"
-        />
+          description={uiText("Applies to every Library source.")}>
         <div className="settings-section-body">
           <div className="settings-preference-row">
             <span>{uiText("Library sources enabled")}</span>
@@ -783,8 +784,8 @@ function AdminLibrarySourcesPanel({
             </div>
           </section>
         )}
-        <SettingsGroupHead
-          level={3}
+        </SettingsCard>
+        <SettingsCard
           title={uiText("Sources")}
           description={uiText(
             "PrintStash stores catalog metadata and thumbnails only; source files stay in their original location.",
@@ -798,10 +799,9 @@ function AdminLibrarySourcesPanel({
               {uiText("Add source")}
             </Button>
           }
-          className="settings-card-head--flush border-t"
-        />
-        {enabled && (
-          <div className="settings-section-body space-y-4">
+        >
+          {enabled ? (
+            <div className="space-y-4 py-3">
             {(sources.isError || sources.data?.kind === "disabled") && (
               <div role="alert">
                 <p>{t("librarySources.sourcesFailed")}</p>
@@ -816,17 +816,9 @@ function AdminLibrarySourcesPanel({
             !sources.isError &&
             sources.data?.kind === "enabled" &&
             libraries.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center">
-                <FolderSync className="h-7 w-7 text-muted-foreground/50" />
-                <p className="text-sm font-medium text-foreground">
-                  {uiText("No library sources yet")}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {uiText(
-                    "Add a mounted folder or connect remote storage to index existing models without copying them into the Vault.",
-                  )}
-                </p>
-              </div>
+              <SettingsEmptyRow>
+                {uiText("No library sources yet")}{". "}{uiText("Add a mounted folder or connect remote storage to index existing models without copying them into the Vault.")}
+              </SettingsEmptyRow>
             ) : (
               <ul>
                 {libraries.map((lib) => {
@@ -1222,7 +1214,13 @@ function AdminLibrarySourcesPanel({
               </div>
             </Modal>
           </div>
-        )}
+          ) : (
+            <div className="opacity-50">
+              <SettingsEmptyRow>{uiText("Turn on Library sources to add one.")}</SettingsEmptyRow>
+            </div>
+          )}
+        </SettingsCard>
+
 
         {commandsAllowed && (
           <ConfirmModal
@@ -1273,7 +1271,7 @@ function AdminLibrarySourcesPanel({
             onClose={() => setEditTarget(null)}
           />
         )}
-      </div>
+      
     </Localized>
   );
 }

@@ -34,6 +34,7 @@ export function SettingsCard({
     <section role="group" aria-label={title} className={cn("settings-card", className)}>
       {!hideHeader && (
         <SettingsGroupHead
+          placement="outside"
           title={title}
           description={description}
           action={action}
@@ -163,6 +164,7 @@ export function SettingsGroupHead({
   id,
   level = 3,
   stackActionOnMobile = false,
+  placement = "inside",
   className,
 }: {
   title: React.ReactNode;
@@ -172,13 +174,16 @@ export function SettingsGroupHead({
   id?: string;
   level?: 2 | 3;
   stackActionOnMobile?: boolean;
+  /** `outside` sits above its box (SettingsCard); `inside` is the first row of a box. */
+  placement?: "outside" | "inside";
   className?: string;
 }) {
   const Heading = level === 2 ? "h2" : "h3";
   return (
     <div
       className={cn(
-        "settings-card-head mb-2.5 flex items-end justify-between gap-3",
+        "settings-card-head flex justify-between gap-3",
+        placement === "outside" ? "mb-2.5 items-end" : "items-start px-5 pb-2 pt-4",
         stackActionOnMobile && "flex-col sm:flex-row sm:items-end",
         className,
       )}

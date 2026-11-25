@@ -1,7 +1,7 @@
 "use client";
 
 import { SETTINGS_BUTTON, SETTINGS_BUTTON_PRIMARY } from "@/components/settings-controls";
-import { SettingsGroupHead } from "@/components/settings-card";
+import { SettingsGroupHead, SettingsCard } from "@/components/settings-card";
 import { knownUiText, uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
@@ -323,15 +323,11 @@ export function StorageConfigCard({
 
   return (
     <Localized>
-      <div className="overflow-hidden rounded-none border border-border bg-card shadow-sm">
-        <SettingsGroupHead
-          level={3}
+      <SettingsCard
           title={t("settings.currentStorage")}
-          description={t("Where PrintStash keeps your Vault files.")}
-          className="settings-card-head--flush"
-        />
+          description={t("Where PrintStash keeps your Vault files.")}>
 
-        <div className="space-y-5 px-4 pb-4 sm:pl-16 sm:pr-5">
+        <div className="space-y-5 px-4 pb-4 sm:px-5">
           {readError && enabled && (
             <div role="alert" className="space-y-2 text-sm text-destructive">
               <p>{t("settings.storageReadFailed")}</p>
@@ -639,7 +635,7 @@ export function StorageConfigCard({
           })}
           confirmLabel={t("settings.storageEnrollConfirmAction")}
         />
-      </div>
+      </SettingsCard>
     </Localized>
   );
 }

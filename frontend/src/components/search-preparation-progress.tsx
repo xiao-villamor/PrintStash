@@ -236,7 +236,7 @@ export function SearchIndexHealth({ generation }: { generation: SearchGeneration
           </p>
         </div>
       </div>
-      <dl className="px-4 pb-2 text-sm sm:pl-16 sm:pr-5">
+      <dl className="px-4 pb-2 text-sm sm:px-5">
         {rows.map((row) => (
           <div
             key={row.label}

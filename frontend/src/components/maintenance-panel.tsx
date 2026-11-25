@@ -2,13 +2,12 @@ import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, HardDrive } from "lucide-react";
+import { AlertTriangle, CheckCircle2, HardDrive, HeartPulse } from "lucide-react";
 
 import { AuditSchedulePanel } from "@/components/audit-schedule-panel";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { SettingsCard, SettingsGroupHead } from "@/components/settings-card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { useQuery } from "@tanstack/react-query";
@@ -165,18 +164,18 @@ export function MaintenancePanel() {
   if (commands.retired) return null;
   return (
     <div className="settings-grouped settings-maintenance">
-      <Card role="region" aria-labelledby="maintenance-heading" className="overflow-hidden">
+      <section aria-labelledby="maintenance-heading">
         <SettingsGroupHead
+          placement="outside"
           level={2}
           id="maintenance-heading"
           title={t("maintenance.checkNow")}
           description={t("maintenance.checkNowDescription")}
-          className="settings-card-head--flush"
         />
-        <CardContent className="space-y-4 px-4 pb-4 pt-0 sm:pl-16 sm:pr-5">
-          <div className="divide-y divide-border">
-            <div className="flex flex-col items-stretch gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
+        <div className="grid gap-4 md:grid-cols-2">
+          <SettingsCard hideHeader title={t("auditSchedule.quick")}>
+            <div className="space-y-3 py-4">
+              <div>
                 <h3 className="text-sm font-semibold">{t("auditSchedule.quick")}</h3>
                 <p className="mt-1 text-sm text-muted-foreground">
                   {t("maintenance.quickDescription")}
@@ -184,16 +183,18 @@ export function MaintenancePanel() {
               </div>
               <Button
                 size="sm"
-                className="w-full sm:w-auto"
                 onClick={() => void start("quick")}
                 loading={busy}
                 disabled={busy || history.isPending || history.isError || denied || isActive(run)}
               >
+                <HeartPulse className="size-3.5" aria-hidden />
                 {t("maintenance.runQuick")}
               </Button>
             </div>
-            <div className="flex flex-col items-stretch gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
+          </SettingsCard>
+          <SettingsCard hideHeader title={t("auditSchedule.full")}>
+            <div className="space-y-3 py-4">
+              <div>
                 <h3 className="text-sm font-semibold">{t("auditSchedule.full")}</h3>
                 <p className="mt-1 text-sm text-muted-foreground">
                   {t("maintenance.fullDescription")}
@@ -201,7 +202,6 @@ export function MaintenancePanel() {
               </div>
               <Button
                 size="sm"
-                className="w-full sm:w-auto"
                 variant="outline"
                 onClick={() => void start("full")}
                 loading={busy}
@@ -210,7 +210,11 @@ export function MaintenancePanel() {
                 {t("maintenance.runFull")}
               </Button>
             </div>
-          </div>
+          </SettingsCard>
+        </div>
+      </section>
+      <SettingsCard title={uiText("Latest results")}>
+        <div className="space-y-4 py-4">
           {history.isError || denied ? (
             <div role="alert">
               <p>{t("auditSchedule.historyLoadFailed")}</p>
@@ -425,8 +429,8 @@ export function MaintenancePanel() {
               )}
             </>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </SettingsCard>
       <AuditSchedulePanel />
 
       <SettingsCard
