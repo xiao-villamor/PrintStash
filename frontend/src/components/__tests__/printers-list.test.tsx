@@ -539,7 +539,7 @@ describe("PrinterCard", () => {
     await chooseCardAction("Voron 2.4", "Set model");
     const picker = screen.getByRole("dialog", { name: "Choose printer model" });
     await user.type(within(picker).getByRole("searchbox"), "Voron 2.4");
-    await user.click(within(picker).getByRole("button", { name: "Select" }));
+    await user.click(within(picker).getByRole("button", { name: "Voron 2.4" }));
 
     await waitFor(() => expect(requestsWithMethod("PATCH")).toHaveLength(1));
     const patched = requestsWithMethod("PATCH")[0]!;

@@ -868,7 +868,7 @@ export function FleetQueuePanel({
                 job.printer_id != null && controllablePrinterIds.has(job.printer_id) ? (
                   <Button
                     variant="outline"
-                    size="xs"
+                    size="sm"
                     disabled={busy === job.id}
                     onClick={() => setResolveTarget(job)}
                   >
@@ -892,7 +892,7 @@ export function FleetQueuePanel({
                     <>
                       <Button
                         variant="outline"
-                        size="xs"
+                        size="sm"
                         disabled={busy === job.id}
                         onClick={() =>
                           void mutate(job.id, () => decideOperatorGate(job.id, "release"))
@@ -902,7 +902,7 @@ export function FleetQueuePanel({
                       </Button>
                       <Button
                         variant="outline"
-                        size="xs"
+                        size="sm"
                         disabled={busy === job.id}
                         onClick={() =>
                           void mutate(job.id, () => decideOperatorGate(job.id, "hold"))
@@ -915,7 +915,7 @@ export function FleetQueuePanel({
                   {job.retryable && (
                     <Button
                       variant="outline"
-                      size="xs"
+                      size="sm"
                       disabled={busy === job.id}
                       onClick={() => void mutate(job.id, () => retryJob(job.id))}
                     >

@@ -55,6 +55,7 @@ import { formatNumber } from "@/lib/format";
 import { PrinterProgress } from "@/components/printer-telemetry";
 import {
   ArrowUpRight,
+  Check,
   CircleAlert,
   CircleCheck,
   CirclePause,
@@ -64,6 +65,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Search,
   Settings,
   Trash2,
   WifiOff,
@@ -913,6 +915,31 @@ function PrinterModelEditor({
   );
 }
 
+const MODEL_BRANDS = [
+  "Bambu Lab",
+  "Prusa",
+  "Elegoo",
+  "Creality",
+  "Voron",
+  "RatRig",
+  "Sovol",
+  "Anycubic",
+  "Flashforge",
+  "Qidi",
+];
+
+/** Group model names under their manufacturer, in the list's own order. */
+function groupModelsByBrand(models: string[]): [string, string[]][] {
+  const groups = new Map<string, string[]>();
+  for (const model of models) {
+    const brand =
+      MODEL_BRANDS.find((name) => model.startsWith(`${name} `) || model === name) ??
+      model.split(" ")[0]!;
+    groups.set(brand, [...(groups.get(brand) ?? []), model]);
+  }
+  return [...groups];
+}
+
 function PrinterModelPicker({
   selected,
   customValue,
@@ -941,6 +968,7 @@ function PrinterModelPicker({
   const models = PRINTER_MODEL_OPTIONS.filter((model) =>
     model.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
   );
+  const groups = groupModelsByBrand(models);
   const modelHintId = useId();
   return (
     <Localized>
@@ -971,6 +999,7 @@ function PrinterModelPicker({
               </Button>
             ) : (
               <Button
+                variant="outline"
                 disabled={saving || blocked}
                 onClick={() => {
                   setCustom(true);
@@ -1010,38 +1039,51 @@ function PrinterModelPicker({
           </div>
         ) : (
           <>
-            <FormField label={uiText("Search manufacturer / model")}>
+            <div className="relative">
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              />
               <Input
                 autoFocus
                 type="search"
+                aria-label={uiText("Search manufacturer / model")}
+                placeholder={uiText("Search manufacturer / model")}
                 disabled={saving}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
+                className="ps-9"
               />
-            </FormField>
-            <div className="mt-4 max-h-96 divide-y divide-border overflow-y-auto">
-              {models.length ? (
-                models.map((model) => (
-                  <div key={model} className="flex items-start justify-between gap-4 py-3">
-                    <div>
-                      <strong className="block text-sm font-semibold">{model}</strong>
-                      <span className="mt-1 block text-sm text-muted-foreground">
-                        {uiText("Printer model")}
-                      </span>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={saving || blocked}
-                      aria-pressed={selected === model}
-                      onClick={() => {
-                        onSelectedChange(model);
-                        onSave(model);
-                      }}
-                    >
-                      {uiText("Select")}
-                    </Button>
-                  </div>
+            </div>
+            <div className="mt-3 max-h-96 space-y-4 overflow-y-auto pe-1">
+              {groups.length ? (
+                groups.map(([brand, brandModels]) => (
+                  <section key={brand} aria-label={brand}>
+                    <h3 className="px-2 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      {brand}
+                    </h3>
+                    <ul className="space-y-0.5">
+                      {brandModels.map((model) => (
+                        <li key={model}>
+                          <button
+                            type="button"
+                            disabled={saving || blocked}
+                            aria-pressed={selected === model}
+                            onClick={() => {
+                              onSelectedChange(model);
+                              onSave(model);
+                            }}
+                            className="flex min-h-10 w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none disabled:pointer-events-none disabled:opacity-60 aria-pressed:bg-foreground/10 aria-pressed:font-medium"
+                          >
+                            {model}
+                            {selected === model && (
+                              <Check aria-hidden="true" className="size-4 shrink-0 text-primary" />
+                            )}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
                 ))
               ) : (
                 <p className="py-4 text-sm text-muted-foreground">

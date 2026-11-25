@@ -38,26 +38,26 @@
       0.5fr
     );
   align-items: center;
-  gap: 16px;
-  padding: 9px 16px;
+  gap: 20px;
+  padding: 10px 20px;
 }
 .queue-register-columns {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 550;
   color: var(--muted-foreground);
   background: var(--muted);
 }
 .queue-register-row {
-  min-height: 64px;
+  min-height: 76px;
   border-top: 1px solid var(--border);
 }
 .queue-register-row strong,
 .queue-register-empty strong {
   font-weight: 580;
-  font-size: 13px;
+  font-size: 14px;
 }
 .queue-register-row small {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted-foreground);
 }
 .queue-register-name,
@@ -103,7 +103,8 @@
 }
 .queue-register-actions {
   justify-content: flex-end;
-  gap: 3px;
+  align-self: stretch;
+  gap: 6px;
 }
 .queue-register-columns span:last-child {
   text-align: end;
@@ -125,8 +126,8 @@
   background: var(--success);
 }
 .queue-register-progress progress {
-  height: 4px;
-  width: 65px;
+  height: 5px;
+  width: 88px;
   appearance: none;
   border: 0;
   border-radius: 9999px;
@@ -144,7 +145,8 @@
   background: var(--primary);
 }
 .queue-register-progress span {
-  font-size: 11px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 .queue-register-empty {
   padding: 17px 20px;
