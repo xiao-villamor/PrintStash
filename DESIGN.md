@@ -287,6 +287,7 @@ ordinary action cursors from drifting between components.
 ```css
 --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);     /* the house curve */
 --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);   /* on-screen movement only */
+--ease-dock:   cubic-bezier(0.333333, 0, 0.666667, 1); /* dock and card reflow */
 --duration-press: 150ms;
 --duration-fast:  200ms;
 --duration-slow:  300ms;
@@ -399,7 +400,9 @@ inherited velocity on interruption. Opening or closing either dock commits the
 Library grid's final tracks before the pane moves. At the click, the library
 captures visible cards before the dock changes layout. Cards on the same row
 move from those positions using a compositor transform. Cards that wrap
-briefly fade into their destination cells. Both docks use the same card timing.
+briefly fade into their destination cells. Card reflow uses the dock curve.
+The collapsed Collections strip uses the same track count for its layout and
+its card limit, so it keeps its height as the dock moves.
 The Collections shell edge and workspace move together.
 The inner outliner keeps its intrinsic width, clipped and anchored to the moving edge.
 Retain the outliner DOM, filter, expansion and scroll state while closed; make it

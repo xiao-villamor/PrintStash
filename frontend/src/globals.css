@@ -72,6 +72,7 @@
 
     /* Shared feedback timing and a critically damped content-settle profile. */
     --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-dock: cubic-bezier(0.333333, 0, 0.666667, 1);
     --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
     --duration-press: 150ms;
     --duration-fast: 200ms;

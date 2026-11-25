@@ -14,10 +14,12 @@ function Grid({
   count = 6,
   virtualize = false,
   keepCollectionCardWidth = false,
+  singleRow = false,
 }: {
   count?: number;
   virtualize?: boolean;
   keepCollectionCardWidth?: boolean;
+  singleRow?: boolean;
 }) {
   // The scroller is known before the grid mounts, as in the Library.
   const [node, setNode] = useState<HTMLDivElement | null>(null);
@@ -36,6 +38,7 @@ function Grid({
           layout="grid"
           virtualize={virtualize}
           keepCollectionCardWidth={keepCollectionCardWidth}
+          singleRow={singleRow}
         />
       )}
     </div>
@@ -137,6 +140,20 @@ describe("LibraryItems", () => {
 
     expect(grid().style.gridTemplateColumns).toBe("repeat(4, 300px)");
     expect(flights.size).toBe(0);
+  });
+
+  it("keeps a collapsed strip on one row when a pane narrows its tracks", () => {
+    width = 1250;
+    render(<Grid singleRow />);
+    expect(screen.getByRole("link", { name: "Card 3" })).toBeVisible();
+    document.documentElement.dataset.paneMoving = "";
+
+    act(() => {
+      window.dispatchEvent(new PaneMovingEvent(250));
+    });
+
+    expect(grid().style.gridTemplateColumns).toBe("repeat(3, 322px)");
+    expect(screen.queryByRole("link", { name: "Card 3" })).toBeNull();
   });
 
   it("preserves collection card width when the sidebar changes how many columns fit", () => {

@@ -93,6 +93,8 @@ interface LibraryItemsProps<T> {
   className?: string;
   /** Narrowest card for this list when its cards are wider than model cards. */
   minCardWidth?: number;
+  /** Keep a collapsed collection strip to one row during the layout commit. */
+  singleRow?: boolean;
   /** Reports how many cards fit one row, e.g. to show a single row of collections. */
   onColumnsChange?: (columns: number) => void;
 }
@@ -117,6 +119,7 @@ export function LibraryItems<T>({
   preferredInspectorWidth = null,
   appliedInspectorCustomWidth = false,
   minCardWidth,
+  singleRow = false,
   onColumnsChange,
 }: LibraryItemsProps<T>) {
   "use no memo";
@@ -161,20 +164,26 @@ export function LibraryItems<T>({
   const gap = layout === "list" ? 0 : compact ? 8 : 16;
   const preferredWidth = minCardWidth ?? preferredCardWidth(compact);
   const track = geometry.track || preferredWidth;
+  const columns = layout === "list" ? 1 : geometry.columns;
+  // Apply the strip's limit using the same geometry as its grid tracks. The
+  // parent updates the hidden count separately and may still have the old limit.
+  const displayedItems = useMemo(
+    () => (singleRow ? items.slice(0, columns) : items),
+    [columns, items, singleRow],
+  );
   // Production-card measurements favor native rows for short loaded snapshots.
   // Larger snapshots bound their DOM while retaining the same row/card identities.
   const virtual =
-    virtualize && items.length > NATIVE_RENDER_LIMIT && "ResizeObserver" in globalThis;
-  const columns = layout === "list" ? 1 : geometry.columns;
+    virtualize && displayedItems.length > NATIVE_RENDER_LIMIT && "ResizeObserver" in globalThis;
   useLayoutEffect(() => {
     if (geometry.width > 0) onColumnsChange?.(layout === "list" ? 1 : geometry.columns);
   }, [layout, geometry.columns, geometry.width, onColumnsChange]);
-  const keys = useMemo(() => items.map(itemKey), [items, itemKey]);
+  const keys = useMemo(() => displayedItems.map(itemKey), [displayedItems, itemKey]);
   const pinnedIndex = pinned === null ? -1 : keys.indexOf(pinned);
   const pinnedRow = pinnedIndex < 0 ? null : Math.floor(pinnedIndex / columns);
   const revealedIndex = revealed === null ? -1 : keys.indexOf(revealed);
   const revealedRow = revealedIndex < 0 ? null : Math.floor(revealedIndex / columns);
-  const rows = Math.ceil(items.length / columns);
+  const rows = Math.ceil(displayedItems.length / columns);
   // TanStack exposes mutable measurements; this component opts out of React Compiler above.
   // oxlint-disable-next-line react/incompatible-library -- Virtualizer is consumed only within this uncompiled renderer.
   const virtualizer = useVirtualizer({
@@ -503,7 +512,7 @@ export function LibraryItems<T>({
       );
     if (visible.length === 0) return;
     const duration = durationToken(node, "--duration-fast") * 1000;
-    const easing = getComputedStyle(node).getPropertyValue("--ease-out").trim();
+    const easing = getComputedStyle(node).getPropertyValue("--ease-dock").trim();
     const rows = new Map(keys.map((key, index) => [key, Math.floor(index / columns)]));
     for (const { card, bounds } of visible) {
       const key = card.dataset.libraryKey!;
@@ -511,7 +520,7 @@ export function LibraryItems<T>({
       if (!origin || origin.row !== rows.get(key)) {
         if (before.columns !== columns)
           cardAnimations.current.push(
-            card.animate([{ opacity: 0.75 }, { opacity: 1 }], { duration, easing }),
+            card.animate([{ opacity: 0.9 }, { opacity: 1 }], { duration, easing }),
           );
         continue;
       }
@@ -632,8 +641,8 @@ export function LibraryItems<T>({
 
   // A card's content depends on its item. Column changes reuse the same elements.
   const contents = useMemo(
-    () => items.map((item, index) => renderItem(item, index)),
-    [items, renderItem],
+    () => displayedItems.map((item, index) => renderItem(item, index)),
+    [displayedItems, renderItem],
   );
   const child = (item: T, index: number) => (
     <div
@@ -720,9 +729,10 @@ export function LibraryItems<T>({
             marginBottom: virtual || row.index === rows - 1 ? undefined : gap,
           }}
         >
-          {(virtual ? items.slice(row.index * columns, (row.index + 1) * columns) : items).map(
-            (item, index) => child(item, (virtual ? row.index * columns : 0) + index),
-          )}
+          {(virtual
+            ? displayedItems.slice(row.index * columns, (row.index + 1) * columns)
+            : displayedItems
+          ).map((item, index) => child(item, (virtual ? row.index * columns : 0) + index))}
         </div>
       ))}
     </div>

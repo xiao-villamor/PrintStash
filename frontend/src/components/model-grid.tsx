@@ -4027,6 +4027,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           keepCollectionCardWidth
                           minCardWidth={300}
                           virtualize={false}
+                          singleRow={limit !== null}
                           onColumnsChange={onColumns}
                         />
                       )}
@@ -4124,6 +4125,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           estimateSize={collectionOverview ? 266 : COMPACT_COLLECTION_HEIGHT}
                           keepCollectionCardWidth={!collectionOverview}
                           minCardWidth={collectionOverview ? undefined : 300}
+                          singleRow={limit !== null}
                           onColumnsChange={onColumns}
                         />
                       )}
