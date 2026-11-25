@@ -189,7 +189,7 @@ class TestCacheDelivery:
         cache.clear()
 
         async def receive():
-            return {"type": "http.request", "body": b"", "more_body": False}
+            pytest.fail("ASGI 2.4 file delivery observes cancellation through send")
 
         async def send(message):
             assert cache.status()["leases"] == 1
@@ -197,7 +197,13 @@ class TestCacheDelivery:
 
         with pytest.raises(asyncio.CancelledError):
             await response(
-                {"type": "http", "method": "GET", "headers": [], "extensions": {}},
+                {
+                    "type": "http",
+                    "asgi": {"version": "3.0", "spec_version": "2.4"},
+                    "method": "GET",
+                    "headers": [],
+                    "extensions": {},
+                },
                 receive,
                 send,
             )

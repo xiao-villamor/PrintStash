@@ -4,6 +4,9 @@ Read before any schema change, migration, or query that touches soft-deleted row
 SQLite is the default installation and PostgreSQL is optional, so every rule here
 has to hold on both.
 
+Table models use Pydantic's `NaiveDatetime` to keep storing UTC timestamps
+without offsets. SQLModel maps plain `datetime` to timezone-aware storage.
+
 ## The regular workflow: changing the schema
 
 The short answer to "do I hand-edit anything?" — **you edit the generated file, you

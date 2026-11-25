@@ -433,9 +433,12 @@ class _WithdrawalWatch:
             return {
                 job_id: (state, attempts, epoch)
                 for job_id, state, attempts, epoch in session.connection().execute(
-                    select(Job.id, Job.state, Job.attempts, Job.execution_epoch).where(
-                        col(Job.id).in_(sorted(job_ids))
-                    )
+                    select(
+                        col(Job.id),
+                        col(Job.state),
+                        col(Job.attempts),
+                        col(Job.execution_epoch),
+                    ).where(col(Job.id).in_(sorted(job_ids)))
                 )
             }
 

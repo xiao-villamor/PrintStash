@@ -214,6 +214,23 @@ class TestNotificationDispatch:
             DBOS.get_workflow_status(cancelled.get_workflow_id()).status == "CANCELLED"
         )
 
+    def test_resumed_work_wakes_its_original_queue(self, runtime):
+        from app.runtime.engine.dbos_notifications import signals
+
+        runtime.gates["resumed"] = threading.Event()
+        with SetEnqueueOptions(delay_seconds=60):
+            pending = runtime.enqueue("resumed")
+        workflow_id = pending.get_workflow_id()
+        DBOS.cancel_workflow(workflow_id)
+        previous_hints = signals.snapshot()[runtime.queue.name]["notifications"]
+
+        DBOS.resume_workflow(workflow_id)
+
+        assert signals.snapshot()[runtime.queue.name]["notifications"] > previous_hints
+        assert runtime.started["resumed"].wait(5), (
+            "resume did not wake the original queue"
+        )
+
     def test_duplicate_hints_do_not_duplicate_execution(self, runtime):
         from app.runtime.engine.dbos_notifications import signals
 

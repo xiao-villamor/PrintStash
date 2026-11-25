@@ -1,9 +1,9 @@
 """Dynamic system settings, operational audit runs and audit findings."""
 
-from datetime import datetime
 from typing import Optional
 
 from printstash_core.mesh.preview_profile import PreviewLook
+from pydantic import NaiveDatetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -145,7 +145,7 @@ class SystemConfig(SQLModel, table=True):
         default="02:00",
         sa_column=Column(String(5), nullable=False, server_default="02:00"),
     )
-    automatic_backup_last_attempt_at: Optional[datetime] = None
+    automatic_backup_last_attempt_at: Optional[NaiveDatetime] = None
     manual_local_backup_enabled: bool = Field(
         default=True,
         sa_column=Column(Boolean, nullable=False, server_default="1"),
@@ -244,9 +244,9 @@ class SystemConfig(SQLModel, table=True):
     makerworld_token: Optional[str] = Field(
         default=None, sa_column=Column(EncryptedText(), nullable=True)
     )
-    makerworld_token_updated_at: Optional[datetime] = Field(default=None)
+    makerworld_token_updated_at: Optional[NaiveDatetime] = Field(default=None)
 
-    configured_at: Optional[datetime] = Field(default=None, index=True)
+    configured_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     samples_initialized: bool = Field(
         default=False, sa_column=Column(Boolean, nullable=False, server_default="0")
     )
@@ -254,8 +254,8 @@ class SystemConfig(SQLModel, table=True):
         default=False, sa_column=Column(Boolean, nullable=False, server_default="0")
     )
 
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class VaultAuditPolicy(SQLModel, table=True):
@@ -288,8 +288,8 @@ class VaultAuditPolicy(SQLModel, table=True):
     notification_cooldown_minutes: int = Field(
         default=60, sa_column=Column(Integer, nullable=False, server_default="60")
     )
-    last_notified_at: Optional[datetime] = None
-    retry_after: Optional[datetime] = None
+    last_notified_at: Optional[NaiveDatetime] = None
+    retry_after: Optional[NaiveDatetime] = None
     launch_failures: int = Field(
         default=0, sa_column=Column(Integer, nullable=False, server_default="0")
     )
@@ -302,11 +302,11 @@ class VaultAuditPolicy(SQLModel, table=True):
     full_cost_acknowledged: bool = Field(default=False)
     requested_by: Optional[int] = Field(default=None, foreign_key="users.id")
     revision: int = Field(default=1)
-    next_due_at: Optional[datetime] = Field(default=None, index=True)
-    last_attempt_at: Optional[datetime] = None
-    last_success_at: Optional[datetime] = None
+    next_due_at: Optional[NaiveDatetime] = Field(default=None, index=True)
+    last_attempt_at: Optional[NaiveDatetime] = None
+    last_success_at: Optional[NaiveDatetime] = None
     deferred_reason: Optional[str] = Field(default=None, max_length=64)
-    updated_at: datetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class VaultAuditEvent(SQLModel, table=True):
@@ -321,7 +321,7 @@ class VaultAuditEvent(SQLModel, table=True):
     dedup_key: str = Field(max_length=128, unique=True)
     event_type: str = Field(max_length=32)
     summary_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class VaultAuditRun(SQLModel, table=True):
@@ -339,8 +339,8 @@ class VaultAuditRun(SQLModel, table=True):
     )
     trigger_key: Optional[str] = Field(default=None, max_length=128, unique=True)
     policy_revision: Optional[int] = None
-    scheduled_for: Optional[datetime] = None
-    deadline_at: Optional[datetime] = None
+    scheduled_for: Optional[NaiveDatetime] = None
+    deadline_at: Optional[NaiveDatetime] = None
     bytes_per_second: Optional[int] = None
     planned_bytes: int = Field(
         default=0, sa_column=Column(BigInteger, nullable=False, server_default="0")
@@ -381,9 +381,9 @@ class VaultAuditRun(SQLModel, table=True):
     current_phase: Optional[str] = Field(default=None, max_length=64)
     cancel_requested: bool = Field(default=False)
     error_code: Optional[str] = Field(default=None, max_length=128)
-    started_at: Optional[datetime] = None
-    finished_at: Optional[datetime] = None
-    created_at: datetime = Field(default_factory=utcnow, index=True)
+    started_at: Optional[NaiveDatetime] = None
+    finished_at: Optional[NaiveDatetime] = None
+    created_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
 
 
 class VaultAuditFinding(SQLModel, table=True):
@@ -402,8 +402,8 @@ class VaultAuditFinding(SQLModel, table=True):
         default=VaultAuditFindingState.OPEN, index=True
     )
     details_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
-    created_at: datetime = Field(default_factory=utcnow, index=True)
-    resolved_at: Optional[datetime] = None
+    created_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
+    resolved_at: Optional[NaiveDatetime] = None
     resolved_by: Optional[int] = Field(default=None, foreign_key="users.id")
 
 
@@ -417,4 +417,4 @@ class AuditLog(SQLModel, table=True):
     resource_id: Optional[int] = Field(default=None, index=True)
     diff_json: str = Field(default="{}")
     ip: Optional[str] = Field(default=None, max_length=64)
-    created_at: datetime = Field(default_factory=utcnow, index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow, index=True)

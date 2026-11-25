@@ -159,17 +159,21 @@ class TestMeasureScene:
         )
         assert reference.volume == expected_volume
         assert measured.volume == expected_volume
-        assert measured.geometry == pytest.approx(reference.geometry, rel=1e-12, abs=0)
-        assert measured.geometry["triangle_count"] == 4
-        assert measured.geometry["bbox_x_mm"] == pytest.approx(
-            10.0 * source_scale * placement_scale, rel=1e-12, abs=0
-        )
-        assert measured.geometry["bbox_y_mm"] == pytest.approx(
-            20.0 * source_scale * placement_scale, rel=1e-12, abs=0
-        )
-        assert measured.geometry["bbox_z_mm"] == pytest.approx(
-            30.0 * source_scale * placement_scale, rel=1e-12, abs=0
-        )
+        expected_geometry = {
+            "triangle_count": 4,
+            "volume_mm3": None,
+            "bbox_x_mm": pytest.approx(
+                10.0 * source_scale * placement_scale, rel=1e-12, abs=0
+            ),
+            "bbox_y_mm": pytest.approx(
+                20.0 * source_scale * placement_scale, rel=1e-12, abs=0
+            ),
+            "bbox_z_mm": pytest.approx(
+                30.0 * source_scale * placement_scale, rel=1e-12, abs=0
+            ),
+        }
+        assert reference.geometry == expected_geometry
+        assert measured.geometry == expected_geometry
         assert (vertices.tobytes(), faces.tobytes(), transform.tobytes()) == originals
 
     @pytest.mark.parametrize("shift", [0.0, 10.0], ids=["coincident", "overlap"])

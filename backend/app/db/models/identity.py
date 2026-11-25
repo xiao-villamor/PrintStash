@@ -1,8 +1,8 @@
 """Actors, credentials, resource permissions, browser pairing and share grants."""
 
-from datetime import datetime
 from typing import ClassVar, Optional
 
+from pydantic import NaiveDatetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -39,8 +39,8 @@ class CollectionPermission(SQLModel, table=True):
     collection_id: int = Field(foreign_key="collections.id", index=True)
     role: CollectionRole = Field(index=True)
 
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class PrinterPermission(SQLModel, table=True):
@@ -57,8 +57,8 @@ class PrinterPermission(SQLModel, table=True):
     user_id: int = Field(foreign_key="users.id", index=True)
     printer_id: int = Field(foreign_key="printers.id", index=True)
     role: PrinterRole = Field(index=True)
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class User(SQLModel, table=True):
@@ -85,10 +85,10 @@ class User(SQLModel, table=True):
         sa_column=Column(Boolean, nullable=False, server_default="0", index=True),
     )
 
-    deleted_at: Optional[datetime] = Field(default=None, index=True)
+    deleted_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class RefreshToken(SQLModel, table=True):
@@ -97,10 +97,10 @@ class RefreshToken(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="users.id", index=True)
     token_hash: str = Field(max_length=64, unique=True, index=True)
-    expires_at: datetime = Field(index=True)
+    expires_at: NaiveDatetime = Field(index=True)
     revoked: bool = Field(default=False, index=True)
-    created_at: datetime = Field(default_factory=utcnow)
-    revoked_at: Optional[datetime] = None
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    revoked_at: Optional[NaiveDatetime] = None
 
 
 class ApiKey(SQLModel, table=True):
@@ -111,9 +111,9 @@ class ApiKey(SQLModel, table=True):
     name: str = Field(default="Programmatic access", max_length=128)
     key_hash: str = Field(max_length=64, unique=True, index=True)
     prefix: str = Field(max_length=16, index=True)
-    created_at: datetime = Field(default_factory=utcnow)
-    last_used_at: Optional[datetime] = None
-    revoked_at: Optional[datetime] = Field(default=None, index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    last_used_at: Optional[NaiveDatetime] = None
+    revoked_at: Optional[NaiveDatetime] = Field(default=None, index=True)
 
 
 class ProviderConnection(SQLModel, table=True):
@@ -147,9 +147,9 @@ class ProviderConnection(SQLModel, table=True):
     credential_secret: Optional[str] = Field(
         default=None, sa_column=Column(EncryptedText(), nullable=True)
     )
-    token_expires_at: Optional[datetime] = Field(default=None)
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    token_expires_at: Optional[NaiveDatetime] = Field(default=None)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class ProviderOAuthState(SQLModel, table=True):
@@ -167,9 +167,9 @@ class ProviderOAuthState(SQLModel, table=True):
     provider: CaptureProvider = Field(sa_column=Column(String(32), nullable=False))
     state_hash: str = Field(max_length=64, unique=True, index=True)
     redirect_uri: str = Field(max_length=2048)
-    expires_at: datetime = Field(index=True)
-    used_at: Optional[datetime] = Field(default=None, index=True)
-    created_at: datetime = Field(default_factory=utcnow)
+    expires_at: NaiveDatetime = Field(index=True)
+    used_at: Optional[NaiveDatetime] = Field(default=None, index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class BrowserPairingCode(SQLModel, table=True):
@@ -185,10 +185,10 @@ class BrowserPairingCode(SQLModel, table=True):
         )
     )
     code_hash: str = Field(max_length=64, unique=True, index=True)
-    expires_at: datetime = Field(index=True)
-    used_at: Optional[datetime] = Field(default=None, index=True)
+    expires_at: NaiveDatetime = Field(index=True)
+    used_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     attempts: int = Field(default=0)
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class BrowserDevice(SQLModel, table=True):
@@ -212,9 +212,9 @@ class BrowserDevice(SQLModel, table=True):
     )
     name: str = Field(max_length=128)
     credential_hash: str = Field(max_length=64, unique=True, index=True)
-    created_at: datetime = Field(default_factory=utcnow)
-    last_used_at: Optional[datetime] = Field(default=None)
-    revoked_at: Optional[datetime] = Field(default=None, index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    last_used_at: Optional[NaiveDatetime] = Field(default=None)
+    revoked_at: Optional[NaiveDatetime] = Field(default=None, index=True)
 
 
 BrowserDevice.database_epoch = column_property(
@@ -236,8 +236,8 @@ class ShareLink(SQLModel, table=True):
     model_id: int = Field(foreign_key="models.id", index=True)
     token_hash: str = Field(max_length=64, unique=True, index=True)
 
-    expires_at: datetime = Field(index=True)
-    revoked_at: Optional[datetime] = Field(default=None, index=True)
+    expires_at: NaiveDatetime = Field(index=True)
+    revoked_at: Optional[NaiveDatetime] = Field(default=None, index=True)
     # When false, the public viewer can render the model but not download the
     # original source files (a tessellated mesh is still served for viewing).
     allow_download: bool = Field(default=False)
@@ -247,4 +247,4 @@ class ShareLink(SQLModel, table=True):
     access_count: int = Field(default=0)
 
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)

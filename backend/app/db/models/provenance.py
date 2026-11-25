@@ -1,8 +1,8 @@
 """Model sources, captured metadata and Artifact provenance links."""
 
-from datetime import datetime
 from typing import Optional
 
+from pydantic import NaiveDatetime
 from sqlalchemy import (
     CheckConstraint,
     Column,
@@ -45,15 +45,15 @@ class ModelProvenanceSource(SQLModel, table=True):
     identity_key: str = Field(max_length=64, index=True)
     source_revision: Optional[str] = Field(default=None, max_length=255)
     tags_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
-    first_captured_at: datetime = Field(default_factory=utcnow)
-    last_checked_at: datetime = Field(default_factory=utcnow, index=True)
+    first_captured_at: NaiveDatetime = Field(default_factory=utcnow)
+    last_checked_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
     created_by: Optional[int] = Field(
         default=None,
         sa_column=Column(
             Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
         ),
     )
-    updated_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
 
 
 class ModelSourceCover(SQLModel, table=True):
@@ -84,8 +84,8 @@ class ModelSourceCover(SQLModel, table=True):
     content_type: str = Field(default="image/webp", max_length=64)
     size_bytes: int
     created_by: Optional[int] = Field(default=None, foreign_key="users.id", index=True)
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow, index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow, index=True)
 
 
 class ModelProvenanceField(SQLModel, table=True):
@@ -124,8 +124,8 @@ class ModelProvenanceField(SQLModel, table=True):
             Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
         ),
     )
-    captured_at: Optional[datetime] = Field(default=None)
-    user_updated_at: Optional[datetime] = Field(default=None)
+    captured_at: Optional[NaiveDatetime] = Field(default=None)
+    user_updated_at: Optional[NaiveDatetime] = Field(default=None)
 
 
 class ProvenanceCapture(SQLModel, table=True):
@@ -168,8 +168,8 @@ class ProvenanceCapture(SQLModel, table=True):
     source_revision: Optional[str] = Field(default=None, max_length=255)
     snapshot_json: str = Field(sa_column=Column(Text, nullable=False))
     snapshot_sha256: str = Field(max_length=64, index=True)
-    captured_at: datetime = Field(default_factory=utcnow)
-    checked_at: datetime = Field(default_factory=utcnow)
+    captured_at: NaiveDatetime = Field(default_factory=utcnow)
+    checked_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class ArtifactProvenanceLink(SQLModel, table=True):
@@ -208,4 +208,4 @@ class ArtifactProvenanceLink(SQLModel, table=True):
     source_revision: Optional[str] = Field(default=None, max_length=255)
     blob_sha256: str = Field(max_length=64, index=True)
     import_key: str = Field(max_length=64, unique=True, index=True)
-    created_at: datetime = Field(default_factory=utcnow, index=True)
+    created_at: NaiveDatetime = Field(default_factory=utcnow, index=True)

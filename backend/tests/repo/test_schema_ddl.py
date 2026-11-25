@@ -42,6 +42,7 @@ from sqlalchemy import (
     create_engine,
     create_mock_engine,
 )
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import ColumnCollectionConstraint, Constraint, CreateTable
 from sqlmodel import SQLModel
 
@@ -108,6 +109,18 @@ def sqlite_dialect():
 
 
 class TestCreateTable:
+    def test_postgresql_preserves_timestamp_storage(self) -> None:
+        dialect = postgresql.dialect()
+
+        timezone_columns = [
+            f"{table.name}.{column.name}"
+            for table in SQLModel.metadata.tables.values()
+            for column in table.columns
+            if column.type.compile(dialect=dialect) == "TIMESTAMP WITH TIME ZONE"
+        ]
+
+        assert timezone_columns == []
+
     def test_suite_cleanup_restores_metadata_before_the_next_test(self) -> None:
         engine = create_mock_engine(
             "postgresql+psycopg://", lambda *_args, **_kwargs: None

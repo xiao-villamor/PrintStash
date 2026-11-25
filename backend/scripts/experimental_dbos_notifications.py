@@ -13,9 +13,9 @@ import json
 from pathlib import Path
 
 EXPECTED = {
-    "_queue.py": "03010fe4bca57616793f2570e12cc05b269c0a23da41becc27b4a5df0be29ba1",
-    "_core.py": "a103f6dcf8f7339f4626db0e67a7a160344f8226d3311d3f9468f943438cba91",
-    "_sys_db.py": "aa6507ab23f00ab6f6f180d62b9b09af7ff2720fef97b578db43bb770b5de96d",
+    "_queue.py": "b598b7153ec393dd620fd4eb23f62835bd92c605f69b9b1cd33c15ee95fba6db",
+    "_core.py": "9297206a5951bced15e960b308867d19c7e1308e3c542280433250e6e8be28aa",
+    "_sys_db.py": "cdf7335fb789c05a509d3a836fd8ccf3d548484b24b836474e9b029c966c62ee",
 }
 
 
@@ -32,7 +32,7 @@ def patch(root: Path) -> None:
             raise ValueError(f"unsupported DBOS source: {name}")
     imports = (
         "from app.runtime.engine.dbos_notifications import ClaimRetry, RECOVERY_SECONDS, signals\n"
-        "PRINTSTASH_NOTIFICATION_PATCH = 3\n"
+        "PRINTSTASH_NOTIFICATION_PATCH = 4\n"
     )
     for name in sources:
         s = sources[name]
@@ -76,7 +76,7 @@ def patch(root: Path) -> None:
         "                latest = queue\n",
         "                if notified_sqlite:\n                    retry.failed()\n                    signals.failed(queue.name)\n                    continue\n                latest = queue\n",
     )
-    # 3.5 claims inside a nested dequeue() per shard scope: any failed claim or
+    # DBOS claims inside a nested dequeue() per shard scope: any failed claim or
     # scope lookup marks the poll failed; the outcome is settled once per poll.
     q = replace_once(
         q,
@@ -172,15 +172,20 @@ def patch(root: Path) -> None:
         "        if not cancel_children:\n",
         "            signals.notify_all()\n\n        if not cancel_children:\n",
     )
-    marker = "    @db_retry()\n    def set_workflow_delay("
+    # DBOS 3.6 keeps each workflow's existing queue on implicit or bulk resume.
+    # Wake the known queues after the resume transaction commits.
+    marker = "    def _requeue_values("
     s = replace_once(
         s,
         marker,
-        "        signals.notify(queue_name if queue_name is not None else INTERNAL_QUEUE_NAME)\n\n"
+        "        if queue_name is None:\n"
+        "            signals.notify_all()\n"
+        "        else:\n"
+        "            signals.notify(queue_name)\n\n"
         + marker,
     )
     for following in ["update_queue", "upsert_queue"]:
-        marker = "    def " + following + "("
+        marker = "    @db_retry()\n    def " + following + "("
         s = replace_once(s, marker, "        signals.notify(name)\n\n" + marker)
     s = replace_once(
         s,
@@ -197,8 +202,8 @@ def patch(root: Path) -> None:
         Path(__file__).resolve().parents[1] / "app/runtime/engine/dbos_notifications.py"
     )
     manifest = {
-        "patch_version": 3,
-        "dbos_version": "3.5.0",
+        "patch_version": 4,
+        "dbos_version": "3.7.0",
         "original_files": EXPECTED,
         "files": {
             name: hashlib.sha256(content.encode()).hexdigest()

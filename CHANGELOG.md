@@ -63,6 +63,8 @@
 
 ### Changed
 
+- The backend uses SQLModel 0.0.50 and SQLAlchemy 2.1.9. Application timestamps retain their existing storage format on SQLite and PostgreSQL.
+
 - Controls use 6px corners, floating menus and dialogs use 8px corners, and cards and panels stay square.
 
 - Model preview places its controls inside the viewer and uses an icon button for screenshots.
@@ -189,7 +191,7 @@
 - Sign-in and first-run setup share one frame and one field style. On the Storage step, Continue runs the storage check itself and moves on when it passes; Check storage remains for checking without leaving the step. The Account step reports every invalid field at once, Review labels Email plainly, lists the previews folder and offers Edit account and Edit storage, and the final button reads Create account. A refused sign-in no longer marks both fields invalid, and the sign-in page explains that another administrator resets a forgotten password in Settings → Users.
 - Storage folders use one name everywhere: "Your files" and "Previews" in setup, its review and Settings, with a note that Docker installs enter the path inside the container. A failed storage check shows "Needs attention" like a passed one shows "Storage ready" and marks the folder it names. Remote providers explain their deletion behaviour in one plain sentence instead of tier names, and beta connections say so. Setup marks completed steps clearly, and the sign-in recovery hint sits below single sign-on.
 - Library motion flows instead of cutting: the details panel eases in from its edge and leaves the same way, pointing it at another Model swaps its contents in place, opening the collections pane eases it in, and a filter, sort, layout or pane change settles the results in place. Cards no longer slide in again when the grid reflows or scrolls them back into view. Opening a folder from the tree, a breadcrumb or a folder card resolves it in one lookup instead of two.
-- The background engine uses DBOS 3.5.0 (was 3.3.0). Its first start adds indexes, a column and a table to the disposable engine database; queued Jobs resume. Stop every API and worker process and restart them together on the same image. DBOS 3.3.0 is not guaranteed to read the migrated engine database: to roll back, stop every process and discard the engine state (the `-dbos` SQLite sibling with its `-wal` and `-shm` files, or the PostgreSQL `dbos` schema) before starting the previous image; Jobs are recorded in the application database and are submitted again.
+- The background engine uses DBOS 3.7.0 (was 3.3.0). On first start it updates the disposable engine database schema, and queued Jobs resume. Stop every API and worker process and restart them together on the same image. DBOS 3.3.0 is not guaranteed to read the migrated engine database: to roll back, stop every process and discard the engine state (the `-dbos` SQLite sibling with its `-wal` and `-shm` files, or the PostgreSQL `dbos` schema) before starting the previous image; Jobs are recorded in the application database and are submitted again.
 
 ### Added
 

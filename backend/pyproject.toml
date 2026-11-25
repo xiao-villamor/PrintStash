@@ -36,10 +36,8 @@ dependencies = [
     "python-multipart>=0.0.32,<0.1",
     "psycopg[binary]>=3.3,<4",
     "scipy>=1.18.1,<2",
-    "SQLAlchemy>=2.0.52,<2.1",
-    # 0.0.45 stores every datetime as DateTime(timezone=True) and rejects naive
-    # values: adopting it needs a TIMESTAMPTZ migration, not a version bump.
-    "sqlmodel>=0.0.39,<0.0.45",
+    "SQLAlchemy>=2.1,<2.2",
+    "sqlmodel>=0.0.50,<0.1",
     "starlette>=1.6,<2",
     "trimesh>=5.2.2,<6",
     # Rhino .3dm meshes; ships amd64 and arm64 Linux wheels.

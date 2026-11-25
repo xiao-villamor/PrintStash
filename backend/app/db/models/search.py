@@ -3,6 +3,7 @@
 from datetime import datetime
 from typing import ClassVar
 
+from pydantic import NaiveDatetime
 from sqlalchemy import (
     CheckConstraint,
     Column,
@@ -76,8 +77,8 @@ class SearchPassage(SQLModel, table=True):
         ),
     )
     truncated: bool = False
-    source_updated_at: datetime
-    updated_at: datetime = Field(default_factory=utcnow)
+    source_updated_at: NaiveDatetime
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class SearchDependency(SQLModel, table=True):
@@ -109,11 +110,11 @@ class SearchReconciliationState(SQLModel, table=True):
     __audit_exclude__: ClassVar[bool] = True
     id: int | None = Field(default=None, primary_key=True)
     subject_type: str = Field(max_length=32, unique=True)
-    watermark_at: datetime = Field(default=datetime(1970, 1, 1))
+    watermark_at: NaiveDatetime = Field(default=datetime(1970, 1, 1))
     watermark_id: int = 0
     partition_after_id: int = 0
     orphan_after_id: int = 0
-    updated_at: datetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class SearchProjectionRequest(SQLModel, table=True):
@@ -139,10 +140,10 @@ class SearchProjectionRequest(SQLModel, table=True):
     cursor_kind: str = Field(default="", max_length=32)
     cursor_id: int = 0
     attempts: int = 0
-    next_attempt_at: datetime = Field(default_factory=utcnow)
+    next_attempt_at: NaiveDatetime = Field(default_factory=utcnow)
     error_code: str | None = Field(default=None, max_length=64)
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class SearchLexicalPosting(SQLModel, table=True):

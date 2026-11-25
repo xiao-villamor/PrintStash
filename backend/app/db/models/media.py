@@ -1,8 +1,8 @@
 """Artifact derivatives and administrators' requests to regenerate them."""
 
-from datetime import datetime
 from typing import ClassVar, Optional
 
+from pydantic import NaiveDatetime
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
@@ -93,7 +93,7 @@ class ArtifactDerivative(SQLModel, table=True):
     # Only the execution that captured this token may finish a running attempt.
     attempt_token: Optional[str] = Field(default=None, max_length=36)
     attempts: int = Field(default=0)
-    next_attempt_at: Optional[datetime] = None
+    next_attempt_at: Optional[NaiveDatetime] = None
     # Why the last attempt failed or was skipped: a code, or a sanitized error.
     failure_reason: Optional[str] = Field(
         default=None, sa_column=Column(Text, nullable=True)
@@ -113,8 +113,8 @@ class ArtifactDerivative(SQLModel, table=True):
     peak_rss_bytes: Optional[int] = Field(
         default=None, sa_column=Column(BigInteger, nullable=True)
     )
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
 
 
 class DerivativeRegeneration(SQLModel, table=True):
@@ -132,7 +132,7 @@ class DerivativeRegeneration(SQLModel, table=True):
     kind: DerivativeKind = Field(
         sa_column=Column(EnumText(DerivativeKind), primary_key=True, nullable=False)
     )
-    requested_at: datetime = Field(default_factory=utcnow)
+    requested_at: NaiveDatetime = Field(default_factory=utcnow)
     requested_by: Optional[int] = Field(
         default=None,
         sa_column=Column(
@@ -160,7 +160,7 @@ class DerivativeGroupRegeneration(SQLModel, table=True):
     kind: DerivativeKind = Field(
         sa_column=Column(EnumText(DerivativeKind), primary_key=True, nullable=False)
     )
-    requested_at: datetime = Field(default_factory=utcnow)
+    requested_at: NaiveDatetime = Field(default_factory=utcnow)
     requested_by: Optional[int] = Field(
         default=None,
         sa_column=Column(
@@ -216,13 +216,13 @@ class MeshFingerprintContinuation(SQLModel, table=True):
     execution_epoch: str | None = Field(max_length=64)
     job_attempt: int | None
     attempts: int = Field(default=1)
-    available_at: datetime = Field(default_factory=utcnow)
+    available_at: NaiveDatetime = Field(default_factory=utcnow)
     source_sha256: str = Field(max_length=64)
     metadata_recipe: int
     algorithm_version: str = Field(max_length=128)
     triangle_cap: int
     source_identity_json: str = Field(sa_column=Column(Text, nullable=False))
     # Nullable has one meaning: no regeneration request existed for this input.
-    regenerated_at: datetime | None
-    created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    regenerated_at: NaiveDatetime | None
+    created_at: NaiveDatetime = Field(default_factory=utcnow)
+    updated_at: NaiveDatetime = Field(default_factory=utcnow)
