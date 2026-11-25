@@ -2332,32 +2332,29 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     setInspectorDock((previous) =>
       previous?.width === dock?.width &&
       previous?.paddingOffset === dock?.paddingOffset &&
-      previous?.custom === dock?.custom &&
       previous?.maxWidth === dock?.maxWidth
         ? previous
         : dock,
     );
   }, []);
-  const [inspectorMotion, setInspectorMotion] = useState<{
-    open: boolean;
-    locked: { dock: LibraryInspectorDock | null } | null;
-  }>({ open: inspectorOpen, locked: inspectorOpen ? { dock: null } : null });
-  const appliedDock = inspectorMotion.locked ? inspectorMotion.locked.dock : inspectorDock;
-  if (inspectorMotion.open !== inspectorOpen) {
-    // The spring's travel is relative to its width. Hold the current width
-    // through the entrance, exit, or a reversal, then apply the latest fit.
-    setInspectorMotion({ open: inspectorOpen, locked: { dock: appliedDock } });
-  }
+  const [inspectorMotion, setInspectorMotion] = useState({
+    open: inspectorOpen,
+    moving: inspectorOpen,
+  });
+  if (inspectorMotion.open !== inspectorOpen)
+    setInspectorMotion({ open: inspectorOpen, moving: true });
   const settleInspectorDock = useCallback(() => {
-    setInspectorMotion((motion) => (motion.locked ? { ...motion, locked: null } : motion));
+    setInspectorMotion((motion) => (motion.moving ? { ...motion, moving: false } : motion));
   }, []);
+  // Publish the fitted dock before the pane slides. Settling enables the
+  // controls and viewer without applying another grid width.
   const inspectorDockStyle: CSSProperties & {
     "--library-inspector-width"?: string;
     "--library-inspector-padding-offset"?: string;
-  } = appliedDock
+  } = inspectorDock
     ? {
-        "--library-inspector-width": `${appliedDock.width}px`,
-        "--library-inspector-padding-offset": `${appliedDock.paddingOffset}px`,
+        "--library-inspector-width": `${inspectorDock.width}px`,
+        "--library-inspector-padding-offset": `${inspectorDock.paddingOffset}px`,
       }
     : {};
   const inspectorOpener = useRef<HTMLElement | null>(null);
@@ -2464,7 +2461,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       treeFocus?.entryKey !== entry.key ||
       treeFocus?.id !== inspectorIntent?.id ||
       !inspectorOpen ||
-      inspectorMotion.locked !== null
+      inspectorMotion.moving
     )
       return;
     const key = `/models/${treeFocus.id}`;
@@ -2493,7 +2490,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       window.clearTimeout(highlightTimer);
       highlighted?.classList.remove("library-tree-spotlight");
     };
-  }, [entry.key, inspectorIntent?.id, inspectorMotion.locked, inspectorOpen, treeFocus]);
+  }, [entry.key, inspectorIntent?.id, inspectorMotion.moving, inspectorOpen, treeFocus]);
 
   const closeInspector = useCallback(() => {
     if (inspectorIntent) setInspector({ ...inspectorIntent, open: false });
@@ -3581,7 +3578,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           data-inspector-grid={(docView === "models" && viewMode === "grid") || undefined}
           data-inspector-layout={docView === "models" ? viewMode : undefined}
           data-inspector-compact-dock={
-            (viewMode === "grid" && compact && !!appliedDock) || undefined
+            (viewMode === "grid" && compact && !!inspectorDock) || undefined
           }
           style={inspectorDockStyle}
           className="@container/library relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-background pb-24 md:pb-0"
@@ -4322,9 +4319,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       layout="grid"
                       freezeInspectorTracks={inspectorOpen}
                       onInspectorDockChange={receiveInspectorDock}
-                      inspectorDockLocked={inspectorMotion.locked !== null}
                       preferredInspectorWidth={preferredInspectorWidth}
-                      appliedInspectorCustomWidth={appliedDock?.custom}
                       estimateSize={compact ? 290 : 250}
                       compact={compact}
                     />
@@ -4452,7 +4447,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                         layout="list"
                         freezeInspectorTracks={inspectorOpen}
                         onInspectorDockChange={receiveInspectorDock}
-                        inspectorDockLocked={inspectorMotion.locked !== null}
                         preferredInspectorWidth={preferredInspectorWidth}
                       />
                     </div>
@@ -4478,16 +4472,16 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             key={entry.session}
             id={inspectorIntent.id}
             open={inspectorOpen}
-            motionLocked={inspectorMotion.locked !== null}
+            motionLocked={inspectorMotion.moving}
             summary={visibleModels.find((model) => model.id === inspectorIntent.id)}
             style={inspectorDockStyle}
             onMotionSettled={settleInspectorDock}
             resize={
-              appliedDock && appliedDock.maxWidth >= LIBRARY_INSPECTOR_MIN_WIDTH
+              inspectorDock && inspectorDock.maxWidth >= LIBRARY_INSPECTOR_MIN_WIDTH
                 ? {
-                    current: appliedDock.width,
-                    max: appliedDock.maxWidth,
-                    locked: inspectorMotion.locked !== null,
+                    current: inspectorDock.width,
+                    max: inspectorDock.maxWidth,
+                    locked: inspectorMotion.moving,
                     onResize: chooseInspectorWidth,
                   }
                 : null

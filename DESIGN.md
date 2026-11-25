@@ -396,6 +396,8 @@ panel stationary. Closed panels become inert immediately. Closing details return
 focus to the opener, the inspected Model card if it was remounted, or the Details button.
 
 Model details captures visible card positions before the dock changes layout.
+The grid and dock agree on their fitted width before the slide. Finishing
+the slide enables editing and the preview without refitting the grid.
 Nearby cards on the same row ease into place. Cards that wrap or move farther
 briefly fade into their destination cells. The selected model stays visually anchored.
 

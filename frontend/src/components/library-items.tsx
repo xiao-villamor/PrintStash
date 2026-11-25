@@ -61,7 +61,6 @@ function cardIsVisible(bounds: DOMRect, viewport: DOMRect) {
 
 export interface LibraryInspectorDock {
   maxWidth: number;
-  custom: boolean;
   width: number;
   paddingOffset: number;
 }
@@ -82,9 +81,7 @@ interface LibraryItemsProps<T> {
   keepCollectionCardWidth?: boolean;
   /** Only the Model results measure the dock's width. */
   onInspectorDockChange?: (dock: LibraryInspectorDock | null) => void;
-  inspectorDockLocked?: boolean;
   preferredInspectorWidth?: number | null;
-  appliedInspectorCustomWidth?: boolean;
   /** A production-build comparison can disable the renderer without changing cards or data. */
   virtualize?: boolean;
   className?: string;
@@ -112,9 +109,7 @@ export function LibraryItems<T>({
   freezeInspectorTracks = false,
   keepCollectionCardWidth = false,
   onInspectorDockChange,
-  inspectorDockLocked = false,
   preferredInspectorWidth = null,
-  appliedInspectorCustomWidth = false,
   minCardWidth,
   singleRow = false,
   onColumnsChange,
@@ -283,11 +278,9 @@ export function LibraryItems<T>({
             inspectorWidth = baseWidth;
             inspectorPaddingOffset = 12;
           }
-          // Size the grid and the dock in the same layout pass. During the
-          // spring, the measured row already reflects the locked padding.
+          // Use the fitted dock and grid width from the same layout pass.
           const fitted = inspectorCustomWidth || (layout === "grid" && available >= closedTrack);
-          if (docked && !inspectorDockLocked && fitted)
-            width = closedFrameWidth - reservedSpace - inspectorWidth;
+          if (docked && fitted) width = closedFrameWidth - reservedSpace - inspectorWidth;
         }
         const nextColumns =
           layout === "list"
@@ -297,10 +290,7 @@ export function LibraryItems<T>({
                 docked || keepCollectionCardWidth ? closedTrack : preferredWidth,
                 gap,
               );
-        const customTracks =
-          layout === "grid" &&
-          docked &&
-          (inspectorDockLocked ? appliedInspectorCustomWidth : inspectorCustomWidth);
+        const customTracks = layout === "grid" && docked && inspectorCustomWidth;
         const nextTrack = customTracks
           ? (width - (nextColumns - 1) * gap) / nextColumns
           : keepCollectionCardWidth
@@ -421,31 +411,21 @@ export function LibraryItems<T>({
     freezeInspectorTracks,
     keepCollectionCardWidth,
     onInspectorDockChange,
-    inspectorDockLocked,
     preferredInspectorWidth,
-    appliedInspectorCustomWidth,
   ]);
 
-  const { inspectorMaxWidth, inspectorWidth, inspectorCustomWidth, inspectorPaddingOffset } =
-    geometry;
+  const { inspectorMaxWidth, inspectorWidth, inspectorPaddingOffset } = geometry;
   useLayoutEffect(() => {
     onInspectorDockChange?.(
       inspectorWidth
         ? {
             width: inspectorWidth,
             maxWidth: inspectorMaxWidth,
-            custom: inspectorCustomWidth,
             paddingOffset: inspectorPaddingOffset,
           }
         : null,
     );
-  }, [
-    inspectorMaxWidth,
-    inspectorWidth,
-    inspectorCustomWidth,
-    inspectorPaddingOffset,
-    onInspectorDockChange,
-  ]);
+  }, [inspectorMaxWidth, inspectorWidth, inspectorPaddingOffset, onInspectorDockChange]);
 
   useLayoutEffect(() => {
     return () => onInspectorDockChange?.(null);

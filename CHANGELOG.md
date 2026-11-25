@@ -12,7 +12,7 @@
 
 ### Changed
 
-- Collections moves the workspace as one surface and fits the grid after the slide. Model details uses a separate reflow for nearby and wrapping cards. Closing Model details returns focus to a card or control in the library.
+- Collections moves the workspace as one surface and fits the grid after the slide. Model details reflows nearby and wrapping cards without a second layout change when the pane docks. Closing Model details returns focus to a card or control in the library.
 
 - The Trash page uses rounded surfaces and icons on its actions, shows how many days each deleted item has left (the last three days in the destructive tone), and has an illustrated empty state.
 

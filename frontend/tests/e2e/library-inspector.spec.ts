@@ -158,7 +158,10 @@ test.describe("Library inline inspector", () => {
               window.paneCardsCrossingCells.push(this.dataset.libraryKey ?? "");
           }
         }
-        return animate.apply(this, args);
+        const animation = animate.apply(this, args);
+        if (this.id === "model-drawer" && this.getAttribute("data-state") === "open")
+          animation.pause();
+        return animation;
       };
     });
     await page.goto("/?type=all&sort=date-desc");
@@ -173,12 +176,22 @@ test.describe("Library inline inspector", () => {
     await details.click();
     await expect(drawer).toBeVisible();
     await expect.poll(animations).toBeGreaterThan(beforeOpeningDetails);
-    await page.waitForFunction(() =>
-      document
-        .getElementById("model-drawer")
-        ?.getAnimations()
-        .every((animation) => animation.playState !== "running"),
+    const readLayout = () =>
+      page.evaluate(() => ({
+        paneWidth: document.getElementById("model-drawer")?.offsetWidth,
+        models: [
+          ...document.querySelectorAll<HTMLElement>(".library-model-content .library-virtual-row"),
+        ].map((row) => [row.clientWidth, row.style.gridTemplateColumns]),
+      }));
+    const openingLayout = await readLayout();
+    await drawer.evaluate(
+      (element) =>
+        new Promise<void>((resolve) => {
+          for (const animation of element.getAnimations()) animation.finish();
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
     );
+    expect(await readLayout()).toEqual(openingLayout);
     const beforeClosingDetails = await animations();
     await details.click();
     await expect(drawer).toBeHidden();
