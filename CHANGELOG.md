@@ -24,10 +24,12 @@
 
 - Storage shows verification badges and a compact control for measurement details. Imports puts browser pairing beside extension setup and keeps upload capacity checks in the upload flow.
 - Model screenshots offer resolution in the viewer. Generated Model images have three additional colour choices, and Settings is available from the workspace menu.
+- Saved views actions open beside the sidebar's three-dot button. An empty list offers the action to save the current view.
 
 ### Performance
 
 - Model details shows the selected cover during opening and initializes the interactive body after the pane docks.
+- The Library filter picker opens and closes immediately without rerendering the gallery for the toggle.
 
 ### Changed
 

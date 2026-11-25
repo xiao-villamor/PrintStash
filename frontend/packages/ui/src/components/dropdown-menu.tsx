@@ -40,6 +40,8 @@ export interface DropdownMenuProps {
   align?: "start" | "end";
   /** A context menu opens at the pointer that asked for it, not at its trigger's edge. */
   anchorPoint?: { x: number; y: number } | null;
+  /** A portaled panel can be opened by a control outside its wrapper. */
+  anchorElement?: HTMLElement | null;
   role?: "menu" | "listbox" | "dialog";
   "aria-label"?: AriaAttributes["aria-label"];
   /** Escape a clipping ancestor while retaining the enclosing modal layer. */
@@ -48,6 +50,8 @@ export interface DropdownMenuProps {
   contentClassName?: string;
   /** Match a field trigger and place the panel just outside its border. */
   field?: boolean;
+  /** Let direct controls show or remove the panel in the opening commit. */
+  animate?: boolean;
   children: ReactNode;
 }
 
@@ -59,12 +63,14 @@ export function DropdownMenu({
   returnFocusRef,
   align = "end",
   anchorPoint = null,
+  anchorElement = null,
   role = "menu",
   "aria-label": ariaLabel,
   portal = false,
   className,
   contentClassName,
   field = false,
+  animate = true,
   children,
 }: DropdownMenuProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -72,7 +78,8 @@ export function DropdownMenu({
   const descendants = useRef(new Set<HTMLElement>());
   const parent = useContext(DropdownContext);
   const [portalHost, setPortalHost] = useState<HTMLElement | null>(null);
-  const { mounted, state } = useMountTransition(open, field ? DURATION.fast : DURATION.press);
+  const transition = useMountTransition(animate && open, field ? DURATION.fast : DURATION.press);
+  const mounted = animate ? transition.mounted : open;
   const scope = useMemo<DropdownScope>(
     () => ({
       portalHost,
@@ -115,7 +122,7 @@ export function DropdownMenu({
             top: anchorPoint.y - gap,
             bottom: anchorPoint.y - gap,
           }
-        : box;
+        : (anchorElement?.getBoundingClientRect() ?? box);
       const viewport = window.visualViewport;
       const leftEdge = (viewport?.offsetLeft ?? 0) + GUTTER;
       const topEdge = (viewport?.offsetTop ?? 0) + GUTTER;
@@ -151,7 +158,11 @@ export function DropdownMenu({
       // A responsive toolbar can disappear while its portaled menu is open.
       // Check CSS visibility, not layout size: a zero rect is also valid during
       // initial layout and in non-layout renderers such as jsdom.
-      for (let node: HTMLElement | null = wrapper; node; node = node.parentElement) {
+      for (
+        let node: HTMLElement | null = anchorElement ?? wrapper;
+        node;
+        node = node.parentElement
+      ) {
         const style = getComputedStyle(node);
         if (node.hidden || style.display === "none" || style.visibility === "hidden") {
           onOpenChange(false);
@@ -172,6 +183,7 @@ export function DropdownMenu({
           })
         : null;
     observer?.observe(wrapper);
+    if (anchorElement) observer?.observe(anchorElement);
     observer?.observe(panel);
     window.addEventListener("resize", onResize);
     window.addEventListener("scroll", position, true);
@@ -185,25 +197,25 @@ export function DropdownMenu({
       window.visualViewport?.removeEventListener("resize", onResize);
       window.visualViewport?.removeEventListener("scroll", position);
     };
-  }, [mounted, align, anchorPoint, portal, portalHost, onOpenChange, field]);
-
-  function contains(target: Node) {
-    return (
-      wrapperRef.current?.contains(target) ||
-      panelRef.current?.contains(target) ||
-      [...descendants.current].some((panel) => panel.contains(target))
-    );
-  }
+  }, [mounted, align, anchorPoint, anchorElement, portal, portalHost, onOpenChange, field]);
 
   useEffect(() => {
     if (!open) return;
     function onPointerDown(e: PointerEvent) {
-      if (e.target instanceof Node && contains(e.target)) return;
+      const target = e.target;
+      if (
+        target instanceof Node &&
+        (wrapperRef.current?.contains(target) ||
+          anchorElement?.contains(target) ||
+          panelRef.current?.contains(target) ||
+          [...descendants.current].some((panel) => panel.contains(target)))
+      )
+        return;
       onOpenChange(false);
     }
     window.addEventListener("pointerdown", onPointerDown);
     return () => window.removeEventListener("pointerdown", onPointerDown);
-  }, [open, onOpenChange]);
+  }, [open, onOpenChange, anchorElement]);
 
   useEffect(() => {
     if (!open || role === "dialog") return;
@@ -220,6 +232,7 @@ export function DropdownMenu({
     if (!open) return;
     const triggerElement =
       returnFocusRef?.current ??
+      anchorElement ??
       wrapperRef.current?.querySelector<HTMLElement>("[data-menu-trigger]");
     if (e.key === "Escape") {
       e.stopPropagation();
@@ -304,14 +317,15 @@ export function DropdownMenu({
       ref={panelRef}
       role={role}
       aria-label={ariaLabel}
-      data-state={state}
+      data-state={animate ? transition.state : "open"}
       inert={field && !open ? true : undefined}
       className={cn(
         portal ? "fixed z-dropdown" : "absolute top-full z-dropdown mt-2",
         align === "end" ? "right-0 origin-top-right" : "left-0 origin-top-left",
-        field
-          ? "transition-[opacity,transform] duration-fast ease-out data-[state=closed]:opacity-0 data-[state=closed]:scale-content-enter motion-reduce:transition-none motion-reduce:data-[state=closed]:scale-100"
-          : "transition-[opacity,transform] duration-press ease-out data-[state=closed]:opacity-0 data-[state=closed]:scale-95 motion-reduce:data-[state=closed]:scale-100",
+        animate &&
+          (field
+            ? "transition-[opacity,transform] duration-fast ease-out data-[state=closed]:opacity-0 data-[state=closed]:scale-content-enter motion-reduce:transition-none motion-reduce:data-[state=closed]:scale-100"
+            : "transition-[opacity,transform] duration-press ease-out data-[state=closed]:opacity-0 data-[state=closed]:scale-95 motion-reduce:data-[state=closed]:scale-100"),
         contentClassName,
         "rounded-lg",
       )}

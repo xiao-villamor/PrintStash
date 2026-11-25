@@ -89,13 +89,20 @@ export function SavedViewSelector({
   const { request: requestStartup } = useLibraryStartup();
   const pane = useCollectionsPane();
   const railExpanded = railTrigger && pane?.open && pane.mode === "views";
-  const { savedViewsRequested, consumeSavedViewsRequest, setSavedViewsOpen } = useNavigationShell();
+  const { savedViewsRequest, consumeSavedViewsRequest, setSavedViewsOpen } = useNavigationShell();
   const [localOpen, setLocalOpen] = useState(false);
-  const open = localOpen || (railTrigger && savedViewsRequested);
+  const sidebarAnchor =
+    railExpanded && savedViewsRequest?.kind === "sidebar" ? savedViewsRequest.anchor : null;
+  const open = localOpen || (railTrigger && savedViewsRequest?.kind === "rail") || !!sidebarAnchor;
+  const compactActions = sidebarAnchor !== null && readState.status === "ready" && !views.length;
   useEffect(() => {
-    if (!railTrigger || !savedViewsRequested) return;
+    if (!railTrigger || !savedViewsRequest) return;
+    if (savedViewsRequest.kind === "sidebar" && !railExpanded) {
+      consumeSavedViewsRequest();
+      return;
+    }
     requestStartup("saved-views");
-  }, [railTrigger, savedViewsRequested, requestStartup]);
+  }, [railTrigger, savedViewsRequest, railExpanded, consumeSavedViewsRequest, requestStartup]);
   useEffect(() => {
     if (!railTrigger) return;
     return () => consumeSavedViewsRequest();
@@ -168,12 +175,17 @@ export function SavedViewSelector({
       <>
         <DropdownMenu
           portal
-          align={align}
+          align={sidebarAnchor ? "end" : align}
+          anchorElement={sidebarAnchor}
+          animate={!sidebarAnchor}
           open={open}
           onOpenChange={setMenuOpen}
           role="dialog"
           aria-label={uiText("Saved views")}
-          contentClassName="w-72 rounded-md border border-border bg-popover text-popover-foreground shadow-lg"
+          contentClassName={cn(
+            compactActions ? "w-52" : "w-72",
+            "rounded-md border border-border bg-popover text-popover-foreground shadow-lg",
+          )}
           trigger={
             <Button
               type="button"
@@ -226,110 +238,116 @@ export function SavedViewSelector({
             </Button>
           }
         >
-          <div className="border-b border-border p-2">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                autoFocus
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={uiText("Find a saved view...")}
-                aria-label={uiText("Find a saved view")}
-                className="h-9 pl-8 focus-visible:ring-1 focus-visible:ring-offset-0"
-              />
-            </div>
-          </div>
-          <div className="max-h-64 overflow-y-auto p-1">
-            {readState.status === "loading" && (
-              <p role="status" className="px-3 py-6 text-center text-sm text-muted-foreground">
-                {uiText("savedView.loading")}
-              </p>
-            )}
-            {readState.status === "error" && (
-              <div role="alert" className="space-y-2 px-3 py-3 text-sm">
-                <p>{uiText("savedView.loadError")}</p>
-                <Button size="sm" variant="outline" onClick={readState.retry}>
-                  {uiText("savedView.retry")}
-                </Button>
+          {!compactActions && (
+            <div className="border-b border-border p-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  autoFocus
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={uiText("Find a saved view...")}
+                  aria-label={uiText("Find a saved view")}
+                  className="h-9 pl-8 focus-visible:ring-1 focus-visible:ring-offset-0"
+                />
               </div>
-            )}
-            {filtered.length ? (
-              filtered.map((view, index) => (
-                <div
-                  key={view.id}
-                  className="group flex items-center rounded hover:bg-popover-hover"
-                >
-                  <button
-                    type="button"
-                    onClick={() => choose(view)}
-                    className="flex min-w-0 flex-1 items-center gap-2 rounded px-2.5 py-2 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <span className="min-w-0 flex-1 truncate">{view.name}</span>
-                    {!query && index < recentIds.length && recentIds.includes(view.id) && (
-                      <span className="font-mono text-3xs text-muted-foreground">
-                        {uiText("Recent")}
-                      </span>
-                    )}
-                    {view.id === activeId && <Check className="h-4 w-4 text-primary" />}
-                  </button>
-                  <div className="flex pr-1 opacity-70 group-hover:opacity-100">
-                    <button
-                      type="button"
-                      title={uiText("Update with current filters")}
-                      aria-label={uiText("Update {value1}", { value1: String(view.name) })}
-                      onClick={() => void run(() => onUpdate(view))}
-                      className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      title={uiText("Rename")}
-                      aria-label={uiText("Rename {value1}", { value1: String(view.name) })}
-                      onClick={() => {
-                        draftRevision.current += 1;
-                        setEditing(view);
-                        setName(view.name);
-                        setMenuOpen(false);
-                      }}
-                      className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      title={uiText("Duplicate")}
-                      aria-label={uiText("Duplicate {value1}", { value1: String(view.name) })}
-                      onClick={() => void run(() => onDuplicate(view))}
-                      className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      title={uiText("Delete")}
-                      aria-label={uiText("Delete {value1}", { value1: String(view.name) })}
-                      onClick={() => {
-                        confirmationRevision.current += 1;
-                        setDeleting(view);
-                        setMenuOpen(false);
-                      }}
-                      className="rounded p-1.5 text-destructive hover:bg-destructive/10"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
+            </div>
+          )}
+          {!compactActions && (
+            <div className="max-h-64 overflow-y-auto p-1">
+              {readState.status === "loading" && (
+                <p role="status" className="px-3 py-6 text-center text-sm text-muted-foreground">
+                  {uiText("savedView.loading")}
+                </p>
+              )}
+              {readState.status === "error" && (
+                <div role="alert" className="space-y-2 px-3 py-3 text-sm">
+                  <p>{uiText("savedView.loadError")}</p>
+                  <Button size="sm" variant="outline" onClick={readState.retry}>
+                    {uiText("savedView.retry")}
+                  </Button>
                 </div>
-              ))
-            ) : readState.status === "ready" ? (
-              <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-                {views.length ? uiText("No matching views") : uiText("No saved views yet")}
-              </p>
-            ) : null}
-          </div>
-          <div className="border-t border-border p-1">
+              )}
+              {filtered.length ? (
+                filtered.map((view, index) => (
+                  <div
+                    key={view.id}
+                    className="group flex items-center rounded hover:bg-popover-hover"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => choose(view)}
+                      className="flex min-w-0 flex-1 items-center gap-2 rounded px-2.5 py-2 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <span className="min-w-0 flex-1 truncate">{view.name}</span>
+                      {!query && index < recentIds.length && recentIds.includes(view.id) && (
+                        <span className="font-mono text-3xs text-muted-foreground">
+                          {uiText("Recent")}
+                        </span>
+                      )}
+                      {view.id === activeId && <Check className="h-4 w-4 text-primary" />}
+                    </button>
+                    <div className="flex pr-1 opacity-70 group-hover:opacity-100">
+                      <button
+                        type="button"
+                        title={uiText("Update with current filters")}
+                        aria-label={uiText("Update {value1}", { value1: String(view.name) })}
+                        onClick={() => void run(() => onUpdate(view))}
+                        className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        title={uiText("Rename")}
+                        aria-label={uiText("Rename {value1}", { value1: String(view.name) })}
+                        onClick={() => {
+                          draftRevision.current += 1;
+                          setEditing(view);
+                          setName(view.name);
+                          setMenuOpen(false);
+                        }}
+                        className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        title={uiText("Duplicate")}
+                        aria-label={uiText("Duplicate {value1}", { value1: String(view.name) })}
+                        onClick={() => void run(() => onDuplicate(view))}
+                        className="rounded p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        title={uiText("Delete")}
+                        aria-label={uiText("Delete {value1}", { value1: String(view.name) })}
+                        onClick={() => {
+                          confirmationRevision.current += 1;
+                          setDeleting(view);
+                          setMenuOpen(false);
+                        }}
+                        className="rounded p-1.5 text-destructive hover:bg-destructive/10"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              ) : readState.status === "ready" ? (
+                <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+                  {views.length ? uiText("No matching views") : uiText("No saved views yet")}
+                </p>
+              ) : null}
+            </div>
+          )}
+          <div className={cn("p-1", !compactActions && "border-t border-border")}>
             <button
+              key={compactActions ? "compact" : "full"}
               type="button"
+              autoFocus={compactActions}
               disabled={readState.status !== "ready"}
               onClick={() => {
                 setMenuOpen(false);

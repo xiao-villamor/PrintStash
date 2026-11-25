@@ -5,6 +5,7 @@ import { LibraryStatusFilters } from "@/components/library-status-filters";
 import { CollectionHeaderTags } from "@/components/collection-header-tags";
 import "./library-header.css";
 import { LibraryEmptyCollection } from "@/components/library-empty-collection";
+import { LibraryFilterControl } from "@/components/library-filter-control";
 import { LibraryFindBar } from "@/components/library-find-bar";
 import { LibraryCollectionsRegion } from "@/components/library-collections-region";
 import { ModelGalleryDrag } from "@/components/model-gallery-drag";
@@ -99,6 +100,7 @@ import {
   useMemo,
   useState,
   useRef,
+  startTransition,
   type CSSProperties,
   type ReactNode,
 } from "react";
@@ -150,7 +152,7 @@ import {
 } from "@/features/library/url";
 import { MobileFilterDrawer } from "@/components/mobile-filter-drawer";
 import { StructuredFilters } from "@/components/structured-filters";
-import { LibraryFilterPicker, type LibraryFilterField } from "@/components/library-filter-picker";
+import type { LibraryFilterField } from "@/components/library-filter-picker";
 import type { UploadMode } from "@/components/upload-modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -180,7 +182,6 @@ import {
   ChevronDown,
   MoreHorizontal,
   ListChecks,
-  SlidersHorizontal,
   ScanSearch,
   FolderTree,
   Boxes,
@@ -711,8 +712,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [displayOpen, setDisplayOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const toolbarMenuOpener = useRef<HTMLElement | null>(null);
-  const filtersOpener = useRef<HTMLButtonElement>(null);
-  const [filtersExpanded, setFiltersExpanded] = useState<boolean | null>(null);
+  const [filterPickerRevision, setFilterPickerRevision] = useState(0);
   // Documents still need the collection snapshot, but have no
   // Model placeholder to measure. Keep their existing bounded browse read.
   if (pageSize === null && docView === "docs") setPageSize(UNMEASURED_PAGE_SIZE);
@@ -949,7 +949,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   const applySavedView = useCallback(
     (view: SavedViewRead) => {
-      setFiltersExpanded(null);
+      setFilterPickerRevision((revision) => revision + 1);
       setActiveSavedViewId(view.id);
       setSelectedIds(new Set());
       setSelectedMultipartRows(new Map());
@@ -1729,12 +1729,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // survives load-more and search; backend per-model RBAC makes cross-collection
   // selections safe. We clear it when navigating folders (see below) so a hidden
   // off-screen selection doesn't linger.
-
-  function toggleStructuredFilters(event: React.MouseEvent<HTMLButtonElement>) {
-    filtersOpener.current = event.currentTarget;
-    startup.request("filters");
-    setFiltersExpanded((current) => !current);
-  }
 
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchRecovery, setBatchRecovery] = useState<{
@@ -3147,58 +3141,27 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   function filterControl(className: string) {
     return (
-      <DropdownMenu
-        open={!!filtersExpanded}
-        onOpenChange={(open) => setFiltersExpanded(open)}
-        portal
-        align="start"
-        role="dialog"
-        aria-label={uiText("Filter Models")}
+      <LibraryFilterControl
+        key={filterPickerRevision}
         className={className}
-        contentClassName="w-[352px] overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-lg"
-        trigger={
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            data-menu-trigger
-            onClick={toggleStructuredFilters}
-            aria-label={uiText("Filters")}
-            aria-haspopup="dialog"
-            aria-expanded={!!filtersExpanded}
-            aria-controls="library-filter-panel"
-            className="h-8 w-full gap-2 aria-expanded:bg-accent aria-expanded:text-accent-foreground"
-          >
-            <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            <span className="library-toolbar-filter-label">{uiText("Filters")}</span>
-            {activeFilterItems.length > Number(!!query.trim()) && (
-              <span className="text-xs tabular-nums text-muted-foreground">
-                {activeFilterItems.length - Number(!!query.trim())}
-              </span>
-            )}
-          </Button>
-        }
-      >
-        <LibraryFilterPicker
-          filters={currentFilters}
-          facets={facetQuery.data}
-          tags={tags}
-          printers={printers}
-          canViewPrinters={canViewPrinters}
-          loading={facetQuery.isLoading || tagsQuery.isLoading}
-          error={facetQuery.isError || tagsQuery.isError}
-          onRetry={() => {
-            void facetQuery.refetch();
-            void tagsQuery.refetch();
-          }}
-          onChange={setStructuredFilter}
-          onReset={() => clearAllFilters(true)}
-          onClose={() => {
-            setFiltersExpanded(false);
-            filtersOpener.current?.focus();
-          }}
-        />
-      </DropdownMenu>
+        activeCount={activeFilterItems.length - Number(!!query.trim())}
+        onOpen={() => {
+          if (!filtersEnabled) startTransition(() => requestStartup("filters"));
+        }}
+        filters={currentFilters}
+        facets={facetQuery.data}
+        tags={tags}
+        printers={printers}
+        canViewPrinters={canViewPrinters}
+        loading={!filtersEnabled || facetQuery.isLoading || tagsQuery.isLoading}
+        error={facetQuery.isError || tagsQuery.isError}
+        onRetry={() => {
+          void facetQuery.refetch();
+          void tagsQuery.refetch();
+        }}
+        onChange={setStructuredFilter}
+        onReset={() => clearAllFilters(true)}
+      />
     );
   }
 

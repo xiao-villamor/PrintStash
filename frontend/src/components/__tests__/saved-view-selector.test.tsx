@@ -48,7 +48,7 @@ function handlerSpies() {
 
 function RailRequest() {
   const { requestSavedViews } = useNavigationShell();
-  return <button onClick={requestSavedViews}>Open saved views from rail</button>;
+  return <button onClick={() => requestSavedViews()}>Open saved views from rail</button>;
 }
 
 describe("SavedViewSelector", () => {

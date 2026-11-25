@@ -118,10 +118,12 @@ export function SavedViewsSidebar() {
         <button
           type="button"
           aria-label={uiText("Manage saved views")}
+          aria-haspopup="dialog"
+          aria-expanded={shell.savedViewsRequest?.kind === "sidebar"}
           title={uiText("Manage saved views")}
           className="flex h-7 w-7 items-center justify-center text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={() => {
-            shell.requestSavedViews();
+          onClick={(event) => {
+            shell.requestSavedViews(event.currentTarget);
             if (pathname !== "/") router.push("/");
           }}
         >
@@ -142,11 +144,13 @@ export function SavedViewsSidebar() {
             </Button>
           </div>
         )}
-        {owner.query.isSuccess && owner.views.length === 0 && (
-          <p className="px-2.5 py-2 text-xs text-muted-foreground">
-            {uiText("No saved views yet")}
-          </p>
-        )}
+        {owner.query.isSuccess &&
+          owner.views.length === 0 &&
+          shell.savedViewsRequest?.kind !== "sidebar" && (
+            <p className="px-2.5 py-2 text-xs text-muted-foreground">
+              {uiText("No saved views yet")}
+            </p>
+          )}
         {owner.views.map((view) => (
           <button
             key={view.id}

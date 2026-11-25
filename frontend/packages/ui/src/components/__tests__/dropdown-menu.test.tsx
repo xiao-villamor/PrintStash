@@ -92,6 +92,26 @@ afterEach(() => {
 
 describe("DropdownMenu", () => {
   describe("mounting", () => {
+    it("renders an instant panel fully open before advancing frames", () => {
+      render(
+        <DropdownMenu open animate={false} onOpenChange={() => {}} trigger={TRIGGER}>
+          <MenuItems />
+        </DropdownMenu>,
+      );
+      expect(screen.getByRole("menu")).toHaveAttribute("data-state", "open");
+    });
+
+    it("removes an instant panel on close", () => {
+      const panel = (open: boolean) => (
+        <DropdownMenu open={open} animate={false} onOpenChange={() => {}} trigger={TRIGGER}>
+          <MenuItems />
+        </DropdownMenu>
+      );
+      const { rerender } = render(panel(true));
+      rerender(panel(false));
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    });
+
     it("renders the trigger while the menu is closed", () => {
       render(
         <DropdownMenu
