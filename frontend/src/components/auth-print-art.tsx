@@ -247,7 +247,7 @@ function preparePrint(
   };
 }
 
-export function AuthPrintArt() {
+export function AuthPrintArt({ animated = true }: { animated?: boolean }) {
   const layersRef = useRef<SVGGElement>(null);
   const travelRef = useRef<SVGPathElement>(null);
   const nozzleRef = useRef<SVGRectElement>(null);
@@ -337,9 +337,9 @@ export function AuthPrintArt() {
           frame = window.requestAnimationFrame(build);
         return;
       }
-      if (elapsedMs >= printDurationMs) {
+      if (!animated || elapsedMs >= printDurationMs) {
         stop();
-        draw(elapsedMs);
+        draw(printDurationMs);
       } else if (frame === undefined) {
         draw(elapsedMs);
         frame = window.requestAnimationFrame(tick);
@@ -358,7 +358,7 @@ export function AuthPrintArt() {
       travelLine.removeAttribute("d");
       nozzle.setAttribute("visibility", "hidden");
     };
-  }, []);
+  }, [animated]);
 
   return (
     <svg

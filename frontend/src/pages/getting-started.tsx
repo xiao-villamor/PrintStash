@@ -6,6 +6,7 @@ import {
   Check,
   ChevronRight,
   Clock3,
+  Eye,
   FolderOpen,
   Loader2,
   Upload,
@@ -26,6 +27,8 @@ import { SetupFolder } from "@/components/setup-folder";
 import { SetupStorageChoice } from "@/components/setup-storage-choice";
 import { ApiError } from "@/lib/errors";
 import { Button } from "@/components/ui/button";
+import { PageContainer } from "@/components/ui/page-container";
+import { PageHeader } from "@/components/ui/page-header";
 import { UploadModal } from "@/components/upload-modal";
 
 export default function GettingStartedPage() {
@@ -109,20 +112,17 @@ export default function GettingStartedPage() {
           : "setup.firstTitle";
   if (!user?.is_superuser) return null;
   return (
-    <div className="h-full overflow-y-auto bg-background">
-      <div className="w-full space-y-5 p-4 sm:p-6">
-        <header>
-          <h1 className="text-xl font-semibold tracking-tight">{t("nav.gettingStarted")}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{t("setup.guideSubtitle")}</p>
-        </header>
+    <PageContainer>
+      <div className="space-y-5">
+        <PageHeader title={t("nav.gettingStarted")} description={t("setup.guideSubtitle")} />
         <div
           className={
             !folder && !choosing && storage === "ready"
-              ? "grid max-w-[1120px] items-start gap-5 lg:grid-cols-[minmax(0,1fr)_320px]"
+              ? "grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]"
               : "grid items-start gap-4"
           }
         >
-          <section className="min-w-0 space-y-6 border border-border bg-card p-4 sm:p-6">
+          <section className="min-w-0 space-y-6 rounded-lg border border-border bg-card p-4 sm:p-6">
             {folder && (
               <Button
                 variant="ghost"
@@ -136,7 +136,7 @@ export default function GettingStartedPage() {
             )}
             <div className="space-y-3">
               {!folder && storage === "ready" && (
-                <div className="flex items-start gap-2 border border-success/30 bg-success/10 px-3 py-2 text-xs text-foreground">
+                <div className="flex items-start gap-2 rounded-md bg-success/10 px-3 py-2 text-sm text-foreground">
                   <Check className="h-4 w-4 text-success" aria-hidden />
                   <div>
                     <p className="font-medium">{t("setup.accountReady")}</p>
@@ -263,7 +263,7 @@ export default function GettingStartedPage() {
                       </div>
                     ) : (
                       <div className="space-y-5">
-                        <section className="flex flex-wrap items-center gap-4 border border-dashed border-border bg-muted/30 p-5">
+                        <section className="flex flex-wrap items-center gap-4 rounded-md border border-dashed border-border bg-muted/30 p-5">
                           <Upload className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
                           <div className="min-w-0 flex-1">
                             <h3 className="text-sm font-semibold">{t("setup.upload")}</h3>
@@ -338,7 +338,7 @@ export default function GettingStartedPage() {
           </section>
           {/* Deferring is not offered before storage exists: every page leads back here. */}
           {!folder && !choosing && storage === "ready" && (
-            <aside className="space-y-4 border border-border bg-card p-4 text-sm">
+            <aside className="space-y-4 rounded-lg border border-border bg-card p-4 text-sm">
               <h2 className="font-semibold">{t("setup.nextOptional")}</h2>
               <nav className="flex flex-col divide-y divide-border">
                 <Link
@@ -357,6 +357,14 @@ export default function GettingStartedPage() {
                   <span className="flex-1">{t("setup.printer")}</span>
                   <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden />
                 </Link>
+                <Link
+                  className="flex items-center gap-3 py-3 text-foreground hover:text-primary"
+                  href="/setup-appearance"
+                >
+                  <Eye className="h-4 w-4 text-muted-foreground" aria-hidden />
+                  <span className="flex-1">{t("setup.customizePreviews")}</span>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden />
+                </Link>
               </nav>
               <p className="text-xs leading-relaxed text-muted-foreground">
                 {t("setup.resumeHelp")}
@@ -370,6 +378,6 @@ export default function GettingStartedPage() {
           )}
         </div>
       </div>
-    </div>
+    </PageContainer>
   );
 }

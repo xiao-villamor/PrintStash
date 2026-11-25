@@ -249,10 +249,12 @@ describe("SetupPage", () => {
     renderSetup();
     await screen.findByLabelText("Username");
 
-    expect(screen.getByRole("heading", { name: "Welcome to PrintStash" })).toBeVisible();
     expect(
-      screen.getByRole("list", { name: "Setup progress" }).querySelector('[aria-current="step"]'),
-    ).toHaveTextContent("Account");
+      screen.getByRole("heading", { name: "Create your administrator account", level: 1 }),
+    ).toBeVisible();
+    const progress = screen.getByRole("list", { name: "Setup progress" });
+    expect(within(progress).getAllByRole("listitem")).toHaveLength(3);
+    expect(progress.querySelector('[aria-current="step"]')).toHaveTextContent("Account");
     const fields = screen.getAllByRole("textbox").map((field) => field.getAttribute("id"));
     expect(fields.indexOf("setup-username")).toBeLessThan(fields.indexOf("setup-email"));
   });
@@ -287,7 +289,7 @@ describe("SetupPage", () => {
   it("explains the administrator account before asking for it", async () => {
     renderSetup();
     await screen.findByLabelText("Username");
-    expect(screen.getByText(/You will be the administrator/)).toBeVisible();
+    expect(screen.getByText(/This account manages your PrintStash installation/)).toBeVisible();
   });
   it("reports every invalid account field at once", async () => {
     const user = userEvent.setup();
@@ -310,10 +312,12 @@ describe("SetupPage", () => {
     expect(screen.getByLabelText("Username")).toHaveAttribute("aria-invalid", "false");
     expect(screen.getByLabelText("Password")).toHaveAttribute("aria-invalid", "true");
   });
-  it("keeps the welcome heading while focus moves to the current step", async () => {
+  it("moves heading focus to the current step", async () => {
     await reachStorage();
-    expect(screen.getByRole("heading", { name: "Welcome to PrintStash" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Your files" })).toHaveFocus();
+    expect(screen.getByRole("heading", { name: "Your files", level: 1 })).toHaveFocus();
+    expect(
+      screen.getByRole("list", { name: "Setup progress" }).querySelector('[aria-current="step"]'),
+    ).toHaveTextContent("Storage");
   });
   it("says an existing folder is connected after setup", async () => {
     await reachStorage();
@@ -393,11 +397,11 @@ describe("SetupPage", () => {
     await user.click(await screen.findByRole("button", { name: "Edit storage" }));
     expect(screen.getByLabelText("Data directory")).toHaveValue("/data/files");
   });
-  it("opens Appearance for the authenticated administrator", async () => {
+  it("opens Getting started for the authenticated administrator", async () => {
     const user = await reachStorage();
     await continueToReview(user);
     await user.click(screen.getByRole("button", { name: "Create account" }));
-    await waitFor(() => expect(currentPath()).toBe("/setup-appearance"));
+    await waitFor(() => expect(currentPath()).toBe("/getting-started"));
     expect(deps.storeLogin).toHaveBeenCalledWith(
       "token",
       expect.objectContaining({ username: "admin" }),
@@ -410,7 +414,7 @@ describe("SetupPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Create account" }));
 
-    await waitFor(() => expect(currentPath()).toBe("/setup-appearance"));
+    await waitFor(() => expect(currentPath()).toBe("/getting-started"));
     expect(listTasks()).toHaveLength(0);
   });
   it("keeps existing tasks when account creation fails", async () => {
@@ -558,9 +562,7 @@ describe("Storage form recovery", () => {
   it("explains the required storage check", async () => {
     await reachStorage();
     expect(
-      screen.getByText(
-        "Continue checks that PrintStash can read and write here. This is not a backup.",
-      ),
+      screen.getByText("PrintStash checks read and write access when you continue."),
     ).toBeVisible();
   });
 
@@ -867,7 +869,7 @@ describe("setup source ownership", () => {
     await continueToReview(user);
 
     await user.click(screen.getByRole("button", { name: "Create account" }));
-    await waitFor(() => expect(currentPath()).toBe("/setup-appearance"));
+    await waitFor(() => expect(currentPath()).toBe("/getting-started"));
 
     const cached = JSON.stringify(
       queryClient

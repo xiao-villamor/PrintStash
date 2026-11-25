@@ -21,14 +21,13 @@ profile information; PrintStash does not send password-reset emails.
 
 ## Your files
 
-The recommended destination uses the deployment's persistent storage volumes for
-uploads and previews. Open **View location and advanced options** to inspect
-paths or choose a remote provider. Use separate empty directories for managed
+The recommended local destination uses the deployment's persistent storage
+volumes for uploads and previews. The Storage step shows the available locations
+and their paths. Use separate empty directories for managed
 local storage. An existing folder of models belongs in **Library sources** in the
 next step, rather than becoming the managed upload directory.
 
-**Continue** checks the selected destination's access before moving on, and
-**Check storage** runs the same check without leaving the step. For local storage it
+**Continue** checks the selected destination's access before opening Review. For local storage it
 also reports available space when measurable. Remote checks use temporary probe
 objects to verify the required access. A successful check is current evidence of
 access, not a backup or a recovery guarantee. Review the account and destination,
@@ -40,6 +39,10 @@ retry preparation. If the browser loses the creation response, it checks whether
 registration has closed and offers sign-in instead of resubmitting creation.
 
 ## Get started
+
+After you create your account, **Getting started** opens with the options to upload
+files or connect an existing folder. **Customize previews** is optional and also
+lets you choose whether to add the sample collection.
 
 Upload files with the existing uploader, or explicitly enable Library sources and
 connect an existing folder. Locations are paths visible to the API process. A

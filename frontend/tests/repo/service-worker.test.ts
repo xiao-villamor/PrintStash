@@ -31,7 +31,7 @@ function worker({
     },
     caches: {
       open,
-      keys: async () => ["printstash-shell-v5", "printstash-shell-v6", "unrelated"],
+      keys: async () => ["printstash-shell-v6", "printstash-shell-v7", "unrelated"],
       delete: async (key: string) => {
         deletions.push(key);
       },
@@ -138,7 +138,7 @@ describe("bootstrap service worker", () => {
       },
     }).invoke("fetch");
     expect(await (await response!).text()).toBe("offline bootstrap");
-    expect(open).toHaveBeenCalledWith("printstash-shell-v6");
+    expect(open).toHaveBeenCalledWith("printstash-shell-v7");
     await done();
   });
   it("reuses HTTP-cached immutable assets during reload", async () => {
@@ -193,6 +193,6 @@ describe("bootstrap service worker", () => {
   it("updates the shell without deleting unrelated caches", async () => {
     const runtime = worker({ open: async () => cache(), network: async () => new Response() });
     await runtime.invoke("activate").done();
-    expect(runtime.deletions).toEqual(["printstash-shell-v5"]);
+    expect(runtime.deletions).toEqual(["printstash-shell-v6"]);
   });
 });

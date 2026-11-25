@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
+import { brandMarkPath } from "../../src/components/auth-print-geometry";
 
 const root = resolve(import.meta.dirname, "../..");
 
@@ -26,8 +27,29 @@ describe("faviconFor", () => {
     expect(darkIcon).toContain("#0E48F0");
     expect(darkIcon).not.toMatch(/#fb923c|#ea580c/i);
     expect(html).toContain("/theme-bootstrap.js");
-    expect(bootstrap).toContain("/icon-dark.svg?v=2");
-    expect(theme).toContain("/icon-dark.svg?v=2");
+    expect(bootstrap).toContain("/icon-dark.svg?v=3");
+    expect(theme).toContain("/icon-dark.svg?v=3");
+  });
+});
+
+describe("PrintStash monogram", () => {
+  it.each([
+    "public/icon-light.svg",
+    "public/icon-dark.svg",
+    "public/logo.svg",
+    "public/logo-dark.svg",
+    "../browser-extension/icon.svg",
+  ])("uses the same shape in %s", (path) => {
+    const asset = readFileSync(resolve(root, path), "utf8");
+    expect(asset).toContain(`d="${brandMarkPath}"`);
+    expect(asset).toContain('fill-rule="evenodd"');
+  });
+
+  it.each([16, 32, 48, 128])("exports a square %i px extension icon", (size) => {
+    const icon = readFileSync(resolve(root, `../browser-extension/icon-${size}.png`));
+    expect(icon.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+    expect(icon.readUInt32BE(16)).toBe(size);
+    expect(icon.readUInt32BE(20)).toBe(size);
   });
 });
 

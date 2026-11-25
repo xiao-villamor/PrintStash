@@ -23,7 +23,7 @@ export default function SetupAppearancePage() {
   const config = useQuery({ ...vaultConfigOptions(), enabled: user?.is_superuser === true });
   const command = useVaultConfigCommand();
   const samples = useMutation({ mutationFn: chooseSetupSamples });
-  const [includeSamples, setIncludeSamples] = useState(true);
+  const [includeSamples, setIncludeSamples] = useState(false);
   const busy = command.isPending || samples.isPending;
   const sampleLabel = t("Add the PrintStash sample collection");
   const [draft, setDraft] = useState<{ value: Appearance; base: EditingBase } | null>(null);
@@ -34,16 +34,16 @@ export default function SetupAppearancePage() {
 
   if (!user?.is_superuser) return null;
 
-  async function finish(skip: boolean) {
+  async function finish() {
     try {
-      if (!skip && config.data && draft && appearanceChanged(config.data, draft.value)) {
+      if (config.data && draft && appearanceChanged(config.data, draft.value)) {
         await command.mutateAsync({
           session: getSessionVersion(),
           base: draft.base,
           payload: draft.value,
         });
       }
-      await samples.mutateAsync(!skip && includeSamples);
+      if (includeSamples) await samples.mutateAsync(true);
       router.replace("/getting-started");
     } catch {
       // Leave the step available so the administrator can retry the choice.
@@ -52,19 +52,24 @@ export default function SetupAppearancePage() {
 
   return (
     <SetupFrame
-      step={4}
       actions={
         <>
-          <Button variant="ghost" disabled={busy} onClick={() => void finish(true)}>
-            {t("Skip")}
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={() => router.replace("/getting-started")}
+          >
+            {t("setup.back")}
           </Button>
-          <Button disabled={!config.data || busy} onClick={() => void finish(false)}>
-            {t("setup.next")}
+          <Button disabled={!config.data} loading={busy} onClick={() => void finish()}>
+            {t("setup.saveAppearance")}
           </Button>
         </>
       }
     >
-      <h2 className="text-xl font-semibold text-foreground">{t("Make your library yours")}</h2>
+      <h1 className="text-xl font-semibold tracking-tight text-foreground">
+        {t("setup.customizePreviews")}
+      </h1>
       <p className="mb-4 mt-2 text-sm text-muted-foreground">
         {t("You can change this any time in Settings")}
       </p>

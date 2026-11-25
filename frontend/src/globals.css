@@ -415,27 +415,6 @@
 }
 
 @layer components {
-  .setup-card {
-    display: grid;
-    max-width: 800px;
-  }
-
-  .setup-card-appearance {
-    max-width: 960px;
-  }
-
-  @media (min-width: 768px) {
-    .setup-card {
-      height: min(600px, 100dvh - 136px);
-      grid-template-columns: 220px minmax(0, 1fr);
-      grid-template-rows: minmax(0, 1fr);
-    }
-
-    .setup-card-appearance {
-      height: min(736px, 100dvh - 136px);
-    }
-  }
-
   .field-option {
     @apply flex min-h-8 w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-2 text-left text-field leading-4 text-popover-foreground hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none data-[active=true]:bg-popover-hover;
   }
@@ -735,50 +714,24 @@
 }
 
 @media (min-width: 1024px) {
-  .auth-frame-split {
-    --auth-workspace-width: max(480px, 40%);
-    position: relative;
+  .auth-frame {
     display: grid;
-    grid-template-columns: minmax(480px, 40%) minmax(0, 1fr);
+    grid-template-columns: minmax(29rem, 46%) minmax(0, 1fr);
   }
 
-  .auth-split-workspace > header,
-  .auth-split-workspace > footer {
-    min-height: 80px;
-    height: auto;
-    padding-block: 24px;
-  }
-
-  .auth-split-main {
-    justify-items: center;
-    padding-inline: 24px;
-  }
-
-  .auth-split-form {
-    width: 340px;
-    max-width: 100%;
-    border: 0;
-    background: transparent;
-    padding: 0;
-    box-shadow: none;
-  }
-
-  .auth-split-tagline {
-    position: absolute;
-    inset-inline-start: calc(var(--auth-workspace-width) + 24px);
-    inset-block-end: 24px;
-    z-index: 1;
+  .auth-frame-setup {
+    grid-template-columns: minmax(36rem, 54%) minmax(0, 1fr);
   }
 
   .auth-split-art {
-    position: relative;
-    display: block;
+    @apply my-6 mr-6 grid place-items-center overflow-hidden rounded-xl border border-border p-6 xl:p-12;
     background: var(--plate);
+    min-width: 0;
   }
 
   .auth-split-art > svg {
-    position: absolute;
-    inset: 0;
-    padding: 48px;
+    inline-size: 100%;
+    block-size: auto;
+    max-inline-size: 54rem;
   }
 }

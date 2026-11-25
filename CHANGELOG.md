@@ -17,6 +17,9 @@
 - Show a compact status label when AI Search is on. Use a neutral Library search focus border and consistent filled dropdowns with rounded menus.
 - Anchor dropdowns below their controls when there is room, with upward placement near the viewport edge.
 - Use cards for the Library gallery and simplify its More menu.
+- Streamline first-run setup with three visible steps, a compact form, and optional preview customization in Getting started.
+- Give sign-in and first-run setup a contrasting print-plate illustration in both themes.
+- Use a single layered PrintStash monogram across the app, favicon, and browser extension.
 - Keep reusable pricing templates in Profiles and show the rates applied to each Model revision. Use a separate editing view for one-off estimate inputs.
 - Let cost estimates use printers with a linked cost profile. Prefer the printer recorded for that revision or an unambiguous match from the G-code.
 - Select catalog printer models and common nozzle sizes in Profiles. Operating costs offer editable lifetime and published power defaults.

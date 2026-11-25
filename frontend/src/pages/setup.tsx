@@ -226,7 +226,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
         is_superuser: true,
       });
       setAccount({ username: "", password: "", confirm: "", email: "" });
-      router.replace("/setup-appearance");
+      router.replace("/getting-started");
     } catch (error) {
       if (!controller.signal.aborted && version === getSessionVersion())
         setError(describeError(error instanceof Error ? error : new Error()));
@@ -287,13 +287,16 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
   }
 
   return (
-    <SetupFrame step={step} actions={actions}>
+    <SetupFrame step={bootstrap.data?.kind === "ready" ? step : undefined} actions={actions}>
+      {bootstrap.data?.kind !== "ready" && (
+        <h1 className="mb-3 text-xl font-semibold tracking-tight">{t("setup.welcome")}</h1>
+      )}
       {existing ? (
-        <p role="status" className="text-[13px] text-muted-foreground">
+        <p role="status" className="text-sm text-muted-foreground">
           {t("setup.exists")}
         </p>
       ) : !status ? (
-        <p role="status" className="text-[13px] text-muted-foreground">
+        <p role="status" className="text-sm text-muted-foreground">
           {bootstrap.error ? t("setup.failed") : t("setup.loading")}
         </p>
       ) : !status.setup_available ? (
@@ -308,7 +311,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
           id={formId}
           ref={form}
           noValidate
-          className={step === 3 ? "space-y-3" : "space-y-5"}
+          className="space-y-5"
           onSubmit={(event) => {
             event.preventDefault();
             if (step === 1) next();
@@ -322,17 +325,17 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
           }}
         >
           <div>
-            <h2
+            <h1
               ref={heading}
               tabIndex={-1}
-              className="text-base font-semibold tracking-tight text-foreground focus-visible:outline-none"
+              className="text-xl font-semibold tracking-tight text-foreground focus-visible:outline-none"
             >
               {t(
                 step === 1 ? "setup.accountHeading" : step === 2 ? "setup.files" : "setup.summary",
               )}
-            </h2>
+            </h1>
             {step !== 3 && (
-              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+              <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
                 {step === 1
                   ? t("setup.accountHelp")
                   : `${t("setup.defaultHelp")} ${t("setup.existingHelp")}`}
@@ -340,7 +343,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
             )}
           </div>
           {step === 1 ? (
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
               {ACCOUNT_FIELDS.map((field) => {
                 const invalid = fieldErrors.includes(field);
                 const secret = field === "password" || field === "confirm";
@@ -453,8 +456,8 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                 }}
               />
               <div className="space-y-2">
-                <p className="text-[13px] text-muted-foreground">{t("setup.checkFirst")}</p>
-                <div role="status" aria-live="polite" className="text-[13px]">
+                <p className="text-sm text-muted-foreground">{t("setup.checkFirst")}</p>
+                <div role="status" aria-live="polite" className="text-sm">
                   {busy ? (
                     <p className="text-muted-foreground">
                       {t(operation === "check" ? "setup.checking" : "setup.creating")}
@@ -514,7 +517,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
           ) : (
             <dl
               aria-label={t("setup.summary")}
-              className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-x-2 divide-y divide-border text-[13px] md:gap-x-3"
+              className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-x-2 divide-y divide-border text-sm sm:gap-x-3"
             >
               {(
                 [
@@ -572,8 +575,8 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                     title={row.value}
                     className={
                       row.key === "files" || row.key === "previews"
-                        ? "truncate text-right font-mono text-xs"
-                        : "truncate text-right"
+                        ? "break-all text-right font-mono text-xs"
+                        : "break-all text-right"
                     }
                   >
                     {row.value}

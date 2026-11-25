@@ -1,5 +1,5 @@
 /* global self, caches */
-const CACHE = "printstash-shell-v6";
+const CACHE = "printstash-shell-v7";
 const BOOTSTRAP = ["/theme-bootstrap.js", "/locale-shell.js"];
 const PUBLIC_FILES = [
   "/logo.svg",
@@ -16,6 +16,8 @@ const SHELL = [
   "/manifest.webmanifest",
   "/icon-light.svg",
   "/icon-dark.svg",
+  "/icon-light.svg?v=3",
+  "/icon-dark.svg?v=3",
 ];
 
 self.addEventListener("install", (event) => {

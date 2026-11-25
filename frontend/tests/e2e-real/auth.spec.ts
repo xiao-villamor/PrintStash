@@ -14,49 +14,39 @@ test.describe("authentication", () => {
     test.use({ authenticated: false });
 
     for (const theme of ["light", "dark"] as const) {
-      test(`centers the login form at responsive sizes in ${theme} mode`, async ({
+      test(`separates the login form from the print artwork in ${theme} mode`, async ({
         page,
       }, testInfo) => {
         await page.addInitScript((value) => localStorage.setItem("printstash.theme", value), theme);
         await page.goto("/login");
         await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
-        const card = page
-          .getByRole("main")
-          .locator(":scope > div")
-          .filter({
-            has: page.getByRole("button", { name: "Sign in", exact: true }),
-          });
-        for (const viewport of [
-          { width: 1440, height: 1100 },
-          { width: 390, height: 844 },
-        ]) {
-          await page.setViewportSize(viewport);
-          await expect(async () => {
-            const bounds = await card.boundingBox();
-            expect(bounds).not.toBeNull();
-            expect(Math.abs(bounds!.x + bounds!.width / 2 - viewport.width / 2)).toBeLessThan(2);
-            expect(Math.abs(bounds!.y + bounds!.height / 2 - viewport.height / 2)).toBeLessThan(2);
-          }).toPass({ timeout: 5_000 });
-          await page.screenshot({
-            path: testInfo.outputPath(`login-${theme}-${viewport.width}.png`),
-          });
-        }
+        const form = page.getByRole("main").locator("form");
+        const artwork = page.locator(".auth-split-art");
+        await expect(artwork).toBeVisible();
+        await expect(artwork).toHaveAttribute("aria-hidden", "true");
+        const formBounds = (await form.boundingBox())!;
+        const artBounds = (await artwork.boundingBox())!;
+        expect(formBounds.x + formBounds.width).toBeLessThan(artBounds.x);
+        expect(artBounds.width).toBeGreaterThan(formBounds.width);
+        await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeInViewport();
+        await page.screenshot({ path: testInfo.outputPath(`login-${theme}-desktop.png`) });
       });
     }
 
     test("keeps the login controls reachable on a short screen", async ({ page }) => {
-      await page.setViewportSize({ width: 390, height: 360 });
+      await page.setViewportSize({ width: 1280, height: 600 });
       await page.goto("/login");
       await page.getByLabel("Username").fill(ADMIN.username);
-      await page.getByLabel("Password").fill("definitely-wrong");
+      await page.getByLabel("Password", { exact: true }).fill("definitely-wrong");
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
       await expect(page.getByRole("alert")).toHaveText("Invalid username or password.");
       await page.getByRole("heading", { name: "Welcome back" }).scrollIntoViewIfNeeded();
       await expect(page.getByRole("heading", { name: "Welcome back" })).toBeInViewport();
+      await page.getByRole("button", { name: "Forgot password?" }).click();
       await page.getByRole("link", { name: "How recovery works" }).scrollIntoViewIfNeeded();
       await expect(page.getByRole("link", { name: "How recovery works" })).toBeInViewport();
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
-        390,
+        1280,
       );
     });
 
@@ -64,7 +54,7 @@ test.describe("authentication", () => {
       await page.goto("/login");
 
       await page.getByLabel("Username").fill(ADMIN.username);
-      await page.getByLabel("Password").fill(ADMIN.password);
+      await page.getByLabel("Password", { exact: true }).fill(ADMIN.password);
       await page.getByRole("button", { name: "Sign in" }).click();
 
       await expect(page).toHaveURL(/\/(\?.*)?$/);
@@ -75,7 +65,7 @@ test.describe("authentication", () => {
       await page.goto("/login");
 
       await page.getByLabel("Username").fill(ADMIN.username);
-      await page.getByLabel("Password").fill("definitely-wrong");
+      await page.getByLabel("Password", { exact: true }).fill("definitely-wrong");
       await page.getByRole("button", { name: "Sign in" }).click();
 
       await expect(page.getByText("Invalid username or password.")).toBeVisible();

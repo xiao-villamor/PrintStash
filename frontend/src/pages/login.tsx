@@ -115,18 +115,18 @@ export default function LoginPage() {
   }
 
   return (
-    <AuthFrame layout="split" note={t("auth.local")}>
-      <h1 className="text-xl font-semibold tracking-tight text-foreground">{t("auth.welcome")}</h1>
-      <p className="mt-1 text-field leading-relaxed text-muted-foreground">
+    <AuthFrame layout="signin" note={t("auth.local")}>
+      <h1 className="text-2xl font-semibold tracking-tight text-foreground">{t("auth.welcome")}</h1>
+      <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
         {t("auth.description")}
       </p>
 
-      <form onSubmit={handleSubmit} className="mt-5 grid gap-4">
+      <form onSubmit={handleSubmit} className="mt-6 grid gap-4">
         {sessionExpired && (
           <div
             id="login-session-expired"
             role="status"
-            className="flex items-start gap-2.5 border border-border bg-muted/50 px-3 py-2.5 text-[13px] font-medium text-foreground"
+            className="flex items-start gap-2.5 rounded-md border border-border bg-muted/50 px-3 py-2.5 text-sm font-medium text-foreground"
           >
             <Info className="mt-px h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
             <p>{t("auth.expired")}</p>
@@ -137,7 +137,7 @@ export default function LoginPage() {
           <div
             id="login-error"
             role="alert"
-            className="flex items-start gap-2.5 border border-destructive/25 bg-destructive/10 px-3 py-2.5 text-[13px] font-medium text-foreground"
+            className="flex items-start gap-2.5 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2.5 text-sm font-medium text-foreground"
           >
             <AlertCircle className="mt-px h-4 w-4 shrink-0 text-destructive" aria-hidden />
             <p>{error}</p>

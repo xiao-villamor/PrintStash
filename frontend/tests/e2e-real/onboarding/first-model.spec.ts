@@ -6,87 +6,44 @@ import { gcodeFor } from "../util";
 const loseResponse = process.env.PLAYWRIGHT_ONBOARDING_LOST_RESPONSE === "1";
 
 test.describe("Browser onboarding", () => {
-  test("centers setup at responsive viewport sizes", async ({ page }, testInfo) => {
+  test("keeps the localized setup progress and action visible on desktop", async ({
+    page,
+  }, testInfo) => {
     await page.addInitScript(() => {
       localStorage.setItem("printstash.locale", "es");
       localStorage.setItem("printstash.theme", "dark");
     });
     await page.goto("/setup");
     await page.getByLabel("Usuario", { exact: true }).fill("first-owner");
-    for (const viewport of [
-      { width: 1440, height: 1100 },
-      { width: 390, height: 844 },
-    ]) {
-      await page.setViewportSize(viewport);
-      const frame = page.getByRole("region", { name: "Bienvenido a PrintStash" });
-      const bounds = await frame.boundingBox();
-      expect(bounds).not.toBeNull();
-      expect(Math.abs(bounds!.x + bounds!.width / 2 - viewport.width / 2)).toBeLessThan(10);
-      if (viewport.width > 1000) expect(bounds!.height).toBeLessThan(viewport.height);
-      else {
-        const next = page.getByRole("button", { name: "Continuar", exact: true });
-        await next.scrollIntoViewIfNeeded();
-        await expect(next).toBeInViewport();
-      }
-      if (viewport.width > 1000) {
-        expect(Math.abs(bounds!.y + bounds!.height / 2 - viewport.height / 2)).toBeLessThan(2);
-        const passwordRow = await page.getByLabel("Contraseña", { exact: true }).boundingBox();
-        const confirmationRow = await page
-          .getByLabel("Confirmar contraseña", { exact: true })
-          .boundingBox();
-        expect(confirmationRow!.y).toBe(passwordRow!.y);
-        expect(confirmationRow!.x).toBeGreaterThanOrEqual(passwordRow!.x + passwordRow!.width);
-        expect(confirmationRow!.width).toBe(passwordRow!.width);
-      }
-      const progress = await page
-        .getByRole("list", { name: "Progreso de configuración" })
-        .boundingBox();
-      expect(progress!.height).toBeLessThan(60);
-      expect(
-        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-      ).toBe(true);
-      const password = await page.getByLabel("Contraseña", { exact: true }).boundingBox();
-      const eye = await page
-        .getByRole("button", { name: "Mostrar Contraseña", exact: true })
-        .boundingBox();
-      expect(eye!.x).toBeGreaterThan(password!.x);
-      expect(eye!.x + eye!.width).toBeLessThanOrEqual(password!.x + password!.width + 1);
-      await page.screenshot({
-        path: testInfo.outputPath(`account-es-${viewport.width}.png`),
-        fullPage: true,
-      });
-    }
-    await page.getByLabel("Contraseña", { exact: true }).fill("BrowserPassword123");
-    await page.getByLabel("Confirmar contraseña", { exact: true }).fill("BrowserPassword123");
-    await page.getByRole("button", { name: "Continuar", exact: true }).click();
-    for (const viewport of [
-      { width: 1440, height: 1100 },
-      { width: 390, height: 844 },
-    ]) {
-      await page.setViewportSize(viewport);
-      await expect(page.getByRole("textbox", { name: "Tus archivos", exact: true })).toBeVisible();
-      const local = await page.getByRole("button", { name: "Carpeta local" }).boundingBox();
-      const remote = await page.getByRole("button", { name: "Compatible con S3" }).boundingBox();
-      expect(Math.abs(local!.width - remote!.width)).toBeLessThan(2);
-      expect(local!.y).toBe(remote!.y);
-      const frame = await page
-        .getByRole("region", { name: "Bienvenido a PrintStash" })
-        .boundingBox();
-      expect(frame!.height).toBeLessThan(viewport.height * 1.5);
-      expect(
-        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-      ).toBe(true);
-      await page.screenshot({
-        path: testInfo.outputPath(`storage-es-${viewport.width}.png`),
-        fullPage: true,
-      });
-    }
+
+    const frame = page.getByRole("region", { name: "Bienvenido a PrintStash" });
+    const progress = page.getByRole("list", { name: "Progreso de configuración" });
+    const next = page.getByRole("button", { name: "Continuar", exact: true });
+    const password = page.getByLabel("Contraseña", { exact: true });
+    const confirmation = page.getByLabel("Confirmar contraseña", { exact: true });
+
+    await expect(progress.getByRole("listitem")).toHaveCount(3);
+    await expect(progress.locator('[aria-current="step"]')).toHaveText(/Cuenta/);
+    const account = (await frame.boundingBox())!;
+    const passwordBounds = (await password.boundingBox())!;
+    const confirmBounds = (await confirmation.boundingBox())!;
+    const nextBounds = (await next.boundingBox())!;
+    expect(confirmBounds.y).toBe(passwordBounds.y);
+    expect(confirmBounds.width).toBe(passwordBounds.width);
+    expect(nextBounds.y - passwordBounds.y - passwordBounds.height).toBeLessThan(100);
+    await expect(next).toBeInViewport();
+    await page.screenshot({ path: testInfo.outputPath("account-es-dark.png") });
+
+    await password.fill("BrowserPassword123");
+    await confirmation.fill("BrowserPassword123");
+    await confirmation.press("Enter");
+    await expect(progress.locator('[aria-current="step"]')).toHaveText(/Almacenamiento/);
+    await expect(page.getByRole("heading", { name: "Tus archivos", exact: true })).toBeFocused();
+    expect((await frame.boundingBox())!.y).toBe(account.y);
     await page.getByRole("button", { name: "Cambiar tema" }).click();
     await expect(page.locator("html")).not.toHaveClass(/dark/);
-    await page.screenshot({
-      path: testInfo.outputPath("storage-es-light-mobile.png"),
-      fullPage: true,
-    });
+    await expect(next).toBeInViewport();
+    await page.screenshot({ path: testInfo.outputPath("storage-es-light.png") });
   });
 
   test(
@@ -105,13 +62,12 @@ test.describe("Browser onboarding", () => {
         if (!localStorage.getItem("printstash.theme"))
           localStorage.setItem("printstash.theme", "dark");
       });
-      await page.setViewportSize({ width: 390, height: 844 });
       await page.goto("/setup");
       await page.getByLabel("Username").fill("first-owner");
       await expect(
         page.getByRole("list", { name: "Setup progress" }).locator('[aria-current="step"]'),
       ).toHaveText(/Account/);
-      await page.screenshot({ path: testInfo.outputPath("account-mobile.png"), fullPage: true });
+      await page.screenshot({ path: testInfo.outputPath("account-desktop.png"), fullPage: true });
       await page.getByLabel("Password", { exact: true }).fill("BrowserPassword123");
       await page.getByRole("button", { name: "Show Password", exact: true }).click();
       await expect(page.getByLabel("Password", { exact: true })).toHaveAttribute("type", "text");
@@ -124,8 +80,7 @@ test.describe("Browser onboarding", () => {
       await expect(page.getByRole("textbox", { name: "Your files", exact: true })).toBeVisible();
       await expect(page.getByLabel("Previews", { exact: true })).toBeVisible();
       await expect(page.getByLabel("Root", { exact: true })).toHaveCount(0);
-      await page.screenshot({ path: testInfo.outputPath("storage-mobile.png"), fullPage: true });
-      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.screenshot({ path: testInfo.outputPath("storage-desktop.png"), fullPage: true });
       await page.getByRole("button", { name: "Continue", exact: true }).press("Enter");
       await expect(
         page.getByRole("heading", { name: "Review before creating your account" }),
@@ -164,54 +119,24 @@ test.describe("Browser onboarding", () => {
       }
       await expect(page).toHaveURL(/\/getting-started$/);
       await expect(page.getByRole("button", { name: "Upload my first files" })).toBeVisible();
-      await page.goto("/settings?section=design");
-      await page.getByRole("combobox", { name: "Language", exact: true }).selectOption("es");
-      await page.goto("/getting-started");
-      await expect(page.getByRole("heading", { name: "Primeros pasos", level: 1 })).toBeVisible();
-      for (const viewport of [
-        { width: 1440, height: 1100 },
-        { width: 390, height: 844 },
-      ]) {
-        await page.setViewportSize(viewport);
-        await expect(
-          page.getByRole("button", { name: "Subir mis primeros archivos" }),
-        ).toBeVisible();
-        expect(
-          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-        ).toBe(true);
-        await page.screenshot({
-          path: testInfo.outputPath(`start-es-${viewport.width}.png`),
-          fullPage: true,
-        });
-      }
-      await page.goto("/settings?section=design");
-      await page.getByRole("combobox", { name: "Tema", exact: true }).selectOption("light");
-      await page.goto("/getting-started");
-      await expect(page.locator("html")).not.toHaveClass(/dark/);
-      await page.screenshot({
-        path: testInfo.outputPath("start-es-light-mobile.png"),
-        fullPage: true,
-      });
-      await page.getByRole("button", { name: "Conectar carpeta", exact: true }).click();
-      await expect(page.getByRole("button", { name: "/boot", exact: true })).toHaveCount(0);
-      await expect(page.getByRole("button", { name: "/run", exact: true })).toHaveCount(0);
-      await page.getByLabel("Nombre de la carpeta").fill("Mis modelos");
-      await page.getByLabel("Ruta de la carpeta en el servidor").fill("/libraries/models");
-      await page.screenshot({ path: testInfo.outputPath("folder-es-mobile.png"), fullPage: true });
-      await page.getByText("¿No aparece tu carpeta?", { exact: true }).click();
-      await page.screenshot({
-        path: testInfo.outputPath("folder-help-es-mobile.png"),
-        fullPage: true,
-      });
-      await page.getByRole("button", { name: "Volver al primer modelo" }).click();
-      await page.getByRole("button", { name: "Subir mis primeros archivos" }).click();
-      await page.screenshot({ path: testInfo.outputPath("upload-es-mobile.png"), fullPage: true });
-      await page.setViewportSize({ width: 1440, height: 1100 });
-      await page.screenshot({ path: testInfo.outputPath("upload-es-desktop.png"), fullPage: true });
-      await page.getByRole("button", { name: "Cancelar", exact: true }).click();
-      await page.goto("/settings?section=design");
-      await page.getByRole("combobox", { name: "Idioma", exact: true }).selectOption("en");
-      await page.goto("/getting-started");
+      await page.getByRole("link", { name: "Customize previews" }).click();
+      await expect(page).toHaveURL(/\/setup-appearance$/);
+      await expect(page.getByRole("heading", { name: "Customize previews" })).toBeVisible();
+      await expect(
+        page.getByRole("checkbox", { name: "Add the PrintStash sample collection" }),
+      ).not.toBeChecked();
+      await expect(page.getByRole("list", { name: "Setup progress" })).toHaveCount(0);
+      const grid = page.getByRole("switch", { name: "Floor grid" });
+      const wasChecked = await grid.getAttribute("aria-checked");
+      await grid.click();
+      await page.getByRole("button", { name: "Save appearance", exact: true }).click();
+      await expect(page).toHaveURL(/\/getting-started$/);
+      await page.getByRole("link", { name: "Customize previews" }).click();
+      await expect(grid).toHaveAttribute("aria-checked", wasChecked === "true" ? "false" : "true");
+      await page.getByRole("button", { name: "Back", exact: true }).click();
+      await expect(page).toHaveURL(/\/getting-started$/);
+      await page.reload();
+      await expect(page.getByRole("button", { name: "Upload my first files" })).toBeVisible();
       await page.getByRole("button", { name: "I'll do this later" }).press("Enter");
       await expect(page).toHaveURL(
         (url) =>
