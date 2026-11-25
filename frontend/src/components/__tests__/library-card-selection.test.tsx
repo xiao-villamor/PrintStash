@@ -13,13 +13,13 @@ describe("LibraryCardSelection", () => {
   it("draws an unchecked box as an outlined chip that reads over any image", () => {
     const box = renderSelection(false);
 
-    expect(box).toHaveClass("border-border-strong", "bg-card/90", "shadow-sm");
+    expect(box).toHaveClass("border-input", "bg-card", "shadow-md");
   });
 
   it("keeps the checked fill of the shared checkbox", () => {
     const box = renderSelection(true);
 
     expect(box).toHaveClass("bg-accent");
-    expect(box).not.toHaveClass("bg-card/90");
+    expect(box).not.toHaveClass("bg-card");
   });
 });

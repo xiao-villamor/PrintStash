@@ -193,7 +193,7 @@ function PreviewArrows({ state, size }: { state: PreviewCard; size: "card" | "ga
               className={cn(
                 "library-preview-arrow pointer-events-auto absolute top-1/2 -translate-y-1/2",
                 // A chip, whatever the image: a photo or render may be dark, light or busy.
-                "border-border-strong bg-card/90 shadow-sm backdrop-blur-sm hover:bg-card focus-visible:bg-card",
+                "border-input bg-card shadow-md hover:bg-card focus-visible:bg-card",
                 size === "card" ? "h-8 w-6" : "h-11 w-8",
                 index === 0
                   ? size === "card"
@@ -266,7 +266,7 @@ export function ModelPreviewControls({
               {...keepOffCard}
               variant="outline"
               size="xs"
-              className="library-preview-views pointer-events-auto h-6 border-border-strong bg-card/90 px-1.5 py-0 text-2xs shadow-sm backdrop-blur-sm hover:bg-card focus-visible:bg-card"
+              className="library-preview-views pointer-events-auto h-6 border-input bg-card px-1.5 py-0 text-2xs shadow-md hover:bg-card focus-visible:bg-card"
               aria-label={uiText("modelPreview.gallery")}
               title={
                 views.length >= 2
