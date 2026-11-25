@@ -10,6 +10,8 @@ from tests.factories.migration_rows import seed_schema_row
 from tests.paths import ALEMBIC_DIR, ALEMBIC_INI
 
 PREVIOUS = "09036ee7701a"
+BEFORE_PALETTE = "caddac5a1ee4"
+PALETTE = "a82fc8c6895d"
 
 
 @pytest.fixture(
@@ -24,20 +26,17 @@ def control_url(request, tmp_path):
     return f"sqlite:///{tmp_path / 'control.sqlite'}"
 
 
-def _edit(engine, assignment: str) -> int:
+def _edit(engine, assignment: str, version_column: str = "vault_edit_version") -> int:
     """Apply one configuration edit and return how far the version moved."""
+    read_version = text(f"SELECT {version_column} FROM system_config WHERE id=1")
     with engine.begin() as connection:
-        before = connection.execute(
-            text("SELECT vault_edit_version FROM system_config WHERE id=1")
-        ).scalar_one()
+        before = connection.execute(read_version).scalar_one()
         connection.execute(text(f"UPDATE system_config SET {assignment} WHERE id=1"))
-        after = connection.execute(
-            text("SELECT vault_edit_version FROM system_config WHERE id=1")
-        ).scalar_one()
+        after = connection.execute(read_version).scalar_one()
     return after - before
 
 
-def _at_previous_release(url: str):
+def _at_previous_release(url: str, previous: str = PREVIOUS):
     config = Config(str(ALEMBIC_INI))
     config.set_main_option("script_location", str(ALEMBIC_DIR))
     config.set_main_option("sqlalchemy.url", url)
@@ -47,9 +46,9 @@ def _at_previous_release(url: str):
         # historical baseline is SQLite-only.
         SQLModel.metadata.create_all(engine)
         command.stamp(config, "head")
-        command.downgrade(config, PREVIOUS)
+        command.downgrade(config, previous)
     else:
-        command.upgrade(config, PREVIOUS)
+        command.upgrade(config, previous)
     with engine.begin() as connection:
         seed_schema_row(connection, "system_config", id=1, currency="USD")
     return config, engine
@@ -73,6 +72,32 @@ class TestPreviewControlMigration:
                 )
             assert _edit(engine, "currency='GBP'") == 1
             assert _edit(engine, "derivatives_previews_enabled=false") == 1
+        finally:
+            engine.dispose()
+
+    def test_palette_round_trip_keeps_config_edit_triggers(self, control_url):
+        config, engine = _at_previous_release(control_url, BEFORE_PALETTE)
+        try:
+            command.upgrade(config, PALETTE)
+            for colour in ("sage", "clay", "plum"):
+                assert _edit(engine, f"preview_look='{colour}'") == 1
+            assert (
+                _edit(engine, "ai_search_settings_json='{}'", "search_edit_version")
+                == 1
+            )
+            assert _edit(engine, "spoolman_enabled=true", "spoolman_edit_version") == 1
+
+            command.downgrade(config, BEFORE_PALETTE)
+            with engine.connect() as connection:
+                assert connection.execute(
+                    text("SELECT preview_look, currency FROM system_config WHERE id=1")
+                ).one() == ("sky", "USD")
+            assert _edit(engine, "preview_look='graphite'") == 1
+            assert (
+                _edit(engine, "ai_search_settings_json=NULL", "search_edit_version")
+                == 1
+            )
+            assert _edit(engine, "spoolman_enabled=false", "spoolman_edit_version") == 1
         finally:
             engine.dispose()
 

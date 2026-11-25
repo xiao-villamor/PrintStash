@@ -11,12 +11,25 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 
 from alembic import op
+from app.db import (
+    config_edit_contracts_v5,
+    search_edit_contracts_v1,
+    spoolman_edit_contracts_v1,
+)
 
 # revision identifiers, used by Alembic.
 revision: str = "a82fc8c6895d"
 down_revision: Union[str, Sequence[str], None] = "caddac5a1ee4"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
+
+
+def _restore_edit_triggers() -> None:
+    # SQLite batch mode replaces the table and drops its triggers.
+    connection = op.get_bind()
+    config_edit_contracts_v5.install(connection)
+    search_edit_contracts_v1.install(connection)
+    spoolman_edit_contracts_v1.install(connection)
 
 
 def upgrade() -> None:
@@ -32,6 +45,7 @@ def upgrade() -> None:
         )
 
     # ### end Alembic commands ###
+    _restore_edit_triggers()
 
 
 def downgrade() -> None:
@@ -52,3 +66,4 @@ def downgrade() -> None:
         )
 
     # ### end Alembic commands ###
+    _restore_edit_triggers()

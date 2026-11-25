@@ -80,7 +80,14 @@ export interface SetupResponse {
 }
 
 export type PreviewLook =
-  keyof typeof import("@/lib/thumbnail-profile.generated").PREVIEW_LOOK_COLOURS;
+  | "sky"
+  | "printstash_blue"
+  | "slate"
+  | "graphite"
+  | "sand"
+  | "sage"
+  | "clay"
+  | "plum";
 
 export interface PreviewAppearance {
   preview_look: PreviewLook;
