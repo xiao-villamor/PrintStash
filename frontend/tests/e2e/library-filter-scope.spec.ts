@@ -150,7 +150,7 @@ test.describe("filters in a folder of folders", () => {
     page,
   }, testInfo) => {
     await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
-    await folderOfFolders(page);
+    await folderOfFolders(page, { withModels: true });
     await page.goto("/?c=parent&scope=here");
     await collapseNavigationSidebar(page);
 
@@ -190,7 +190,7 @@ test.describe("filters in a folder of folders", () => {
   });
 
   test("preserves the subfolder scope after keyboard activation and reload", async ({ page }) => {
-    await folderOfFolders(page);
+    await folderOfFolders(page, { withModels: true });
     await page.goto("/?c=parent&scope=here");
     const scope = page.getByRole("button", { name: "Include subfolders", exact: true });
 
