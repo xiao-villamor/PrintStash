@@ -407,6 +407,8 @@ describe("PrinterCard", () => {
                 slot_key: "ams0-tray0",
                 label: "AMS 0 tray 0 · front",
                 material_type: "PLA",
+                material_brand: null,
+                spool_filament_id: null,
                 color_hex: "#D42C2C",
               },
             ],

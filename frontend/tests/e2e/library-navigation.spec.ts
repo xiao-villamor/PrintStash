@@ -161,15 +161,9 @@ test.describe("Library navigation", () => {
     });
   }
 
-  for (const { layout, viewport } of [
-    { layout: "grid", viewport: "desktop" },
-    { layout: "list", viewport: "desktop" },
-    { layout: "grid", viewport: "mobile" },
-    { layout: "list", viewport: "mobile" },
-  ] as const) {
-    test(`restores the nested ${layout} reading position on ${viewport}`, async ({ page }) => {
+  for (const viewport of ["desktop", "mobile"] as const) {
+    test(`restores the nested gallery reading position on ${viewport}`, async ({ page }) => {
       if (viewport === "mobile") await page.setViewportSize({ width: 390, height: 844 });
-      await page.addInitScript((value) => localStorage.setItem("ps-vault-view", value), layout);
       const models = Array.from({ length: 40 }, (_, index) =>
         aModelListItem({ id: index + 100, name: `Reading position ${index}` }),
       );
@@ -329,15 +323,10 @@ test.describe("Library navigation", () => {
     });
   }
 
-  for (const { layout, kind } of [
-    { layout: "grid", kind: "model" },
-    { layout: "list", kind: "model" },
-    { layout: "grid", kind: "multipart" },
-  ] as const) {
-    test(`preserves the ${layout} reading anchor after removing a confirmed favorite${kind === "multipart" ? " Multipart" : ""}`, async ({
+  for (const kind of ["model", "multipart"] as const) {
+    test(`preserves the gallery reading anchor after removing a confirmed favorite${kind === "multipart" ? " Multipart" : ""}`, async ({
       page,
     }) => {
-      await page.addInitScript((value) => localStorage.setItem("ps-vault-view", value), layout);
       const models = Array.from({ length: 40 }, (_, index) =>
         aModelListItem({ id: index + 100, name: `Favorite ${index}`, starred: true }),
       );
@@ -380,52 +369,30 @@ test.describe("Library navigation", () => {
         .getByRole("main")
         .getByRole("link", { name: /Favorite 24/ })
         .first();
-      const remove =
-        layout === "grid"
-          ? page.getByRole(kind === "model" ? "menuitem" : "button", {
-              name: "Remove Favorite 24 from favorites",
-              exact: true,
-            })
-          : target;
+      const remove = page.getByRole(kind === "model" ? "menuitem" : "button", {
+        name: "Remove Favorite 24 from favorites",
+        exact: true,
+      });
       await scrollToLibraryEntry(page, target);
       await target.evaluate((node) => {
         const main = node.closest("main")!;
-        const list = main.querySelector<HTMLElement>("[data-library-list]");
-        const scroll = list && list.scrollHeight > list.clientHeight ? list : main;
-        scroll.scrollTop += node.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+        main.scrollTop += node.getBoundingClientRect().top - main.getBoundingClientRect().top;
       });
       await target.hover();
-      if (layout === "grid" && kind === "model") await target.click({ button: "right" });
+      if (kind === "model") await target.click({ button: "right" });
       const survivor = page
         .getByRole("main")
         .getByRole("link", { name: /Favorite 25/ })
         .first();
       await expect(survivor).toBeVisible();
-      let before = await survivor.evaluate((node) => node.getBoundingClientRect().top);
+      const before = await survivor.evaluate((node) => node.getBoundingClientRect().top);
       const box = await remove.boundingBox();
       if (!box) throw new Error("Favorite action has no visible box");
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-      if (layout === "list") {
-        await expect(page.locator("#model-drawer")).toBeVisible();
-        before = await survivor.evaluate((node) => node.getBoundingClientRect().top);
-        await page
-          .locator("#model-drawer")
-          .getByRole("link", { name: "Open page", exact: true })
-          .click();
-        await page
-          .getByRole("button", { name: "Remove Favorite 24 from favorites", exact: true })
-          .click();
-        await expect(page.getByRole("heading", { name: "Favorite 24", exact: true })).toBeVisible();
-      } else await expect(target).toBeVisible();
+      await expect(target).toBeVisible();
       // Compare the same unhovered geometry; the next card can move under the pointer.
       await page.mouse.move(1, 1);
       acknowledgement.resolve();
-      if (layout === "list") {
-        await expect(
-          page.getByRole("button", { name: "Add Favorite 24 to favorites", exact: true }),
-        ).toBeVisible();
-        await page.getByRole("link", { name: "Back", exact: true }).click();
-      }
       await expect(page.getByRole("main").getByRole("link", { name: /Favorite 24/ })).toHaveCount(
         0,
       );

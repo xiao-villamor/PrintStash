@@ -48,15 +48,14 @@ test.describe("Library navigation", () => {
     }
   });
 
-  for (const { layout, width, height } of [
-    { layout: "grid", width: 1280, height: 900 },
-    { layout: "list", width: 390, height: 844 },
+  for (const { viewport, width, height } of [
+    { viewport: "desktop", width: 1280, height: 900 },
+    { viewport: "mobile", width: 390, height: 844 },
   ] as const) {
-    test(`restores a paged Library reading position through real detail navigation (${layout})`, async ({
+    test(`restores a paged Library reading position through real detail navigation (${viewport})`, async ({
       page,
     }) => {
       await page.setViewportSize({ width, height });
-      await page.addInitScript((value) => localStorage.setItem("ps-vault-view", value), layout);
       const backend = path.resolve("../backend");
       const dataRoot = process.env.PLAYWRIGHT_REAL_DATA_DIR ?? path.resolve("tests/e2e-real/.data");
       const seeded = JSON.parse(
@@ -119,11 +118,10 @@ test.describe("Library navigation", () => {
       }
     });
 
-    test(`preserves a paged reading position during automatic refresh (${layout})`, async ({
+    test(`preserves a paged reading position during automatic refresh (${viewport})`, async ({
       page,
     }) => {
       await page.setViewportSize({ width, height });
-      await page.addInitScript((value) => localStorage.setItem("ps-vault-view", value), layout);
       const backend = path.resolve("../backend");
       const dataRoot = process.env.PLAYWRIGHT_REAL_DATA_DIR ?? path.resolve("tests/e2e-real/.data");
       const seeded = JSON.parse(
@@ -158,8 +156,7 @@ test.describe("Library navigation", () => {
         await scrollToLibraryEntry(page, last);
         await expect(last).toBeVisible();
         const before = await page.getByRole("main").evaluate((main) => {
-          const list = main.querySelector<HTMLElement>("[data-library-list]");
-          const scroll = list && list.scrollHeight > list.clientHeight ? list : main;
+          const scroll = main;
           const bounds = scroll.getBoundingClientRect();
           const anchor = Array.from(
             main.querySelectorAll<HTMLElement>("[data-library-entry]"),

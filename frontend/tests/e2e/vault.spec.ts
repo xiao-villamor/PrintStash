@@ -436,14 +436,16 @@ test.describe("vault route", () => {
     await expect(page).toHaveURL(/\/settings$/);
   });
 
-  test("vault display choice survives reload", async ({ page }) => {
+  test("keeps the gallery More menu focused on its actions", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("main").getByRole("button", { name: "More", exact: true }).click();
-    await page.getByRole("menuitem", { name: "Display" }).click();
-    await page.getByRole("menuitem", { name: "List View" }).click();
-    await expect(page.getByText("Thumb", { exact: true })).toBeVisible();
-    await page.reload();
-    await expect(page.getByText("Thumb", { exact: true })).toBeVisible();
+    const menu = page.getByRole("menu");
+    await expect(menu.getByRole("menuitem", { name: "Similar models" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Documents" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "New multipart set" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Display" })).toHaveCount(0);
+    await expect(menu.getByRole("menuitem", { name: /Saved views/ })).toHaveCount(0);
+    await expect(menu.getByRole("menuitemcheckbox", { name: "Favorites" })).toHaveCount(0);
   });
 
   test("vault sort requests one globally sorted cursor page", async ({ page }) => {
@@ -624,48 +626,13 @@ test.describe("vault route on a phone-width viewport", () => {
 
     const menu = await openMobileMore(page);
 
-    await expect(menu.getByRole("menuitemcheckbox", { name: "Favorites" })).toBeVisible();
-    await expect(menu.getByRole("menuitem", { name: /Saved views/ })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Documents" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: /Saved views/ })).toHaveCount(0);
     await expect(menu.getByRole("menuitemcheckbox", { name: "Select" })).toHaveCount(0);
-    await expect(menu.getByRole("menuitem", { name: "Display" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Display" })).toHaveCount(0);
     if (process.env.PRINTSTASH_CAPTURE_UI) {
       await page.screenshot({ path: "/tmp/printstash-all-models-360-more.png", fullPage: true });
     }
-  });
-
-  test("reports a toggle as off before it is used", async ({ page }) => {
-    // A checkbox with no checked state is one a screen reader cannot report, and
-    // the menu closes after each use — so its state is the only memory of it.
-    await gotoMobileVault(page);
-
-    const menu = await openMobileMore(page);
-
-    await expect(menu.getByRole("menuitemcheckbox", { name: "Favorites" })).toHaveAttribute(
-      "aria-checked",
-      "false",
-    );
-  });
-
-  test("filters to favourites from the menu", async ({ page }) => {
-    await gotoMobileVault(page);
-    const menu = await openMobileMore(page);
-
-    await menu.getByRole("menuitemcheckbox", { name: "Favorites" }).click();
-
-    await expect(page).toHaveURL(/[?&]favorites=true/);
-  });
-
-  test("reports the favourites toggle as on afterwards", async ({ page }) => {
-    await gotoMobileVault(page);
-    const menu = await openMobileMore(page);
-    await menu.getByRole("menuitemcheckbox", { name: "Favorites" }).click();
-
-    await openMobileMore(page);
-
-    await expect(page.getByRole("menuitemcheckbox", { name: "Favorites" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
   });
 
   test("offers a way out of keyboard selection mode", async ({ page }) => {
@@ -678,92 +645,5 @@ test.describe("vault route on a phone-width viewport", () => {
     await expect(page.getByRole("button", { name: "Done", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Done", exact: true }).click();
     await expect(page.getByRole("button", { name: "Done", exact: true })).toHaveCount(0);
-  });
-
-  test("switches the display from the menu", async ({ page }) => {
-    await gotoMobileVault(page);
-    const menu = await openMobileMore(page);
-
-    await menu.getByRole("menuitem", { name: "Display" }).click();
-    await page.getByRole("menuitem", { name: "List View" }).click();
-
-    await expect(page.getByText("Thumb", { exact: true })).toBeVisible();
-  });
-
-  test.describe("the saved-views picker opened from the menu", () => {
-    test.beforeEach(async ({ page }) => {
-      await page.route("**/api/v1/saved-views", async (route) => {
-        await route.fulfill({
-          contentType: "application/json",
-          body: JSON.stringify([
-            {
-              id: 7,
-              name: "Ready to print",
-              filters: {
-                library_view: "all",
-                collection: null,
-                direct: true,
-                tag: [],
-                q: "skadis",
-                printer_id: null,
-                printer_presence: null,
-                favorites: false,
-              },
-              created_at: "2026-06-04T00:24:22.000000",
-              updated_at: "2026-06-04T00:24:22.000000",
-            },
-          ]),
-        });
-      });
-    });
-
-    test("opens focused on its search field", async ({ page }) => {
-      await gotoMobileVault(page);
-      const menu = await openMobileMore(page);
-
-      await menu.getByRole("menuitem", { name: /Saved views/ }).click();
-
-      await expect(page.getByRole("dialog")).toBeVisible();
-      await expect(page.getByRole("textbox", { name: "Find a saved view" })).toBeFocused();
-    });
-
-    test("keeps the arrow keys inside itself", async ({ page }) => {
-      // The menu behind it also answers to arrows; letting them through moves a
-      // selection the user cannot see.
-      await gotoMobileVault(page);
-      const menu = await openMobileMore(page);
-      await menu.getByRole("menuitem", { name: /Saved views/ }).click();
-      const search = page.getByRole("textbox", { name: "Find a saved view" });
-
-      await search.press("ArrowDown");
-
-      await expect(search).toBeFocused();
-    });
-
-    test("returns focus to the item that opened it", async ({ page }) => {
-      // Escape from a nested dialog otherwise drops focus to the document, and a
-      // keyboard user has to tab in from the top of the page again.
-      await gotoMobileVault(page);
-      const menu = await openMobileMore(page);
-      const savedViews = menu.getByRole("menuitem", { name: /Saved views/ });
-      await savedViews.click();
-
-      await page.getByRole("textbox", { name: "Find a saved view" }).press("Escape");
-
-      await expect(page.getByRole("dialog")).toBeHidden();
-      await expect(savedViews).toBeFocused();
-    });
-
-    test("applies the view the user chose", async ({ page }) => {
-      await gotoMobileVault(page);
-      const menu = await openMobileMore(page);
-      await menu.getByRole("menuitem", { name: /Saved views/ }).click();
-      const dialog = page.getByRole("dialog");
-
-      await dialog.getByRole("button", { name: "Ready to print", exact: true }).click();
-
-      await expect(page).toHaveURL(/[?&]q=skadis/);
-      await expect(dialog).toBeHidden();
-    });
   });
 });

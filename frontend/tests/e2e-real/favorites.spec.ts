@@ -38,7 +38,7 @@ test.describe("confirmed favorite removal", () => {
       await scrollToLibraryEntry(page, targetLink);
       // The removed card is the first visible anchor in the virtual scroll surface.
       await targetLink.evaluate((node) => {
-        const scroll = node.closest<HTMLElement>("[data-library-list]") ?? node.closest("main");
+        const scroll = node.closest("main");
         if (!scroll) throw new Error("Missing Library scroll container");
         scroll.scrollTop += node.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
       });
@@ -74,13 +74,7 @@ test.describe("confirmed favorite removal", () => {
           return after ? Math.abs(after.y - before.y) : Infinity;
         })
         .toBeLessThanOrEqual(2);
-      expect(
-        await page
-          .getByRole("main")
-          .evaluate(
-            (main) => (main.querySelector<HTMLElement>("[data-library-list]") ?? main).scrollTop,
-          ),
-      ).toBeGreaterThan(0);
+      expect(await page.getByRole("main").evaluate((main) => main.scrollTop)).toBeGreaterThan(0);
     } finally {
       release.resolve();
       expect(

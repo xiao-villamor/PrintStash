@@ -109,20 +109,17 @@ async function folderOfFolders(page: Page, { withModels = false } = {}) {
 }
 
 test.describe("filters in a folder of folders", () => {
-  for (const layout of ["Grid", "List"]) {
-    test(`shows a single compact child entry in ${layout.toLowerCase()} view`, async ({ page }) => {
-      await folderOfFolders(page, { withModels: true });
-      await page.goto("/?c=parent&scope=here");
-      await collapseNavigationSidebar(page);
-      await page.getByRole("button", { name: `${layout} View`, exact: true }).click();
+  test("shows a single compact child card", async ({ page }) => {
+    await folderOfFolders(page, { withModels: true });
+    await page.goto("/?c=parent&scope=here");
+    await collapseNavigationSidebar(page);
 
-      const main = page.getByRole("main");
-      await expect(main.getByText("Model in parent", { exact: true })).toBeVisible();
-      await expect(main.getByText("child", { exact: true })).toHaveCount(1);
-      await expect(main.getByRole("link", { name: "Open collection" })).toHaveCount(0);
-      await expect(main.getByText("Model in child", { exact: true })).toHaveCount(0);
-    });
-  }
+    const main = page.getByRole("main");
+    await expect(main.getByText("Model in parent", { exact: true })).toBeVisible();
+    await expect(main.getByText("child", { exact: true })).toHaveCount(1);
+    await expect(main.getByRole("link", { name: "Open collection" })).toHaveCount(0);
+    await expect(main.getByText("Model in child", { exact: true })).toHaveCount(0);
+  });
 
   test("includes descendant models in the main grid when asked", async ({ page }) => {
     await folderOfFolders(page, { withModels: true });

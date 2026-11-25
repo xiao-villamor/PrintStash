@@ -10,7 +10,8 @@ import { test, expect } from "./helpers";
 import { createCollectionViaVault, modelCard, uploadGcodeModel, uploadModel } from "./util";
 
 test.describe("vault", () => {
-  test("search filters the library; list/grid toggle keeps the model visible", async ({ page }) => {
+  test("opens gallery cards after restoring a legacy list preference", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("ps-vault-view", "list"));
     const name = `e2e-vault-${Date.now()}`;
     await uploadGcodeModel(page, name);
 
@@ -19,13 +20,8 @@ test.describe("vault", () => {
     await expect(page).toHaveURL(/[?&]q=/);
     await expect(modelCard(page, name)).toBeVisible();
 
-    // List / grid toggle (title-labelled buttons) both keep the result.
-    await page.getByRole("button", { name: "Display" }).click();
-    await page.getByRole("menuitem", { name: "List View" }).click();
-    await expect(modelCard(page, name)).toBeVisible();
-    await page.getByRole("button", { name: "Display" }).click();
-    await page.getByRole("menuitem", { name: "Grid View" }).click();
-    await expect(modelCard(page, name)).toBeVisible();
+    await expect(page.getByRole("main")).toHaveAttribute("data-inspector-layout", "grid");
+    await expect(page.getByRole("button", { name: "List View" })).toHaveCount(0);
   });
 
   test("the toolbar stays reachable on a phone-width viewport", async ({ page }) => {
@@ -52,16 +48,11 @@ test.describe("vault", () => {
     await more.click();
 
     const menu = page.getByRole("menu").last();
-    await expect(menu.getByRole("menuitemcheckbox", { name: "Favorites" })).toBeVisible();
-    await expect(menu.getByRole("menuitem", { name: /Saved views/ })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Documents" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: /Saved views/ })).toHaveCount(0);
     await expect(menu.getByRole("menuitemcheckbox", { name: "Select" })).toHaveCount(0);
-    await expect(menu.getByRole("menuitem", { name: "Display" })).toBeVisible();
-    await menu.getByRole("menuitem", { name: "Display" }).click();
-    await page.getByRole("menuitem", { name: "List View" }).click();
-    await expect(more).toBeVisible();
-    await expect
-      .poll(() => page.evaluate(() => localStorage.getItem("ps-vault-view")))
-      .toBe("list");
+    await expect(menu.getByRole("menuitem", { name: "Display" })).toHaveCount(0);
+    await expect(menu.getByRole("menuitem", { name: "New multipart set" })).toBeVisible();
     // Neither the heading nor the document may scroll sideways: a horizontal
     // scrollbar on a phone hides the controls to the right of it.
     expect(await heading.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(

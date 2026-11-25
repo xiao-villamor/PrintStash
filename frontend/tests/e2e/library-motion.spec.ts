@@ -272,23 +272,6 @@ test.describe("Library motion", () => {
     expect(await page.evaluate(() => window.libraryReveals.length)).toBe(settled);
   });
 
-  test("list layout reveals without scaling", async ({ page }) => {
-    await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
-    await expect(page.locator(".library-card-fill-frame")).toHaveCSS("opacity", "1");
-    await page.evaluate(() => {
-      window.libraryReveals = [];
-    });
-
-    await page.getByRole("button", { name: "List View", exact: true }).click();
-
-    await expect.poll(() => page.evaluate(() => window.libraryReveals.length)).toBe(1);
-    expect((await page.evaluate(() => window.libraryReveals))[0].transforms).toEqual([
-      "none",
-      "none",
-    ]);
-  });
-
   test("reduced motion keeps cached history visits immediate", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/");
