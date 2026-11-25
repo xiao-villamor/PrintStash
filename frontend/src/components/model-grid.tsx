@@ -1601,7 +1601,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const key = `/models/${id}`;
     let attempts = 0;
     function reveal() {
-      const anchor = startupContent.current?.querySelector<HTMLElement>(libraryReadingSelector(key));
+      const anchor = startupContent.current?.querySelector<HTMLElement>(
+        libraryReadingSelector(key),
+      );
       const card = anchor?.closest<HTMLElement>("[data-library-key]") ?? anchor;
       if (card) {
         card.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
@@ -4191,81 +4193,86 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       }}
                     />
                   ) : (
-                  <EmptyState
-                    title={uiText(
-                      emptyFavorites
-                        ? "No favorites yet"
-                        : selectedCollection && !hasActiveFilters
-                          ? "library.collectionEmpty"
-                          : "No models found",
-                    )}
-                    description={
-                      emptyFavorites
-                        ? uiText("Star a model or multipart set to see it here.")
-                        : hasActiveFilters
-                          ? uiText("Try clearing some filters.")
-                          : selectedCollection
-                            ? uiText(
-                                canUploadHere
-                                  ? "library.collectionEmptyHelp"
-                                  : "library.collectionReadOnlyEmptyHelp",
-                              )
-                            : uiText(
-                                "Upload a model when you're ready, or skim the wiki first if this is a new install.",
-                              )
-                    }
-                    action={
-                      emptyFavorites ? (
-                        <Button type="button" variant="outline" size="xs" onClick={toggleFavorites}>
-                          {uiText("aiSearch.backToLibrary")}
-                        </Button>
-                      ) : hasActiveFilters ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="xs"
-                          onClick={() => clearAllFilters()}
-                        >
-                          {uiText("Clear all filters")}
-                        </Button>
-                      ) : selectedCollection && !canUploadHere ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleCollectionChange(null)}
-                        >
-                          {uiText("aiSearch.backToLibrary")}
-                        </Button>
-                      ) : (
-                        <div className="flex flex-wrap items-center justify-center gap-2">
-                          <GettingStartedReminder />
+                    <EmptyState
+                      title={uiText(
+                        emptyFavorites
+                          ? "No favorites yet"
+                          : selectedCollection && !hasActiveFilters
+                            ? "library.collectionEmpty"
+                            : "No models found",
+                      )}
+                      description={
+                        emptyFavorites
+                          ? uiText("Star a model or multipart set to see it here.")
+                          : hasActiveFilters
+                            ? uiText("Try clearing some filters.")
+                            : selectedCollection
+                              ? uiText(
+                                  canUploadHere
+                                    ? "library.collectionEmptyHelp"
+                                    : "library.collectionReadOnlyEmptyHelp",
+                                )
+                              : uiText(
+                                  "Upload a model when you're ready, or skim the wiki first if this is a new install.",
+                                )
+                      }
+                      action={
+                        emptyFavorites ? (
                           <Button
                             type="button"
-                            size="sm"
-                            disabled={!canUploadToVault}
-                            onClick={() => {
-                              setDropPreload({ files: [], mode: "files" });
-                              setUploadOpen(true);
-                            }}
+                            variant="outline"
+                            size="xs"
+                            onClick={toggleFavorites}
                           >
-                            {uiText("Upload files")}
+                            {uiText("aiSearch.backToLibrary")}
                           </Button>
-                          {canUploadToVault && (
-                            <Button asChild variant="outline" size="sm">
-                              <Link href="/inbox">{uiText("Import from URL")}</Link>
+                        ) : hasActiveFilters ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="xs"
+                            onClick={() => clearAllFilters()}
+                          >
+                            {uiText("Clear all filters")}
+                          </Button>
+                        ) : selectedCollection && !canUploadHere ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleCollectionChange(null)}
+                          >
+                            {uiText("aiSearch.backToLibrary")}
+                          </Button>
+                        ) : (
+                          <div className="flex flex-wrap items-center justify-center gap-2">
+                            <GettingStartedReminder />
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={!canUploadToVault}
+                              onClick={() => {
+                                setDropPreload({ files: [], mode: "files" });
+                                setUploadOpen(true);
+                              }}
+                            >
+                              {uiText("Upload files")}
                             </Button>
-                          )}
-                          {user?.is_superuser && (
-                            <Button asChild variant="outline" size="sm">
-                              <Link href="/settings">{uiText("Connect folder or NAS")}</Link>
-                            </Button>
-                          )}
-                        </div>
-                      )
-                    }
-                    className="flex-1 py-20"
-                  />
+                            {canUploadToVault && (
+                              <Button asChild variant="outline" size="sm">
+                                <Link href="/inbox">{uiText("Import from URL")}</Link>
+                              </Button>
+                            )}
+                            {user?.is_superuser && (
+                              <Button asChild variant="outline" size="sm">
+                                <Link href="/settings">{uiText("Connect folder or NAS")}</Link>
+                              </Button>
+                            )}
+                          </div>
+                        )
+                      }
+                      className="flex-1 py-20"
+                    />
                   )
                 ) : viewMode === "grid" ? (
                   <div

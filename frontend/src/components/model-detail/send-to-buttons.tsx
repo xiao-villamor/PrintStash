@@ -785,10 +785,7 @@ export function SendToButtons({
           }
           dismissible={!sending}
           headerExtra={
-            <fieldset
-              className="shrink-0"
-              disabled={sending}
-            >
+            <fieldset className="shrink-0" disabled={sending}>
               <legend className="sr-only">{uiText("Action")}</legend>
               <div className="inline-flex max-w-full flex-wrap gap-1 rounded-md border border-border bg-muted p-1">
                 {(
@@ -826,7 +823,7 @@ export function SendToButtons({
           footer={
             queuing ? (
               <>
-{blockedReason === null && readySummary && (
+                {blockedReason === null && readySummary && (
                   <p className="me-auto text-sm text-muted-foreground">{readySummary}</p>
                 )}
                 {blockedReason && (
@@ -847,7 +844,7 @@ export function SendToButtons({
               </>
             ) : (
               <>
-{blockedReason === null && readySummary && (
+                {blockedReason === null && readySummary && (
                   <p className="me-auto text-sm text-muted-foreground">{readySummary}</p>
                 )}
                 {blockedReason && (

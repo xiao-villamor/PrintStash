@@ -450,9 +450,7 @@ export function InspectorContent({
                 ))}
               </select>
             ) : (
-              <span className="library-inspector-rev-chip">
-                {revisionName(file)}
-              </span>
+              <span className="library-inspector-rev-chip">{revisionName(file)}</span>
             )}
           </div>
           <div className="library-inspector-print-summary">
@@ -880,11 +878,11 @@ function revisionName(file: FileRead) {
 }
 function revisionStats(meta: MetadataRead | null): [string, string][] {
   const stats: [string, string | null][] = [
+    [uiText("Time"), meta?.estimated_time_s != null ? formatDuration(meta.estimated_time_s) : null],
     [
-      uiText("Time"),
-      meta?.estimated_time_s != null ? formatDuration(meta.estimated_time_s) : null,
+      uiText("Weight"),
+      meta?.filament_weight_g != null ? formatGrams(meta.filament_weight_g) : null,
     ],
-    [uiText("Weight"), meta?.filament_weight_g != null ? formatGrams(meta.filament_weight_g) : null],
     [
       uiText("Layer"),
       meta?.layer_height_mm != null ? `${formatNumber(meta.layer_height_mm)} mm` : null,

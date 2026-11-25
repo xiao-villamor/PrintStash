@@ -133,7 +133,10 @@ export function PrinterDiagnosticsPanel({
                   <tr key={check.name}>
                     <th scope="row">{checkLabel(check.name)}</th>
                     <td>
-                      <StatePill icon={check.ok ? CircleCheck : CircleAlert} destructive={!check.ok}>
+                      <StatePill
+                        icon={check.ok ? CircleCheck : CircleAlert}
+                        destructive={!check.ok}
+                      >
                         {uiText(check.ok ? "Passed" : "Failed")}
                       </StatePill>
                     </td>

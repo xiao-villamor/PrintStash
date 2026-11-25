@@ -2394,7 +2394,9 @@ export function SettingsPanel() {
                 <Trash2 className="size-6" aria-hidden="true" />
               </span>
               <div className="space-y-1">
-                <p className="text-base font-semibold text-foreground">{uiText("Trash is empty.")}</p>
+                <p className="text-base font-semibold text-foreground">
+                  {uiText("Trash is empty.")}
+                </p>
                 <p className="mx-auto max-w-sm text-sm text-muted-foreground">
                   {uiText("Deleted models wait here until the retention window ends.")}
                 </p>

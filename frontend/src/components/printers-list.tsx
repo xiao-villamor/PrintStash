@@ -121,8 +121,8 @@ export function PrintersPage() {
   const artworkPreference = usePrinterArtworkPreference();
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const searchParams = useSearchParams();
-  const [requestedView, setActiveView] = useState<"fleet" | "queue" | "maintenance">(
-    () => (searchParams.get("tab") === "queue" ? "queue" : "fleet"),
+  const [requestedView, setActiveView] = useState<"fleet" | "queue" | "maintenance">(() =>
+    searchParams.get("tab") === "queue" ? "queue" : "fleet",
   );
   const [queueView, setQueueView] = useState<FleetQueueView>("queued");
   const [healthFilter, setHealthFilter] = useState<"ready" | "attention" | null>(null);
@@ -290,28 +290,30 @@ export function PrintersPage() {
                 className="flex flex-wrap items-center justify-between gap-3"
               >
                 <div className="flex divide-x divide-border overflow-hidden rounded-lg border border-border bg-card">
-                <FleetMetric
-                  label={uiText("Ready")}
-                  value={readyCount}
-                  selected={healthFilter === "ready"}
-                  onClick={() => setHealthFilter(healthFilter === "ready" ? null : "ready")}
-                />
-                <FleetMetric
-                  label={uiText("Active jobs")}
-                  value={summary?.active_jobs}
-                  onClick={canSeeQueue ? () => openQueue("active") : undefined}
-                />
-                <FleetMetric
-                  label={uiText("Queued jobs")}
-                  value={summary?.queued_jobs}
-                  onClick={canSeeQueue ? () => openQueue("queued") : undefined}
-                />
-                <FleetMetric
-                  label={uiText("Needs attention")}
-                  value={attentionCount}
-                  selected={healthFilter === "attention"}
-                  onClick={() => setHealthFilter(healthFilter === "attention" ? null : "attention")}
-                />
+                  <FleetMetric
+                    label={uiText("Ready")}
+                    value={readyCount}
+                    selected={healthFilter === "ready"}
+                    onClick={() => setHealthFilter(healthFilter === "ready" ? null : "ready")}
+                  />
+                  <FleetMetric
+                    label={uiText("Active jobs")}
+                    value={summary?.active_jobs}
+                    onClick={canSeeQueue ? () => openQueue("active") : undefined}
+                  />
+                  <FleetMetric
+                    label={uiText("Queued jobs")}
+                    value={summary?.queued_jobs}
+                    onClick={canSeeQueue ? () => openQueue("queued") : undefined}
+                  />
+                  <FleetMetric
+                    label={uiText("Needs attention")}
+                    value={attentionCount}
+                    selected={healthFilter === "attention"}
+                    onClick={() =>
+                      setHealthFilter(healthFilter === "attention" ? null : "attention")
+                    }
+                  />
                 </div>
                 <label className="flex min-w-0 max-w-full items-center gap-3 text-sm text-muted-foreground">
                   {uiText("Group")}
@@ -352,10 +354,7 @@ export function PrintersPage() {
               {loading ? (
                 <div className="grid animate-panel-in grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
                   {Array.from({ length: 3 }).map((_, i) => (
-                    <div
-                      key={i}
-                      className="bg-card border border-border rounded-lg p-5 space-y-3"
-                    >
+                    <div key={i} className="bg-card border border-border rounded-lg p-5 space-y-3">
                       <Skeleton className="h-5 w-32" />
                       <Skeleton className="h-4 w-48" />
                       <Skeleton className="h-4 w-24" />
@@ -672,7 +671,9 @@ function FleetPrinterCard({
               )}
               {loadedSlots.map((slot) => {
                 const color =
-                  slot.color_hex && /^#[0-9a-f]{6}$/i.test(slot.color_hex) ? slot.color_hex : undefined;
+                  slot.color_hex && /^#[0-9a-f]{6}$/i.test(slot.color_hex)
+                    ? slot.color_hex
+                    : undefined;
                 return (
                   <span
                     key={slot.slot_key}
@@ -685,7 +686,9 @@ function FleetPrinterCard({
                         style={{ backgroundColor: color }}
                       />
                     )}
-                    {slot.material_type && <span className="font-medium">{slot.material_type}</span>}
+                    {slot.material_type && (
+                      <span className="font-medium">{slot.material_type}</span>
+                    )}
                     <span className="min-w-0 break-words text-muted-foreground">{slot.label}</span>
                   </span>
                 );

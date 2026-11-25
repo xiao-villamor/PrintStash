@@ -38,7 +38,9 @@ function SettingsTable({
       {rows.length === 0 ? (
         <p className="py-3 text-sm text-muted-foreground">{uiText("profiles.noSettings")}</p>
       ) : (
-        <dl className={`divide-y divide-border ${contained ? "max-h-80 overflow-y-auto pr-2" : ""}`}>
+        <dl
+          className={`divide-y divide-border ${contained ? "max-h-80 overflow-y-auto pr-2" : ""}`}
+        >
           {rows.map(([key, value]) => (
             <div key={key} className="grid gap-1 py-2 text-sm sm:grid-cols-2 sm:gap-4">
               <dt className="min-w-0 break-words font-mono text-xs text-muted-foreground">{key}</dt>
@@ -72,12 +74,7 @@ function SourceFile({ file, locale }: { file: SourceFileCapture; locale: string 
           </p>
         </div>
         {hasProcess && (
-          <Button
-            variant="outline"
-            size="xs"
-            aria-expanded={open}
-            onClick={() => setOpen(!open)}
-          >
+          <Button variant="outline" size="xs" aria-expanded={open} onClick={() => setOpen(!open)}>
             {uiText("profiles.fileProcess")}
             <ChevronDown
               aria-hidden

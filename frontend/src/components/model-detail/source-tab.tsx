@@ -93,8 +93,7 @@ function SourceRow({
   useUiLocale();
   const i18n = useOptionalI18n();
   const notSupplied = i18n?.t("source.notSuppliedGeneric") ?? uiText("source.notSuppliedGeneric");
-  const link =
-    field?.field_name === "creator_url" ? safeHttpUrl(field.effective_value) : null;
+  const link = field?.field_name === "creator_url" ? safeHttpUrl(field.effective_value) : null;
   return (
     <div
       className={`grid grid-cols-[minmax(6rem,.4fr)_minmax(0,1fr)] gap-x-4 px-3 py-2.5 text-sm ${last ? "" : "border-b border-border"}`}

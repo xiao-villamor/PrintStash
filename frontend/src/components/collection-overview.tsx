@@ -157,7 +157,9 @@ export function CollectionOverviewCard({
                 </span>
               )}
             </div>
-            <p className={`collection-card-count text-xs text-muted-foreground ${compact ? "" : "mt-1"}`}>
+            <p
+              className={`collection-card-count text-xs text-muted-foreground ${compact ? "" : "mt-1"}`}
+            >
               {modelCount}
             </p>
           </div>

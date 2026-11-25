@@ -1479,7 +1479,10 @@ export function FilamentProfilesCard() {
                       );
                     })}
                   </div>
-                  <aside className="min-w-0 rounded-lg border border-border bg-card" ref={setDetailsHost} />
+                  <aside
+                    className="min-w-0 rounded-lg border border-border bg-card"
+                    ref={setDetailsHost}
+                  />
                 </div>
               )}
             </section>
@@ -1847,7 +1850,10 @@ export function FilamentProfilesCard() {
                       );
                     })}
                   </div>
-                  <aside className="min-w-0 rounded-lg border border-border bg-card" ref={setDetailsHost} />
+                  <aside
+                    className="min-w-0 rounded-lg border border-border bg-card"
+                    ref={setDetailsHost}
+                  />
                 </div>
               )}
             </section>

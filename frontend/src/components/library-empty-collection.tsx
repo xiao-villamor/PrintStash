@@ -61,15 +61,7 @@ function EmptyCollectionArt() {
         <path d="M100 50l17 10v20l-17 10-17-10V60z" />
         <path d="M83 60l17 10 17-10M100 70v20" />
       </g>
-      <rect
-        x="76"
-        y="100"
-        width="32"
-        height="4"
-        rx="2"
-        fill="currentColor"
-        opacity="0.25"
-      />
+      <rect x="76" y="100" width="32" height="4" rx="2" fill="currentColor" opacity="0.25" />
       <circle cx="136" cy="112" r="13" className="fill-primary" />
       <path
         d="M136 106v12M130 112h12"
@@ -110,9 +102,7 @@ export function LibraryEmptyCollection({
           <Upload className="size-4" aria-hidden="true" />
           {uiText("Upload files")}
         </Button>
-        <p className="text-xs text-muted-foreground">
-          {uiText("library.collectionEmptyDrop")}
-        </p>
+        <p className="text-xs text-muted-foreground">{uiText("library.collectionEmptyDrop")}</p>
       </section>
     </div>
   );
