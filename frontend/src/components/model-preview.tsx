@@ -187,13 +187,12 @@ function PreviewArrows({ state, size }: { state: PreviewCard; size: "card" | "ga
             <Button
               key={index}
               {...keepOffCard}
-              variant="outline"
+              variant="ghost"
               size="icon"
               data-side={index === 0 ? "previous" : "next"}
               className={cn(
                 "library-preview-arrow pointer-events-auto absolute top-1/2 -translate-y-1/2",
-                // A chip, whatever the image: a photo or render may be dark, light or busy.
-                "border-input bg-card shadow-md hover:bg-card focus-visible:bg-card",
+                "bg-card text-card-foreground shadow-md hover:bg-muted hover:text-foreground focus-visible:bg-card dark:bg-card/90 dark:hover:bg-card dark:focus-visible:bg-card",
                 size === "card" ? "h-8 w-6" : "h-11 w-8",
                 index === 0
                   ? size === "card"

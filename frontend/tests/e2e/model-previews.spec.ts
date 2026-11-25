@@ -374,12 +374,11 @@ test.describe("Model preview browsing", () => {
   for (const theme of ["light", "dark"] as const) {
     test(`outlines card controls against the image area in ${theme} mode`, async ({ page }) => {
       await page.addInitScript((value) => localStorage.setItem("printstash.theme", value), theme);
-      const { card, next } = await library(page);
+      const { card } = await library(page);
       const plate = await card
         .locator('[data-model-preview="Bracket 1"]')
         .evaluate((element) => getComputedStyle(element).backgroundColor);
       for (const control of [
-        next,
         card.getByRole("button", { name: "Model views", exact: true }),
         card.getByRole("checkbox", { name: /^Select / }),
       ]) {
@@ -396,6 +395,18 @@ test.describe("Model preview browsing", () => {
     });
   }
 
+  test("shows preview arrows without a resting outline", async ({ page }, testInfo) => {
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
+    const { card, next } = await library(page);
+    await collapseNavigationSidebar(page);
+
+    await card.locator("[data-model-preview]").hover();
+    await next.hover();
+
+    await card.screenshot({ path: testInfo.outputPath("preview-arrows.png") });
+    await expect(next).toHaveCSS("border-top-width", "0px", { timeout: 1000 });
+  });
+
   test("keeps card arrows compact over the image", async ({ page }) => {
     const { card, next } = await library(page);
 
@@ -406,6 +417,7 @@ test.describe("Model preview browsing", () => {
 
   test("browses views with arrows inside the gallery", async ({ page }) => {
     const { card } = await library(page);
+    await card.locator("[data-model-preview]").hover();
     await card.getByRole("button", { name: "Model views", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Model views" });
 

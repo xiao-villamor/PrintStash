@@ -7,7 +7,7 @@
 - Open Trash from one workspace with an aligned selection header and a clearer review of expired items.
 - Keep the Model details title and actions clear while scrolling past the image preview. Show G-code in the full Model page and give its toolbar and layer controls dedicated space.
 - Open the Library details preview without briefly showing the cover during loading.
-- Round sidebar highlights, workspace menu highlights, and image preview indicators. Match Library loading cards to the current card design.
+- Round sidebar highlights, workspace menu highlights, and image preview indicators. Soften preview arrows with a filled background. Match Library loading cards to the current card design.
 - Give the multi-plate tray its own row and keep the selected plate visible when switching views. Improve lighting on dark filament.
 - Align the model's Print actions and add space to attachment rows.
 
