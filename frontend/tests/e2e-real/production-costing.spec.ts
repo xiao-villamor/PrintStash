@@ -124,16 +124,26 @@ test.describe("production costing", () => {
       expect.arrayContaining([expect.objectContaining({ imported: true })]),
     );
 
+    await page.goto("/profiles?tab=pricing");
+    await page.getByLabel("Profit margin (%)").fill("20");
+    await page.getByLabel("Tax (%)").fill("10");
+    await page.getByLabel("New template name").fill(name);
+    await page.getByRole("button", { name: "Save pricing template" }).click();
+    await expect(page.getByRole("main").getByText(name, { exact: true })).toBeVisible();
+
     await page.goto(`${modelPath}?tab=costing`);
     const form = page.getByRole("form", { name: "Production estimate" });
     const saveEstimate = form.getByRole("button", { name: "Save estimate" });
     await expect(saveEstimate).toBeEnabled();
+    await expect(form.getByRole("button", { name: "Save pricing template" })).toHaveCount(0);
+    await form.getByText("Adjust estimate inputs").click();
     const time = form.getByLabel("Estimated time per copy");
     const grams = form.getByLabel("Filament per copy");
     await expect(time).toHaveValue("30.2");
     await expect(grams).toHaveValue("6.8");
     await expect(form.getByLabel(/Cost per kg/)).toHaveValue("20");
-    await expect(form.getByLabel("Cost profile")).toHaveValue(String(preset.id));
+    await expect(form.getByLabel("Printer profile")).toHaveValue(String(preset.id));
+    await expect(form.getByLabel("Filament preset or spool")).toHaveValue(`preset-${filament.id}`);
     await expect(page.getByRole("heading", { name: "Production cost preview" })).toBeVisible();
     await time.fill("20");
     await grams.fill("1");
@@ -144,11 +154,7 @@ test.describe("production costing", () => {
     await time.fill("120");
     await form.getByLabel("Filament per copy").fill("100");
 
-    // Save reusable pricing rates and apply them to the pending estimate.
-    await form.getByLabel("Profit margin (%)").fill("20");
-    await form.getByLabel("Tax (%)").fill("10");
-    await form.getByLabel("New template name").fill(name);
-    await form.getByRole("button", { name: "Save pricing template" }).click();
+    // Apply pricing rates from Profiles to this revision.
     await form.getByLabel("Pricing template", { exact: true }).selectOption({ label: name });
     await form.getByLabel("Profit margin (%)").fill("0");
     await form.getByLabel("Tax (%)").fill("0");
@@ -183,15 +189,14 @@ test.describe("production costing", () => {
     await cost.screenshot({ path: testInfo.outputPath("costing-breakdown.png") });
 
     await expect(form.getByLabel("Filament per copy")).toHaveValue("100");
-    await form.getByLabel("Pricing template", { exact: true }).selectOption({ label: name });
-    await form.getByRole("button", { name: "Delete template" }).click();
+    await form.getByRole("link", { name: "Pricing templates in Profiles" }).click();
+    await page.getByRole("button", { name: `Delete ${name}`, exact: true }).click();
     await page
       .getByRole("dialog", { name: "Delete pricing template?" })
       .getByRole("button", { name: "Delete template" })
       .click();
-    await expect(
-      form.getByLabel("Pricing template", { exact: true }).getByRole("option", { name }),
-    ).toHaveCount(0);
+    await expect(page.getByRole("main").getByText(name, { exact: true })).toHaveCount(0);
+    await page.goto(`${modelPath}?tab=costing`);
     await expect(cost.getByText("$3.64", { exact: true })).toBeVisible();
 
     await clickModelAction(page, "Delete model");

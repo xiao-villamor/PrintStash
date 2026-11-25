@@ -184,26 +184,36 @@ test.describe("settings route", () => {
 
   test("selects Settings values from the shared menu", async ({ page }) => {
     await page.goto("/settings?section=design");
-    const theme = page.getByRole("combobox", { name: "Theme", exact: true });
-    await expect(theme).toBeVisible();
-    const style = await theme.evaluate((select) => {
+    const currency = page.getByRole("combobox", { name: "Display currency", exact: true });
+    await expect(currency).toBeEnabled();
+    const style = await currency.evaluate((select) => {
       const picker = getComputedStyle(select, "::picker(select)");
       const chosen = select.querySelector("option:checked");
       return {
         appearance: getComputedStyle(select).appearance,
         pickerRadius: picker.borderTopLeftRadius,
         chosenBackground: chosen ? getComputedStyle(chosen).backgroundColor : null,
-        accent: getComputedStyle(document.documentElement).getPropertyValue("--accent").trim(),
       };
     });
     expect(style.appearance).toBe("base-select");
-    expect(style.pickerRadius).toBe("0px");
+    expect(style.pickerRadius).toBe("8px");
     expect(style.chosenBackground).not.toBe("rgba(0, 0, 0, 0)");
+    await expect(currency).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
 
-    await theme.click();
-    await page.getByRole("option", { name: "Dark", exact: true }).click();
-    await expect(theme).toHaveValue("dark");
-    await theme.selectOption("light");
+    await currency.click();
+    await currency.locator('option[value="EUR"]').click();
+    await expect(currency).toHaveValue("EUR");
+  });
+
+  test("keeps the migration backup selector disabled without backups", async ({ page }) => {
+    await page.route("**/api/v1/backups/sources", (route) => route.fulfill({ json: [] }));
+    await page.goto("/settings?section=storage");
+    await page.getByRole("button", { name: "Plan migration" }).click();
+    const backups = page.getByRole("combobox", { name: "Recent backup" });
+
+    await expect(backups).toBeDisabled();
+    await expect(backups).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
+    await expect(backups).toHaveCSS("opacity", "0.5");
   });
 
   test("rejects a stale configuration write in the browser fake", async ({ request }) => {
@@ -251,33 +261,37 @@ test.describe("settings route", () => {
     await expect.poll(() => probes).toBe(answered + 1);
   });
   for (const theme of ["light", "dark"] as const) {
-    test(`uses one field surface across forms in ${theme} mode`, async ({ page }, testInfo) => {
+    test(`uses consistent text and dropdown fields in ${theme} mode`, async ({
+      page,
+    }, testInfo) => {
       await page.addInitScript((value) => localStorage.setItem("printstash.theme", value), theme);
       await page.goto("/settings?section=design");
       await collapseNavigationSidebar(page);
       const token = theme === "dark" ? "--surface-container-high" : "--card";
-      const fields = [
-        page.getByLabel("Display currency"),
+      const dropdowns = [
+        page.getByRole("combobox", { name: "Display currency", exact: true }),
         page.getByRole("combobox", { name: "Metric 1", exact: true }),
         page.getByRole("combobox", { name: "Metric 2", exact: true }),
         page.getByRole("combobox", { name: "Metric 3", exact: true }),
       ];
-      async function checkFill(field: (typeof fields)[number]) {
+      async function checkFill(field: (typeof dropdowns)[number], surface = token) {
         const { actual, expected } = await field.evaluate((element, surface) => {
           const style = getComputedStyle(element);
           const canvas = document.createElement("canvas").getContext("2d")!;
           canvas.fillStyle = style.backgroundColor;
           return { actual: canvas.fillStyle, expected: style.getPropertyValue(surface).trim() };
-        }, token);
+        }, surface);
         expect(actual).toBe(expected);
       }
 
-      await expect(fields[0]).toBeEnabled();
+      await expect(dropdowns[0]).toBeEnabled();
       await page
         .getByRole("article", { name: "Example bracket", exact: true })
         .evaluate((element) => element.scrollIntoView({ block: "center" }));
       await page.screenshot({ path: testInfo.outputPath(`appearance-${theme}.png`) });
-      for (const field of fields) await checkFill(field);
+      for (const dropdown of dropdowns) {
+        await checkFill(dropdown, "--surface-container-high");
+      }
 
       await page.goto("/settings?section=sso");
       const issuer = page.getByLabel("Issuer URL", { exact: true });

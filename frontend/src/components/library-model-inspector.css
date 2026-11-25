@@ -101,9 +101,7 @@
   width: 100%;
   min-width: 0;
   height: 36px;
-  border: 1px solid var(--input);
   padding: 0 8px;
-  background: var(--card);
   color: var(--foreground);
   font-size: 13px;
 }
@@ -310,7 +308,7 @@
   }
 }
 
-.library-model-inspector :is(textarea, select, summary):focus-visible {
+.library-model-inspector :is(textarea, summary):focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
@@ -479,18 +477,4 @@ details.library-inspector-section > summary {
 }
 .library-inspector-workspace .library-inspector-delivery button {
   white-space: nowrap;
-}
-
-/* Selects in the print block are filled, not outlined. */
-.library-inspector-workspace select {
-  border-color: transparent;
-  border-radius: var(--radius);
-  background-color: var(--field-surface);
-}
-.library-inspector-workspace select:hover {
-  background-color: color-mix(in srgb, var(--foreground) 12%, transparent);
-}
-.library-inspector-workspace select:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 1px;
 }

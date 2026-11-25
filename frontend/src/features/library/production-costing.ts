@@ -30,11 +30,6 @@ export function pricingTemplatesOptions(offset: number) {
 export function useProductionCostCommands(modelId: number, fileId: number) {
   const client = useQueryClient();
   const { queryKey } = productionCostOptions(modelId, fileId);
-  const refreshTemplates = async (session: number) => {
-    requireSessionVersion(session);
-    await client.invalidateQueries({ queryKey: templatesKey });
-    requireSessionVersion(session);
-  };
   return {
     save: useMutation({
       mutationFn: async ({
@@ -58,6 +53,17 @@ export function useProductionCostCommands(modelId: number, fileId: number) {
         void client.invalidateQueries({ queryKey: queryKeys.model(modelId), exact: true });
       },
     }),
+  };
+}
+
+export function usePricingTemplateCommands() {
+  const client = useQueryClient();
+  const refreshTemplates = async (session: number) => {
+    requireSessionVersion(session);
+    await client.invalidateQueries({ queryKey: templatesKey });
+    requireSessionVersion(session);
+  };
+  return {
     createTemplate: useMutation({
       mutationFn: ({
         template,

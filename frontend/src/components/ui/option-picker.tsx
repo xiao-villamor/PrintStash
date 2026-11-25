@@ -114,7 +114,7 @@ export function OptionPicker<T extends string | number>(props: OptionPickerProps
             aria-expanded={open}
             aria-describedby={`${id}-selection`}
             disabled={disabled}
-            className="w-full min-w-0 justify-between border-input bg-field-surface font-normal"
+            className="dropdown-field w-full min-w-0 justify-between font-normal"
             onClick={() => toggle(!open)}
           >
             <span
@@ -155,7 +155,7 @@ export function OptionPicker<T extends string | number>(props: OptionPickerProps
           role="listbox"
           aria-label={label}
           aria-multiselectable={props.multiple || undefined}
-          className="max-h-56 overflow-y-auto"
+          className="max-h-56 overflow-y-auto p-1"
         >
           {matches.map((option, index) => (
             <button

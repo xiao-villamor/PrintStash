@@ -24,6 +24,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FilamentProfilesCard } from "@/components/filament-profiles-card";
+import { PricingTemplatesPanel } from "@/components/pricing-templates";
 import { anEditingBase, aVaultConfig } from "@/test-support/factories";
 import { clearLogin } from "@/lib/auth-store";
 import { queryClient, queryKeys } from "@/lib/query-client";
@@ -31,6 +32,20 @@ import { json, memberSession, renderApp, type RenderAppOptions } from "@/test-su
 import type { FilamentProfileRead, PrinterProfileRead } from "@/types";
 
 const FROZEN_NOW = "2026-01-01T00:00:00Z";
+
+it("lists pricing templates without management actions for non-admins", async () => {
+  renderApp(<PricingTemplatesPanel admin={false} />, {
+    routes: {
+      "GET /api/v1/pricing-templates": json([
+        { id: "standard", name: "Standard rates", margin_percent: 20, tax_percent: 10 },
+      ]),
+    },
+  });
+
+  expect(await screen.findByText("Standard rates")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Save pricing template" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Delete Standard rates" })).toBeNull();
+});
 
 function aFilamentProfile(over: Partial<FilamentProfileRead> = {}): FilamentProfileRead {
   return {

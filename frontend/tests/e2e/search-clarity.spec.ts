@@ -8,8 +8,8 @@ useMockApi();
 
 test.describe("search clarity", () => {
   for (const [theme, fill] of [
-    ["light", "rgb(16, 24, 40)"],
-    ["dark", "rgb(237, 241, 247)"],
+    ["light", "rgb(238, 240, 243)"],
+    ["dark", "rgb(54, 64, 78)"],
   ] as const) {
     test(`makes active AI search distinct in the ${theme} theme`, async ({ page }) => {
       await page.addInitScript(
@@ -25,7 +25,7 @@ test.describe("search clarity", () => {
       await expect(ai).not.toHaveCSS("background-color", fill);
       await ai.click();
 
-      await expect(ai).toHaveText("AI Search on");
+      await expect(ai).toHaveText("AI on");
       await expect(ai).toHaveAttribute("aria-pressed", "true");
       await expect(ai).toHaveCSS("background-color", fill);
       await expect(page.getByRole("searchbox", { name: "Search library" })).toHaveAttribute(
@@ -56,10 +56,9 @@ test.describe("search clarity", () => {
       neutral: getComputedStyle(element.querySelector("svg")!).color,
     }));
     expect(focusedBorder.actual).toBe(focusedBorder.neutral);
-    await expect(page.getByRole("button", { name: "AI Search", exact: true })).toHaveText(
-      "AI Search on",
-      { timeout: 1000 },
-    );
+    await expect(page.getByRole("button", { name: "AI Search", exact: true })).toHaveText("AI on", {
+      timeout: 1000,
+    });
     const field = await input.boundingBox();
     expect(field).not.toBeNull();
     for (const name of ["AI Search", "Clear search"]) {
@@ -157,7 +156,7 @@ test.describe("search clarity", () => {
     ).toHaveText("30 results");
     await expect(page.getByRole("group", { name: "Result types" })).toBeVisible();
     const ai = page.getByRole("button", { name: "AI Search", exact: true });
-    await expect(ai).toHaveText("AI Search on");
+    await expect(ai).toHaveText("AI on");
     await expect(ai).toHaveAttribute("aria-pressed", "true");
     const results = page.getByRole("list", { name: "Search results" });
     await expect(results.getByRole("listitem")).toHaveCount(30);

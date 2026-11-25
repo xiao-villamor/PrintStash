@@ -1661,12 +1661,14 @@ test.describe("model detail route", () => {
     });
     await page.goto("/models/1");
     await selectModelDetailTab(page, "Print settings");
-    const picker = page.getByRole("region", { name: "Inspect revision" });
-    await picker.getByRole("button", { name: "Rev 2", exact: true }).click();
-    await expect(picker.getByRole("button", { name: "Rev 2", exact: true })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    const settings = page.getByRole("tabpanel", { name: "Print settings" });
+    const previous = settings.getByRole("button", { name: /^Rev 1\b/ });
+    await expect(previous).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
+    await previous.click();
+    const picker = page.getByRole("menu", { name: "Inspect revision" });
+    await expect(picker.getByRole("menuitemradio", { name: /^Rev 1\b/ })).toBeChecked();
+    await picker.getByRole("menuitemradio", { name: /^Rev 2\b/ }).click();
+    await expect(settings.getByRole("button", { name: /^Rev 2\b/ })).toBeVisible();
     await expect(
       page.getByTestId("model-detail-sidebar").getByText("PETG", { exact: true }),
     ).toBeVisible();
@@ -1676,7 +1678,7 @@ test.describe("model detail route", () => {
     ).toBeVisible();
     await page.getByRole("tab", { name: /^Print/ }).click();
     await page.getByRole("button", { name: "Prepare print", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Send Rev 2 to printer", exact: true });
+    const dialog = page.getByRole("dialog", { name: "Prepare print", exact: true });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Revision", exact: true })).toContainText(
       /Rev 2/,
@@ -1687,10 +1689,7 @@ test.describe("model detail route", () => {
     await recommended.press("Enter");
     await expect(page.getByRole("tabpanel", { name: "Print" })).toBeFocused();
     await selectModelDetailTab(page, "Print settings");
-    await expect(picker.getByRole("button", { name: /Rev 1/ })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    await expect(previous).toBeVisible();
     expect(writes).toBe(0);
   });
 

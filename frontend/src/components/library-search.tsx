@@ -271,10 +271,10 @@ export function LibrarySearch({
                     ? "aiSearch.turnOffAi"
                     : "aiSearch.submitAi",
               )}
-              className="h-7 gap-1.5 px-2 text-muted-foreground aria-pressed:bg-inverse-surface aria-pressed:font-semibold aria-pressed:text-inverse-on-surface aria-pressed:hover:bg-inverse-surface aria-pressed:hover:text-inverse-on-surface"
+              className="h-7 gap-1.5 px-2 text-muted-foreground aria-pressed:bg-accent aria-pressed:text-accent-foreground dark:aria-pressed:bg-surface-bright dark:aria-pressed:hover:bg-surface-bright"
               onClick={toggleAi}
             >
-              <AiModeIcon className="size-3.5" aria-hidden />
+              <AiModeIcon className={aiActive ? "size-3.5 text-success" : "size-3.5"} aria-hidden />
               {t(aiActive ? "aiSearch.activeLabel" : "aiSearch.settingsTitle")}
             </Button>
           )}

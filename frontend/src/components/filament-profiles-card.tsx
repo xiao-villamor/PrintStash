@@ -43,6 +43,7 @@ import {
   type ExpenseDraft,
 } from "@/lib/printer-expenses";
 import { PrinterExpenseFields } from "@/components/printer-expense-fields";
+import { PricingTemplatesPanel } from "@/components/pricing-templates";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -480,8 +481,9 @@ export function FilamentProfilesCard() {
   const { locale, t } = useI18n();
   const { user } = useAuth();
   const params = useSearchParams();
-  const [activeTab, setActiveTab] = useState<"filaments" | "printers">(
-    params.get("tab") === "printers" ? "printers" : "filaments",
+  const initialTab = params.get("tab");
+  const [activeTab, setActiveTab] = useState<"filaments" | "printers" | "pricing">(
+    initialTab === "pricing" || initialTab === "printers" ? initialTab : "filaments",
   );
   const filamentQuery = useQuery({ ...filamentProfilesOptions(), enabled: auth.isAuthenticated });
   const printerQuery = useQuery({ ...printerProfilesOptions(), enabled: auth.isAuthenticated });
@@ -1038,7 +1040,7 @@ export function FilamentProfilesCard() {
         <PageHeader
           title={translateUiText(locale, "Profiles")}
           description={translateUiText(locale, "profiles.description")}
-          actions={profileActions}
+          actions={activeTab === "pricing" ? undefined : profileActions}
         />
         <ConfirmModal
           open={
@@ -1064,7 +1066,7 @@ export function FilamentProfilesCard() {
           }
           confirmLabel={uiText("Delete preset")}
         />
-        {(error || activeQuery.isError) && (
+        {activeTab !== "pricing" && (error || activeQuery.isError) && (
           <div
             role="alert"
             className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
@@ -1110,6 +1112,7 @@ export function FilamentProfilesCard() {
                     </>
                   ),
                 },
+                { key: "pricing", label: uiText("Pricing templates") },
               ]}
               active={activeTab}
               onChange={setActiveTab}
@@ -1119,7 +1122,9 @@ export function FilamentProfilesCard() {
               activeTabClassName="bg-foreground/12 text-foreground"
             />
           </div>
-          {activeDenied ? null : activeTab === "filaments" ? (
+          {activeTab === "pricing" ? (
+            auth.isAuthenticated && <PricingTemplatesPanel admin={user?.is_superuser === true} />
+          ) : activeDenied ? null : activeTab === "filaments" ? (
             <section aria-labelledby="filament-presets-heading">
               <h2 id="filament-presets-heading" className="sr-only">
                 {uiText("Filament presets")}

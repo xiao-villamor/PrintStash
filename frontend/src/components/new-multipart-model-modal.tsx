@@ -162,7 +162,7 @@ export function NewMultipartModelModal({
                 <Button
                   type="button"
                   variant="outline"
-                  className="w-full justify-start font-normal"
+                  className="dropdown-field w-full justify-start font-normal"
                   aria-label={t("multipart.collectionLabel")}
                   data-menu-trigger
                   aria-haspopup="dialog"

@@ -9,7 +9,7 @@ import { Input, inputClasses } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { productionCostOptions, useProductionCostCommands } from "@/features/library/model-detail";
 import { parseApiError, userMessage } from "@/lib/errors";
-import { formatDuration, formatNumber } from "@/lib/format";
+import { formatDuration, formatGrams, formatNumber } from "@/lib/format";
 import { uiText } from "@/lib/locale";
 import { usePrinters, useSpoolmanStatus, useSpools } from "@/lib/queries";
 import { filamentProfilesOptions, printerProfilesOptions } from "@/lib/queries/profiles";
@@ -32,7 +32,8 @@ import {
   matchPrinterPreset,
   previewPieceCosts,
 } from "./costing-defaults";
-import { PricingTemplateControls } from "./pricing-template-controls";
+import { PricingTemplatePicker } from "@/components/pricing-templates";
+import { Link } from "@/lib/link";
 
 type PlateCostInput = {
   fileId: number;
@@ -530,7 +531,9 @@ function EstimateForm({
   const [draft, setDraft] = useState(initialDraft);
   const [nextKey, setNextKey] = useState(draft.materials.length);
   // Where each material's rate came from, until the reader types over it.
-  const [rateOrigins, setRateOrigins] = useState<Record<number, string>>({});
+  const [rateOrigins, setRateOrigins] = useState<Record<number, { value: string; label: string }>>(
+    {},
+  );
   const currency = row.estimate?.currency ?? row.currency;
   const sameCurrency = currency === row.currency;
   const filamentProfiles = useQuery(filamentProfilesOptions()).data ?? [];
@@ -608,6 +611,14 @@ function EstimateForm({
     }));
   }
 
+  function clearRateOrigin(key: number) {
+    setRateOrigins((old) => {
+      const next = { ...old };
+      delete next[key];
+      return next;
+    });
+  }
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (estimate && !blocked && !commands.save.isPending) onSave(estimate);
@@ -656,7 +667,7 @@ function EstimateForm({
             <div className="grid grid-cols-2 items-start gap-3 p-4">
               <FormField
                 className="col-span-2"
-                label={uiText("Cost profile")}
+                label={uiText("Printer profile")}
                 hint={
                   draft.printer === undefined && printer
                     ? uiText("From the {value1} preset", { value1: printer.name })
@@ -695,54 +706,37 @@ function EstimateForm({
                   ))}
                 </select>
               </FormField>
-              <FormField
-                label={uiText("Estimated time per copy")}
-                hint={[uiText("Minutes"), fileOrigin].filter(Boolean).join(" · ")}
-              >
-                <Input
-                  type="number"
-                  min={0}
-                  max={1000000}
-                  step="any"
-                  value={draft.minutes}
-                  required
-                  onChange={(event) => setDraft({ ...draft, minutes: event.target.value })}
-                />
-              </FormField>
-              <FormField label={uiText("Pieces per print")}>
-                <Input
-                  type="number"
-                  min={1}
-                  max={100000}
-                  value={draft.pieces}
-                  required
-                  onChange={(event) => setDraft({ ...draft, pieces: event.target.value })}
-                />
-              </FormField>
-              {!sameCurrency && (
-                <p className="col-span-2 text-xs text-muted-foreground">
-                  {uiText(
-                    "This estimate uses a different currency from the current vault presets.",
-                  )}
-                </p>
-              )}
-              {materials.map((line) => (
-                <fieldset
-                  key={line.key}
-                  className={
-                    draft.materials.length > 1
-                      ? "col-span-2 grid grid-cols-2 gap-3 border p-3"
-                      : "col-span-2 grid grid-cols-2 gap-3"
-                  }
+              <p className="col-span-2 text-sm text-muted-foreground">
+                <Link
+                  href={`/profiles?tab=printers${matchedPrinter ? `&profile=${matchedPrinter.id}` : ""}`}
+                  className="underline underline-offset-4 hover:text-foreground"
                 >
+                  {uiText("Printer costs in Profiles")}
+                </Link>
+              </p>
+              {materials.map((line) => (
+                <div key={line.key} className="col-span-2 space-y-1.5">
+                  <p className="text-sm text-foreground">
+                    {line.name || uiText("Filament")}
+                    {line.grams && ` · ${formatGrams(Number(line.grams))}`}
+                    {line.rate &&
+                      ` · ${formatNumber(Number(line.rate), { maximumFractionDigits: 4 })} ${currency}/kg`}
+                  </p>
+                  {rateOrigins[line.key] ? (
+                    <p className="text-sm text-muted-foreground">{rateOrigins[line.key].label}</p>
+                  ) : line.autoRate && pickedFilament ? (
+                    <p className="text-sm text-muted-foreground">
+                      {uiText("From the {value1} preset", { value1: pickedFilament.name })}
+                    </p>
+                  ) : null}
                   {sameCurrency && (filamentProfiles.length > 0 || spools.length > 0) && (
-                    <FormField
-                      className="col-span-2"
-                      label={uiText("Fill from filament preset or spool")}
-                    >
+                    <FormField className="col-span-2" label={uiText("Filament preset or spool")}>
                       <select
                         className={inputClasses}
-                        value=""
+                        value={
+                          rateOrigins[line.key]?.value ??
+                          (line.autoRate && pickedFilament ? `preset-${pickedFilament.id}` : "")
+                        }
                         onChange={(event) => {
                           const option = event.target.value;
                           const spool = spools.find((item) => option === `spool-${item.id}`);
@@ -764,7 +758,10 @@ function EstimateForm({
                             });
                             setRateOrigins((old) => ({
                               ...old,
-                              [line.key]: uiText("From Spoolman spool #{id}", { id: spool.id }),
+                              [line.key]: {
+                                value: option,
+                                label: uiText("From Spoolman spool #{id}", { id: spool.id }),
+                              },
                             }));
                           } else if (profile) {
                             updateMaterial(line.key, {
@@ -776,14 +773,17 @@ function EstimateForm({
                             });
                             setRateOrigins((old) => ({
                               ...old,
-                              [line.key]: uiText("From the {value1} preset", {
-                                value1: profile.name,
-                              }),
+                              [line.key]: {
+                                value: option,
+                                label: uiText("From the {value1} preset", { value1: profile.name }),
+                              },
                             }));
                           }
                         }}
                       >
-                        <option value="">{uiText("Select a preset or spool")}</option>
+                        <option value="" disabled>
+                          {uiText("Select a preset or spool")}
+                        </option>
                         {filamentProfiles.map((item) => (
                           <option key={`preset-${item.id}`} value={`preset-${item.id}`}>
                             {item.name}
@@ -800,172 +800,211 @@ function EstimateForm({
                       </select>
                     </FormField>
                   )}
-                  {line.spoolId !== null && (
-                    <div className="col-span-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                      <span>{uiText("Spoolman #{id}", { id: line.spoolId })}</span>
+                </div>
+              ))}
+              <p className="col-span-2 text-sm text-muted-foreground">
+                <Link
+                  href="/profiles?tab=filaments"
+                  className="underline underline-offset-4 hover:text-foreground"
+                >
+                  {uiText("Filament costs in Profiles")}
+                </Link>
+              </p>
+              <div className="col-span-2">
+                <PricingTemplatePicker
+                  onApply={(value) =>
+                    setDraft({
+                      ...draft,
+                      margin: String(value.margin_percent),
+                      tax: String(value.tax_percent),
+                    })
+                  }
+                />
+              </div>
+              {!estimate && (
+                <p className="col-span-2 text-sm text-muted-foreground">
+                  {uiText("Choose saved rates or complete the missing estimate inputs below.")}
+                </p>
+              )}
+            </div>
+            <details className="border-t border-border">
+              <summary className="rounded-md px-4 py-3 text-sm font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+                {uiText("Adjust estimate inputs")}
+              </summary>
+              <div className="grid grid-cols-2 items-start gap-3 p-4 pt-2">
+                <FormField
+                  label={uiText("Estimated time per copy")}
+                  hint={[uiText("Minutes"), fileOrigin].filter(Boolean).join(" · ")}
+                >
+                  <Input
+                    type="number"
+                    min={0}
+                    max={1000000}
+                    step="any"
+                    value={draft.minutes}
+                    required
+                    onChange={(event) => setDraft({ ...draft, minutes: event.target.value })}
+                  />
+                </FormField>
+                <FormField label={uiText("Pieces per print")}>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={100000}
+                    value={draft.pieces}
+                    required
+                    onChange={(event) => setDraft({ ...draft, pieces: event.target.value })}
+                  />
+                </FormField>
+                {!sameCurrency && (
+                  <p className="col-span-2 text-xs text-muted-foreground">
+                    {uiText(
+                      "This estimate uses a different currency from the current vault presets.",
+                    )}
+                  </p>
+                )}
+                {materials.map((line) => (
+                  <fieldset
+                    key={line.key}
+                    className={
+                      draft.materials.length > 1
+                        ? "col-span-2 grid grid-cols-2 gap-3 border p-3"
+                        : "col-span-2 grid grid-cols-2 gap-3"
+                    }
+                  >
+                    {line.spoolId !== null && (
+                      <div className="col-span-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                        <span>{uiText("Spoolman #{id}", { id: line.spoolId })}</span>
+                        <Button
+                          type="button"
+                          size="xs"
+                          variant="ghost"
+                          onClick={() => {
+                            updateMaterial(line.key, { spoolId: null });
+                            clearRateOrigin(line.key);
+                          }}
+                        >
+                          {uiText("Clear spool association")}
+                        </Button>
+                      </div>
+                    )}
+                    <FormField className="col-span-2" label={uiText("Material name")}>
+                      <Input
+                        maxLength={200}
+                        value={line.name}
+                        required
+                        onChange={(event) => updateMaterial(line.key, { name: event.target.value })}
+                      />
+                    </FormField>
+                    <FormField
+                      label={uiText("Filament per copy")}
+                      hint={[uiText("Grams"), fileOrigin].filter(Boolean).join(" · ")}
+                    >
+                      <Input
+                        type="number"
+                        min={0}
+                        max={1000000}
+                        step="any"
+                        value={line.grams}
+                        required
+                        onChange={(event) =>
+                          updateMaterial(line.key, { grams: event.target.value })
+                        }
+                      />
+                    </FormField>
+                    <FormField
+                      label={`${uiText("Cost per kg")} (${currency})`}
+                      hint={
+                        rateOrigins[line.key]?.label ??
+                        (line.autoRate
+                          ? pickedFilament
+                            ? uiText("From the {value1} preset", { value1: pickedFilament.name })
+                            : embeddedRate !== null
+                              ? uiText("From the G-code")
+                              : undefined
+                          : undefined)
+                      }
+                    >
+                      <Input
+                        type="number"
+                        min={0}
+                        max={1000000}
+                        step="any"
+                        value={line.rate ?? ""}
+                        required
+                        onChange={(event) => {
+                          updateMaterial(line.key, { rate: event.target.value });
+                          clearRateOrigin(line.key);
+                        }}
+                      />
+                    </FormField>
+                    {draft.materials.length > 1 && (
                       <Button
                         type="button"
                         size="xs"
                         variant="ghost"
-                        onClick={() => updateMaterial(line.key, { spoolId: null })}
+                        className="col-span-2 justify-self-start"
+                        onClick={() =>
+                          setDraft({
+                            ...draft,
+                            materials: draft.materials.filter((item) => item.key !== line.key),
+                          })
+                        }
                       >
-                        {uiText("Clear spool association")}
+                        {uiText("Remove material")}
                       </Button>
-                    </div>
-                  )}
-                  <FormField className="col-span-2" label={uiText("Material name")}>
-                    <Input
-                      maxLength={200}
-                      value={line.name}
-                      required
-                      onChange={(event) => updateMaterial(line.key, { name: event.target.value })}
-                    />
-                  </FormField>
+                    )}
+                  </fieldset>
+                ))}
+                <div className="col-span-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={draft.materials.length >= 32}
+                    onClick={() => {
+                      setDraft({
+                        ...draft,
+                        materials: [...draft.materials, blankMaterial(nextKey)],
+                      });
+                      setNextKey(nextKey + 1);
+                    }}
+                  >
+                    {uiText("Add material")}
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-3 border-t border-border p-4">
+                <h3 className="text-sm font-medium text-muted-foreground">{uiText("Pricing")}</h3>
+                <div className="grid grid-cols-2 gap-3">
                   <FormField
-                    label={uiText("Filament per copy")}
-                    hint={[uiText("Grams"), fileOrigin].filter(Boolean).join(" · ")}
+                    label={uiText("Profit margin (%)")}
+                    hint={uiText("Profit as a share of the price before tax.")}
                   >
                     <Input
                       type="number"
                       min={0}
-                      max={1000000}
+                      max={99.99}
                       step="any"
-                      value={line.grams}
+                      value={draft.margin}
                       required
-                      onChange={(event) => updateMaterial(line.key, { grams: event.target.value })}
+                      onChange={(event) => setDraft({ ...draft, margin: event.target.value })}
                     />
                   </FormField>
-                  <FormField
-                    label={`${uiText("Cost per kg")} (${currency})`}
-                    hint={
-                      rateOrigins[line.key] ??
-                      (line.autoRate
-                        ? pickedFilament
-                          ? uiText("From the {value1} preset", { value1: pickedFilament.name })
-                          : embeddedRate !== null
-                            ? uiText("From the G-code")
-                            : undefined
-                        : undefined)
-                    }
-                  >
+                  <FormField label={uiText("Tax (%)")}>
                     <Input
                       type="number"
                       min={0}
-                      max={1000000}
+                      max={100}
                       step="any"
-                      value={line.rate ?? ""}
+                      value={draft.tax}
                       required
-                      onChange={(event) => {
-                        updateMaterial(line.key, { rate: event.target.value });
-                        setRateOrigins((old) => {
-                          const next = { ...old };
-                          delete next[line.key];
-                          return next;
-                        });
-                      }}
+                      onChange={(event) => setDraft({ ...draft, tax: event.target.value })}
                     />
                   </FormField>
-                  {draft.materials.length > 1 && (
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="ghost"
-                      className="col-span-2 justify-self-start"
-                      onClick={() =>
-                        setDraft({
-                          ...draft,
-                          materials: draft.materials.filter((item) => item.key !== line.key),
-                        })
-                      }
-                    >
-                      {uiText("Remove material")}
-                    </Button>
-                  )}
-                </fieldset>
-              ))}
-              <div className="col-span-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={draft.materials.length >= 32}
-                  onClick={() => {
-                    setDraft({ ...draft, materials: [...draft.materials, blankMaterial(nextKey)] });
-                    setNextKey(nextKey + 1);
-                  }}
-                >
-                  {uiText("Add material")}
-                </Button>
+                </div>
               </div>
-            </div>
-            <div className="space-y-3 border-t border-border p-4">
-              <h3 className="text-sm font-medium text-muted-foreground">{uiText("Pricing")}</h3>
-              <div className="grid grid-cols-2 gap-3">
-                <FormField
-                  label={uiText("Profit margin (%)")}
-                  hint={uiText("Profit as a share of the price before tax.")}
-                >
-                  <Input
-                    type="number"
-                    min={0}
-                    max={99.99}
-                    step="any"
-                    value={draft.margin}
-                    required
-                    onChange={(event) => setDraft({ ...draft, margin: event.target.value })}
-                  />
-                </FormField>
-                <FormField label={uiText("Tax (%)")}>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={100}
-                    step="any"
-                    value={draft.tax}
-                    required
-                    onChange={(event) => setDraft({ ...draft, tax: event.target.value })}
-                  />
-                </FormField>
-              </div>
-              <PricingTemplateControls
-                rates={rates}
-                admin={admin}
-                pending={commands.createTemplate.isPending || commands.deleteTemplate.isPending}
-                onApply={(value) =>
-                  setDraft({
-                    ...draft,
-                    margin: String(value.margin_percent),
-                    tax: String(value.tax_percent),
-                  })
-                }
-                onSave={async (template) => {
-                  try {
-                    await commands.createTemplate.mutateAsync({
-                      template,
-                      session: getSessionVersion(),
-                    });
-                    toast.success(uiText("Pricing template saved."));
-                    return true;
-                  } catch (error) {
-                    toast.error(error);
-                    return false;
-                  }
-                }}
-                onDelete={async (id) => {
-                  try {
-                    await commands.deleteTemplate.mutateAsync({
-                      id,
-                      session: getSessionVersion(),
-                    });
-                    toast.success(uiText("Pricing template deleted."));
-                    return true;
-                  } catch (error) {
-                    toast.error(error);
-                    return false;
-                  }
-                }}
-              />
-            </div>
+            </details>
           </SoftCard>
         </InspectorSection>
         {messages}

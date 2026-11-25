@@ -48,7 +48,7 @@ theme swap so colors remain consistent throughout the application.
 | `destructive-action` / `destructive-action-foreground` | Filled destructive confirmation with a deep red background and white text |
 | `success`, `warning` | Status only — never as decoration |
 | `border`, `input`, `ring` | Edges and focus rings |
-| `field-surface` | Text inputs, textareas, selects and picker triggers styled as fields |
+| `field-surface` | Text inputs and textareas |
 | `surface-*`, `on-surface*`, `outline*` | The elevation scale, for multi-layer panels |
 | `preview-image-matte` | A theme-independent neutral backing for transparent slicer preview images |
 
@@ -79,6 +79,9 @@ Primary actions and selected controls are deliberately different:
   navigation.
 - Use `OptionPicker` for data-driven lists that can grow, such as printers
   and revisions. Keep the search and scrollable choices inside the menu.
+- Single-choice selects and picker buttons use `surface-container-high` with
+  a transparent border at rest. Use the shared `dropdown-field` class on custom
+  picker buttons. Keyboard focus uses the standard focus outline.
 - Orange belongs to `warning` or explicitly tertiary/status content. It is not
   an action or selection color.
 

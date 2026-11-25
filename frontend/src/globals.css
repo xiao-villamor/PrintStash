@@ -375,6 +375,36 @@
   }
 }
 
+/* Choice fields share a neutral trigger regardless of how their options open. */
+:is(select:not([multiple], [size]), .dropdown-field) {
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background-color: var(--surface-container-high);
+  box-shadow: none;
+}
+
+:is(select:not([multiple], [size]), .dropdown-field):not(:disabled, [aria-disabled="true"]):is(
+    :hover,
+    :open,
+    [aria-expanded="true"]
+  ) {
+  background-color: var(--surface-container-highest);
+}
+
+:is(select:not([multiple], [size]), .dropdown-field):focus {
+  outline: none;
+  box-shadow: none;
+}
+
+:is(select:not([multiple], [size]), .dropdown-field):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+:is(select:not([multiple], [size]), .dropdown-field)[aria-invalid="true"] {
+  border-color: var(--destructive);
+}
+
 @layer components {
   .setup-card {
     display: grid;
@@ -398,7 +428,7 @@
   }
 
   .field-option {
-    @apply flex min-h-8 w-full min-w-0 items-center gap-2 px-2.5 py-2 text-left text-field leading-4 text-popover-foreground hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none data-[active=true]:bg-popover-hover;
+    @apply flex min-h-8 w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-2 text-left text-field leading-4 text-popover-foreground hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none data-[active=true]:bg-popover-hover;
   }
 
   .field-option[aria-selected="true"]:not([data-active], :hover, :focus-visible) {

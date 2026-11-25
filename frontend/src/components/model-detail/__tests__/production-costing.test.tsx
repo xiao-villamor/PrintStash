@@ -89,6 +89,12 @@ describe("ProductionCosting", () => {
 
     const form = within(await screen.findByRole("form", { name: "Production estimate" }));
     expect(form.getByRole("button", { name: "Save estimate" })).toBeVisible();
+    expect(form.getByRole("link", { name: "Printer costs in Profiles" })).toHaveAttribute(
+      "href",
+      "/profiles?tab=printers",
+    );
+    expect(form.queryByRole("button", { name: "Save pricing template" })).toBeNull();
+    expect(form.getByLabelText("Estimated time per copy")).not.toBeVisible();
     expect(screen.getByText("No production estimate saved for this artifact.")).toBeVisible();
     expect(view.requestsWithMethod("PUT")).toHaveLength(0);
   });
@@ -177,7 +183,7 @@ describe("ProductionCosting", () => {
     );
 
     const form = within(await screen.findByRole("form", { name: "Production estimate" }));
-    await waitFor(() => expect(form.getByLabelText("Cost profile")).toHaveValue("5"));
+    await waitFor(() => expect(form.getByLabelText("Printer profile")).toHaveValue("5"));
     const price = form.getByLabelText("Cost per kg (USD)");
     await waitFor(() => expect(price).toHaveValue(rate));
     const save = form.getByRole("button", { name: "Save estimate" });
@@ -193,7 +199,7 @@ describe("ProductionCosting", () => {
     expect(save).toBeDisabled();
     await user.type(price, "40");
     expect(finalPrice().getByText("$5.00")).toBeVisible();
-    await user.selectOptions(form.getByLabelText("Cost profile"), "");
+    await user.selectOptions(form.getByLabelText("Printer profile"), "");
     expect(finalPrice().getByText("$4.00")).toBeVisible();
   });
 
@@ -227,6 +233,7 @@ describe("ProductionCosting", () => {
 
     const user = userEvent.setup();
     const form = within(await screen.findByRole("form", { name: "Production estimate" }));
+    await user.click(form.getByText("Adjust estimate inputs"));
     await user.type(form.getByLabelText("Estimated time per copy"), "30");
     await user.type(form.getByLabelText("Material name"), "PETG");
     await user.type(form.getByLabelText("Filament per copy"), "10");
