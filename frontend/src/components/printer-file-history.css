@@ -1,5 +1,7 @@
 .printer-explorer {
   border: 1px solid var(--border);
+  border-radius: var(--radius-popover);
+  overflow: hidden;
   background: var(--card);
   color: var(--card-foreground);
 }
@@ -10,7 +12,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
-  padding: 12px 16px;
+  padding: 14px 20px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -69,7 +71,7 @@
 .printer-explorer-inspector,
 .printer-explorer-unsupported {
   min-width: 0;
-  padding: 12px 16px;
+  padding: 16px 20px;
 }
 
 .printer-explorer-folders {
@@ -95,10 +97,15 @@
   min-width: 0;
 }
 
+.printer-explorer-folder {
+  border-radius: var(--radius);
+  padding: 7px 8px;
+}
+
 .printer-explorer-folder[aria-current],
 .printer-explorer-table tr[data-selected="true"] {
-  background: var(--accent);
-  color: var(--accent-foreground);
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+  color: var(--foreground);
 }
 
 .printer-explorer-table tr[data-selected="false"]:hover {
@@ -119,16 +126,16 @@
 
 .printer-explorer-table th,
 .printer-explorer-table td {
-  padding: 9px 12px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   text-align: start;
 }
 
 .printer-explorer-table th {
-  background: var(--muted);
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
   color: var(--muted-foreground);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
 }
 

@@ -13,8 +13,8 @@ import { PrinterConfigEditor } from "./config-editor";
 import "./config-editor.css";
 
 const tabClassName =
-  "shrink-0 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring transition-colors duration-press motion-reduce:transition-none";
-const activeTabClassName = "bg-accent text-accent-foreground";
+  "h-7.5 shrink-0 rounded-md px-3 text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors duration-press motion-reduce:transition-none";
+const activeTabClassName = "bg-foreground/12 text-foreground";
 
 type ConfigView = "files" | "reported";
 type ConfigSource = "klipper_config" | "moonraker_config" | "server_info" | "printer_info";
@@ -155,7 +155,7 @@ function ConfigSections({ groups }: { groups: ConfigGroup[] }) {
                     type="button"
                     aria-current={section.id === selected?.id ? "true" : undefined}
                     onClick={() => setSelection(section.id)}
-                    className="w-full px-2 py-1.5 text-start font-mono text-xs transition-colors duration-press [overflow-wrap:anywhere] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring aria-[current=true]:bg-accent aria-[current=true]:text-accent-foreground motion-reduce:transition-none"
+                    className="w-full px-2 py-1.5 text-start font-mono text-xs transition-colors duration-press [overflow-wrap:anywhere] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring aria-[current=true]:bg-foreground/10 aria-[current=true]:text-foreground motion-reduce:transition-none rounded-md"
                   >
                     {section.name}
                   </button>
@@ -219,7 +219,7 @@ function ReportedConfiguration({
           ]}
           active={source}
           onChange={setSource}
-          className="max-w-full gap-0.5 overflow-x-auto border bg-muted/30 p-0.5"
+          className="max-w-full gap-0.5 overflow-x-auto rounded-lg border border-border bg-card p-0.75"
           tabClassName={tabClassName}
           activeTabClassName={activeTabClassName}
           showIndicator={false}
@@ -274,7 +274,7 @@ export function PrinterConfigWorkspace({
         ]}
         active={view}
         onChange={setView}
-        className="w-fit max-w-full gap-0.5 overflow-x-auto border bg-muted/30 p-0.5"
+        className="w-fit max-w-full gap-0.5 overflow-x-auto rounded-lg border border-border bg-card p-0.75"
         tabClassName={tabClassName}
         activeTabClassName={activeTabClassName}
         showIndicator={false}

@@ -83,8 +83,9 @@ import {
   type CommandReceipts,
 } from "@/components/printer-controls";
 import { PrinterConsole } from "./printer-console";
-import { MachineIdentity, MachineMaterials } from "@/components/printer-machine";
+import { MachineIdentity, MachineMaterials, MachinePortrait } from "@/components/printer-machine";
 import { PrinterStatusBadge } from "@/components/printer-status-badge";
+import { PrinterReadouts } from "@/components/printer-readouts";
 import { Switch } from "@/components/ui/switch";
 import {
   PREHEAT_PRESETS,
@@ -877,56 +878,64 @@ function PrinterDetailView({
           }
         />
         <div className="w-full space-y-6">
-          <PageHeader
-            title={printer.name}
-            description={
-              <span className="inline-flex flex-wrap items-center gap-2">
-                <PrinterStatusBadge status={printer.status} />
-                {providerLabel(printer)} · {connectionLabel}
-                {printer.capabilities.support_level === "beta" && (
-                  <span className="inline-flex rounded-full bg-foreground/10 px-2 py-0.5 text-2xs font-medium text-foreground/80">
-                    {uiText("Beta")}
-                  </span>
-                )}
-              </span>
-            }
-            actions={
-              activeTab === "materials" ||
-              activeTab === "maintenance" ||
-              activeTab === "diagnostics" ||
-              (activeTab === "files" && printer.capabilities.can_list_files) ? null : (
-                <>
-                  {activeTab === "status" &&
-                    availability.moonraker &&
-                    printer.access.can_control && (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <CommandReceipt receipt={receipts.emergency} pending={emergencyStopBusy} />
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          disabled={!availability.connected || emergencyStopBusy}
-                          onClick={emergencyStop}
-                        >
-                          {uiText("Emergency stop")}
-                        </Button>
-                      </div>
+          <div className="flex items-start gap-4">
+            <MachinePortrait printer={printer} />
+            <div className="min-w-0 flex-1">
+              <PageHeader
+                title={printer.name}
+                description={
+                  <span className="inline-flex flex-wrap items-center gap-2">
+                    <PrinterStatusBadge status={printer.status} />
+                    {providerLabel(printer)} · {connectionLabel}
+                    {printer.capabilities.support_level === "beta" && (
+                      <span className="inline-flex rounded-full bg-foreground/10 px-2 py-0.5 text-2xs font-medium text-foreground/80">
+                        {uiText("Beta")}
+                      </span>
                     )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (activeTab === "config") void loadMoonrakerConfig();
-                      else void refreshAll();
-                    }}
-                    disabled={activeTab === "config" && loadingConfig}
-                  >
-                    <RefreshCcw className="h-3.5 w-3.5" />
-                    {uiText("Refresh")}
-                  </Button>
-                </>
-              )
-            }
-          />
+                  </span>
+                }
+                actions={
+                  activeTab === "materials" ||
+                  activeTab === "maintenance" ||
+                  activeTab === "diagnostics" ||
+                  (activeTab === "files" && printer.capabilities.can_list_files) ? null : (
+                    <>
+                      {activeTab === "status" &&
+                        availability.moonraker &&
+                        printer.access.can_control && (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <CommandReceipt
+                              receipt={receipts.emergency}
+                              pending={emergencyStopBusy}
+                            />
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              disabled={!availability.connected || emergencyStopBusy}
+                              onClick={emergencyStop}
+                            >
+                              {uiText("Emergency stop")}
+                            </Button>
+                          </div>
+                        )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          if (activeTab === "config") void loadMoonrakerConfig();
+                          else void refreshAll();
+                        }}
+                        disabled={activeTab === "config" && loadingConfig}
+                      >
+                        <RefreshCcw className="h-3.5 w-3.5" />
+                        {uiText("Refresh")}
+                      </Button>
+                    </>
+                  )
+                }
+              />
+            </div>
+          </div>
 
           {(error || resources.error) && (
             <div className="rounded border border-red-300/50 bg-red-50/30 p-3 font-mono text-sm text-red-600 dark:bg-red-950/20">
@@ -1005,6 +1014,10 @@ function PrinterDetailView({
               activeTabClassName="bg-foreground/12 text-foreground"
             />
           </div>
+
+          {activeTab === "status" && telemetry === "live" && (
+            <PrinterReadouts snapshot={snapshot} />
+          )}
 
           {activeTab === "status" && (
             <div

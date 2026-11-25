@@ -17,7 +17,7 @@
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 8px;
-  padding: 12px 16px;
+  padding: 14px 20px;
   border-bottom: 1px solid var(--border);
 }
 .printer-sections-panel > header h2 {
@@ -25,14 +25,14 @@
   font-weight: 650;
 }
 .printer-sections-body {
-  padding: 12px 16px;
+  padding: 16px 20px;
 }
 .printer-sections-panel > .printer-reference-surface {
   border: 0;
-  padding: 12px 16px;
+  padding: 16px 20px;
 }
 .printer-sections-panel > [role="alert"] {
-  padding: 12px 16px;
+  padding: 16px 20px;
 }
 .printer-check-table {
   width: 100%;
@@ -42,13 +42,13 @@
 }
 .printer-check-table :is(th, td) {
   text-align: start;
-  padding: 9px 16px;
-  vertical-align: top;
+  padding: 12px 20px;
+  vertical-align: middle;
   border-top: 1px solid var(--border);
   overflow-wrap: anywhere;
 }
 .printer-check-table thead {
-  background: var(--muted);
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
   color: var(--muted-foreground);
 }
 .printer-check-table tbody th {
