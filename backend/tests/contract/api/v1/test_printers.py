@@ -187,6 +187,7 @@ class TestDiagnostics:
             assert body["support_level"] == "stable"
             assert [check["name"] for check in body["checks"]] == [
                 "configuration",
+                "address",
                 "provider_info",
                 "live_status",
             ]

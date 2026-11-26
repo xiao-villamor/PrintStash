@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Suggest IP addresses when adding a printer and explain that `.local` names usually can't be resolved from the container. Printer diagnostics now check the address first and name an unresolvable `.local` or other hostname instead of reporting a generic connection failure.
 - Open Trash from one workspace with an aligned selection header and a clearer review of expired items.
 - Keep the Model details title and actions clear while scrolling past the image preview. Show G-code in the full Model page and give its toolbar and layer controls dedicated space.
 - Open the Library details preview without briefly showing the cover during loading.

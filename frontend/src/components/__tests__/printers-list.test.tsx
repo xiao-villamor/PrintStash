@@ -210,6 +210,21 @@ describe("PrinterSetupForm", () => {
     expect(screen.getByRole("dialog", { name: "Add printer" })).toBeVisible();
   });
 
+  it("suggests an IP address for the printer", async () => {
+    await openForm();
+    expect(screen.getByLabelText("Moonraker URL")).toHaveAttribute(
+      "placeholder",
+      "http://192.168.1.50:7125",
+    );
+  });
+
+  it("explains that .local names may not resolve from the container", async () => {
+    await openForm();
+    expect(screen.getByLabelText("Moonraker URL")).toHaveAccessibleDescription(
+      "Use the printer's IP address. Names ending in .local usually can't be resolved from the PrintStash container.",
+    );
+  });
+
   it("submits only once when add is triggered twice before request resolves", async () => {
     let resolveCreate!: () => void;
     fetchMock.mockImplementation((input, init) =>

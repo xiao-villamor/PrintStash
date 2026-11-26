@@ -53,7 +53,13 @@ from app.db.session import get_session
 from app.modules.identity import printer_rbac, rbac, ws_tickets
 from app.modules.identity.auth import get_user_by_id, verify_access_token
 from app.modules.media.sliced_gcode import is_sliced_filename
-from app.modules.printing import dispatch, materials, printer_edits, production_costing
+from app.modules.printing import (
+    dispatch,
+    materials,
+    printer_address,
+    printer_edits,
+    production_costing,
+)
 from app.modules.printing.printer_files import (
     list_printer_files,
     sync_printer_files,
@@ -471,6 +477,18 @@ async def printer_diagnostics(
     summary = provider_diagnostic_summary(p.provider)
     checks: list[dict[str, object]] = []
 
+    def report() -> dict:
+        return {
+            "printer_id": p.id,
+            "provider": p.provider.value,
+            "support_level": summary["support_level"],
+            "capabilities": summary["capabilities"],
+            "unsupported_actions": summary["unsupported_actions"],
+            "notes": summary["notes"],
+            "checks": checks,
+            "ok": all(bool(check["ok"]) for check in checks),
+        }
+
     try:
         provider = _provider_client(request, p)
         checks.append({"name": "configuration", "ok": True})
@@ -483,30 +501,22 @@ async def printer_diagnostics(
                 "detail": exc.detail,
             }
         )
-        return {
-            "printer_id": p.id,
-            "provider": p.provider.value,
-            "support_level": summary["support_level"],
-            "capabilities": summary["capabilities"],
-            "unsupported_actions": summary["unsupported_actions"],
-            "notes": summary["notes"],
-            "checks": checks,
-            "ok": False,
-        }
+        return report()
+
+    # An address that does not resolve fails every later check with a generic
+    # transport error; stop here so the operator sees the actionable reason.
+    checks.append(
+        await _diagnostic_check(
+            "address", lambda: printer_address.check_printer_address(p)
+        )
+    )
+    if not checks[-1]["ok"]:
+        return report()
 
     checks.append(await _diagnostic_check("provider_info", provider.info))
     checks.append(await _diagnostic_check("live_status", provider.query_status))
 
-    return {
-        "printer_id": p.id,
-        "provider": p.provider.value,
-        "support_level": summary["support_level"],
-        "capabilities": summary["capabilities"],
-        "unsupported_actions": summary["unsupported_actions"],
-        "notes": summary["notes"],
-        "checks": checks,
-        "ok": all(bool(check["ok"]) for check in checks),
-    }
+    return report()
 
 
 @router.get(
