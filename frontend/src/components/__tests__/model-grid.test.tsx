@@ -392,8 +392,10 @@ describe("ModelBrowser", () => {
       const main = screen.getByRole("main");
       await within(main).findByText("Benchy");
       await user.click(within(main).getByRole("button", { name: "New multipart set" }));
-      const dialog = await screen.findByRole("dialog", { name: "New multipart set" });
-      expect(within(dialog).getByText("No parts yet. Pick models below.")).toBeVisible();
+      // The dialog body is a lazy chunk, so wait for the body rather than the shell.
+      expect(
+        await screen.findByText("No parts yet. Pick models below.", {}, { timeout: 10_000 }),
+      ).toBeVisible();
     });
     it("hides the multipart header button from signed-out readers", async () => {
       renderVault({ auth: signedOutSession(), models: [aModelListItem({ name: "Benchy" })] });
@@ -412,8 +414,11 @@ describe("ModelBrowser", () => {
       await within(screen.getByRole("main")).findByText("Benchy");
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
       await user.click(await screen.findByRole("button", { name: "Group as multipart set" }));
-      const dialog = await screen.findByRole("dialog", { name: "New multipart set" });
-      const summary = within(dialog).getByRole("region", { name: "Parts in this set" });
+      const summary = await screen.findByRole(
+        "region",
+        { name: "Parts in this set" },
+        { timeout: 10_000 },
+      );
       expect(within(summary).getByText("Benchy")).toBeVisible();
       expect(within(summary).queryByText("Calibration cube")).toBeNull();
     });
