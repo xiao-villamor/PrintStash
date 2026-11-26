@@ -2,6 +2,7 @@ export * from "./components/badge";
 export * from "./components/button";
 export * from "./components/card";
 export * from "./components/checkbox";
+export * from "./components/chip";
 export * from "./components/confirm-modal";
 export * from "./components/drawer";
 export * from "./components/dropdown-menu";

@@ -29,7 +29,7 @@ import {
   Upload,
 } from "lucide-react";
 
-import "./revision-status-badge.css";
+import { Chip } from "@/components/ui/chip";
 import { Modal } from "@/components/ui/modal";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
@@ -399,18 +399,14 @@ const READINESS_BADGE = {
   unavailable: { key: "multipart.readiness.unavailable", Icon: CircleX },
 } as const satisfies Record<PartReadiness, { key: string; Icon: LucideIcon }>;
 
-/** A part's readiness, in the same quiet pill revisions use; only a missing Model is loud. */
+/** A part's readiness as the shared chip; only a missing Model is loud. */
 function PartReadinessBadge({ readiness }: { readiness: PartReadiness }) {
   const { t } = useI18n();
   const { key, Icon } = READINESS_BADGE[readiness];
   return (
-    <span
-      className="revision-status-badge"
-      data-tone={readiness === "unavailable" ? "destructive" : undefined}
-    >
-      <Icon aria-hidden className="size-3 shrink-0" />
+    <Chip tone={readiness === "unavailable" ? "destructive" : "neutral"} icon={<Icon />}>
       {t(key)}
-    </span>
+    </Chip>
   );
 }
 

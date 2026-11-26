@@ -567,6 +567,7 @@ these calls at zero.
 | `Switch` | Settings toggle with a pill 38×22 track and written On/Off states |
 | `Checkbox` | Form options and selection with an outlined square, a checkmark on a neutral fill when selected, and a visible keyboard ring |
 | `Input`, `Badge`, `Spinner`, `EmptyState`, `Card`, `Skeleton` | Token-correct defaults |
+| `Chip` | The quiet status pill: neutral fill, 12px outline icon, no colour. Only `tone="destructive"` is loud. Use it for every state word on cards and lists (revision status, multipart part readiness) instead of a new pill |
 
 Use the shared `Checkbox` for form options in dialogs. Include the visible
 text in its label so the full row is clickable. Verify the box, checkmark, and
