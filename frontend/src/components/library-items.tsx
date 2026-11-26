@@ -11,11 +11,13 @@ import {
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { PANE_SETTLED_EVENT } from "@/components/use-collections-pane-motion";
 import {
+  libraryEntryControl,
   libraryReadingSelector,
   type LibraryReadingRenderer,
 } from "@/features/library/reading-position";
 import { cn } from "@/lib/utils";
 import { durationToken } from "@/lib/css-time";
+import { keyboardOverlayOpen } from "@/lib/keyboard-commands";
 import {
   clampInspectorWidth,
   INSPECTOR_WILL_MOVE_EVENT,
@@ -686,6 +688,48 @@ export function LibraryItems<T>({
         className,
       )}
       data-library-renderer={virtual ? "virtual" : "native"}
+      onKeyDown={(event) => {
+        if (
+          event.defaultPrevented ||
+          event.nativeEvent.isComposing ||
+          event.altKey ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.shiftKey ||
+          !(event.target instanceof HTMLElement)
+        )
+          return;
+        let step: number;
+        switch (event.key) {
+          case "ArrowDown":
+            step = columns;
+            break;
+          case "ArrowUp":
+            step = -columns;
+            break;
+          case "ArrowRight":
+            step = layout === "grid" ? 1 : 0;
+            break;
+          case "ArrowLeft":
+            step = layout === "grid" ? -1 : 0;
+            break;
+          default:
+            return;
+        }
+        if (step === 0 || keyboardOverlayOpen()) return;
+        const card = event.target.closest<HTMLElement>("[data-library-key]");
+        if (!card?.dataset.libraryKey || libraryEntryControl(card) !== event.target) return;
+        const index = keys.indexOf(card.dataset.libraryKey);
+        if (index < 0) return;
+        const next = keys[index + step];
+        const nextCard = next
+          ? event.currentTarget.querySelector<HTMLElement>(
+              `[data-library-key="${CSS.escape(next)}"]`,
+            )
+          : null;
+        event.preventDefault();
+        if (nextCard) libraryEntryControl(nextCard)?.focus();
+      }}
       onFocusCapture={(event) => {
         const card = event.target.closest<HTMLElement>("[data-library-key]");
         const key = card?.dataset.libraryKey;

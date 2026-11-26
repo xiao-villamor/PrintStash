@@ -81,8 +81,11 @@ test.describe("Library inline inspector", () => {
     const headerBounds = (await header.boundingBox())!;
     const modeBounds = (await modes.boundingBox())!;
     const mediaBounds = (await preview.locator(".library-inspector-preview").boundingBox())!;
-    expect(modeBounds.y + modeBounds.height).toBeLessThan(mediaBounds.y);
-    const offset = Math.round(mediaBounds.y - headerBounds.y - headerBounds.height + 8);
+    expect(modeBounds.y).toBeGreaterThan(mediaBounds.y);
+    expect(modeBounds.y + modeBounds.height).toBeLessThan(mediaBounds.y + mediaBounds.height);
+    const offset = Math.round(
+      modeBounds.y + modeBounds.height - headerBounds.y - headerBounds.height + 8,
+    );
     await page.mouse.move(modeBounds.x + 12, modeBounds.y + modeBounds.height + 30);
     await page.mouse.wheel(0, offset);
     await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBe(offset);
@@ -408,6 +411,59 @@ test.describe("Library inline inspector", () => {
     expect(problems).toEqual([]);
   });
 
+  for (const destination of ["/?c=maraio&type=all", "/"] as const) {
+    test(`keeps navigating Collections when a tree Model opens details from ${destination === "/" ? "All Models" : "its collection"}`, async ({
+      page,
+    }, testInfo) => {
+      await page.goto(destination);
+      const sidebar = page.getByRole("complementary", { name: "Collections" });
+      const folder = sidebar.getByRole("treeitem", { name: "maraio", exact: true });
+      const model = sidebar.getByRole("treeitem", {
+        name: "skadis_kitchen-roll_screw",
+        exact: true,
+      });
+      await expect(folder).toBeVisible();
+      await folder.focus();
+      if ((await folder.getAttribute("aria-expanded")) === "false")
+        await page.keyboard.press("ArrowRight");
+      await expect(model).toBeVisible();
+      await page.keyboard.press("ArrowDown");
+      await expect(model).toBeFocused();
+      await page.keyboard.press("Enter");
+
+      const drawer = page.getByRole("complementary", { name: "Model details" });
+      await expect(drawer).toBeVisible();
+      await expect(drawer.getByRole("region", { name: "Preview", exact: true })).toBeVisible();
+      await expect(page).toHaveURL(/c=maraio/);
+      await expect(model).toBeFocused();
+      await page.keyboard.press("w");
+      await expect(folder).toBeFocused();
+      await expect(drawer).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath("tree-focus-with-details.png") });
+      await page.keyboard.press("Escape");
+      await expect(drawer).toBeHidden();
+      await expect(folder).toBeFocused();
+    });
+  }
+
+  test("toggles Details from the focused collection", async ({ page }) => {
+    await page.goto("/?c=maraio&type=all");
+    const card = page.getByRole("main").getByRole("link", { name: "skadis_kitchen-roll_screw" });
+    await expect(card).toBeVisible();
+    const folder = page
+      .getByRole("complementary", { name: "Collections" })
+      .getByRole("treeitem", { name: "maraio", exact: true });
+    await folder.focus();
+    await page.keyboard.press("Control+Alt+b");
+    const drawer = page.getByRole("complementary", { name: "Model details" });
+    await expect(drawer).toBeVisible();
+    await expect(folder).toBeFocused();
+
+    await page.keyboard.press("Control+Alt+b");
+    await expect(drawer).toBeHidden();
+    await expect(folder).toBeFocused();
+  });
+
   test("returns Escape focus to the model card after a pointer opening", async ({ page }) => {
     await page.goto("/?c=maraio&type=all");
     const sidebar = page.getByRole("button", { name: "Toggle sidebar", exact: true });
@@ -419,6 +475,7 @@ test.describe("Library inline inspector", () => {
     await card.click();
     const drawer = page.locator("#model-drawer");
     await expect(drawer).toBeVisible();
+    await expect(drawer.getByRole("heading", { level: 2 })).toBeFocused();
 
     await page.keyboard.press("Escape");
 

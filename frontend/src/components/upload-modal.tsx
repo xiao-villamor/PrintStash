@@ -813,7 +813,7 @@ export function UploadModal({
                           aria-haspopup="dialog"
                           aria-expanded={catOpen}
                           title={selectedCollectionLabel || undefined}
-                          className="upload-field flex items-center gap-2"
+                          className="upload-field dropdown-field flex items-center gap-2"
                         >
                           <span className="min-w-0 flex-1 truncate text-left">
                             {selectedCollectionLabel ||

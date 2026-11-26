@@ -19,6 +19,52 @@ import { collapseNavigationSidebar } from "../e2e-real/util";
 useMockApi();
 
 test.describe("printer routes", () => {
+  test("styles the Fleet group selector like the Library sort picker", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
+    await page.goto("/");
+    await collapseNavigationSidebar(page);
+    const sort = page.getByRole("combobox", { name: "Sort models" });
+    await expect(sort).toBeVisible();
+    const surface = await sort.evaluate((element) => getComputedStyle(element).backgroundColor);
+
+    await page.goto("/printers");
+    const group = page.getByRole("combobox", { name: "Group", exact: true });
+    await expect(group).toHaveCSS("background-color", surface);
+    await expect(group).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
+    await expect(group).toHaveCSS("border-radius", "6px");
+  });
+
+  test("shows a keyboard focus outline on the Fleet group selector", async ({ page }) => {
+    await page.goto("/printers");
+    await page.getByRole("button", { name: "Group printers" }).focus();
+    await page.keyboard.press("Tab");
+    const group = page.getByRole("combobox", { name: "Group", exact: true });
+
+    await expect(group).toBeFocused();
+    await expect(group).toHaveCSS("outline-style", "solid");
+    await expect(group).toHaveCSS("outline-width", "2px");
+  });
+
+  test("identifies the Fleet group filter without a separate visible label", async ({ page }) => {
+    await page.goto("/printers");
+    const group = page.getByRole("combobox", { name: "Group", exact: true });
+    await expect(group).toBeVisible();
+    await expect(group.locator("option:checked")).toHaveText("All groups");
+    await expect(page.getByText("Group", { exact: true })).toHaveCount(0);
+  });
+
+  test("uses the shared dropdown trigger for the print destination", async ({ page }) => {
+    await page.goto("/models/1?tab=revisions");
+    await page.getByRole("button", { name: "Prepare print", exact: true }).first().click();
+    const dialog = page.getByRole("dialog", { name: "Prepare print", exact: true });
+    const destination = dialog.getByRole("button", { name: "Destination", exact: true });
+
+    await expect(destination).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
+    await expect(destination).toHaveCSS("border-radius", "6px");
+    await destination.click();
+    await expect(page.getByRole("dialog", { name: "Destination", exact: true })).toBeVisible();
+  });
+
   test("remembers the grouped Fleet layout", async ({ page }, testInfo) => {
     await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
     await page.route("**/api/v1/printers", (route) =>

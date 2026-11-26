@@ -13,7 +13,9 @@ import { StorageConnectionReview } from "@/components/storage-connection-review"
 
 import { captureEditingBase } from "@/lib/api/editing";
 import type { EditingBase } from "@/types/editing";
-import type { PreferenceIntent, PreviewMode } from "@/lib/queries/settings-preferences";
+import type { PricingRates } from "@/types/production-costing";
+import type { PreferenceIntent } from "@/lib/queries/settings-preferences";
+import type { PreviewMode } from "@/types/config";
 
 import { PreviewAppearanceSettings } from "@/components/preview-appearance-settings";
 import { GettingStartedReminder } from "@/components/getting-started-reminder";
@@ -98,7 +100,6 @@ import {
   Hourglass,
   Files,
   FolderSync,
-  FolderTree,
   HardDrive,
   HeartPulse,
   Activity,
@@ -114,9 +115,9 @@ import {
   Trash2,
   Search,
   Server,
-  Tag,
   Users,
   Clock,
+  CircleDollarSign,
   RefreshCw,
   Globe,
   Folder,
@@ -137,6 +138,7 @@ import { Localized } from "@/components/ui/localized";
 import { translateUiText } from "@/lib/locale";
 import { cn } from "@/lib/utils";
 import { useRouter, useSearchParams } from "@/lib/navigation";
+import { Link } from "@/lib/link";
 import { CURRENCY_OPTIONS } from "@/lib/currency";
 import { ExternalLibrariesPanel } from "@/components/external-libraries-panel";
 import { StorageInventoryPanel } from "@/components/storage-inventory-panel";
@@ -151,6 +153,7 @@ import { NotificationsPanel } from "@/components/notifications-panel";
 import { SpoolmanConnectCard } from "@/components/spoolman-connect-card";
 import { OidcSettingsCard } from "@/components/oidc-settings-card";
 import { AiSearchSettings } from "@/components/ai-search-settings";
+import { PricingTemplatePicker } from "@/components/pricing-templates";
 import { MaintenancePanel } from "@/components/maintenance-panel";
 import { addSampleCollection } from "@/lib/api/config";
 import { BackgroundWorkPanel } from "@/components/background-work-panel";
@@ -247,6 +250,7 @@ const SETTINGS_SECTIONS: {
   { id: "remote-storage", labelKey: SETTINGS_SECTION_LABELS["remote-storage"], icon: Cloud },
   { id: "imports", labelKey: SETTINGS_SECTION_LABELS["imports"], icon: Download },
   { id: "ai-search", labelKey: SETTINGS_SECTION_LABELS["ai-search"], icon: Search },
+  { id: "pricing", labelKey: SETTINGS_SECTION_LABELS.pricing, icon: CircleDollarSign },
   { id: "maintenance", labelKey: SETTINGS_SECTION_LABELS["maintenance"], icon: HeartPulse },
   { id: "work", labelKey: SETTINGS_SECTION_LABELS["work"], icon: Activity },
   { id: "libraries", labelKey: SETTINGS_SECTION_LABELS["libraries"], icon: FolderSync },
@@ -264,7 +268,7 @@ const SETTINGS_GROUPS: { labelKey: MessageKey; ids: SettingsSection[] }[] = [
     labelKey: "Vault",
     ids: ["overview", "access", "storage", "backup", "remote-storage", "maintenance"],
   },
-  { labelKey: "Library", ids: ["imports", "libraries", "previews", "ai-search"] },
+  { labelKey: "Library", ids: ["imports", "libraries", "previews", "ai-search", "pricing"] },
   { labelKey: "Integrations", ids: ["spoolman", "notifications", "sso"] },
   { labelKey: "This browser", ids: ["design", "gpu"] },
   { labelKey: "System", ids: ["work", "about"] },
@@ -278,6 +282,7 @@ const SETTINGS_SUBTITLES = {
   "remote-storage": "settings.subtitle.remoteStorage",
   imports: "settings.subtitle.imports",
   "ai-search": "settings.subtitle.aiSearch",
+  pricing: "settings.subtitle.pricing",
   maintenance: "settings.subtitle.maintenance",
   work: "settings.subtitle.work",
   libraries: "settings.subtitle.libraries",
@@ -376,6 +381,28 @@ interface RetentionDraft {
   text: string;
   base: EditingBase;
 }
+
+interface PricingDraft {
+  rates: { [Rate in keyof PricingRates]: string };
+  base: EditingBase;
+}
+
+function parsePricingDraft({
+  margin_percent,
+  tax_percent,
+}: PricingDraft["rates"]): PricingRates | null {
+  const margin = Number(margin_percent);
+  const tax = Number(tax_percent);
+  if (
+    !margin_percent.trim() ||
+    !tax_percent.trim() ||
+    !(margin >= 0 && margin <= 99.99) ||
+    !(tax >= 0 && tax <= 100)
+  )
+    return null;
+  return { margin_percent: margin, tax_percent: tax };
+}
+
 function parseTrashRetentionDays(value: string): number | null {
   if (!/^(?:-1|\d+)$/.test(value)) return null;
   const days = Number(value);
@@ -400,6 +427,8 @@ function preferenceLabel(intent: PreferenceIntent): string {
       return uiText("Auto-mark known good on successful print");
     case "currency":
       return uiText("Display currency");
+    case "pricing":
+      return uiText("Default pricing");
     case "thumbnail-width":
       return uiText("Model image quality");
     case "backup-retention":
@@ -539,12 +568,12 @@ export function SettingsPanel() {
   // during render; mirroring it into state needed an effect to re-sync on every
   // deep link, back button, and replace.
   const activeSection = settingsSection(searchParams.get("section"));
-  const sectionMotion = useContentReveal<HTMLElement>(activeSection);
+  const sectionMotion = useContentReveal<HTMLElement>(activeSection, { scroll: "self" });
   const trashPage = activeSection === "trash";
-  const mobileTabsRef = useRef<HTMLDivElement>(null);
+  const settingsTabsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const tabs = mobileTabsRef.current?.querySelector<HTMLElement>('[role="tablist"]');
+    const tabs = settingsTabsRef.current?.querySelector<HTMLElement>('[role="tablist"]');
     const selected = tabs?.querySelector<HTMLElement>('[data-active="true"]');
     if (tabs && selected) {
       tabs.scrollLeft = selected.offsetLeft - (tabs.clientWidth - selected.clientWidth) / 2;
@@ -716,10 +745,11 @@ export function SettingsPanel() {
   const [gcDigestConfirmation, setGcDigestConfirmation] = useState("");
   const [trashBusy, setTrashBusy] = useState<TrashOperation | null>(null);
   const [trashRetentionDraft, setTrashRetentionDraft] = useState<RetentionDraft | null>(null);
+  const [pricingDraft, setPricingDraft] = useState<PricingDraft | null>(null);
   const remoteConfig = useVaultConfig({
     enabled:
       !!user?.is_superuser &&
-      ["overview", "design", "previews", "backup", "trash"].includes(activeSection),
+      ["overview", "design", "previews", "backup", "trash", "pricing"].includes(activeSection),
     retry: false,
   });
   const configDenied =
@@ -728,6 +758,12 @@ export function SettingsPanel() {
   const preferenceCommand = useSettingsPreferenceCommand();
   const preferenceIntent = preferenceCommand.intent;
   const preferenceReview = preferenceCommand.state;
+  const pricingRates = pricingDraft?.rates ?? {
+    margin_percent: String(remoteConfigData?.pricing_defaults?.margin_percent ?? 0),
+    tax_percent: String(remoteConfigData?.pricing_defaults?.tax_percent ?? 0),
+  };
+  const parsedPricing = parsePricingDraft(pricingRates);
+  const pricingDisabled = !remoteConfigData || remoteConfig.isError || preferenceCommand.blocked;
   const selectedPreviewMode =
     preferenceIntent?.kind === "multi-angle"
       ? preferenceIntent.value
@@ -892,7 +928,8 @@ export function SettingsPanel() {
   }, []);
   const visibleSettingsSections = SETTINGS_SECTIONS.filter(
     (section) =>
-      !["sso", "maintenance", "work", "ai-search"].includes(section.id) || user?.is_superuser,
+      !["sso", "maintenance", "work", "ai-search", "pricing"].includes(section.id) ||
+      user?.is_superuser,
   );
 
   const settingsNavGroups: SettingsNavGroup[] = SETTINGS_GROUPS.flatMap((group) => {
@@ -994,7 +1031,8 @@ export function SettingsPanel() {
     }
   }
 
-  function settleRetention(intent: PreferenceIntent, receipt: VaultConfigRead) {
+  function settlePreferenceDraft(intent: PreferenceIntent, receipt: VaultConfigRead) {
+    if (intent.kind === "pricing") setPricingDraft(null);
     if (intent.kind !== "backup-retention" && intent.kind !== "trash-retention") return;
     const setter =
       intent.kind === "backup-retention" ? setBackupRetentionDays : setTrashRetentionDraft;
@@ -1008,6 +1046,7 @@ export function SettingsPanel() {
     const intent = preferenceCommand.intent;
     if (intent?.kind === "backup-retention") setBackupRetentionDays(null);
     if (intent?.kind === "trash-retention") setTrashRetentionDraft(null);
+    if (intent?.kind === "pricing") setPricingDraft(null);
     preferenceCommand.adopt();
   }
   async function recoverPreference(action: "review" | "retry") {
@@ -1033,7 +1072,7 @@ export function SettingsPanel() {
           };
         }
         const receipt = await preferenceCommand.retry(intent);
-        if (accountCurrent(session)) settleRetention(intent, receipt);
+        if (accountCurrent(session)) settlePreferenceDraft(intent, receipt);
       }
     } catch (error) {
       if (accountCurrent(session)) toast.error(error);
@@ -1073,6 +1112,29 @@ export function SettingsPanel() {
       await preferenceCommand.run({ kind: "currency", value: next }, remoteConfigData);
       if (accountCurrent(session))
         toast.success(uiText("Currency set to {value1}.", { value1: next }));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
+    }
+  }
+
+  function updatePricingDraft(rate: keyof PricingRates, value: string) {
+    if (!remoteConfigData) return;
+    setPricingDraft((previous) => ({
+      rates: { ...(previous?.rates ?? pricingRates), [rate]: value },
+      base: previous?.base ?? captureEditingBase(remoteConfigData),
+    }));
+  }
+
+  async function savePricingDefaults() {
+    if (!pricingDraft || !parsedPricing || pricingDisabled) return;
+    const session = getSessionVersion();
+    try {
+      const intent = { kind: "pricing", value: parsedPricing } as const;
+      const receipt = await preferenceCommand.run(intent, pricingDraft.base);
+      if (accountCurrent(session)) {
+        settlePreferenceDraft(intent, receipt);
+        toast.success(uiText("Default pricing saved."));
+      }
     } catch (error) {
       if (accountCurrent(session)) toast.error(error);
     }
@@ -1217,7 +1279,7 @@ export function SettingsPanel() {
         backupRetentionDraft?.base ?? captureEditingBase(remoteConfigData),
       );
       if (!accountCurrent(session)) return;
-      settleRetention(intent, receipt);
+      settlePreferenceDraft(intent, receipt);
       toast.success(t("settings.backupRetentionSaved"));
     } catch (error) {
       if (accountCurrent(session)) toast.error(error);
@@ -1773,7 +1835,7 @@ export function SettingsPanel() {
         trashRetentionDraft?.base ?? captureEditingBase(remoteConfigData),
       );
       if (!accountCurrent(session)) return;
-      settleRetention(intent, receipt);
+      settlePreferenceDraft(intent, receipt);
       toast.success(uiText("Trash retention updated."));
     } catch (error) {
       if (accountCurrent(session)) toast.error(error);
@@ -2025,8 +2087,6 @@ export function SettingsPanel() {
               return uiText("Vault version");
             },
             value: health ? `${health.name} v${health.version}` : uiText("Loading..."),
-            desc: uiText("API server status and version"),
-            icon: Server,
           },
           {
             get label() {
@@ -2039,8 +2099,6 @@ export function SettingsPanel() {
               : health?.status === "ok"
                 ? uiText("Connected")
                 : uiText("Unknown"),
-            desc: uiText("SQLite by default, Postgres optional"),
-            icon: Database,
             text: true,
           },
         ]
@@ -2054,8 +2112,7 @@ export function SettingsPanel() {
           ? uiText("Local")
           : stats.storage.backend.toUpperCase()
         : "...",
-      desc: stats?.storage.bucket ?? stats?.storage.prefix ?? uiText("Configured vault storage"),
-      icon: HardDrive,
+      detail: stats?.storage.bucket ?? stats?.storage.prefix,
       text: true,
     },
     {
@@ -2063,24 +2120,18 @@ export function SettingsPanel() {
         return uiText("Indexed files");
       },
       value: stats ? formatBytes(stats.indexed_size_bytes) : "...",
-      desc: "Tracked in the database",
-      icon: Files,
     },
     {
       get label() {
         return uiText("Collections");
       },
       value: stats ? `${stats.collection_count}` : "...",
-      desc: "Hierarchical tree entries",
-      icon: FolderTree,
     },
     {
       get label() {
         return uiText("Tags");
       },
       value: stats ? `${stats.tag_count}` : "...",
-      desc: "Flat tag vocabulary size",
-      icon: Tag,
     },
   ];
 
@@ -2539,7 +2590,7 @@ export function SettingsPanel() {
 
   return (
     <Localized>
-      <div className={cn("w-full space-y-6", !trashPage && "mx-auto max-w-7xl")}>
+      <div className={cn("settings-frame", !trashPage && "mx-auto max-w-7xl")}>
         <ConfirmModal
           open={restartConfirmOpen}
           variant="default"
@@ -2754,7 +2805,7 @@ export function SettingsPanel() {
         />
 
         {!trashPage && (
-          <div ref={mobileTabsRef} className="border-b border-border pb-3 lg:hidden">
+          <div ref={settingsTabsRef} className="border-b border-border pb-3 lg:hidden">
             <TabBar
               tabs={visibleSettingsSections.map((section) => {
                 const Icon = section.icon;
@@ -2781,8 +2832,8 @@ export function SettingsPanel() {
         <div
           className={
             trashPage
-              ? ""
-              : "lg:grid lg:grid-cols-[14.5rem_minmax(0,1fr)] lg:items-start lg:gap-8 xl:grid-cols-[14.5rem_minmax(0,1fr)_10.5rem]"
+              ? "settings-layout flex flex-col"
+              : "settings-layout flex flex-col lg:grid lg:grid-cols-[14.5rem_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)] lg:gap-8 xl:grid-cols-[14.5rem_minmax(0,1fr)_10.5rem]"
           }
         >
           {!trashPage && (
@@ -2970,13 +3021,13 @@ export function SettingsPanel() {
                     ))}
                   </div>
 
-                  <div className="grid items-start gap-6 xl:grid-cols-2">
+                  <div className="settings-overview-pair settings-overview-summary">
                     {user?.is_superuser && (
                       <SettingsCard
                         title={t("Data safety")}
                         description={t("Review backups and file checks for this Vault.")}
-                        action={
-                          <div className="flex flex-wrap gap-2">
+                        footer={
+                          <>
                             <Button
                               variant="outline"
                               size="sm"
@@ -2991,7 +3042,7 @@ export function SettingsPanel() {
                             >
                               {t("settings.maintenance")}
                             </Button>
-                          </div>
+                          </>
                         }
                       >
                         <dl className="settings-safety-rows">
@@ -3062,7 +3113,7 @@ export function SettingsPanel() {
                     <SettingsCard
                       title={uiText("System")}
                       description={uiText("Server status and vault configuration")}
-                      action={
+                      footer={
                         user?.is_superuser && health?.capabilities?.restart ? (
                           <Button
                             type="button"
@@ -3076,42 +3127,36 @@ export function SettingsPanel() {
                         ) : undefined
                       }
                     >
-                      <div>
+                      <dl className="settings-overview-facts">
                         {systemItems.map((item) => (
-                          <div key={item.label} className="settings-readonly-row">
-                            <div className="min-w-0">
-                              <p className="text-[13px] font-medium text-foreground">
-                                {item.label}
-                              </p>
-                              <p className="settings-row-hint">{item.desc}</p>
-                            </div>
-                            <span
-                              className={cn(
-                                "text-[13px] text-foreground",
-                                !("text" in item && item.text) && "font-mono",
+                          <div key={item.label}>
+                            <dt className="text-sm font-medium text-foreground">{item.label}</dt>
+                            <dd>
+                              <span
+                                className={cn(
+                                  "text-sm text-foreground",
+                                  !("text" in item && item.text) && "font-mono",
+                                )}
+                              >
+                                {item.value}
+                              </span>
+                              {"detail" in item && item.detail && (
+                                <span className="settings-row-hint mt-1 block">{item.detail}</span>
                               )}
-                            >
-                              {item.value}
-                            </span>
+                            </dd>
                           </div>
                         ))}
-                      </div>
+                      </dl>
                     </SettingsCard>
                   </div>
-                  <div className="grid items-start gap-6 xl:grid-cols-2">
+                  <div className="settings-overview-pair">
                     <SettingsCard
                       title={uiText("Library migration")}
                       description={uiText(
                         "Portable archive with models, metadata, print history, and original artifacts",
                       )}
-                    >
-                      <div className="space-y-4 py-4">
-                        <p className="text-sm text-muted-foreground leading-relaxed">
-                          {uiText(
-                            "Export a versioned archive for migration to another PrintStash installation. Accounts, credentials, settings, and trash are excluded.",
-                          )}
-                        </p>
-                        <div className="flex flex-wrap items-end gap-2">
+                      footer={
+                        <>
                           <button
                             type="button"
                             onClick={() => void exportArchive()}
@@ -3144,22 +3189,22 @@ export function SettingsPanel() {
                               />
                             </label>
                           )}
-                        </div>
-                      </div>
+                        </>
+                      }
+                    >
+                      <p className="py-4 text-sm leading-relaxed text-muted-foreground">
+                        {uiText(
+                          "Export a versioned archive for migration to another PrintStash installation. Accounts, credentials, settings, and trash are excluded.",
+                        )}
+                      </p>
                     </SettingsCard>
 
                     {/* Data export */}
                     <SettingsCard
                       title={uiText("Data export")}
                       description={uiText("Metadata only — no raw STL/3MF/G-code files")}
-                    >
-                      <div className="space-y-4 py-4">
-                        <p className="text-sm text-muted-foreground leading-relaxed">
-                          {uiText(
-                            "Download your searchable library context for spreadsheets, audits, migrations, or local AI prompts.",
-                          )}
-                        </p>
-                        <div className="flex flex-wrap gap-2">
+                      footer={
+                        <>
                           <button
                             type="button"
                             onClick={() => exportData("json")}
@@ -3178,8 +3223,14 @@ export function SettingsPanel() {
                             <Download className="h-3.5 w-3.5" />
                             {exporting === "csv" ? uiText("Exporting") : uiText("CSV")}
                           </button>
-                        </div>
-                      </div>
+                        </>
+                      }
+                    >
+                      <p className="py-4 text-sm leading-relaxed text-muted-foreground">
+                        {uiText(
+                          "Download your searchable library context for spreadsheets, audits, migrations, or local AI prompts.",
+                        )}
+                      </p>
                     </SettingsCard>
                   </div>
                   {user?.is_superuser && (
@@ -5241,6 +5292,95 @@ export function SettingsPanel() {
 
             {activeSection === "ai-search" && user?.is_superuser && <AiSearchSettings />}
 
+            {activeSection === "pricing" && user?.is_superuser && (
+              <SettingsCard
+                title={uiText("Default pricing")}
+                action={
+                  <Button asChild variant="outline" size="sm">
+                    <Link href="/profiles?tab=pricing">{uiText("Pricing templates")}</Link>
+                  </Button>
+                }
+              >
+                <form
+                  aria-label={uiText("Default pricing")}
+                  className="space-y-4 p-4"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void savePricingDefaults();
+                  }}
+                >
+                  <fieldset disabled={pricingDisabled} className="grid gap-4 sm:grid-cols-2">
+                    <FormField
+                      label={uiText("Default profit margin (%)")}
+                      hint={uiText("Profit as a share of the price before tax.")}
+                    >
+                      <Input
+                        type="number"
+                        value={pricingRates.margin_percent}
+                        onChange={(event) =>
+                          updatePricingDraft("margin_percent", event.target.value)
+                        }
+                        min={0}
+                        max={99.99}
+                        step="any"
+                        required
+                      />
+                    </FormField>
+                    <FormField
+                      label={uiText("Default sales tax (%)")}
+                      hint={uiText("Applied to the price before tax.")}
+                    >
+                      <Input
+                        type="number"
+                        value={pricingRates.tax_percent}
+                        onChange={(event) => updatePricingDraft("tax_percent", event.target.value)}
+                        min={0}
+                        max={100}
+                        step="any"
+                        required
+                      />
+                    </FormField>
+                    <PricingTemplatePicker
+                      rates={parsedPricing}
+                      onApply={(rates) => {
+                        if (!remoteConfigData) return;
+                        setPricingDraft((previous) => ({
+                          rates: {
+                            margin_percent: String(rates.margin_percent),
+                            tax_percent: String(rates.tax_percent),
+                          },
+                          base: previous?.base ?? captureEditingBase(remoteConfigData),
+                        }));
+                      }}
+                    />
+                  </fieldset>
+                  <div className="flex justify-end gap-2">
+                    {pricingDraft && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={pricingDisabled}
+                        onClick={() => setPricingDraft(null)}
+                      >
+                        {uiText("Cancel")}
+                      </Button>
+                    )}
+                    <Button
+                      type="submit"
+                      size="sm"
+                      disabled={pricingDisabled || pricingDraft === null || parsedPricing === null}
+                      loading={
+                        preferenceReview.phase === "saving" && preferenceIntent?.kind === "pricing"
+                      }
+                    >
+                      {uiText("Save default pricing")}
+                    </Button>
+                  </div>
+                </form>
+              </SettingsCard>
+            )}
+
             {activeSection === "maintenance" && user?.is_superuser && <MaintenancePanel />}
 
             {activeSection === "work" && user?.is_superuser && <BackgroundWorkPanel />}
@@ -5414,6 +5554,10 @@ export function SettingsPanel() {
                   <CardMetricsEditor
                     metrics={cardMetricsInDisplayOrder(cardMetrics)}
                     onChange={updateCardMetric}
+                    showPreviewLabel={previewPreferences.showCardPreviewLabel}
+                    onShowPreviewLabelChange={(showCardPreviewLabel) =>
+                      savePreviewPreference({ showCardPreviewLabel })
+                    }
                   />
                 </section>
 

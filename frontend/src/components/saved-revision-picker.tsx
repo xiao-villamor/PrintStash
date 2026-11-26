@@ -81,7 +81,7 @@ export function SavedRevisionPicker({
             id={revisionId}
             type="button"
             variant="outline"
-            className="h-[38px] w-full min-w-0 justify-between border-input text-left text-[13px] font-normal"
+            className="dropdown-field h-[38px] w-full min-w-0 justify-between text-left text-[13px] font-normal"
             aria-haspopup="dialog"
             aria-expanded={pickerOpen}
             onClick={() => onOpenChange(!pickerOpen)}

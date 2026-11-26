@@ -180,6 +180,8 @@ class FleetLoadedSlot(BaseModel):
     slot_key: str
     label: str
     material_type: str | None
+    material_brand: str | None
+    spool_filament_id: int | None
     color_hex: str | None
 
 

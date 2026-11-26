@@ -1449,6 +1449,8 @@ def fleet_summary(
                         "slot_key": row.slot_key,
                         "label": row.label,
                         "material_type": row.material_type,
+                        "material_brand": row.material_brand,
+                        "spool_filament_id": row.spool_filament_id,
                         "color_hex": row.color_hex,
                     }
                     for row in loaded_slots

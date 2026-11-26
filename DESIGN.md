@@ -38,6 +38,7 @@ theme swap so colors remain consistent throughout the application.
 | Token | Use |
 | --- | --- |
 | `background` / `foreground` | Page base |
+| `brand` / `brand-fold` | Encaje symbol and its folded face |
 | `card` / `card-foreground` | Raised content surfaces |
 | `popover` / `popover-foreground` | Floating panels: menus, pickers |
 | `popover-hover` | Perceptible hover/focus fill for items inside floating panels |
@@ -48,7 +49,7 @@ theme swap so colors remain consistent throughout the application.
 | `destructive-action` / `destructive-action-foreground` | Filled destructive confirmation with a deep red background and white text |
 | `success`, `warning` | Status only — never as decoration |
 | `border`, `input`, `ring` | Edges and focus rings |
-| `field-surface` | Text inputs, textareas, selects and picker triggers styled as fields |
+| `field-surface` | Text inputs and textareas |
 | `surface-*`, `on-surface*`, `outline*` | The elevation scale, for multi-layer panels |
 | `preview-image-matte` | A theme-independent neutral backing for transparent slicer preview images |
 
@@ -79,6 +80,11 @@ Primary actions and selected controls are deliberately different:
   navigation.
 - Use `OptionPicker` for data-driven lists that can grow, such as printers
   and revisions. Keep the search and scrollable choices inside the menu.
+- Single-choice selects and picker buttons use `surface-container-high` with
+  a transparent border at rest. Use the shared `dropdown-field` class on custom
+  picker buttons. Keyboard focus uses the standard focus outline.
+- Dropdowns open below their trigger when they fit. Open above when there is
+  insufficient room below.
 - Orange belongs to `warning` or explicitly tertiary/status content. It is not
   an action or selection color.
 
@@ -107,8 +113,9 @@ The model detail inspector uses these action rules with the shared `Button`,
 - `--radius` gives buttons, inputs, selects, and segmented controls 6px corners
   through the default, small, and medium radius utilities. `--radius-popover`
   gives menus, floating lists, toasts, and dialogs 8px corners through the
-  large radius utility. Library cards, panels and the groups inside the model
-  inspector use that same 8px radius. Circular avatars, status dots, and count
+  large radius utility. Library Model cards, Multipart Model cards and their
+  loading cards use 6px corners. Panels and groups inside the Model inspector
+  use 8px corners. Circular avatars, status dots, and count
   badges retain their shape.
 - Type ramp adds `text-2xs` (0.6875rem) and `text-3xs` (0.625rem) for the mono
   label style. No `text-[11px]`.
@@ -448,8 +455,8 @@ Choosing:
 the user is watching. **Nothing in the app may exceed 300ms.**
 The decorative sign-in build-plate print is the duration exception. It plays
 once over 18.95 seconds, is non-interactive, and shows the filled layers,
-top infill, and parked nozzle under
-reduced motion.
+top infill, and parked nozzle under reduced motion. First-run setup shows the
+finished print.
 The Printers routing graph is the second exception: while a printer is printing, the
 edges leading to it flow (`stroke-dashoffset`, 0.9 s linear loop) and its station
 pulses a success-colored outline (`opacity`, 2.4 s loop). Both are non-interactive,

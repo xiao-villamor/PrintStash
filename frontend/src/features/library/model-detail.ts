@@ -137,5 +137,6 @@ export { useModelCoverEditing } from "./model-covers";
 export {
   pricingTemplatesOptions,
   productionCostOptions,
+  usePricingTemplateCommands,
   useProductionCostCommands,
 } from "./production-costing";

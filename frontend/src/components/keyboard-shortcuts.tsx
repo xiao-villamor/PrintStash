@@ -14,6 +14,7 @@ import {
   keyboardOverlayOpen,
   modalOverlayOpen,
   OPEN_KEYBOARD_SHORTCUTS,
+  OUTLINER_KEYBOARD_ROW,
   pendingCollectionRename,
   requestCollectionRename,
 } from "@/lib/keyboard-commands";
@@ -70,14 +71,15 @@ export function KeyboardShortcuts() {
     };
     function focus() {
       if (cancelled || !host) return;
-      const target = host.querySelector<HTMLElement>(
+      const target =
         focusRequest.kind === "search"
-          ? "[data-shell-panel-search]"
-          : '[data-outliner-collection][aria-selected="true"], [data-outliner-collection], [data-outliner-entry]',
-      );
+          ? host.querySelector<HTMLElement>("[data-shell-panel-search]")
+          : (host.querySelector<HTMLElement>('[data-outliner-collection][aria-selected="true"]') ??
+            host.querySelector<HTMLElement>("[data-outliner-match]") ??
+            host.querySelector<HTMLElement>(OUTLINER_KEYBOARD_ROW));
       if (target) {
-        target.focus({ preventScroll: true });
-        stop();
+        target.focus({ preventScroll: focusRequest.kind === "search" });
+        if (document.activeElement === target) stop();
       }
     }
     observer = new MutationObserver(focus);
@@ -136,6 +138,8 @@ export function KeyboardShortcuts() {
             document
               .querySelector<HTMLButtonElement>('header [aria-controls="collections-pane"]')
               ?.focus({ preventScroll: true });
+          if (desktop && !pane.open && pane.mode === "collections")
+            requestFocus((value) => ({ token: value.token + 1, kind: "collections" }));
           pane.toggle();
           return;
         }
@@ -209,6 +213,9 @@ export function KeyboardShortcuts() {
         { labelKey: "Show or hide the sidebar", keys: [mod, "B"] },
         { labelKey: "Show or hide details", keys: [mod, alt, "B"] },
         { labelKey: "Move in the collection tree", keys: ["↑", "↓", "←", "→"] },
+        { labelKey: "Move in the collection tree without arrow keys", keys: ["W", "A", "S", "D"] },
+        { labelKey: "Focus Library results", keys: ["G"] },
+        { labelKey: "Move between Library results", keys: ["↑", "↓", "←", "→"] },
       ],
     },
     {

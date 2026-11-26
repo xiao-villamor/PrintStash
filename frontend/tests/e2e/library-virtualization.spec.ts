@@ -22,78 +22,73 @@ test.beforeEach(async ({ page }) => {
 
 async function scrollLibrary(page: Page, offset: "start" | "end") {
   await page.locator("main").evaluate((main, end) => {
-    const list = main.querySelector<HTMLElement>("[data-library-list]");
-    const scroll = list && list.scrollHeight > list.clientHeight ? list : main;
+    const scroll = main;
     scroll.scrollTop = end === "end" ? scroll.scrollHeight : 0;
   }, offset);
 }
 
 test.describe("Loaded Library surfaces", () => {
-  for (const layout of ["grid", "list"] as const) {
-    test(`bounds loaded ${layout} cards while retaining the final Model`, async ({ page }) => {
-      const problems = await collectPageProblems(page);
-      await page.setViewportSize({ width: 1440, height: 900 });
-      await page.addInitScript((view) => localStorage.setItem("ps-vault-view", view), layout);
-      const cursors: (string | null)[] = [];
-      const pages: { start: number; count: number }[] = [];
-      await page.route("**/api/v1/collections/children?**", (route) =>
-        route.fulfill({ json: { items: [], next_cursor: null } }),
-      );
-      await page.route("**/api/v1/models/browse?**", (route) => {
-        const params = new URL(route.request().url()).searchParams;
-        const limit = Number(params.get("limit"));
-        expect(limit).toBeGreaterThan(0);
-        expect(limit).toBeLessThanOrEqual(100);
-        const cursor = params.get("cursor");
-        cursors.push(cursor);
-        const start = cursor === null ? 0 : Number(cursor);
-        const count = Math.min(limit, 192 - start);
-        pages.push({ start, count });
-        return route.fulfill({
-          json: {
-            items: Array.from({ length: count }, (_, index) => ({
-              kind: "model",
-              model: aModelListItem({
-                id: start + index + 100,
-                name: `Loaded Model ${start + index + 1}`,
-                tags:
-                  index % 3 === 0 ? ["A long tag that wraps to exercise measured card rows"] : [],
-              }),
-            })),
-            total: 192,
-            next_cursor: start + count < 192 ? String(start + count) : null,
-            browse_revision: "r1",
-            authorization_revision: "a1",
-          },
-        });
+  test("bounds loaded cards while retaining the final Model", async ({ page }) => {
+    const problems = await collectPageProblems(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const cursors: (string | null)[] = [];
+    const pages: { start: number; count: number }[] = [];
+    await page.route("**/api/v1/collections/children?**", (route) =>
+      route.fulfill({ json: { items: [], next_cursor: null } }),
+    );
+    await page.route("**/api/v1/models/browse?**", (route) => {
+      const params = new URL(route.request().url()).searchParams;
+      const limit = Number(params.get("limit"));
+      expect(limit).toBeGreaterThan(0);
+      expect(limit).toBeLessThanOrEqual(100);
+      const cursor = params.get("cursor");
+      cursors.push(cursor);
+      const start = cursor === null ? 0 : Number(cursor);
+      const count = Math.min(limit, 192 - start);
+      pages.push({ start, count });
+      return route.fulfill({
+        json: {
+          items: Array.from({ length: count }, (_, index) => ({
+            kind: "model",
+            model: aModelListItem({
+              id: start + index + 100,
+              name: `Loaded Model ${start + index + 1}`,
+              tags: index % 3 === 0 ? ["A long tag that wraps to exercise measured card rows"] : [],
+            }),
+          })),
+          total: 192,
+          next_cursor: start + count < 192 ? String(start + count) : null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
       });
-      await page.goto("/?type=all");
-      await expect(
-        page
-          .getByRole("main")
-          .getByRole("link", { name: /Loaded Model 1\b/ })
-          .first(),
-      ).toBeVisible();
-      await expect
-        .poll(
-          async () => {
-            await scrollLibrary(page, "end");
-            return pages.some((page) => page.start + page.count === 192);
-          },
-          { timeout: 20_000 },
-        )
-        .toBe(true);
-      await scrollLibrary(page, "end");
-      await expect(page.getByRole("link", { name: /Loaded Model 192\b/ })).toBeVisible();
-      expect(cursors[0]).toBeNull();
-      for (let index = 1; index < pages.length; index += 1) {
-        expect(pages[index].start).toBe(pages[index - 1].start + pages[index - 1].count);
-      }
-      expect(await page.locator("main [data-library-key]").count()).toBeLessThan(60);
-      await page.screenshot({ path: test.info().outputPath(`virtual-${layout}-end.png`) });
-      expect(problems).toEqual([]);
     });
-  }
+    await page.goto("/?type=all");
+    await expect(
+      page
+        .getByRole("main")
+        .getByRole("link", { name: /Loaded Model 1\b/ })
+        .first(),
+    ).toBeVisible();
+    await expect
+      .poll(
+        async () => {
+          await scrollLibrary(page, "end");
+          return pages.some((page) => page.start + page.count === 192);
+        },
+        { timeout: 20_000 },
+      )
+      .toBe(true);
+    await scrollLibrary(page, "end");
+    await expect(page.getByRole("link", { name: /Loaded Model 192\b/ })).toBeVisible();
+    expect(cursors[0]).toBeNull();
+    for (let index = 1; index < pages.length; index += 1) {
+      expect(pages[index].start).toBe(pages[index - 1].start + pages[index - 1].count);
+    }
+    expect(await page.locator("main [data-library-key]").count()).toBeLessThan(60);
+    await page.screenshot({ path: test.info().outputPath("virtual-gallery-end.png") });
+    expect(problems).toEqual([]);
+  });
 
   test("retains a focused card while its row leaves the viewport", async ({ page }) => {
     await page.route("**/api/v1/collections/children?**", (route) =>
@@ -414,40 +409,37 @@ test.describe("Loaded Library surfaces", () => {
     });
   }
 
-  for (const layout of ["grid", "list"] as const) {
-    test(`bounds loaded Collection ${layout} rows`, async ({ page }) => {
-      await page.addInitScript((view) => localStorage.setItem("ps-vault-view", view), layout);
-      const collections = Array.from({ length: 192 }, (_, index) =>
-        aCollectionNode({
-          id: 100 + index,
-          name: `Collection ${index}`,
-          path: `collection-${index}`,
-          display_path: `Collection ${index}`,
-        }),
-      );
-      await page.route("**/api/v1/collections/children?**", (route) =>
-        route.fulfill({ json: { items: collections, next_cursor: null } }),
-      );
-      await page.route("**/api/v1/models/browse?**", (route) =>
-        route.fulfill({
-          json: {
-            items: [],
-            total: 0,
-            next_cursor: null,
-            browse_revision: "r1",
-            authorization_revision: "a1",
-          },
-        }),
-      );
-      await page.goto("/?type=all");
-      const main = page.getByRole("main");
-      await expect(main.getByRole("button", { name: /Collection 0\b/ })).toBeVisible();
-      if (layout === "grid") await main.getByRole("button", { name: /^\d+ more$/ }).click();
-      expect(await main.locator("[data-collection-path]").count()).toBeLessThan(60);
-      await scrollLibrary(page, "end");
-      await expect(main.getByRole("button", { name: /Collection 191\b/ })).toBeInViewport();
-    });
-  }
+  test("bounds loaded Collection cards", async ({ page }) => {
+    const collections = Array.from({ length: 192 }, (_, index) =>
+      aCollectionNode({
+        id: 100 + index,
+        name: `Collection ${index}`,
+        path: `collection-${index}`,
+        display_path: `Collection ${index}`,
+      }),
+    );
+    await page.route("**/api/v1/collections/children?**", (route) =>
+      route.fulfill({ json: { items: collections, next_cursor: null } }),
+    );
+    await page.route("**/api/v1/models/browse?**", (route) =>
+      route.fulfill({
+        json: {
+          items: [],
+          total: 0,
+          next_cursor: null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      }),
+    );
+    await page.goto("/?type=all");
+    const main = page.getByRole("main");
+    await expect(main.getByRole("button", { name: /Collection 0\b/ })).toBeVisible();
+    await main.getByRole("button", { name: /^\d+ more$/ }).click();
+    expect(await main.locator("[data-collection-path]").count()).toBeLessThan(60);
+    await scrollLibrary(page, "end");
+    await expect(main.getByRole("button", { name: /Collection 191\b/ })).toBeInViewport();
+  });
 
   test("keeps a multipart tag draft when columns change", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });

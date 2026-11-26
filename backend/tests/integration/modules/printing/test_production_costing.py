@@ -21,6 +21,7 @@ _EXPENSES = {
     "power_watts": 200,
     "electricity_per_kwh": 0.25,
     "extra_per_hour": 1,
+    "failure_rate_percent": 20,
 }
 
 

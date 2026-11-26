@@ -6,7 +6,8 @@
  * edit, and delete rather than stopping at the first green tick.
  */
 import { type Locator } from "@playwright/test";
-import { test, expect, authBundleFor, ADMIN } from "./helpers";
+import { test, expect, authBundleFor, authedContext, ADMIN } from "./helpers";
+import { DESKTOP_CHROMIUM } from "../playwright-desktop";
 import { collapseNavigationSidebar } from "./util";
 
 // Resolve the unique name to the server-ID label in one DOM read. Retaining
@@ -43,6 +44,70 @@ function rowOf(input: Locator): Locator {
 }
 
 test.describe("profiles", () => {
+  test("links both preset types to the connected printer", async ({ page }) => {
+    const name = `e2e-profile-links-${Date.now()}`;
+    const api = `http://127.0.0.1:${process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410}/api/v1`;
+    const moonraker = `http://127.0.0.1:${process.env.PLAYWRIGHT_MOCK_PRINTER_PORT ?? 7530}`;
+    const { token } = await authBundleFor(ADMIN.username, ADMIN.password);
+    const headers = { Authorization: `Bearer ${token}` };
+    const profile = await page.request.post(`${api}/printer-profiles`, { headers, data: { name } });
+    expect(profile.ok()).toBe(true);
+    const { id: profileId } = await profile.json();
+    const filament = await page.request.post(`${api}/filament-profiles`, {
+      headers,
+      data: { name, material_type: "PLA", material_brand: name },
+    });
+    expect(filament.ok()).toBe(true);
+    const { id: filamentId } = await filament.json();
+    let printerId: number | undefined;
+    try {
+      const connected = await page.request.post(`${api}/printers`, {
+        headers,
+        data: { name, provider: "moonraker", moonraker_url: moonraker, cost_profile_id: profileId },
+      });
+      expect(connected.ok()).toBe(true);
+      printerId = (await connected.json()).id;
+      const material = await page.request.put(
+        `${api}/printers/${printerId}/material-state/manual`,
+        {
+          headers,
+          data: {
+            slots: [
+              {
+                slot_key: "manual0",
+                label: "Feed 1",
+                state: "loaded",
+                material_type: "PLA",
+                material_brand: name,
+              },
+            ],
+          },
+        },
+      );
+      expect(material.ok()).toBe(true);
+
+      await page.goto(`/profiles?tab=printers&profile=${profileId}`);
+      await collapseNavigationSidebar(page);
+      const assigned = page.getByRole("region", { name: "Assigned printers" });
+      await assigned.getByRole("link", { name, exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`/printers/${printerId}\\?tab=settings`));
+
+      await page.goto("/profiles?tab=filaments");
+      await page
+        .getByRole("region", { name: `Preset: ${name}` })
+        .getByRole("button")
+        .click();
+      const matching = page.getByRole("region", { name: "Printers with matching filament" });
+      await expect(matching.getByText("Feed 1")).toBeVisible();
+      await matching.getByRole("link", { name: new RegExp(name) }).click();
+      await expect(page).toHaveURL(new RegExp(`/printers/${printerId}\\?tab=materials`));
+    } finally {
+      if (printerId) await page.request.delete(`${api}/printers/${printerId}`, { headers });
+      await page.request.delete(`${api}/printer-profiles/${profileId}`, { headers });
+      await page.request.delete(`${api}/filament-profiles/${filamentId}`, { headers });
+    }
+  });
+
   for (const kind of ["filament", "printer"] as const) {
     test(`discards a canceled new ${kind} preset`, async ({ page }) => {
       await page.setViewportSize({ width: 1440, height: 1000 });
@@ -194,9 +259,10 @@ test.describe("profiles", () => {
     }
   });
 
-  test("create and delete a printer preset", async ({ page }) => {
+  test("persists printer hardware choices and operating cost overrides", async ({ page }) => {
     const name = `e2e-printer-${Date.now()}`;
     await page.goto("/profiles");
+    await collapseNavigationSidebar(page);
 
     await page.getByRole("tab", { name: /Printers/ }).click();
     const section = page.locator("section", { hasText: "Printer presets" });
@@ -204,15 +270,59 @@ test.describe("profiles", () => {
     const create = page.getByRole("dialog", { name: "New printer preset" });
     const createForm = create.getByRole("form", { name: "Create printer preset" });
     await createForm.getByLabel("Name").fill(name);
-    await createForm.getByLabel("Printer model").fill("Voron 2.4");
+    await createForm.getByRole("combobox", { name: "Printer model" }).selectOption("Bambu Lab A1");
+    await createForm.getByRole("combobox", { name: "Nozzle diameter" }).selectOption("0.6");
+    await createForm.getByLabel(/Purchase cost/).fill("500");
+    const presetWrite = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/printer-profiles") && response.request().method() === "POST",
+    );
     await create.getByRole("button", { name: "Add preset" }).click();
+    const presetReceipt = await presetWrite;
+    expect(presetReceipt.status()).toBe(201);
+    expect(await presetReceipt.json()).toMatchObject({
+      printer_model: "Bambu Lab A1",
+      nozzle_diameter_mm: 0.6,
+      expenses: { lifetime_hours: 5000, power_watts: 95 },
+    });
 
     const nameInput = await inputByValue(section, /^Printer preset name/, name);
-    await expect(nameInput).toBeVisible();
+    const editor = rowOf(nameInput);
+    await editor.getByRole("combobox", { name: /^Printer model/ }).selectOption({
+      label: "Custom printer model",
+    });
+    await editor.getByRole("textbox", { name: "Custom printer model" }).fill("Workshop CoreXY");
+    await editor.getByRole("combobox", { name: /^Printer nozzle diameter/ }).selectOption({
+      label: "Custom nozzle diameter (mm)",
+    });
+    await editor.getByRole("textbox", { name: "Custom nozzle diameter (mm)" }).fill("0.45");
+    await editor.getByLabel("Expected lifetime (print hours)").fill("3000");
+    await editor.getByLabel("Average power (W)").fill("132");
+    const editWrite = page.waitForResponse(
+      (response) =>
+        /\/printer-profiles\/\d+$/.test(response.url()) && response.request().method() === "PATCH",
+    );
+    await editor.getByRole("button", { name: "Close", exact: true }).click();
+    const editReceipt = await editWrite;
+    expect(editReceipt.status()).toBe(200);
+    expect(await editReceipt.json()).toMatchObject({
+      printer_model: "Workshop CoreXY",
+      nozzle_diameter_mm: 0.45,
+      expenses: { lifetime_hours: 3000, power_watts: 132 },
+    });
 
     await page.reload();
     await page.getByRole("tab", { name: /Printers/ }).click();
     const reloaded = await inputByValue(section, /^Printer preset name/, name);
+    const persisted = rowOf(reloaded);
+    await expect(persisted.getByLabel("Custom printer model", { exact: true })).toHaveValue(
+      "Workshop CoreXY",
+    );
+    await expect(persisted.getByLabel("Custom nozzle diameter (mm)", { exact: true })).toHaveValue(
+      "0.45",
+    );
+    await expect(persisted.getByLabel("Expected lifetime (print hours)")).toHaveValue("3000");
+    await expect(persisted.getByLabel("Average power (W)")).toHaveValue("132");
     await rowOf(reloaded)
       .getByRole("button", { name: `Delete printer preset ${name}` })
       .click();
@@ -226,7 +336,7 @@ test.describe("profiles", () => {
     );
   });
   for (const kind of ["filament", "printer"] as const) {
-    test(`two ${kind} preset editors recover a competing save`, async ({ page }) => {
+    test(`two ${kind} preset editors recover a competing save`, async ({ page, browser }) => {
       const api = `http://127.0.0.1:${process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410}`;
       const bundle = await authBundleFor(ADMIN.username, ADMIN.password);
       const headers = { Authorization: `Bearer ${bundle.token}` };
@@ -241,15 +351,15 @@ test.describe("profiles", () => {
       });
       expect(response.status()).toBe(201);
       const profile: { id: number } = await response.json();
-      const second = await page.context().newPage();
+      const { context, page: second } = await authedContext(browser, bundle);
       const numericLabel =
-        kind === "filament"
-          ? `Filament cost per kg ${profile.id}`
-          : `Printer nozzle diameter ${profile.id}`;
-      const nextValue = kind === "filament" ? "42" : "0.6";
+        kind === "filament" ? `Filament cost per kg ${profile.id}` : "Custom nozzle diameter (mm)";
+      const nextValue = kind === "filament" ? "42" : "0.65";
       try {
         await page.goto("/profiles");
-        await second.goto("/profiles");
+        await second.setViewportSize(DESKTOP_CHROMIUM.viewport);
+        await second.goto(page.url());
+        await expect(second.getByRole("heading", { name: "Profiles", exact: true })).toBeVisible();
         if (kind === "printer") {
           await page.getByRole("tab", { name: /Printers/ }).click();
           await second.getByRole("tab", { name: /Printers/ }).click();
@@ -264,6 +374,11 @@ test.describe("profiles", () => {
           .getByRole("button")
           .click();
         await second.getByRole("button", { name: `Edit preset ${name}`, exact: true }).click();
+        if (kind === "printer") {
+          await second
+            .getByRole("combobox", { name: `Printer nozzle diameter ${profile.id}`, exact: true })
+            .selectOption({ label: numericLabel });
+        }
         // An invalid number captures the second editor's base without allowing
         // blur between browser tabs to save it before the competing edit.
         await second.getByRole("textbox", { name: numericLabel, exact: true }).fill("-1");
@@ -277,7 +392,7 @@ test.describe("profiles", () => {
         );
         await page
           .getByRole("dialog", { name: `Edit ${kind} preset`, exact: true })
-          .getByRole("heading")
+          .getByRole("button", { name: "Close", exact: true })
           .click();
         expect((await firstSave).status()).toBe(200);
         await second.getByRole("textbox", { name: numericLabel, exact: true }).fill(nextValue);
@@ -288,9 +403,10 @@ test.describe("profiles", () => {
         );
         await second
           .getByRole("dialog", { name: `Edit ${kind} preset`, exact: true })
-          .getByRole("heading")
+          .getByRole("button", { name: "Close", exact: true })
           .click();
         expect((await staleSave).status()).toBe(412);
+        await second.getByRole("button", { name: `Edit preset ${name}`, exact: true }).click();
         await expect(second.getByRole("textbox", { name: numericLabel, exact: true })).toHaveValue(
           nextValue,
         );
@@ -321,7 +437,7 @@ test.describe("profiles", () => {
           second.getByRole("textbox", { name: `${label} notes ${profile.id}`, exact: true }),
         ).toHaveValue("Keep the first editor notes");
       } finally {
-        await second.close();
+        await context.close();
         await page.request.delete(`${api}/api/v1/${kind}-profiles/${profile.id}`, { headers });
       }
     });

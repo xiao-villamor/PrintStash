@@ -208,6 +208,7 @@ describe("SettingsPanel", () => {
       "spoolman",
       "design",
       "previews",
+      "pricing",
       "gpu",
       "about",
     ])("opens the %s section from the URL", async (section) => {
@@ -2920,6 +2921,46 @@ describe("SettingsPanel", () => {
       await waitFor(() => expect(toggle).toBeEnabled());
 
       expect(toggle).toHaveAttribute("aria-checked", "true");
+    });
+  });
+
+  describe("default pricing", () => {
+    it("saves the entered rates as vault defaults", async () => {
+      const user = userEvent.setup();
+      const rates = { margin_percent: 18.5, tax_percent: 7.25 };
+      const app = renderSettings({
+        at: "/settings?section=pricing",
+        routes: {
+          "PUT /api/v1/config": json({ ...VAULT_CONFIG, edit_version: 2, pricing_defaults: rates }),
+          "GET /api/v1/pricing-templates": json([]),
+        },
+      });
+      const form = within(await screen.findByRole("form", { name: "Default pricing" }));
+      const margin = form.getByLabelText("Default profit margin (%)");
+      const tax = form.getByLabelText("Default sales tax (%)");
+      await waitFor(() => expect(margin).toBeEnabled());
+      await user.clear(margin);
+      await user.type(margin, "18.5");
+      await user.clear(tax);
+      await user.type(tax, "7.25");
+      await user.click(form.getByRole("button", { name: "Save default pricing" }));
+
+      await waitFor(() => {
+        const [write] = app.requestsWithMethod("PUT");
+        expect(JSON.parse(write.body ?? "{}")).toEqual({ pricing_defaults: rates });
+      });
+      await waitFor(() =>
+        expect(form.getByRole("button", { name: "Save default pricing" })).toBeDisabled(),
+      );
+      expect(margin).toHaveValue(18.5);
+      expect(tax).toHaveValue(7.25);
+    });
+
+    it("hides vault pricing settings from members", async () => {
+      renderSettings({ at: "/settings?section=pricing", auth: memberSession() });
+      const nav = await screen.findByRole("navigation", { name: "Settings sections" });
+      expect(within(nav).queryByRole("button", { name: "Pricing" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("form", { name: "Default pricing" })).not.toBeInTheDocument();
     });
   });
 

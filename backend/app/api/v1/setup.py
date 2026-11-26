@@ -14,6 +14,7 @@ response shapes. First ownership and storage preparation are operations of
 from __future__ import annotations
 
 from fastapi import APIRouter, Body, Depends, Request, Response, status
+from printstash_core.mesh.preview_profile import PreviewAppearance, PreviewLook
 from sqlmodel import Session, select
 
 from app.api import setup_session
@@ -29,9 +30,16 @@ from app.modules.administration import (
     setup_policy,
     setup_storage,
 )
+from app.modules.derivatives.policy import (
+    SettingName,
+    effective_setting,
+    render_appearance,
+)
 from app.modules.identity.auth import create_access_token
 from app.schemas.setup import (
     SetupCheckResponse,
+    SetupPreviewAppearance,
+    SetupPreviewMode,
     SetupRequest,
     SetupResponse,
     SetupSessionResponse,
@@ -92,10 +100,22 @@ def get_status(
             observed_host=hostname,
         )
     provider_config = runtime_config.get_sanitized_storage_provider(session)
+    appearance = render_appearance(config)
+    preview_mode = SetupPreviewMode.SINGLE
+    if effective_setting(config, SettingName.PREVIEWS):
+        preview_mode = (
+            SetupPreviewMode.OBLIQUE_POLES
+            if effective_setting(config, SettingName.PREVIEW_POLES)
+            else SetupPreviewMode.OBLIQUE
+        )
     return SetupStatus(
         configured=False,
         setup_available=True,
         user_count=user_count,
+        preview_appearance=SetupPreviewAppearance(
+            preview_look=appearance.look, preview_floor_grid=appearance.floor_grid
+        ),
+        preview_mode=preview_mode,
         # The deployment's own paths (VAULT_DATA_ROOT and any override), not a
         # later runtime edit: what a blank field means on a fresh install.
         default_data_dir=str(settings.frozen.data_dir),
@@ -127,6 +147,29 @@ def begin_setup(
     request: Request, response: Response, session: Session = Depends(get_session)
 ) -> SetupSessionResponse:
     return SetupSessionResponse(csrf=setup_session.begin(request, response, session))
+
+
+@router.get(
+    "/preview-example",
+    response_class=Response,
+    responses={200: {"content": {"image/webp": {}}}},
+    dependencies=[Depends(rate_limit(40, 60))],
+)
+def preview_example(
+    look: PreviewLook,
+    floor_grid: bool,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> Response:
+    setup_session.verify_preview(request)
+    setup_bootstrap.require_open(session)
+    from app.modules.media.preview_example import render_example
+
+    return Response(
+        render_example(PreviewAppearance(look, floor_grid)),
+        media_type="image/webp",
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 @router.post(

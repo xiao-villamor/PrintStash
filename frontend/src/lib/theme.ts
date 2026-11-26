@@ -30,7 +30,7 @@ function applyTheme(mode: ThemeMode) {
   document.documentElement.classList.toggle("dark", dark);
   const favicon = document.getElementById("app-favicon");
   if (favicon instanceof HTMLLinkElement)
-    favicon.href = dark ? "/icon-dark.svg?v=2" : "/icon-light.svg?v=2";
+    favicon.href = dark ? "/icon-dark.svg?v=6" : "/icon-light.svg?v=6";
 }
 
 export function setThemeMode(mode: ThemeMode) {

@@ -6,6 +6,27 @@
 
 - Open Trash from one workspace with an aligned selection header and a clearer review of expired items.
 - Keep the Model details title and actions clear while scrolling past the image preview. Show G-code in the full Model page and give its toolbar and layer controls dedicated space.
+- Open the Library details preview without briefly showing the cover during loading.
+- Round sidebar highlights, workspace menu highlights, and image preview indicators. Soften preview arrows with a filled background. Match Library loading cards to the current card design.
+- Keep the Settings header in place. Scroll the sidebar options and the current panel independently. Use a shorter, inset scrollbar and align the paired Overview cards.
+- Group identical confirmation notices, dismiss them sooner, and provide a visible close button.
+- Focus the collection tree when opening it by shortcut. Use arrows or W/A/S/D to move between folders and Models, with a rounded focus outline on the whole row.
+- Use the keyboard in filtered collections. Press G to focus Library results, then use the arrow keys to move between them.
+- Keep keyboard focus in Collections when opening or closing Model details from the tree.
+- Let each browser show or hide the view name and position on Model cards.
+- Show a compact status label when AI Search is on. Use a neutral Library search focus border and consistent filled dropdowns with rounded menus.
+- Anchor dropdowns below their controls when there is room, with upward placement near the viewport edge.
+- Use cards for the Library gallery and simplify its More menu.
+- Center first-run setup and let the administrator choose the preview color, floor grid, and number of views before reviewing the account and storage choices.
+- Give sign-in and first-run setup a print illustration with a soft white background and a clearer grid in dark mode.
+- Use the Encaje logo in the app and its icons, with graphite in light mode and soft white in dark mode.
+- Keep reusable pricing templates in Profiles and show the rates applied to each Model revision. Use a separate editing view for one-off estimate inputs.
+- Let cost estimates use printers with a linked cost profile. Prefer the printer recorded for that revision or an unambiguous match from the G-code.
+- Select catalog printer models and common nozzle sizes in Profiles. Operating costs offer editable lifetime and published power defaults.
+- Link printer profiles to assigned machines and filament profiles to printers with matching loaded material.
+- Set default margin and tax in Settings → Pricing. Model estimates show their pricing breakdown with two decimal places.
+- Give dark Library cards a neutral hover border and a shadow that follows the rounded corners. Use the same tighter corners on Models, Multipart Models, and their loading cards.
+- Show all AI Search preparation steps with the current step highlighted. Put location choices in view when changing setup and use the shared Settings layout for readiness, index checks, and actions. Open search types, servers, and technical settings as dedicated views.
 - Give the multi-plate tray its own row and keep the selected plate visible when switching views. Improve lighting on dark filament.
 - Align the model's Print actions and add space to attachment rows.
 
@@ -56,6 +77,7 @@
 
 ### Added
 
+- Set a printer failure rate to include expected reprints in production estimates.
 - Fleet can show printer cards inside dotted frames labelled by their configured groups. The browser remembers the layout.
 - Model guides and attachments have their own Documentation tab.
 - Model attachments accept file drops and clicks on the empty upload area, and the Markdown editor shows a live preview beside the draft.

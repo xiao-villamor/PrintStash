@@ -8,6 +8,7 @@ export interface PreviewPreferences {
   previewQuality: PreviewQuality;
   screenshotScale: ScreenshotScale;
   meshRenderer: MeshRendererPreference;
+  showCardPreviewLabel: boolean;
 }
 
 export const PREVIEW_PREFERENCES_STORAGE_KEY = "printstash.preview.preferences:v1";
@@ -25,6 +26,7 @@ export const DEFAULT_PREVIEW_PREFERENCES: PreviewPreferences = {
   previewQuality: "balanced",
   screenshotScale: 2,
   meshRenderer: "webgl",
+  showCardPreviewLabel: true,
 };
 
 const PREVIEW_PIXEL_RATIOS = {
@@ -53,6 +55,7 @@ interface StoredPreviewPreferences {
   readonly previewQuality?: StoredJsonValue;
   readonly screenshotScale?: StoredJsonValue;
   readonly meshRenderer?: StoredJsonValue;
+  readonly showCardPreviewLabel?: StoredJsonValue;
 }
 
 const isBrowser = (): boolean => "window" in globalThis;
@@ -81,6 +84,7 @@ export function readPreviewPreferences(): PreviewPreferences {
   try {
     const stored: StoredPreviewPreferences = JSON.parse(raw ?? "{}");
     value = {
+      showCardPreviewLabel: stored.showCardPreviewLabel !== false,
       previewQuality: isPreviewQuality(stored.previewQuality)
         ? stored.previewQuality
         : DEFAULT_PREVIEW_PREFERENCES.previewQuality,

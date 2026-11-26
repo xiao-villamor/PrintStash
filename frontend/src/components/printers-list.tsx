@@ -390,21 +390,19 @@ export function PrintersPage() {
                     )}
                     {uiText("Group printers")}
                   </Button>
-                  <label className="flex min-w-0 items-center gap-3 text-sm text-muted-foreground">
-                    {uiText("Group")}
-                    <select
-                      value={selectedGroup ?? ""}
-                      onChange={(event) => setSelectedGroup(event.target.value || null)}
-                      className="h-8 w-37.5 min-w-0 rounded-md border border-input bg-field-surface px-2.5 text-sm text-foreground"
-                    >
-                      <option value="">{uiText("All groups")}</option>
-                      {printerGroups.map(([name]) => (
-                        <option key={groupOptionValue(name)} value={groupOptionValue(name)}>
-                          {name ?? uiText("Ungrouped")}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <select
+                    aria-label={uiText("Group")}
+                    value={selectedGroup ?? ""}
+                    onChange={(event) => setSelectedGroup(event.target.value || null)}
+                    className="h-8 w-37.5 min-w-0 px-2.5 text-sm text-foreground"
+                  >
+                    <option value="">{uiText("All groups")}</option>
+                    {printerGroups.map(([name]) => (
+                      <option key={groupOptionValue(name)} value={groupOptionValue(name)}>
+                        {name ?? uiText("Ungrouped")}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </section>
             )}

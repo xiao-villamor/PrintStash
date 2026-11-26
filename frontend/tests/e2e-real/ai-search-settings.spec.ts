@@ -16,7 +16,7 @@ test.describe("AI Search settings freshness", () => {
         ).ok(),
       ).toBe(true);
       await page.goto("/settings?section=ai-search");
-      await page.getByRole("button", { name: "Technical settings", exact: true }).click();
+      await page.getByRole("link", { name: "Technical settings", exact: true }).click();
       const weight = page.getByRole("spinbutton", { name: "Keyword ranking weight" });
       await weight.fill("2");
       expect(
@@ -56,6 +56,8 @@ test.describe("AI Search settings freshness", () => {
       ).json();
       expect(saved.settings.lexical_weight).toBe(2);
       expect(saved.settings.semantic_weight).toBe(4);
+      await page.reload();
+      await expect(weight).toHaveValue("2");
     } finally {
       await context.setOffline(false);
       await page.request.put(`${API}/api/v1/config/ai-search`, { data: initial.settings });
@@ -75,9 +77,9 @@ test.describe("AI Search settings freshness", () => {
         ).ok(),
       ).toBe(true);
       await page.goto("/settings?section=ai-search");
-      await page.getByRole("button", { name: "Technical settings", exact: true }).click();
+      await page.getByRole("link", { name: "Technical settings", exact: true }).click();
       await second.goto("/settings?section=ai-search");
-      await second.getByRole("button", { name: "Technical settings", exact: true }).click();
+      await second.getByRole("link", { name: "Technical settings", exact: true }).click();
       await page.getByRole("spinbutton", { name: "Keyword ranking weight" }).fill("2");
       await second.getByRole("spinbutton", { name: "Semantic ranking weight" }).fill("3");
       await page.getByRole("button", { name: "Save search settings" }).click();

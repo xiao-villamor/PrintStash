@@ -7,6 +7,7 @@
 import { expect, test } from "@playwright/test";
 
 import { useMockApi } from "./_setup";
+import { collapseNavigationSidebar } from "../e2e-real/util";
 
 useMockApi();
 
@@ -59,18 +60,78 @@ test.describe("OpenDesign shell", () => {
     });
   }
 
+  test("rounds the hovered navigation rail highlight", async ({ page }) => {
+    await page.goto("/");
+    await collapseNavigationSidebar(page);
+    const link = page.getByRole("navigation", { name: "Navigation" }).getByRole("link", {
+      name: "Printers",
+    });
+
+    await link.hover();
+
+    await expect(link).toHaveCSS("border-radius", "6px");
+  });
+
+  test("rounds the focused workspace menu highlight", async ({ page }) => {
+    await page.goto("/");
+    await collapseNavigationSidebar(page);
+    const account = page.getByRole("button", { name: "My workspace" });
+
+    await account.focus();
+    await account.press("Enter");
+    const row = page.getByRole("menuitem", { name: "Statistics" });
+    await row.focus();
+
+    await expect(row).toHaveCSS("border-radius", "6px");
+  });
+
   test("uses the floating radius on the workspace menu", async ({ page }) => {
     await page.goto("/");
     await page.getByRole("button", { name: "My workspace" }).click();
     await expect(page.getByRole("menu")).toHaveCSS("border-radius", "8px");
   });
 
-  test("uses the control radius on the native sort select", async ({ page }) => {
+  for (const theme of ["light", "dark"] as const) {
+    test(`uses a neutral toolbar surface for sorting in the ${theme} theme`, async ({ page }) => {
+      await page.addInitScript(
+        (selectedTheme) => localStorage.setItem("printstash.theme", selectedTheme),
+        theme,
+      );
+      await page.goto("/");
+      await collapseNavigationSidebar(page);
+      const sort = page.getByRole("combobox", { name: "Sort models" });
+
+      await expect(sort).toHaveCSS("border-radius", "6px");
+      await expect(sort).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
+      await expect(sort).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    });
+  }
+
+  test("applies a keyboard sort after reopening the Library", async ({ page }) => {
+    await page.goto("/?sort=date-desc");
+    const sort = page.getByRole("combobox", { name: "Sort models" });
+
+    await sort.press("Space");
+    await expect.poll(() => sort.evaluate((element) => element.matches(":open"))).toBe(true);
+    await page.getByRole("option", { name: "Oldest", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/sort=date-asc/);
+
     await page.goto("/");
-    await expect(page.getByRole("combobox", { name: "Sort models" })).toHaveCSS(
-      "border-radius",
-      "6px",
-    );
+    await expect(sort).toHaveValue("date-asc");
+  });
+
+  test("returns focus to sorting after dismissing the picker", async ({ page }) => {
+    await page.goto("/?sort=date-desc");
+    const sort = page.getByRole("combobox", { name: "Sort models" });
+
+    await sort.click();
+    await expect.poll(() => sort.evaluate((element) => element.matches(":open"))).toBe(true);
+    await page.keyboard.press("Escape");
+
+    await expect.poll(() => sort.evaluate((element) => element.matches(":open"))).toBe(false);
+    await expect(sort).toBeFocused();
+    await expect(sort).toHaveValue("date-desc");
   });
 
   test("uses the floating radius on the native select picker", async ({ page }) => {
@@ -80,6 +141,36 @@ test.describe("OpenDesign shell", () => {
     expect(
       await sort.evaluate((element) => getComputedStyle(element, "::picker(select)").borderRadius),
     ).toBe("8px");
+  });
+
+  test("anchors the sort picker below when it fits", async ({ page }) => {
+    await page.goto("/");
+    const sort = page.getByRole("combobox", { name: "Sort models" });
+    await sort.evaluate((element) => {
+      element.style.position = "fixed";
+      element.style.insetBlockStart = "60vh";
+      element.style.insetInlineStart = "50vw";
+    });
+    await sort.press("Space");
+    await expect.poll(() => sort.evaluate((element) => element.matches(":open"))).toBe(true);
+    const trigger = await sort.boundingBox();
+    const first = await sort.getByRole("option").first().boundingBox();
+    expect(first!.y).toBeGreaterThanOrEqual(trigger!.y + trigger!.height);
+  });
+
+  test("opens the sort picker upward at the viewport edge", async ({ page }) => {
+    await page.goto("/");
+    const sort = page.getByRole("combobox", { name: "Sort models" });
+    await sort.evaluate((element) => {
+      element.style.position = "fixed";
+      element.style.insetBlockEnd = "4px";
+      element.style.insetInlineStart = "50vw";
+    });
+    await sort.press("Space");
+    await expect.poll(() => sort.evaluate((element) => element.matches(":open"))).toBe(true);
+    const trigger = await sort.boundingBox();
+    const first = await sort.getByRole("option").first().boundingBox();
+    expect(first!.y + first!.height).toBeLessThanOrEqual(trigger!.y);
   });
 
   test("the phone navigation remains usable at 320 pixels", async ({ page }) => {

@@ -59,8 +59,15 @@ test.describe("progressive web app", () => {
     expect(manifest.short_name).toBe("PrintStash");
     expect(manifest.display).toBe("standalone");
     expect(manifest.start_url).toBe("/");
-    expect(Array.isArray(manifest.icons)).toBe(true);
-    expect(manifest.icons.length).toBeGreaterThan(0);
+    expect(manifest.icons).toContainEqual({
+      src: "/icon-maskable.svg",
+      sizes: "any",
+      type: "image/svg+xml",
+      purpose: "any maskable",
+    });
+    const icon = await page.request.get("/icon-maskable.svg");
+    expect(icon.ok()).toBe(true);
+    expect(icon.headers()["content-type"]).toContain("image/svg+xml");
   });
 
   test("the service worker script registers and installs", async ({ page }) => {

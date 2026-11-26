@@ -61,7 +61,8 @@ export function SettingsToc({ scope, section }: { scope: string; section: string
   }, [scope, section]);
 
   useEffect(() => {
-    if (items.length === 0) return;
+    const root = document.querySelector(scope);
+    if (!root || items.length === 0) return;
     const visible = new Set<string>();
     const observer = new IntersectionObserver(
       (entries) => {
@@ -72,14 +73,14 @@ export function SettingsToc({ scope, section }: { scope: string; section: string
         const first = items.find((item) => visible.has(item.id));
         if (first) setActive(first.id);
       },
-      { rootMargin: "0px 0px -60% 0px" },
+      { root, rootMargin: "0px 0px -60% 0px" },
     );
     for (const item of items) {
       const element = document.getElementById(item.id);
       if (element) observer.observe(element);
     }
     return () => observer.disconnect();
-  }, [items]);
+  }, [items, scope]);
 
   if (items.length < 3) return null;
   return (

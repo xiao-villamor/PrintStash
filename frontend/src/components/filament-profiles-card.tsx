@@ -23,13 +23,24 @@ import {
   PrinterProfileCreate,
   FilamentProfileUpdate,
   PrinterProfileUpdate,
+  type MaterialSlotRead,
 } from "@/types";
 
-import { usePrinters, useSpoolmanStatus, useVaultConfig } from "@/lib/queries";
+import { useFleetSummary, usePrinters, useSpoolmanStatus, useVaultConfig } from "@/lib/queries";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
-import { Check, Loader2, Plus, RefreshCw, Trash2, X, Pencil, type LucideIcon } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Trash2,
+  X,
+  Pencil,
+  type LucideIcon,
+} from "lucide-react";
 import { FilamentSpool } from "@/components/ui/filament-spool";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { FilamentSpoolPrice } from "@/components/filament-spool-price";
@@ -43,6 +54,8 @@ import {
   type ExpenseDraft,
 } from "@/lib/printer-expenses";
 import { PrinterExpenseFields } from "@/components/printer-expense-fields";
+import { PrinterProfileFields } from "@/components/printer-profile-fields";
+import { PricingTemplatesPanel } from "@/components/pricing-templates";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -77,6 +90,70 @@ type PrinterEdit = {
 };
 
 type PrinterDraft = PrinterEdit & { base: PrinterProfileRead };
+
+type ProfilePrinterLink = { href: string; name: string; detail?: string };
+
+function matchesLoadedFilament(
+  slot: Pick<MaterialSlotRead, "material_type" | "material_brand" | "spool_filament_id">,
+  profile: FilamentProfileRead,
+) {
+  if (profile.spoolman_filament_id !== null) {
+    return slot.spool_filament_id === profile.spoolman_filament_id;
+  }
+  const material = profile.material_type?.trim().toLowerCase();
+  const brand = profile.material_brand?.trim().toLowerCase();
+  return Boolean(
+    material &&
+    slot.material_type?.trim().toLowerCase() === material &&
+    (!brand || slot.material_brand?.trim().toLowerCase() === brand),
+  );
+}
+
+function ProfilePrinterLinks({
+  title,
+  printers,
+  empty,
+}: {
+  title: string;
+  printers: ProfilePrinterLink[];
+  empty: string;
+}) {
+  return (
+    <section className="space-y-2 border-t border-border pt-4" aria-label={title}>
+      <h4 className="text-sm font-semibold">{title}</h4>
+      {printers.length ? (
+        <ul className="max-w-xl divide-y divide-border rounded-lg border border-border">
+          {printers.map(({ href, name, detail }) => (
+            <li key={href}>
+              <Link
+                href={href}
+                className="flex min-w-0 items-center gap-3 rounded-md px-3 py-2.5 text-sm text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              >
+                <Printer3D className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="block wrap-anywhere font-medium">{name}</span>
+                  {detail && (
+                    <span className="block wrap-anywhere text-xs text-muted-foreground">
+                      {detail}
+                    </span>
+                  )}
+                </span>
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-sm text-muted-foreground">{empty}</p>
+          <Button asChild size="sm" variant="outline">
+            <Link href="/printers">{uiText("Manage printers")}</Link>
+          </Button>
+        </div>
+      )}
+    </section>
+  );
+}
 
 type PresetReview<Row> = { phase: "required" | "loading" } | { phase: "ready"; snapshot: Row };
 
@@ -480,8 +557,9 @@ export function FilamentProfilesCard() {
   const { locale, t } = useI18n();
   const { user } = useAuth();
   const params = useSearchParams();
-  const [activeTab, setActiveTab] = useState<"filaments" | "printers">(
-    params.get("tab") === "printers" ? "printers" : "filaments",
+  const initialTab = params.get("tab");
+  const [activeTab, setActiveTab] = useState<"filaments" | "printers" | "pricing">(
+    initialTab === "pricing" || initialTab === "printers" ? initialTab : "filaments",
   );
   const filamentQuery = useQuery({ ...filamentProfilesOptions(), enabled: auth.isAuthenticated });
   const printerQuery = useQuery({ ...printerProfilesOptions(), enabled: auth.isAuthenticated });
@@ -504,7 +582,32 @@ export function FilamentProfilesCard() {
   const selectedPrinter =
     printers.find((profile) => profile.id === selectedPrinterId) ?? printers[0];
   const assigned = selectedPrinter
-    ? fleetQuery.data?.filter((printer) => printer.cost_profile_id === selectedPrinter.id)
+    ? fleetQuery.data?.flatMap((printer) =>
+        printer.cost_profile_id === selectedPrinter.id
+          ? [{ href: `/printers/${printer.id}?tab=settings`, name: printer.name }]
+          : [],
+      )
+    : undefined;
+  const showLoadedFilament =
+    activeTab === "filaments" &&
+    selectedFilament !== undefined &&
+    Boolean(selectedFilament.material_type || selectedFilament.spoolman_filament_id);
+  const fleetSummary = useFleetSummary({ enabled: auth.isAuthenticated && showLoadedFilament });
+  const loadedOn = showLoadedFilament
+    ? fleetSummary.data?.printers.flatMap((printer) => {
+        const slots = printer.loaded_material_slots?.filter((slot) =>
+          matchesLoadedFilament(slot, selectedFilament),
+        );
+        return slots?.length
+          ? [
+              {
+                href: `/printers/${printer.printer_id}?tab=materials`,
+                name: printer.name,
+                detail: slots.map((slot) => slot.label).join(" · "),
+              },
+            ]
+          : [];
+      })
     : undefined;
   const activeDenied = activeTab === "filaments" ? filamentDenied : printerDenied;
   const activeQuery = activeTab === "filaments" ? filamentQuery : printerQuery;
@@ -869,7 +972,7 @@ export function FilamentProfilesCard() {
       toast.error(uiText("Invalid nozzle diameter"));
       return;
     }
-    const expenses = parseExpenses(newPrinterExpenses);
+    const expenses = parseExpenses(newPrinterExpenses, newPrinterModel);
     const problem = expenseProblem(expenses);
     if (problem) {
       toast.error(problem);
@@ -948,7 +1051,7 @@ export function FilamentProfilesCard() {
       toast.error(uiText("Invalid nozzle diameter"));
       return;
     }
-    const expenses = parseExpenses(edit.expenses);
+    const expenses = parseExpenses(edit.expenses, edit.model);
     if (expenseProblem(expenses)) return;
     const key = `p${profile.id}`;
     cancelSavedFeedback(key);
@@ -1038,7 +1141,7 @@ export function FilamentProfilesCard() {
         <PageHeader
           title={translateUiText(locale, "Profiles")}
           description={translateUiText(locale, "profiles.description")}
-          actions={profileActions}
+          actions={activeTab === "pricing" ? undefined : profileActions}
         />
         <ConfirmModal
           open={
@@ -1064,7 +1167,7 @@ export function FilamentProfilesCard() {
           }
           confirmLabel={uiText("Delete preset")}
         />
-        {(error || activeQuery.isError) && (
+        {activeTab !== "pricing" && (error || activeQuery.isError) && (
           <div
             role="alert"
             className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
@@ -1110,6 +1213,7 @@ export function FilamentProfilesCard() {
                     </>
                   ),
                 },
+                { key: "pricing", label: uiText("Pricing templates") },
               ]}
               active={activeTab}
               onChange={setActiveTab}
@@ -1119,7 +1223,9 @@ export function FilamentProfilesCard() {
               activeTabClassName="bg-foreground/12 text-foreground"
             />
           </div>
-          {activeDenied ? null : activeTab === "filaments" ? (
+          {activeTab === "pricing" ? (
+            auth.isAuthenticated && <PricingTemplatesPanel admin={user?.is_superuser === true} />
+          ) : activeDenied ? null : activeTab === "filaments" ? (
             <section aria-labelledby="filament-presets-heading">
               <h2 id="filament-presets-heading" className="sr-only">
                 {uiText("Filament presets")}
@@ -1474,6 +1580,13 @@ export function FilamentProfilesCard() {
                             )
                           }
                         >
+                          {loadedOn && (
+                            <ProfilePrinterLinks
+                              title={uiText("Printers with matching filament")}
+                              printers={loadedOn}
+                              empty={uiText("No matching filament is loaded.")}
+                            />
+                          )}
                           <ProfileSettingsDetails kind="filament" profile={profile} />
                         </ProfileRow>
                       );
@@ -1548,25 +1661,15 @@ export function FilamentProfilesCard() {
                       aria-describedby={`${helpId}-printer-name`}
                     />
                   </FormField>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <h3 className="col-span-full text-field font-semibold">
-                      {uiText("Printer & nozzle")}
-                    </h3>
-                    <FormField label={uiText("Printer model")}>
-                      <Input
-                        value={newPrinterModel}
-                        onChange={(e) => setNewPrinterModel(e.target.value)}
-                        placeholder={uiText("Machine model")}
-                      />
-                    </FormField>
-                    <FormField label={uiText("Nozzle diameter")}>
-                      <Input
-                        value={newPrinterNozzle}
-                        onChange={(e) => setNewPrinterNozzle(e.target.value)}
-                        inputMode="decimal"
-                        placeholder="0.4"
-                      />
-                    </FormField>
+                  <div className="space-y-4">
+                    <h3 className="text-field font-semibold">{uiText("Printer & nozzle")}</h3>
+                    <PrinterProfileFields
+                      model={newPrinterModel}
+                      nozzle={newPrinterNozzle}
+                      disabled={commands.createPrinter.isPending}
+                      onModelChange={setNewPrinterModel}
+                      onNozzleChange={setNewPrinterNozzle}
+                    />
                   </div>
                   <FormField
                     label={uiText("Notes")}
@@ -1584,6 +1687,7 @@ export function FilamentProfilesCard() {
                   <PrinterExpenseFields
                     currency={currency}
                     draft={newPrinterExpenses}
+                    model={newPrinterModel}
                     disabled={commands.createPrinter.isPending}
                     onChange={setNewPrinterExpenses}
                   />
@@ -1624,6 +1728,15 @@ export function FilamentProfilesCard() {
                               profile.nozzle_diameter_mm === null
                                 ? null
                                 : `${formatNozzle(profile.nozzle_diameter_mm)} mm`,
+                            ],
+                            [
+                              uiText("Print failure rate"),
+                              profile.expenses && profile.expenses.failure_rate_percent > 0
+                                ? formatNumber(profile.expenses.failure_rate_percent / 100, {
+                                    style: "percent",
+                                    maximumFractionDigits: 2,
+                                  })
+                                : null,
                             ],
                           ]}
                           notes={profile.notes}
@@ -1691,7 +1804,7 @@ export function FilamentProfilesCard() {
                           detailsHost={detailsHost}
                           editor={(focusCosts) => (
                             <>
-                              <FormField className="min-w-0 sm:col-span-2" label={uiText("Name")}>
+                              <FormField className="col-span-full" label={uiText("Name")}>
                                 <Input
                                   value={edit.name}
                                   onChange={(e) =>
@@ -1706,39 +1819,18 @@ export function FilamentProfilesCard() {
                                   })}
                                 />
                               </FormField>
-                              <FormField className="lg:col-span-2" label={uiText("Printer model")}>
-                                <Input
-                                  value={edit.model}
-                                  onChange={(e) =>
-                                    updatePrinterEdit(profile.id, { model: e.target.value })
-                                  }
-                                  disabled={
-                                    !auth.isAuthenticated ||
-                                    rowStatus[`p${profile.id}`] === "saving"
-                                  }
-                                  aria-label={uiText("Printer model {value1}", {
-                                    value1: String(profile.id),
-                                  })}
-                                  placeholder={uiText("Machine model")}
-                                />
-                              </FormField>
-                              <FormField className="lg:col-span-2" label={uiText("Nozzle")}>
-                                <Input
-                                  value={edit.nozzle}
-                                  onChange={(e) =>
-                                    updatePrinterEdit(profile.id, { nozzle: e.target.value })
-                                  }
-                                  disabled={
-                                    !auth.isAuthenticated ||
-                                    rowStatus[`p${profile.id}`] === "saving"
-                                  }
-                                  inputMode="decimal"
-                                  aria-label={uiText("Printer nozzle diameter {value1}", {
-                                    value1: String(profile.id),
-                                  })}
-                                  placeholder="0.4"
-                                />
-                              </FormField>
+                              <PrinterProfileFields
+                                id={profile.id}
+                                model={edit.model}
+                                nozzle={edit.nozzle}
+                                disabled={
+                                  !auth.isAuthenticated || rowStatus[`p${profile.id}`] === "saving"
+                                }
+                                onModelChange={(model) => updatePrinterEdit(profile.id, { model })}
+                                onNozzleChange={(nozzle) =>
+                                  updatePrinterEdit(profile.id, { nozzle })
+                                }
+                              />
                               <FormField className="col-span-full min-w-0" label={uiText("Notes")}>
                                 <textarea
                                   value={edit.notes}
@@ -1760,6 +1852,7 @@ export function FilamentProfilesCard() {
                                 currency={currency}
                                 focus={focusCosts}
                                 draft={edit.expenses}
+                                model={edit.model}
                                 disabled={
                                   !auth.isAuthenticated || rowStatus[`p${profile.id}`] === "saving"
                                 }
@@ -1818,32 +1911,11 @@ export function FilamentProfilesCard() {
                           }
                         >
                           {assigned && (
-                            <section
-                              className="space-y-2 border-t border-border pt-4"
-                              aria-label={uiText("Assigned printers")}
-                            >
-                              <h4 className="text-sm font-semibold">
-                                {uiText("Assigned printers")}
-                              </h4>
-                              {assigned.length > 0 ? (
-                                <ul className="space-y-2 text-sm">
-                                  {assigned.map((printer) => (
-                                    <li key={printer.id}>
-                                      <Link
-                                        href={`/printers/${printer.id}?tab=settings`}
-                                        className="break-words text-foreground underline underline-offset-4"
-                                      >
-                                        {printer.name}
-                                      </Link>
-                                    </li>
-                                  ))}
-                                </ul>
-                              ) : (
-                                <Button asChild size="sm" variant="outline">
-                                  <Link href="/printers">{uiText("Manage printers")}</Link>
-                                </Button>
-                              )}
-                            </section>
+                            <ProfilePrinterLinks
+                              title={uiText("Assigned printers")}
+                              printers={assigned}
+                              empty={uiText("No printers use this cost profile.")}
+                            />
                           )}
                           <ProfileSettingsDetails kind="printer" profile={profile} />
                         </ProfileRow>

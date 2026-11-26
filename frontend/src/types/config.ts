@@ -1,4 +1,7 @@
 import type { EditingBase } from "./editing";
+import type { PricingRates } from "./production-costing";
+
+export type PreviewMode = "single" | "oblique" | "oblique-poles";
 
 export interface SetupStatus {
   configured: boolean;
@@ -33,6 +36,8 @@ export interface SetupStatus {
   current_backup_s3_bucket?: string;
   current_backup_s3_endpoint_url?: string;
   current_backup_s3_region?: string;
+  preview_appearance?: PreviewAppearance;
+  preview_mode?: PreviewMode;
   configured_at?: string | null;
 }
 
@@ -40,6 +45,8 @@ export interface SetupRequest {
   username: string;
   password: string;
   email?: string;
+  preview_appearance?: PreviewAppearance;
+  preview_mode?: PreviewMode;
   storage_backend?: string;
   storage_provider?: string;
   storage_provider_config?: StorageProviderConfigValues;
@@ -58,7 +65,10 @@ export interface SetupRequest {
   backup_s3_secret_key?: string;
 }
 
-export type SetupStorageRequest = Omit<SetupRequest, "username" | "password" | "email">;
+export type SetupStorageRequest = Omit<
+  SetupRequest,
+  "username" | "password" | "email" | "preview_appearance" | "preview_mode"
+>;
 
 export interface SetupStorageCheck {
   ready: boolean;
@@ -136,6 +146,7 @@ export interface VaultConfigRead extends EditingBase, PreviewAppearance {
   auto_mark_known_good: boolean;
   external_libraries_enabled: boolean;
   currency: string;
+  pricing_defaults: PricingRates;
   model_thumbnail_width: number;
   oidc_enabled: boolean;
   oidc_issuer_url: string;
@@ -182,6 +193,7 @@ export interface VaultConfigUpdate extends Partial<PreviewAppearance> {
   auto_mark_known_good?: boolean;
   external_libraries_enabled?: boolean;
   currency?: string;
+  pricing_defaults?: PricingRates;
   model_thumbnail_width?: 320 | 640 | 1280;
   oidc_enabled?: boolean;
   oidc_issuer_url?: string;

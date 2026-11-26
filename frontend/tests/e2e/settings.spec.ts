@@ -48,44 +48,172 @@ const accessibleGpu = {
 };
 
 test.describe("settings route", () => {
+  test("keeps Settings navigation fixed when Appearance scrolls", async ({ page }) => {
+    await page.goto("/settings?section=design");
+    await collapseNavigationSidebar(page);
+    const navigation = page.getByRole("navigation", { name: "Settings sections" });
+    const title = page.getByRole("heading", { name: "Appearance", level: 1 });
+    const content = page.locator(".settings-main");
+    await expect(page.getByRole("group", { name: "Model card metrics" })).toBeVisible();
+    const originalNav = await navigation.boundingBox();
+    const originalTitle = await title.boundingBox();
+
+    await content.hover({ position: { x: 160, y: 150 } });
+    await page.mouse.wheel(0, 480);
+
+    await expect.poll(() => content.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    expect(await navigation.boundingBox()).toEqual(originalNav);
+    expect(await title.boundingBox()).toEqual(originalTitle);
+  });
+
+  test("scrolls the Settings options independently in a short desktop window", async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 1920, height: 800 });
+    await page.goto("/settings?section=design");
+    await collapseNavigationSidebar(page);
+
+    const navigation = page.getByRole("navigation", { name: "Settings sections" });
+    const search = navigation.getByRole("searchbox", { name: "Search settings" });
+    const back = navigation.getByRole("button", { name: "Back to library" });
+    const about = navigation.getByRole("button", { name: "About", exact: true });
+    const content = page.locator(".settings-main");
+    await expect(search).toBeInViewport();
+    await expect(about).not.toBeInViewport();
+    const originalSearch = await search.boundingBox();
+    const originalBack = await back.boundingBox();
+    const originalContentScroll = await content.evaluate((element) => element.scrollTop);
+
+    await navigation.getByRole("button", { name: "Library sources", exact: true }).hover();
+    await page.mouse.wheel(0, 650);
+
+    await expect(about).toBeInViewport({ ratio: 1 });
+    await expect(navigation.locator(".settings-nav-options")).toHaveCSS("scrollbar-width", "none");
+    expect(await search.boundingBox()).toEqual(originalSearch);
+    expect(await back.boundingBox()).toEqual(originalBack);
+    expect(await content.evaluate((element) => element.scrollTop)).toBe(originalContentScroll);
+    await page.screenshot({ path: testInfo.outputPath("settings-options-scrolled.png") });
+    await about.click();
+    await expect(page).toHaveURL(/section=about/);
+  });
+
   test("keeps the active settings section visible at the bottom of the overview", async ({
     page,
-  }) => {
+  }, testInfo) => {
     await page.goto("/settings?section=overview");
     const toggle = page.getByRole("button", { name: "Toggle sidebar" });
     if ((await toggle.getAttribute("aria-expanded")) === "true") await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
 
-    await page.getByRole("heading", { name: "Data export" }).scrollIntoViewIfNeeded();
+    const index = page.getByRole("complementary", { name: "On this page" });
+    await index.getByRole("link", { name: "Data export" }).click();
+    await expect(page.getByRole("heading", { name: "Data export" })).toBeInViewport();
 
     const crumbs = page.getByRole("navigation", { name: "Breadcrumbs" });
     await expect(crumbs.locator("[aria-current=page]")).toHaveText("Overview");
     await expect(crumbs).toBeInViewport();
     expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(1080);
+
+    const scrollbar = await page.locator(".settings-main").evaluate((element) => {
+      const track = getComputedStyle(element, "::-webkit-scrollbar-track");
+      const thumb = getComputedStyle(element, "::-webkit-scrollbar-thumb");
+      const width = getComputedStyle(element, "::-webkit-scrollbar").width;
+      return {
+        gap: getComputedStyle(element).paddingInlineEnd,
+        arrows: getComputedStyle(element, "::-webkit-scrollbar-button").display,
+        thumbWidth: parseFloat(width) - 2 * parseFloat(thumb.borderInlineStartWidth),
+        trackHeight: Math.round(
+          element.getBoundingClientRect().height - 2 * parseFloat(track.marginBlockStart),
+        ),
+      };
+    });
+    expect(scrollbar).toEqual({ gap: "8px", arrows: "none", thumbWidth: 4, trackHeight: 144 });
+    await page.screenshot({ path: testInfo.outputPath("overview-scrollbar.png") });
+  });
+
+  test("aligns the paired Overview groups", async ({ page }, testInfo) => {
+    await page.goto("/settings?section=overview");
+    await collapseNavigationSidebar(page);
+    const overviewPairs = page.locator(".settings-overview-pair");
+    await expect(overviewPairs).toHaveCount(2);
+    const pairs = await overviewPairs.evaluateAll((groups) =>
+      groups.map((group) =>
+        Array.from(group.querySelectorAll(".settings-card")).map((card) => ({
+          box: card.querySelector(".settings-card-box")!.getBoundingClientRect().toJSON(),
+          titleY: card.querySelector("h3")!.getBoundingClientRect().y,
+          actionY: card.querySelector(".settings-card-foot button")?.getBoundingClientRect().y,
+        })),
+      ),
+    );
+    for (const [left, right] of pairs) {
+      expect(left.box.x).toBeLessThan(right.box.x);
+      expect(left.box.y).toBeCloseTo(right.box.y);
+      expect(left.titleY).toBeCloseTo(right.titleY);
+    }
+    const [migration, dataExport] = pairs[1];
+    expect(migration.box.height).toBeCloseTo(dataExport.box.height);
+    expect(migration.actionY).toBeCloseTo(dataExport.actionY!);
+
+    const safety = page.getByRole("group", { name: "Data safety", exact: true });
+    const safetyRowHeights = await safety
+      .locator("dl > div")
+      .evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height));
+    expect(safetyRowHeights).toHaveLength(3);
+    expect(Math.max(...safetyRowHeights)).toBeLessThan(80);
+
+    const system = page.getByRole("group", { name: "System", exact: true });
+    const systemRows = await system.locator("dl > div").evaluateAll((rows) =>
+      rows.map((row) => {
+        const label = row.querySelector("dt")!.getBoundingClientRect();
+        const value = row.querySelector("dd")!.getBoundingClientRect();
+        return { labelX: label.x, labelY: label.y, valueY: value.y, gap: value.x - label.right };
+      }),
+    );
+    expect(systemRows).toHaveLength(6);
+    expect(systemRows[0].labelX).toBe(systemRows[1].labelX);
+    expect(systemRows[0].labelY).toBeLessThan(systemRows[1].labelY);
+    for (const row of systemRows) {
+      expect(row.labelY).toBe(row.valueY);
+      expect(row.gap).toBeGreaterThanOrEqual(20);
+    }
+
+    const metadata = page.getByRole("button", { name: "JSON", exact: true });
+    await metadata.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath("overview-aligned.png") });
   });
 
   test("selects Settings values from the shared menu", async ({ page }) => {
     await page.goto("/settings?section=design");
-    const theme = page.getByRole("combobox", { name: "Theme", exact: true });
-    await expect(theme).toBeVisible();
-    const style = await theme.evaluate((select) => {
+    const currency = page.getByRole("combobox", { name: "Display currency", exact: true });
+    await expect(currency).toBeEnabled();
+    const style = await currency.evaluate((select) => {
       const picker = getComputedStyle(select, "::picker(select)");
       const chosen = select.querySelector("option:checked");
       return {
         appearance: getComputedStyle(select).appearance,
         pickerRadius: picker.borderTopLeftRadius,
         chosenBackground: chosen ? getComputedStyle(chosen).backgroundColor : null,
-        accent: getComputedStyle(document.documentElement).getPropertyValue("--accent").trim(),
       };
     });
     expect(style.appearance).toBe("base-select");
-    expect(style.pickerRadius).toBe("0px");
+    expect(style.pickerRadius).toBe("8px");
     expect(style.chosenBackground).not.toBe("rgba(0, 0, 0, 0)");
+    await expect(currency).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
 
-    await theme.click();
-    await page.getByRole("option", { name: "Dark", exact: true }).click();
-    await expect(theme).toHaveValue("dark");
-    await theme.selectOption("light");
+    await currency.click();
+    await currency.locator('option[value="EUR"]').click();
+    await expect(currency).toHaveValue("EUR");
+  });
+
+  test("keeps the migration backup selector disabled without backups", async ({ page }) => {
+    await page.route("**/api/v1/backups/sources", (route) => route.fulfill({ json: [] }));
+    await page.goto("/settings?section=storage");
+    await page.getByRole("button", { name: "Plan migration" }).click();
+    const backups = page.getByRole("combobox", { name: "Recent backup" });
+
+    await expect(backups).toBeDisabled();
+    await expect(backups).toHaveCSS("border-top-color", "rgba(0, 0, 0, 0)");
+    await expect(backups).toHaveCSS("opacity", "0.5");
   });
 
   test("rejects a stale configuration write in the browser fake", async ({ request }) => {
@@ -133,33 +261,35 @@ test.describe("settings route", () => {
     await expect.poll(() => probes).toBe(answered + 1);
   });
   for (const theme of ["light", "dark"] as const) {
-    test(`uses one field surface across forms in ${theme} mode`, async ({ page }, testInfo) => {
+    test(`keeps field surfaces consistent in ${theme} mode`, async ({ page }, testInfo) => {
       await page.addInitScript((value) => localStorage.setItem("printstash.theme", value), theme);
       await page.goto("/settings?section=design");
       await collapseNavigationSidebar(page);
       const token = theme === "dark" ? "--surface-container-high" : "--card";
-      const fields = [
-        page.getByLabel("Display currency"),
+      const dropdowns = [
+        page.getByRole("combobox", { name: "Display currency", exact: true }),
         page.getByRole("combobox", { name: "Metric 1", exact: true }),
         page.getByRole("combobox", { name: "Metric 2", exact: true }),
         page.getByRole("combobox", { name: "Metric 3", exact: true }),
       ];
-      async function checkFill(field: (typeof fields)[number]) {
+      async function checkFill(field: (typeof dropdowns)[number], surface = token) {
         const { actual, expected } = await field.evaluate((element, surface) => {
           const style = getComputedStyle(element);
           const canvas = document.createElement("canvas").getContext("2d")!;
           canvas.fillStyle = style.backgroundColor;
           return { actual: canvas.fillStyle, expected: style.getPropertyValue(surface).trim() };
-        }, token);
+        }, surface);
         expect(actual).toBe(expected);
       }
 
-      await expect(fields[0]).toBeEnabled();
+      await expect(dropdowns[0]).toBeEnabled();
       await page
         .getByRole("article", { name: "Example bracket", exact: true })
         .evaluate((element) => element.scrollIntoView({ block: "center" }));
       await page.screenshot({ path: testInfo.outputPath(`appearance-${theme}.png`) });
-      for (const field of fields) await checkFill(field);
+      for (const dropdown of dropdowns) {
+        await checkFill(dropdown, "--surface-container-high");
+      }
 
       await page.goto("/settings?section=sso");
       const issuer = page.getByLabel("Issuer URL", { exact: true });
@@ -505,7 +635,7 @@ test.describe("settings route", () => {
   test("preview settings persist quality choices and queue image recreation", async ({ page }) => {
     await page.goto("/settings?section=previews");
 
-    await page.getByLabel("Preview quality").selectOption("detail");
+    await page.getByRole("radio", { name: "High detail · 2×" }).click();
     await expect
       .poll(() => page.evaluate(() => localStorage.getItem("printstash.preview.preferences:v1")))
       .toContain('"previewQuality":"detail"');
@@ -514,7 +644,7 @@ test.describe("settings route", () => {
       page.waitForRequest(
         (request) => request.url().includes("/api/v1/config") && request.method() === "PUT",
       ),
-      page.getByLabel("Model image quality").selectOption("1280"),
+      page.getByRole("radio", { name: "High · 1280 × 960" }).click(),
     ]);
 
     await Promise.all([
@@ -526,6 +656,30 @@ test.describe("settings route", () => {
       page.getByRole("button", { name: "Recreate all images" }).click(),
     ]);
     await expect(page.getByText("Model preview recreation queued.")).toBeVisible();
+  });
+
+  test("a repeated preview save confirmation can be closed immediately", async ({
+    page,
+  }, testInfo) => {
+    await page.goto("/settings?section=previews");
+    await collapseNavigationSidebar(page);
+    const quality = page.getByRole("radiogroup", { name: "Preview quality" });
+    await quality.getByRole("radio", { name: "High detail · 2×" }).click();
+    await quality.getByRole("radio", { name: "Performance · 1×" }).click();
+
+    const notifications = page.getByRole("region", { name: /^Notifications/ });
+    const message = notifications.getByText("Preview settings saved for this browser.", {
+      exact: true,
+    });
+    await expect(message).toHaveCount(1);
+    const close = notifications.getByRole("button", { name: "Close", exact: true });
+    await expect(close).toBeInViewport();
+    await close.hover();
+    await page.screenshot({ path: testInfo.outputPath("preview-confirmation.png") });
+    await close.click();
+    await expect(message).toHaveCount(0, { timeout: 1200 });
+    await page.reload();
+    await expect(quality.getByRole("radio", { name: "Performance · 1×" })).toBeChecked();
   });
 
   test("settings warns administrators when a newer release is available", async ({ page }) => {

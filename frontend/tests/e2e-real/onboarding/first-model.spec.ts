@@ -1,92 +1,65 @@
 /* A fresh installation reaches its first Models using only browser controls. */
 import { mkdir, writeFile } from "node:fs/promises";
-import { test, expect } from "@playwright/test";
-import { gcodeFor } from "../util";
+import { test, expect, type Locator, type Page } from "@playwright/test";
+import { brandMarkOutline } from "../../../src/components/brand-geometry";
+import { collapseNavigationSidebar, gcodeFor } from "../util";
 
 const loseResponse = process.env.PLAYWRIGHT_ONBOARDING_LOST_RESPONSE === "1";
 
+async function expectCenteredSetupCard(card: Locator) {
+  const frame = (await card.boundingBox())!;
+  const column = (await card.locator("..").boundingBox())!;
+  expect(frame.x + frame.width / 2).toBeCloseTo(column.x + column.width / 2, 0);
+  expect(frame.y + frame.height / 2).toBeCloseTo(column.y + column.height / 2, 0);
+  await expect(card).toBeInViewport({ ratio: 1 });
+}
+
+async function expectExamplePreviews(page: Page) {
+  const previews = page.locator('[data-preview-theme] [data-library-thumbnail="ready"] img');
+  await expect(previews).toHaveCount(2);
+  for (const preview of await previews.all()) await expect(preview).toHaveCSS("opacity", "1");
+}
+
 test.describe("Browser onboarding", () => {
-  test("centers setup at responsive viewport sizes", async ({ page }, testInfo) => {
+  test("keeps the localized setup steps visible on desktop", async ({ page }, testInfo) => {
     await page.addInitScript(() => {
       localStorage.setItem("printstash.locale", "es");
       localStorage.setItem("printstash.theme", "dark");
     });
     await page.goto("/setup");
     await page.getByLabel("Usuario", { exact: true }).fill("first-owner");
-    for (const viewport of [
-      { width: 1440, height: 1100 },
-      { width: 390, height: 844 },
-    ]) {
-      await page.setViewportSize(viewport);
-      const frame = page.getByRole("region", { name: "Bienvenido a PrintStash" });
-      const bounds = await frame.boundingBox();
-      expect(bounds).not.toBeNull();
-      expect(Math.abs(bounds!.x + bounds!.width / 2 - viewport.width / 2)).toBeLessThan(10);
-      if (viewport.width > 1000) expect(bounds!.height).toBeLessThan(viewport.height);
-      else {
-        const next = page.getByRole("button", { name: "Continuar", exact: true });
-        await next.scrollIntoViewIfNeeded();
-        await expect(next).toBeInViewport();
-      }
-      if (viewport.width > 1000) {
-        expect(Math.abs(bounds!.y + bounds!.height / 2 - viewport.height / 2)).toBeLessThan(2);
-        const passwordRow = await page.getByLabel("Contraseña", { exact: true }).boundingBox();
-        const confirmationRow = await page
-          .getByLabel("Confirmar contraseña", { exact: true })
-          .boundingBox();
-        expect(confirmationRow!.y).toBe(passwordRow!.y);
-        expect(confirmationRow!.x).toBeGreaterThanOrEqual(passwordRow!.x + passwordRow!.width);
-        expect(confirmationRow!.width).toBe(passwordRow!.width);
-      }
-      const progress = await page
-        .getByRole("list", { name: "Progreso de configuración" })
-        .boundingBox();
-      expect(progress!.height).toBeLessThan(60);
-      expect(
-        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-      ).toBe(true);
-      const password = await page.getByLabel("Contraseña", { exact: true }).boundingBox();
-      const eye = await page
-        .getByRole("button", { name: "Mostrar Contraseña", exact: true })
-        .boundingBox();
-      expect(eye!.x).toBeGreaterThan(password!.x);
-      expect(eye!.x + eye!.width).toBeLessThanOrEqual(password!.x + password!.width + 1);
-      await page.screenshot({
-        path: testInfo.outputPath(`account-es-${viewport.width}.png`),
-        fullPage: true,
-      });
-    }
-    await page.getByLabel("Contraseña", { exact: true }).fill("BrowserPassword123");
-    await page.getByLabel("Confirmar contraseña", { exact: true }).fill("BrowserPassword123");
-    await page.getByRole("button", { name: "Continuar", exact: true }).click();
-    for (const viewport of [
-      { width: 1440, height: 1100 },
-      { width: 390, height: 844 },
-    ]) {
-      await page.setViewportSize(viewport);
-      await expect(page.getByRole("textbox", { name: "Tus archivos", exact: true })).toBeVisible();
-      const local = await page.getByRole("button", { name: "Carpeta local" }).boundingBox();
-      const remote = await page.getByRole("button", { name: "Compatible con S3" }).boundingBox();
-      expect(Math.abs(local!.width - remote!.width)).toBeLessThan(2);
-      expect(local!.y).toBe(remote!.y);
-      const frame = await page
-        .getByRole("region", { name: "Bienvenido a PrintStash" })
-        .boundingBox();
-      expect(frame!.height).toBeLessThan(viewport.height * 1.5);
-      expect(
-        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-      ).toBe(true);
-      await page.screenshot({
-        path: testInfo.outputPath(`storage-es-${viewport.width}.png`),
-        fullPage: true,
-      });
-    }
+    const mark = page.getByRole("banner").locator(`path[d="${brandMarkOutline}"]`);
+    await expect(mark).toHaveCSS("fill", "rgb(241, 244, 250)");
+
+    const frame = page.getByRole("region", { name: "Bienvenido a PrintStash" });
+    const progress = page.getByRole("list", { name: "Progreso de configuración" });
+    const next = page.getByRole("button", { name: "Continuar", exact: true });
+    const password = page.getByLabel("Contraseña", { exact: true });
+    const confirmation = page.getByLabel("Confirmar contraseña", { exact: true });
+
+    await expect(progress.getByRole("listitem")).toHaveCount(4);
+    await expect(progress.locator('[aria-current="step"]')).toHaveText(/Cuenta/);
+    await expectCenteredSetupCard(frame);
+    const passwordBounds = (await password.boundingBox())!;
+    const confirmBounds = (await confirmation.boundingBox())!;
+    const nextBounds = (await next.boundingBox())!;
+    expect(confirmBounds.y).toBe(passwordBounds.y);
+    expect(confirmBounds.width).toBe(passwordBounds.width);
+    expect(nextBounds.y - passwordBounds.y - passwordBounds.height).toBeLessThan(100);
+    await expect(next).toBeInViewport();
+    await page.screenshot({ path: testInfo.outputPath("account-es-dark.png") });
+
+    await password.fill("BrowserPassword123");
+    await confirmation.fill("BrowserPassword123");
+    await confirmation.press("Enter");
+    await expect(progress.locator('[aria-current="step"]')).toHaveText(/Almacenamiento/);
+    await expect(page.getByRole("heading", { name: "Tus archivos", exact: true })).toBeFocused();
+    await expectCenteredSetupCard(frame);
     await page.getByRole("button", { name: "Cambiar tema" }).click();
     await expect(page.locator("html")).not.toHaveClass(/dark/);
-    await page.screenshot({
-      path: testInfo.outputPath("storage-es-light-mobile.png"),
-      fullPage: true,
-    });
+    await expect(mark).toHaveCSS("fill", "rgb(20, 25, 35)");
+    await expect(next).toBeInViewport();
+    await page.screenshot({ path: testInfo.outputPath("storage-es-light.png") });
   });
 
   test(
@@ -105,13 +78,14 @@ test.describe("Browser onboarding", () => {
         if (!localStorage.getItem("printstash.theme"))
           localStorage.setItem("printstash.theme", "dark");
       });
-      await page.setViewportSize({ width: 390, height: 844 });
       await page.goto("/setup");
+      const frame = page.getByRole("region", { name: "Welcome to PrintStash" });
       await page.getByLabel("Username").fill("first-owner");
       await expect(
         page.getByRole("list", { name: "Setup progress" }).locator('[aria-current="step"]'),
       ).toHaveText(/Account/);
-      await page.screenshot({ path: testInfo.outputPath("account-mobile.png"), fullPage: true });
+      await expectCenteredSetupCard(frame);
+      await page.screenshot({ path: testInfo.outputPath("account-desktop.png"), fullPage: true });
       await page.getByLabel("Password", { exact: true }).fill("BrowserPassword123");
       await page.getByRole("button", { name: "Show Password", exact: true }).click();
       await expect(page.getByLabel("Password", { exact: true })).toHaveAttribute("type", "text");
@@ -124,12 +98,43 @@ test.describe("Browser onboarding", () => {
       await expect(page.getByRole("textbox", { name: "Your files", exact: true })).toBeVisible();
       await expect(page.getByLabel("Previews", { exact: true })).toBeVisible();
       await expect(page.getByLabel("Root", { exact: true })).toHaveCount(0);
-      await page.screenshot({ path: testInfo.outputPath("storage-mobile.png"), fullPage: true });
-      await page.setViewportSize({ width: 1280, height: 900 });
+      await expectCenteredSetupCard(frame);
+      await page.screenshot({ path: testInfo.outputPath("storage-desktop.png"), fullPage: true });
+      await page.getByRole("button", { name: "Continue", exact: true }).press("Enter");
+      await expect(page.getByRole("heading", { name: "Customize previews" })).toBeFocused();
+      await expectExamplePreviews(page);
+      await page.getByRole("radio", { name: "Sage" }).press("Space");
+      const setupGrid = page.getByRole("switch", { name: "Floor grid" });
+      await setupGrid.click();
+      await expect(setupGrid).toHaveAttribute("aria-checked", "false");
+      await expectExamplePreviews(page);
+      const views = page.getByRole("combobox", { name: "Preview views" });
+      await expect(views).toHaveValue("single");
+      await views.press("Space");
+      await expect(page.locator("select:open")).toHaveCount(1);
+      await page.screenshot({
+        path: testInfo.outputPath("appearance-views-menu.png"),
+        fullPage: true,
+      });
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("Enter");
+      await expect(views).toHaveValue("oblique-poles");
+      await expect(views).toBeFocused();
+      await expectCenteredSetupCard(frame);
+      await page.screenshot({
+        path: testInfo.outputPath("appearance-desktop.png"),
+        fullPage: true,
+      });
       await page.getByRole("button", { name: "Continue", exact: true }).press("Enter");
       await expect(
         page.getByRole("heading", { name: "Review before creating your account" }),
       ).toBeVisible();
+      const summary = page.getByRole("group", { name: "Review before creating your account" });
+      await expect(summary.getByText("Sage", { exact: true })).toBeVisible();
+      await expect(summary.getByText("Off", { exact: true })).toBeVisible();
+      await expect(summary.getByText("6 views · top and bottom")).toBeVisible();
+      await expectCenteredSetupCard(frame);
       await page.screenshot({ path: testInfo.outputPath("review-desktop.png"), fullPage: true });
       let accountRequests = 0;
       if (loseResponse) {
@@ -164,54 +169,42 @@ test.describe("Browser onboarding", () => {
       }
       await expect(page).toHaveURL(/\/getting-started$/);
       await expect(page.getByRole("button", { name: "Upload my first files" })).toBeVisible();
-      await page.goto("/settings?section=design");
-      await page.getByRole("combobox", { name: "Language", exact: true }).selectOption("es");
-      await page.goto("/getting-started");
-      await expect(page.getByRole("heading", { name: "Primeros pasos", level: 1 })).toBeVisible();
-      for (const viewport of [
-        { width: 1440, height: 1100 },
-        { width: 390, height: 844 },
-      ]) {
-        await page.setViewportSize(viewport);
-        await expect(
-          page.getByRole("button", { name: "Subir mis primeros archivos" }),
-        ).toBeVisible();
-        expect(
-          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-        ).toBe(true);
-        await page.screenshot({
-          path: testInfo.outputPath(`start-es-${viewport.width}.png`),
-          fullPage: true,
-        });
-      }
-      await page.goto("/settings?section=design");
-      await page.getByRole("combobox", { name: "Tema", exact: true }).selectOption("light");
-      await page.goto("/getting-started");
-      await expect(page.locator("html")).not.toHaveClass(/dark/);
+      const config = await page.request.get("/api/v1/config");
+      expect(config.ok()).toBe(true);
+      expect(await config.json()).toMatchObject({
+        preview_look: "sage",
+        preview_floor_grid: false,
+        derivatives_previews_enabled: true,
+        derivatives_previews_include_poles: true,
+      });
+      await collapseNavigationSidebar(page);
       await page.screenshot({
-        path: testInfo.outputPath("start-es-light-mobile.png"),
+        path: testInfo.outputPath("getting-started-desktop.png"),
         fullPage: true,
       });
-      await page.getByRole("button", { name: "Conectar carpeta", exact: true }).click();
-      await expect(page.getByRole("button", { name: "/boot", exact: true })).toHaveCount(0);
-      await expect(page.getByRole("button", { name: "/run", exact: true })).toHaveCount(0);
-      await page.getByLabel("Nombre de la carpeta").fill("Mis modelos");
-      await page.getByLabel("Ruta de la carpeta en el servidor").fill("/libraries/models");
-      await page.screenshot({ path: testInfo.outputPath("folder-es-mobile.png"), fullPage: true });
-      await page.getByText("¿No aparece tu carpeta?", { exact: true }).click();
+      await page.getByRole("link", { name: "Customize previews" }).click();
+      await expect(page).toHaveURL(/\/setup-appearance$/);
+      await expect(page.getByRole("heading", { name: "Customize previews" })).toBeVisible();
+      await expect(
+        page.getByRole("checkbox", { name: "Add the PrintStash sample collection" }),
+      ).not.toBeChecked();
+      await expect(page.getByRole("list", { name: "Setup progress" })).toHaveCount(0);
+      await expectExamplePreviews(page);
       await page.screenshot({
-        path: testInfo.outputPath("folder-help-es-mobile.png"),
+        path: testInfo.outputPath("preview-appearance-desktop.png"),
         fullPage: true,
       });
-      await page.getByRole("button", { name: "Volver al primer modelo" }).click();
-      await page.getByRole("button", { name: "Subir mis primeros archivos" }).click();
-      await page.screenshot({ path: testInfo.outputPath("upload-es-mobile.png"), fullPage: true });
-      await page.setViewportSize({ width: 1440, height: 1100 });
-      await page.screenshot({ path: testInfo.outputPath("upload-es-desktop.png"), fullPage: true });
-      await page.getByRole("button", { name: "Cancelar", exact: true }).click();
-      await page.goto("/settings?section=design");
-      await page.getByRole("combobox", { name: "Idioma", exact: true }).selectOption("en");
-      await page.goto("/getting-started");
+      const grid = page.getByRole("switch", { name: "Floor grid" });
+      const wasChecked = await grid.getAttribute("aria-checked");
+      await grid.click();
+      await page.getByRole("button", { name: "Save appearance", exact: true }).click();
+      await expect(page).toHaveURL(/\/getting-started$/);
+      await page.getByRole("link", { name: "Customize previews" }).click();
+      await expect(grid).toHaveAttribute("aria-checked", wasChecked === "true" ? "false" : "true");
+      await page.getByRole("button", { name: "Back", exact: true }).click();
+      await expect(page).toHaveURL(/\/getting-started$/);
+      await page.reload();
+      await expect(page.getByRole("button", { name: "Upload my first files" })).toBeVisible();
       await page.getByRole("button", { name: "I'll do this later" }).press("Enter");
       await expect(page).toHaveURL(
         (url) =>

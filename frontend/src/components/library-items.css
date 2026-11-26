@@ -1,6 +1,9 @@
 .library-virtual-row {
   display: grid;
   align-items: stretch;
+}
+:root[data-pane-moving] .library-virtual-row,
+[data-inspector-moving] .library-virtual-row {
   /* For the one frame before the column count catches up with a narrowing
      pane, the last card is clipped instead of scrolling the page sideways. */
   overflow-x: clip;
@@ -9,6 +12,9 @@
 .library-items-grid > [data-library-key],
 .library-virtual-row > [data-library-key] {
   height: 100%;
+}
+.library-model-card {
+  border-radius: var(--radius);
 }
 .library-preview {
   background-color: var(--plate);
@@ -323,8 +329,8 @@
 /* An image on its own compositing layer can escape its parent's rounded clip, so the
    preview rounds its own top corners (one pixel inside the card's border). */
 .library-model-card .library-preview {
-  border-start-start-radius: calc(var(--radius-popover) - 1px);
-  border-start-end-radius: calc(var(--radius-popover) - 1px);
+  border-start-start-radius: calc(var(--radius) - 1px);
+  border-start-end-radius: calc(var(--radius) - 1px);
   isolation: isolate;
 }
 /* Keep the selected surface opaque beneath the overlapping revision actions. */
@@ -342,6 +348,17 @@
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent),
     0 12px 28px -12px rgb(0 0 0 / 0.6);
+}
+
+:where(.dark) .library-model-card:not([data-inspected]):hover {
+  border-color: var(--border-strong);
+  box-shadow:
+    0 8px 20px -10px var(--dialog-shadow),
+    0 2px 5px var(--dialog-shadow);
+}
+
+:where(.dark) .library-model-card:not([data-inspected], [data-selected]):hover {
+  background-color: color-mix(in srgb, var(--card) 96%, var(--foreground));
 }
 
 /* Keyboard focus rings the whole card, not the square link inside it. */
@@ -378,8 +395,8 @@
 /* Preview shape and type stay consistent as the shared track grows. */
 .collection-card-collage {
   aspect-ratio: 2 / 1;
-  border-start-start-radius: calc(var(--radius-popover) - 1px);
-  border-start-end-radius: calc(var(--radius-popover) - 1px);
+  border-start-start-radius: calc(var(--radius) - 1px);
+  border-start-end-radius: calc(var(--radius) - 1px);
 }
 [data-compact] .collection-card-collage {
   width: 100px;

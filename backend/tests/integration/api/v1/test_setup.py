@@ -24,6 +24,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from printstash_core.mesh.preview_profile import PreviewLook
 from sqlmodel import Session, select
 
 from app.core.config import _overlay, settings
@@ -67,6 +68,148 @@ def _payload(**overrides: Any) -> dict[str, Any]:
 
 def _complete(client: TestClient, **overrides: Any):
     return client.post("/api/v1/setup", json=_payload(**overrides))
+
+
+class TestSetupPreviewAppearance:
+    example = "/api/v1/setup/preview-example?look=sage&floor_grid=false"
+
+    def test_reports_current_preview_defaults(self, client: TestClient) -> None:
+        status = client.get("/api/v1/setup/status").json()
+
+        assert status["preview_appearance"] == {
+            "preview_look": "sky",
+            "preview_floor_grid": True,
+        }
+        assert status["preview_mode"] == "single"
+
+    def test_renders_the_example_for_a_prepared_browser(
+        self, client: TestClient
+    ) -> None:
+        client.headers.pop("X-PrintStash-Setup-CSRF")
+
+        response = client.get(self.example)
+
+        assert response.status_code == 200, response.text
+        assert response.headers["content-type"] == "image/webp"
+        assert response.content[8:12] == b"WEBP"
+
+    @pytest.mark.parametrize("cookie", [None, "invalid-ticket"])
+    def test_requires_a_valid_setup_session(
+        self, client: TestClient, cookie: str | None
+    ) -> None:
+        client.cookies.clear()
+        if cookie is not None:
+            client.cookies.set("printstash_setup", cookie)
+
+        assert client.get(self.example).status_code == 403
+
+    def test_rejects_the_example_when_setup_is_closed(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        build_user(db_session, "existing-owner")
+
+        assert client.get(self.example).status_code == 409
+
+    def test_rejects_the_example_when_setup_is_disabled(
+        self, client: TestClient
+    ) -> None:
+        _overlay["setup_mode"] = "disabled"
+
+        assert client.get(self.example).status_code == 403
+
+    def test_rejects_the_example_for_an_untrusted_host(
+        self, client: TestClient
+    ) -> None:
+        assert (
+            client.get(self.example, headers={"Host": "public.example"}).status_code
+            == 403
+        )
+
+    def test_persists_the_selected_appearance(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        response = _complete(
+            client,
+            preview_appearance={"preview_look": "sage", "preview_floor_grid": False},
+        )
+
+        assert response.status_code == 201, response.text
+        db_session.expire_all()
+        config = db_session.get(SystemConfig, 1)
+        assert config is not None
+        assert config.preview_look.value == "sage"
+        assert config.preview_floor_grid is False
+
+    def test_omitting_appearance_retains_existing_preferences(
+        self, client: TestClient, db_session: Session, make_system_config
+    ) -> None:
+        make_system_config(
+            preview_look=PreviewLook.PLUM,
+            preview_floor_grid=False,
+            derivatives_previews_enabled=True,
+            derivatives_previews_include_poles=False,
+        )
+
+        status = client.get("/api/v1/setup/status").json()
+        assert status["preview_appearance"] == {
+            "preview_look": "plum",
+            "preview_floor_grid": False,
+        }
+        assert status["preview_mode"] == "oblique"
+        response = _complete(client)
+
+        assert response.status_code == 201, response.text
+        db_session.expire_all()
+        config = db_session.get(SystemConfig, 1)
+        assert config is not None
+        assert config.preview_look is PreviewLook.PLUM
+        assert config.preview_floor_grid is False
+        assert config.derivatives_previews_enabled is True
+        assert config.derivatives_previews_include_poles is False
+
+    @pytest.mark.parametrize(
+        ("preview_mode", "enabled", "include_poles"),
+        [
+            ("single", False, False),
+            ("oblique", True, False),
+            ("oblique-poles", True, True),
+        ],
+    )
+    def test_persists_the_selected_number_of_views(
+        self,
+        client: TestClient,
+        db_session: Session,
+        preview_mode: str,
+        enabled: bool,
+        include_poles: bool,
+    ) -> None:
+        response = _complete(client, preview_mode=preview_mode)
+
+        assert response.status_code == 201, response.text
+        db_session.expire_all()
+        config = db_session.get(SystemConfig, 1)
+        assert config is not None
+        assert config.derivatives_previews_enabled is enabled
+        assert config.derivatives_previews_include_poles is include_poles
+
+    def test_rejects_unsupported_number_of_views(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        assert _complete(client, preview_mode="unsupported").status_code == 422
+        assert db_session.exec(select(User)).first() is None
+
+    @pytest.mark.parametrize(
+        "appearance",
+        [
+            {"preview_look": "unknown", "preview_floor_grid": False},
+            {"preview_look": "sage", "preview_floor_grid": "no"},
+        ],
+    )
+    def test_rejects_invalid_appearance_before_creating_the_owner(
+        self, client: TestClient, db_session: Session, appearance: dict[str, object]
+    ) -> None:
+        assert _complete(client, preview_appearance=appearance).status_code == 422
+        assert db_session.exec(select(User)).first() is None
 
 
 @pytest.fixture

@@ -24,13 +24,30 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FilamentProfilesCard } from "@/components/filament-profiles-card";
-import { anEditingBase, aVaultConfig } from "@/test-support/factories";
+import { PricingTemplatesPanel } from "@/components/pricing-templates";
+import { anEditingBase, aPrinter, aVaultConfig } from "@/test-support/factories";
 import { clearLogin } from "@/lib/auth-store";
 import { queryClient, queryKeys } from "@/lib/query-client";
 import { json, memberSession, renderApp, type RenderAppOptions } from "@/test-support/render";
 import type { FilamentProfileRead, PrinterProfileRead } from "@/types";
 
 const FROZEN_NOW = "2026-01-01T00:00:00Z";
+
+describe("Pricing templates in Profiles", () => {
+  it("lists pricing templates without management actions for non-admins", async () => {
+    renderApp(<PricingTemplatesPanel admin={false} />, {
+      routes: {
+        "GET /api/v1/pricing-templates": json([
+          { id: "standard", name: "Standard rates", margin_percent: 20, tax_percent: 10 },
+        ]),
+      },
+    });
+
+    expect(await screen.findByText("Standard rates")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Save pricing template" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete Standard rates" })).toBeNull();
+  });
+});
 
 function aFilamentProfile(over: Partial<FilamentProfileRead> = {}): FilamentProfileRead {
   return {
@@ -109,6 +126,7 @@ async function renderCard(
       "GET /api/v1/printer-profiles": json(printers),
       "GET /api/v1/spoolman/status": json({ enabled: spoolman, url: null, reachable: spoolman }),
       "GET /api/v1/slicer-profiles": json({ items: [], next_before_id: null }),
+      "GET /api/v1/fleet/summary": json({ printers: [] }),
       ...routes,
     },
     ...rest,
@@ -127,6 +145,83 @@ afterEach(() => {
 });
 
 describe("FilamentProfilesCard", () => {
+  describe("printer links", () => {
+    it("links to settings for printers using the selected cost profile", async () => {
+      await renderCard({
+        at: "/profiles?tab=printers",
+        expand: false,
+        routes: {
+          "GET /api/v1/printers": json([
+            aPrinter({ id: 6, name: "Bench printer", cost_profile_id: 1 }),
+            aPrinter({ id: 7, name: "Spare printer", cost_profile_id: null }),
+          ]),
+        },
+      });
+      const section = within(await screen.findByRole("region", { name: "Assigned printers" }));
+      expect(section.getByRole("link", { name: "Bench printer" })).toHaveAttribute(
+        "href",
+        "/printers/6?tab=settings",
+      );
+      expect(section.queryByRole("link", { name: "Spare printer" })).not.toBeInTheDocument();
+    });
+
+    it.each([
+      { kind: "local", profile: aFilamentProfile(), matchingId: 6, slot: "AMS 1" },
+      {
+        kind: "synced",
+        profile: aFilamentProfile({ spoolman_filament_id: 11 }),
+        matchingId: 7,
+        slot: "AMS 2",
+      },
+    ])(
+      "links to the loaded slot for a $kind filament preset",
+      async ({ profile, matchingId, slot }) => {
+        await renderCard({
+          filaments: [profile],
+          expand: false,
+          routes: {
+            "GET /api/v1/fleet/summary": json({
+              printers: [
+                {
+                  printer_id: 6,
+                  name: "Bench printer",
+                  loaded_material_slots: [
+                    {
+                      label: "AMS 1",
+                      material_type: "pla",
+                      material_brand: "Prusament",
+                      spool_filament_id: 8,
+                    },
+                  ],
+                },
+                {
+                  printer_id: 7,
+                  name: "Spare printer",
+                  loaded_material_slots: [
+                    {
+                      label: "AMS 2",
+                      material_type: "PLA",
+                      material_brand: "Generic",
+                      spool_filament_id: 11,
+                    },
+                  ],
+                },
+              ],
+            }),
+          },
+        });
+        const section = within(
+          await screen.findByRole("region", { name: "Printers with matching filament" }),
+        );
+        expect(section.getByRole("link", { name: new RegExp(slot) })).toHaveAttribute(
+          "href",
+          `/printers/${matchingId}?tab=materials`,
+        );
+        expect(section.getAllByRole("link")).toHaveLength(1);
+      },
+    );
+  });
+
   describe("listing presets", () => {
     it.each(["filament", "printer"] as const)("hides a denied %s catalog", async (kind) => {
       const app = await renderCard();
@@ -861,8 +956,14 @@ describe("FilamentProfilesCard", () => {
           ]),
         });
         await user.click(review);
+        if (kind === "printer") {
+          await user.selectOptions(
+            screen.getByRole("combobox", { name: "Printer nozzle diameter 1" }),
+            screen.getByRole("option", { name: "Custom nozzle diameter (mm)" }),
+          );
+        }
         const input = screen.getByRole("textbox", {
-          name: kind === "filament" ? "Filament cost per kg 1" : "Printer nozzle diameter 1",
+          name: kind === "filament" ? "Filament cost per kg 1" : "Custom nozzle diameter (mm)",
         });
         await user.clear(input);
         await user.type(input, "-1");
@@ -1402,6 +1503,62 @@ describe("FilamentProfilesCard", () => {
   });
 
   describe("creating a printer preset", () => {
+    it("saves catalog hardware with operating cost defaults", async () => {
+      const user = userEvent.setup();
+      const app = await renderCard({
+        at: "/profiles?tab=printers",
+        expand: false,
+        routes: {
+          "POST /api/v1/printer-profiles": json(aPrinterProfile({ id: 2, name: "Workshop" }), 201),
+        },
+      });
+      await user.click(screen.getByRole("button", { name: "New printer preset" }));
+      const dialog = within(screen.getByRole("dialog", { name: "New printer preset" }));
+      await user.type(dialog.getByRole("textbox", { name: "Name" }), "Workshop");
+      await user.selectOptions(
+        dialog.getByRole("combobox", { name: "Printer model" }),
+        "Bambu Lab A1",
+      );
+      await user.selectOptions(dialog.getByRole("combobox", { name: "Nozzle diameter" }), "0.6");
+      expect(dialog.getByRole("link", { name: "Published average of 95 W for PLA" })).toBeVisible();
+      expect(dialog.getByLabelText("Expected lifetime (print hours)")).toHaveAttribute(
+        "placeholder",
+        "5000",
+      );
+      fireEvent.change(dialog.getByLabelText(/Purchase cost/), { target: { value: "500" } });
+      await user.click(dialog.getByRole("button", { name: "Add preset" }));
+
+      const [write] = app.requestsWithMethod("POST");
+      expect(JSON.parse(write?.body ?? "{}")).toMatchObject({
+        printer_model: "Bambu Lab A1",
+        nozzle_diameter_mm: 0.6,
+        expenses: { lifetime_hours: 5000, power_watts: 95 },
+      });
+    });
+
+    it("leaves operating costs unset when the user only chooses hardware", async () => {
+      const user = userEvent.setup();
+      const app = await renderCard({
+        at: "/profiles?tab=printers",
+        expand: false,
+        routes: {
+          "POST /api/v1/printer-profiles": json(aPrinterProfile({ id: 2, name: "Workshop" }), 201),
+        },
+      });
+      await user.click(screen.getByRole("button", { name: "New printer preset" }));
+      const dialog = within(screen.getByRole("dialog", { name: "New printer preset" }));
+      await user.type(dialog.getByRole("textbox", { name: "Name" }), "Workshop");
+      await user.selectOptions(
+        dialog.getByRole("combobox", { name: "Printer model" }),
+        "Prusa MK4S",
+      );
+      await user.click(dialog.getByRole("button", { name: "Add preset" }));
+
+      const [write] = app.requestsWithMethod("POST");
+      expect(JSON.parse(write?.body ?? "{}")).toMatchObject({ printer_model: "Prusa MK4S" });
+      expect(JSON.parse(write?.body ?? "{}")).not.toHaveProperty("expenses");
+    });
+
     it("saves operating expenses during initial creation", async () => {
       const user = userEvent.setup();
       const app = await renderCard({
@@ -1503,7 +1660,11 @@ describe("FilamentProfilesCard", () => {
       await screen.findByText("Filament presets");
       await user.click(screen.getByRole("tab", { name: /Printers/ }));
       await openProfileRows();
-      const nozzle = await screen.findByLabelText("Printer nozzle diameter 1");
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: "Printer nozzle diameter 1" }),
+        screen.getByRole("option", { name: "Custom nozzle diameter (mm)" }),
+      );
+      const nozzle = await screen.findByLabelText("Custom nozzle diameter (mm)");
 
       await user.clear(nozzle);
       await user.type(nozzle, "wide");
@@ -1729,6 +1890,7 @@ describe("Profile consultation and editing", () => {
             power_watts: 200,
             electricity_per_kwh: 0.25,
             extra_per_hour: 1,
+            failure_rate_percent: 0,
           },
         }),
       ],

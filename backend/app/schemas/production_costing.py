@@ -21,6 +21,7 @@ class PrinterExpenses(BaseModel):
     power_watts: Amount
     electricity_per_kwh: Amount
     extra_per_hour: Amount
+    failure_rate_percent: Annotated[float, Field(ge=0, le=99.99)] = 0
 
 
 class PricingRates(BaseModel):
@@ -80,14 +81,17 @@ class PieceCosts(BaseModel):
     maintenance: float
     electricity: float
     extra: float
+    reprints: float
     production: float
     price_before_tax: float
+    profit: float
     tax: float
     final_price: float
 
 
 class ArtifactCostingRead(EditingBase):
     currency: str
+    pricing_defaults: PricingRates
     estimate: ProductionEstimate | None
     costs: PieceCosts | None
     slicer_filament_cost: float | None

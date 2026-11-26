@@ -17,6 +17,8 @@
     --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
     --background: #f6f7f9;
     --foreground: #101828;
+    --brand: #141923;
+    --brand-fold: #4f535b;
     --card: #ffffff;
     --card-foreground: #101828;
     --popover: #ffffff;
@@ -127,6 +129,8 @@
     --sidebar-bg: #0f1318;
     --rail-bg: #090c10;
     --foreground: #edf1f7;
+    --brand: #f1f4fa;
+    --brand-fold: #b7bbc1;
     --card: #13171e;
     --card-foreground: #edf1f7;
     --popover: #13171e;
@@ -313,6 +317,15 @@
 
     select:not([multiple]):not([size])::picker(select) {
       appearance: base-select;
+      inset: auto;
+      position-area: block-end span-inline-end;
+      position-try-fallbacks:
+        flip-inline,
+        flip-block,
+        flip-block flip-inline;
+      position-try-order: normal;
+      align-self: start;
+      justify-self: start;
       min-width: anchor-size(width);
       max-height: min(20rem, 60vh);
       margin: 4px 0;
@@ -375,30 +388,39 @@
   }
 }
 
+/* Choice fields share a neutral trigger regardless of how their options open. */
+:is(select:not([multiple], [size]), .dropdown-field) {
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background-color: var(--surface-container-high);
+  box-shadow: none;
+}
+
+:is(select:not([multiple], [size]), .dropdown-field):not(:disabled, [aria-disabled="true"]):is(
+    :hover,
+    :open,
+    [aria-expanded="true"]
+  ) {
+  background-color: var(--surface-container-highest);
+}
+
+:is(select:not([multiple], [size]), .dropdown-field):focus {
+  outline: none;
+  box-shadow: none;
+}
+
+:is(select:not([multiple], [size]), .dropdown-field):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+:is(select:not([multiple], [size]), .dropdown-field)[aria-invalid="true"] {
+  border-color: var(--destructive);
+}
+
 @layer components {
-  .setup-card {
-    display: grid;
-    max-width: 800px;
-  }
-
-  .setup-card-appearance {
-    max-width: 960px;
-  }
-
-  @media (min-width: 768px) {
-    .setup-card {
-      height: min(600px, 100dvh - 136px);
-      grid-template-columns: 220px minmax(0, 1fr);
-      grid-template-rows: minmax(0, 1fr);
-    }
-
-    .setup-card-appearance {
-      height: min(736px, 100dvh - 136px);
-    }
-  }
-
   .field-option {
-    @apply flex min-h-8 w-full min-w-0 items-center gap-2 px-2.5 py-2 text-left text-field leading-4 text-popover-foreground hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none data-[active=true]:bg-popover-hover;
+    @apply flex min-h-8 w-full min-w-0 items-center gap-2 rounded-md px-2.5 py-2 text-left text-field leading-4 text-popover-foreground hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none data-[active=true]:bg-popover-hover;
   }
 
   .field-option[aria-selected="true"]:not([data-active], :hover, :focus-visible) {
@@ -413,12 +435,6 @@
 
 @supports (appearance: base-select) {
   select.upload-store-in::picker(select) {
-    inset: auto;
-    position-area: block-end span-inline-end;
-    position-try-fallbacks: flip-block;
-    position-try-order: normal;
-    align-self: start;
-    justify-self: start;
     width: anchor-size(width);
     min-width: 0;
     max-height: min(280px, 60dvh);
@@ -525,14 +541,62 @@
   }
 }
 
-/* Sonner's defaults (400ms, its own curve) are off the house scale; retune them.
-   `height` is Sonner's stack collapse when one of several toasts is dismissed —
-   it stays in the list, retimed, because dropping it makes the stack snap. */
-[data-sonner-toast] {
-  transition:
-    transform var(--duration-fast) var(--ease-out),
-    opacity var(--duration-fast) var(--ease-out),
-    height var(--duration-fast) var(--ease-out) !important;
+.printstash-toaster [data-sonner-toast][data-styled="true"] {
+  gap: 8px;
+  padding-block: 10px;
+  padding-inline: 14px 10px;
+}
+
+.printstash-toaster [data-sonner-toast] [data-content] {
+  min-width: 0;
+}
+
+.printstash-toaster [data-sonner-toast][data-styled="true"] [data-close-button] {
+  position: static;
+  order: 1;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin-inline-start: auto;
+  transform: none;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted-foreground);
+}
+
+.printstash-toaster [data-sonner-toast][data-styled="true"]:hover [data-close-button]:hover {
+  background: var(--popover-hover);
+  color: var(--foreground);
+}
+
+.printstash-toaster [data-close-button] svg {
+  width: 18px;
+  height: 18px;
+}
+
+.printstash-toaster [data-sonner-toast][data-styled="true"] [data-close-button]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+  box-shadow: none;
+}
+
+.printstash-toaster [data-sonner-toast][data-removed="true"] {
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Keep the height transition for the stack collapse after a dismissal. */
+  .printstash-toaster [data-sonner-toast] {
+    transition:
+      transform var(--duration-fast) var(--ease-out),
+      opacity var(--duration-fast) var(--ease-out),
+      height var(--duration-fast) var(--ease-out) !important;
+  }
+
+  .printstash-toaster [data-sonner-toast] > * {
+    transition: opacity var(--duration-fast) var(--ease-out);
+  }
 }
 
 /* Thin styled scrollbars */
@@ -654,50 +718,32 @@
 }
 
 @media (min-width: 1024px) {
-  .auth-frame-split {
-    --auth-workspace-width: max(480px, 40%);
-    position: relative;
+  .auth-frame {
     display: grid;
-    grid-template-columns: minmax(480px, 40%) minmax(0, 1fr);
+    grid-template-columns: minmax(29rem, 46%) minmax(0, 1fr);
   }
 
-  .auth-split-workspace > header,
-  .auth-split-workspace > footer {
-    min-height: 80px;
-    height: auto;
-    padding-block: 24px;
-  }
-
-  .auth-split-main {
-    justify-items: center;
-    padding-inline: 24px;
-  }
-
-  .auth-split-form {
-    width: 340px;
-    max-width: 100%;
-    border: 0;
-    background: transparent;
-    padding: 0;
-    box-shadow: none;
-  }
-
-  .auth-split-tagline {
-    position: absolute;
-    inset-inline-start: calc(var(--auth-workspace-width) + 24px);
-    inset-block-end: 24px;
-    z-index: 1;
+  .auth-frame-setup {
+    grid-template-columns: minmax(36rem, 54%) minmax(0, 1fr);
   }
 
   .auth-split-art {
-    position: relative;
-    display: block;
+    --auth-art-grid: color-mix(in srgb, var(--muted-foreground) 24%, transparent);
+    --auth-art-stroke: var(--foreground);
+    @apply my-6 mr-6 grid place-items-center overflow-hidden rounded-xl border border-border p-6 xl:p-12;
     background: var(--plate);
+    min-width: 0;
+  }
+
+  :root.dark .auth-split-art {
+    --auth-art-grid: color-mix(in srgb, var(--outline) 62%, transparent);
+    --auth-art-stroke: var(--outline);
+    background: var(--inverse-surface);
   }
 
   .auth-split-art > svg {
-    position: absolute;
-    inset: 0;
-    padding: 48px;
+    inline-size: 100%;
+    block-size: auto;
+    max-inline-size: 54rem;
   }
 }

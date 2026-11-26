@@ -23,6 +23,7 @@ from app.modules.storage.storage_operations import (
     vault_operations,
 )
 from app.schemas.editing import EditingBase, EditPrecondition
+from app.schemas.production_costing import PricingRates
 
 router = APIRouter(prefix="/config", tags=["config"])
 
@@ -89,6 +90,7 @@ class VaultConfigRead(EditingBase):
     auto_mark_known_good: bool = True
     external_libraries_enabled: bool = False
     currency: str = "USD"
+    pricing_defaults: PricingRates
     model_thumbnail_width: int = 640
     oidc_enabled: bool = False
     oidc_issuer_url: str = ""
@@ -125,6 +127,7 @@ class VaultConfigUpdate(BaseModel):
     auto_mark_known_good: Optional[bool] = None
     external_libraries_enabled: Optional[bool] = None
     currency: Optional[str] = Field(default=None, min_length=3, max_length=3)
+    pricing_defaults: PricingRates | None = None
     model_thumbnail_width: Optional[Literal[320, 640, 1280]] = None
     oidc_enabled: Optional[bool] = None
     oidc_issuer_url: Optional[str] = Field(default=None, max_length=512)
@@ -525,6 +528,9 @@ def update_config(
 
         if body.currency is not None:
             runtime_config.set_currency(session, body.currency, commit=False)
+
+        if body.pricing_defaults is not None:
+            runtime_config.set_pricing_defaults(session, body.pricing_defaults)
 
         if requested_provider is not None:
             runtime_config.update_storage_provider(

@@ -37,7 +37,7 @@ account deletion across reloads, and the API key receipt.
 
 `batch.spec.ts` reveals a Model checkbox on hover before starting selection and applying real tags, deletes and moves, including undo and viewer permission checks.
 
-`multipart-models.spec.ts` selects and deletes sets in desktop grid and mobile list views, checks the detail and build planning screens, and verifies that member Models and G-code revisions remain available.
+`multipart-models.spec.ts` selects and deletes sets in desktop and mobile galleries, checks the detail and build planning screens, and verifies that member Models and G-code revisions remain available.
 
 `library-filters.spec.ts` filters a real uploaded Model through file-type, printed-status and calendar dropdowns, restores the range after reload, and clears a print-history date to recover the result.
 
@@ -183,7 +183,7 @@ the storage step from any page, choose storage, then upload a first Model.
 
 auth (centered login in both themes at desktop/mobile sizes, short-screen scrolling,
 UI login, wrong-password, username + API-key login then revoke) ·
-vault (search, tag filter, list/grid toggle, empty state, narrow responsive toolbar) · collections
+vault (search, tag filter, gallery cards, empty state, narrow responsive toolbar) · collections
 (create / nest / anchored heading rename at 1080p preserving the visible tree, populated nested collection, Model identity and downloaded Artifact bytes across reload, plus keyboard pen/Escape cancellation / subtree count / delete / recursive-delete non-empty from the sidebar / lazy child expansion and Model move) ·
 documents (markdown editor, collection README, GFM tables) · tags (quick create/assign from a card,
 global delete) ·
@@ -299,8 +299,9 @@ sends no further setup probe.
   draft and explicitly save revised changes without replacing untouched settings.
 
 - `production-costing.spec.ts`: normalizes filament spool pricing, configures printer expenses, uses Moonraker print measurements, and verifies saved per-piece estimates and reusable pricing rates.
-- `profiles.spec.ts`: two editors per preset kind recover a conditional conflict
-  while preserving the other editor’s notes, verified after reload.
+- `profiles.spec.ts` covers selecting a printer model and nozzle, saving the
+  operating cost defaults, and reloading custom overrides. Two editors per
+  preset kind also recover a conflict while preserving the other editor's notes.
 
 - `provider-connections.spec.ts`: issue a pairing code, claim without an account session, resolve competing browser-name drafts through explicit review, then confirm revocation.
 

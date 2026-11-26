@@ -2,7 +2,7 @@ import { expect, type Page } from "@playwright/test";
 
 export async function selectModelDetailTab(page: Page, name: string | RegExp): Promise<void> {
   const inspector = page.getByTestId("model-detail-sidebar");
-  if (name === "Print settings" || name === "Costing") {
+  if (name === "Print settings" || name === "Cost estimate") {
     const print = inspector.getByRole("tab", { name: /^Print\b/ });
     if ((await print.getAttribute("aria-selected")) !== "true") await print.click();
     await inspector.getByRole("button", { name, exact: true }).click();

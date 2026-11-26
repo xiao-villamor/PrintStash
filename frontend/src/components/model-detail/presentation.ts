@@ -54,7 +54,7 @@ export function modelDetailSectionLabel(section: TabKey) {
     case "settings":
       return uiText("Print settings");
     case "costing":
-      return uiText("Costing");
+      return uiText("Cost estimate");
     case "source":
       return uiText("Source and license");
     case "similar":

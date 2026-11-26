@@ -8,6 +8,7 @@ import {
 } from "@/lib/use-outliner-restoration";
 
 import { useCollectionsPane } from "@/lib/collections-pane-context";
+import { OUTLINER_KEYBOARD_ROW } from "@/lib/keyboard-commands";
 import { TreeCount } from "@/components/tree-count";
 import { captureModelDrag, type ModelDrag } from "@/lib/model-dnd";
 import { knownUiText } from "@/lib/locale";
@@ -140,6 +141,13 @@ function collectionDropTarget(event: DragEndEvent): CollectionDropData | null {
 
 const ALL_EXPANDED_KEY = "ps-filter-all-expanded";
 
+const compactTreeDirections = new Map([
+  ["w", "ArrowUp"],
+  ["a", "ArrowLeft"],
+  ["s", "ArrowDown"],
+  ["d", "ArrowRight"],
+]);
+
 /** Is the "All Models" group expanded? Open unless this session closed it. */
 function readAllModelsExpanded(): boolean {
   try {
@@ -176,7 +184,7 @@ function DraggableModelLeaf({
       <div
         ref={setNodeRef}
         {...listeners}
-        {...attributes}
+        {...(enabled && !moving ? attributes : undefined)}
         onClick={(event) => {
           if (event.detail <= 1) onOpen?.(model, event.currentTarget);
         }}
@@ -486,7 +494,11 @@ function SearchResults({
   const query = useOutlinerSearch({ ...ctx.params, q: text });
   useTreeReadiness(ctx, "search", query.isError ? "failed" : query.isPending ? "pending" : "ready");
   const matches = query.data?.pages.flatMap((page) => page.items) ?? [];
-  function locate(path: string | null) {
+  function locate(path: string | null, keyboardOpener?: HTMLButtonElement) {
+    keyboardOpener
+      ?.closest("aside")
+      ?.querySelector<HTMLInputElement>("[data-tree-filter]")
+      ?.focus({ preventScroll: true });
     ctx.onSelect(path);
     clear();
   }
@@ -498,8 +510,10 @@ function SearchResults({
             variant="ghost"
             size="sm"
             className="max-w-full justify-start"
-            onClick={() => {
-              if (entry.kind === "collection") locate(entry.collection);
+            data-outliner-match
+            onClick={(event) => {
+              if (entry.kind === "collection")
+                locate(entry.collection, event.detail === 0 ? event.currentTarget : undefined);
               else
                 router.push(
                   entry.kind === "model" ? `/models/${entry.id}` : `/multipart-models/${entry.id}`,
@@ -520,7 +534,9 @@ function SearchResults({
             size="sm"
             className="max-w-full text-muted-foreground"
             title={uiText("Open location")}
-            onClick={() => locate(entry.collection)}
+            onClick={(event) =>
+              locate(entry.collection, event.detail === 0 ? event.currentTarget : undefined)
+            }
           >
             <span className="truncate">{entry.collection_label ?? uiText("All Models")}</span>
           </Button>
@@ -680,10 +696,10 @@ function CollectionTreeRow({
               onPointerLeave={() => onIntent?.(null)}
               onBlur={() => onIntent?.(null)}
               onClick={() => onSelect(node.path, node.id)}
-              className={`flex min-h-7 flex-1 min-w-0 items-center gap-1.5 text-left text-sm font-medium truncate focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${moving ? "cursor-wait" : ctx.dragEnabled ? "cursor-grab active:cursor-grabbing" : ""}`}
+              className={`flex min-h-7 flex-1 min-w-0 items-center gap-1.5 text-left text-sm font-medium truncate ${moving ? "cursor-wait" : ctx.dragEnabled ? "cursor-grab active:cursor-grabbing" : ""}`}
               aria-description={`${node.display_path} · ${uiText("counts.items", { count: node.subtree_entry_count })}`}
               data-outliner-collection={node.path}
-              {...attributes}
+              {...(ctx.dragEnabled && !moving ? attributes : undefined)}
               role="treeitem"
               aria-busy={moving || receiving || undefined}
               aria-selected={isSelected}
@@ -706,7 +722,7 @@ function CollectionTreeRow({
               <button
                 type="button"
                 onClick={() => setConfirming(true)}
-                className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-colors hover:bg-muted hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring group-hover/row:opacity-100 group-focus-within/row:opacity-100"
+                className="flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-colors hover:bg-muted hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring group-hover/row:opacity-100"
                 title={uiText("Delete collection")}
                 aria-label={uiText("Delete collection")}
               >
@@ -771,6 +787,7 @@ function DroppableAllModels({
             aria-label={isExpanded ? uiText("Collapse") : uiText("Expand")}
             aria-expanded={isExpanded}
             onClick={onToggleExpand}
+            data-tree-toggle
           >
             <ChevronRight aria-hidden className={`size-4 ${isExpanded ? "rotate-90" : ""}`} />
           </Button>
@@ -783,6 +800,7 @@ function DroppableAllModels({
           aria-current={selected ? "page" : undefined}
           aria-busy={receiving || undefined}
           onClick={onClick}
+          data-outliner-root
         >
           <FolderOpen aria-hidden className="size-4 shrink-0" />
           <span className="truncate">{target.name}</span>
@@ -840,11 +858,7 @@ export function FilterSidebarContent({
     let focused: HTMLElement | null = null;
     function updateStops() {
       if (!content) return;
-      const rows = [
-        ...content.querySelectorAll<HTMLElement>(
-          "[data-outliner-collection], [data-outliner-entry]",
-        ),
-      ];
+      const rows = [...content.querySelectorAll<HTMLElement>(OUTLINER_KEYBOARD_ROW)];
       const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       const current =
         rows.find((row) => row === active) ??
@@ -855,9 +869,7 @@ export function FilterSidebarContent({
     }
     function focus(event: FocusEvent) {
       if (event.target instanceof HTMLElement)
-        focused = event.target.closest<HTMLElement>(
-          "[data-outliner-collection], [data-outliner-entry]",
-        );
+        focused = event.target.closest<HTMLElement>(OUTLINER_KEYBOARD_ROW);
       updateStops();
     }
     updateStops();
@@ -1197,37 +1209,47 @@ export function FilterSidebarContent({
             )
               return;
             const target = event.target instanceof HTMLElement ? event.target : null;
-            const row = target?.closest<HTMLElement>(
-              "[data-outliner-collection], [data-outliner-entry]",
-            );
+            const row = target?.closest<HTMLElement>(OUTLINER_KEYBOARD_ROW);
             if (!row || !contentRef.current) return;
-            const rows = [
-              ...contentRef.current.querySelectorAll<HTMLElement>(
-                "[data-outliner-collection], [data-outliner-entry]",
+            const key = compactTreeDirections.get(event.key.toLowerCase()) ?? event.key;
+            const matches = row.hasAttribute("data-outliner-match");
+            const rows = Array.from(
+              contentRef.current.querySelectorAll<HTMLElement>(
+                matches ? "[data-outliner-match]" : OUTLINER_KEYBOARD_ROW,
               ),
-            ];
+            );
             const index = rows.indexOf(row);
             const node = row.closest<HTMLElement>("[data-tree-node]");
-            const toggle = node?.querySelector<HTMLButtonElement>("[data-tree-toggle]");
+            const root = rows.find((entry) => entry.hasAttribute("data-outliner-root"));
+            const toggle = row.parentElement?.querySelector<HTMLButtonElement>(
+              ":scope > [data-tree-toggle]",
+            );
             let next: HTMLElement | undefined | null;
-            if (event.key === "ArrowDown") next = rows[Math.min(index + 1, rows.length - 1)];
-            else if (event.key === "ArrowUp") next = rows[Math.max(index - 1, 0)];
-            else if (event.key === "Home") next = rows[0];
-            else if (event.key === "End") next = rows.at(-1);
-            else if (event.key === "ArrowRight") {
-              if (!row.dataset.outlinerCollection) return;
+            if (key === "ArrowDown") next = rows[Math.min(index + 1, rows.length - 1)];
+            else if (key === "ArrowUp") {
+              next =
+                index === 0 && matches
+                  ? row.closest("aside")?.querySelector<HTMLElement>("[data-tree-filter]")
+                  : rows[Math.max(index - 1, 0)];
+            } else if (key === "Home") next = rows[0];
+            else if (key === "End") next = rows.at(-1);
+            else if (key === "ArrowRight") {
               if (toggle?.getAttribute("aria-expanded") === "false") toggle.click();
-              else if (node?.contains(rows[index + 1] ?? null)) next = rows[index + 1];
-            } else if (event.key === "ArrowLeft") {
-              if (!row.dataset.outlinerCollection)
-                next = node?.querySelector<HTMLElement>("[data-outliner-collection]");
-              else if (toggle?.getAttribute("aria-expanded") === "true") toggle.click();
-              else
-                next = node?.parentElement
-                  ?.closest("[data-tree-node]")
-                  ?.querySelector<HTMLElement>("[data-outliner-collection]");
+              else if (
+                row === root ||
+                (row.dataset.outlinerCollection && node?.contains(rows[index + 1] ?? null))
+              )
+                next = rows[index + 1];
+            } else if (key === "ArrowLeft") {
+              if (toggle?.getAttribute("aria-expanded") === "true") toggle.click();
+              else if (row !== root) {
+                const parent = row.dataset.outlinerCollection
+                  ? node?.parentElement?.closest("[data-tree-node]")
+                  : node;
+                next = parent?.querySelector<HTMLElement>("[data-outliner-collection]") ?? root;
+              }
             } else if (
-              event.key === "F2" &&
+              key === "F2" &&
               !navigationOnly &&
               row.dataset.outlinerCollection === selectedCollection
             ) {
@@ -1789,6 +1811,24 @@ export function FilterSidebar(props: FilterSidebarProps) {
               onChange={(e) => setOutlinerFilter(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Escape") setOutlinerFilter("");
+                if (
+                  e.nativeEvent.isComposing ||
+                  e.ctrlKey ||
+                  e.metaKey ||
+                  e.altKey ||
+                  e.shiftKey ||
+                  (e.key !== "ArrowDown" && e.key !== "ArrowUp")
+                )
+                  return;
+                const rows = e.currentTarget
+                  .closest("aside")
+                  ?.querySelectorAll<HTMLElement>(
+                    outlinerFilter.trim() ? "[data-outliner-match]" : OUTLINER_KEYBOARD_ROW,
+                  );
+                const next = rows?.[e.key === "ArrowDown" ? 0 : rows.length - 1];
+                if (!next) return;
+                e.preventDefault();
+                next.focus();
               }}
             />
             {outlinerFilter && (

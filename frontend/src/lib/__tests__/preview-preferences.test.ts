@@ -51,7 +51,14 @@ describe("readPreviewPreferences", () => {
       previewQuality: "detail",
       screenshotScale: 3,
       meshRenderer: "webgl",
+      showCardPreviewLabel: true,
     });
+  });
+
+  it("persists hidden card preview labels", () => {
+    writePreviewPreferences({ ...DEFAULT_PREVIEW_PREFERENCES, showCardPreviewLabel: false });
+
+    expect(readPreviewPreferences().showCardPreviewLabel).toBe(false);
   });
 
   it("refuses an unsupported mesh renderer preference", () => {
@@ -70,11 +77,13 @@ describe("readPreviewPreferences", () => {
     writePreviewPreferences({
       previewQuality: "detail",
       meshRenderer: "webgl",
+      showCardPreviewLabel: true,
       screenshotScale: 3,
     });
     expect(readPreviewPreferences()).toEqual({
       previewQuality: "detail",
       meshRenderer: "webgl",
+      showCardPreviewLabel: true,
       screenshotScale: 3,
     });
   });
@@ -123,6 +132,7 @@ describe("optional preview preferences persistence", () => {
       const choice: PreviewPreferences = {
         previewQuality: "detail",
         meshRenderer: "webgl",
+        showCardPreviewLabel: true,
         screenshotScale: 3,
       };
       localStorage.setItem(PREVIEW_PREFERENCES_STORAGE_KEY, JSON.stringify(choice));
@@ -149,6 +159,7 @@ describe("optional preview preferences persistence", () => {
       const choice: PreviewPreferences = {
         previewQuality: "detail",
         meshRenderer: "webgl",
+        showCardPreviewLabel: true,
         screenshotScale: 3,
       };
       writePreviewPreferences(DEFAULT_PREVIEW_PREFERENCES);
@@ -177,6 +188,7 @@ describe("optional preview preferences persistence", () => {
     const choice: PreviewPreferences = {
       previewQuality: "detail",
       meshRenderer: "webgl",
+      showCardPreviewLabel: true,
       screenshotScale: 3,
     };
     const expected = structuredClone(choice);
@@ -198,6 +210,7 @@ describe("optional preview preferences persistence", () => {
     const choice: PreviewPreferences = {
       previewQuality: "detail",
       meshRenderer: "webgl",
+      showCardPreviewLabel: true,
       screenshotScale: 3,
     };
     vi.spyOn(JSON, "stringify").mockImplementationOnce(() => {
@@ -210,11 +223,13 @@ describe("optional preview preferences persistence", () => {
     const choice: PreviewPreferences = {
       previewQuality: "detail",
       meshRenderer: "webgl",
+      showCardPreviewLabel: true,
       screenshotScale: 3,
     };
     const external: PreviewPreferences = {
       previewQuality: "performance",
       meshRenderer: "webgl",
+      showCardPreviewLabel: true,
       screenshotScale: 1,
     };
     const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
@@ -242,12 +257,14 @@ describe("preview preference consumers", () => {
         writePreviewPreferences({
           previewQuality: "detail",
           meshRenderer: "webgl",
+          showCardPreviewLabel: true,
           screenshotScale: 3,
         }),
       );
       expect(view.result.current).toEqual({
         previewQuality: "detail",
         meshRenderer: "webgl",
+        showCardPreviewLabel: true,
         screenshotScale: 3,
       });
     } finally {

@@ -8,55 +8,98 @@
  * `revoked` in a list somewhere is not the same as `refused` on the wire.
  */
 import { test, expect, ADMIN } from "./helpers";
+import { brandMarkFold, brandMarkOutline } from "../../src/components/brand-geometry";
+import { collapseNavigationSidebar } from "./util";
 
 test.describe("authentication", () => {
   test.describe("without a browser session", () => {
     test.use({ authenticated: false });
 
     for (const theme of ["light", "dark"] as const) {
-      test(`centers the login form at responsive sizes in ${theme} mode`, async ({
+      test(`separates the login form from the print artwork in ${theme} mode`, async ({
         page,
       }, testInfo) => {
         await page.addInitScript((value) => localStorage.setItem("printstash.theme", value), theme);
         await page.goto("/login");
         await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
-        const card = page
-          .getByRole("main")
-          .locator(":scope > div")
-          .filter({
-            has: page.getByRole("button", { name: "Sign in", exact: true }),
-          });
-        for (const viewport of [
-          { width: 1440, height: 1100 },
-          { width: 390, height: 844 },
-        ]) {
-          await page.setViewportSize(viewport);
-          await expect(async () => {
-            const bounds = await card.boundingBox();
-            expect(bounds).not.toBeNull();
-            expect(Math.abs(bounds!.x + bounds!.width / 2 - viewport.width / 2)).toBeLessThan(2);
-            expect(Math.abs(bounds!.y + bounds!.height / 2 - viewport.height / 2)).toBeLessThan(2);
-          }).toPass({ timeout: 5_000 });
-          await page.screenshot({
-            path: testInfo.outputPath(`login-${theme}-${viewport.width}.png`),
-          });
-        }
+        const brand = page.getByRole("banner");
+        await expect(brand.locator(`path[d="${brandMarkOutline}"]`)).toHaveCSS(
+          "fill",
+          theme === "light" ? "rgb(20, 25, 35)" : "rgb(241, 244, 250)",
+        );
+        await expect(brand.locator(`path[d="${brandMarkFold}"]`)).toHaveCSS(
+          "fill",
+          theme === "light" ? "rgb(79, 83, 91)" : "rgb(183, 187, 193)",
+        );
+        const form = page.getByRole("main").locator("form");
+        const artwork = page.locator(".auth-split-art");
+        await expect(artwork).toBeVisible();
+        await expect(artwork).toHaveAttribute("aria-hidden", "true");
+        const formBounds = (await form.boundingBox())!;
+        const artBounds = (await artwork.boundingBox())!;
+        expect(formBounds.x + formBounds.width).toBeLessThan(artBounds.x);
+        expect(artBounds.width).toBeGreaterThan(formBounds.width);
+        await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeInViewport();
+        await page.screenshot({ path: testInfo.outputPath(`login-${theme}-desktop.png`) });
       });
     }
 
+    test("the print panel uses a white backdrop in dark mode", async ({ page }) => {
+      await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
+      await page.goto("/login");
+      const artwork = page.locator(".auth-split-art");
+      const bed = artwork.locator("polygon");
+      const outline = artwork.locator('path[fill-rule="evenodd"]').last().locator("..");
+      const toggle = page.getByRole("button", { name: "Toggle theme" });
+      await expect(artwork).toHaveCSS("background-color", "rgb(37, 44, 55)");
+      await expect(bed).toHaveCSS("fill", "none");
+      await toggle.click();
+      await expect(artwork).toHaveCSS("background-color", "rgb(237, 241, 247)");
+      await expect(bed).toHaveCSS("fill", "none");
+      await expect(outline).toHaveCSS("stroke", "rgb(105, 123, 146)");
+      await toggle.click();
+      await expect(artwork).toHaveCSS("background-color", "rgb(37, 44, 55)");
+      await expect(bed).toHaveCSS("fill", "none");
+      await expect(outline).toHaveCSS("stroke", "rgb(237, 241, 247)");
+    });
+
+    test("the build plate grid has more contrast in dark mode", async ({ page }) => {
+      await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+      await page.goto("/login");
+      const grid = page.locator(".auth-split-art polygon + path");
+      await expect(grid).toHaveCSS("stroke", "color(srgb 0.411765 0.482353 0.572549 / 0.62)");
+    });
+
+    test("the favicon follows the saved theme", async ({ page }) => {
+      await page.emulateMedia({ colorScheme: "light" });
+      await page.goto("/login");
+      const favicon = page.locator("#app-favicon");
+      const toggle = page.getByRole("button", { name: "Toggle theme" });
+      await expect(favicon).toHaveAttribute("href", "/icon-light.svg?v=6");
+      await toggle.click();
+      await expect(favicon).toHaveAttribute("href", "/icon-dark.svg?v=6");
+      await page.reload();
+      await expect(favicon).toHaveAttribute("href", "/icon-dark.svg?v=6");
+      await toggle.click();
+      await expect(favicon).toHaveAttribute("href", "/icon-light.svg?v=6");
+      await page.reload();
+      await expect(favicon).toHaveAttribute("href", "/icon-light.svg?v=6");
+    });
+
     test("keeps the login controls reachable on a short screen", async ({ page }) => {
-      await page.setViewportSize({ width: 390, height: 360 });
+      await page.setViewportSize({ width: 1280, height: 600 });
       await page.goto("/login");
       await page.getByLabel("Username").fill(ADMIN.username);
-      await page.getByLabel("Password").fill("definitely-wrong");
+      await page.getByLabel("Password", { exact: true }).fill("definitely-wrong");
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
       await expect(page.getByRole("alert")).toHaveText("Invalid username or password.");
       await page.getByRole("heading", { name: "Welcome back" }).scrollIntoViewIfNeeded();
       await expect(page.getByRole("heading", { name: "Welcome back" })).toBeInViewport();
+      await page.getByRole("button", { name: "Forgot password?" }).click();
       await page.getByRole("link", { name: "How recovery works" }).scrollIntoViewIfNeeded();
       await expect(page.getByRole("link", { name: "How recovery works" })).toBeInViewport();
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
-        390,
+        1280,
       );
     });
 
@@ -64,18 +107,21 @@ test.describe("authentication", () => {
       await page.goto("/login");
 
       await page.getByLabel("Username").fill(ADMIN.username);
-      await page.getByLabel("Password").fill(ADMIN.password);
+      await page.getByLabel("Password", { exact: true }).fill(ADMIN.password);
       await page.getByRole("button", { name: "Sign in" }).click();
 
       await expect(page).toHaveURL(/\/(\?.*)?$/);
       await expect(page.getByRole("button", { name: "Upload", exact: true })).toBeVisible();
+      await collapseNavigationSidebar(page);
+      const home = page.getByRole("link", { name: "PrintStash", exact: true });
+      await expect(home.locator(`path[d="${brandMarkOutline}"]`)).toBeVisible();
     });
 
     test("the login form rejects a wrong password", async ({ page }) => {
       await page.goto("/login");
 
       await page.getByLabel("Username").fill(ADMIN.username);
-      await page.getByLabel("Password").fill("definitely-wrong");
+      await page.getByLabel("Password", { exact: true }).fill("definitely-wrong");
       await page.getByRole("button", { name: "Sign in" }).click();
 
       await expect(page.getByText("Invalid username or password.")).toBeVisible();

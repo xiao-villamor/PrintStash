@@ -25,6 +25,10 @@ const config = {
         ring: "var(--ring)",
         background: "var(--background)",
         foreground: "var(--foreground)",
+        brand: {
+          DEFAULT: "var(--brand)",
+          fold: "var(--brand-fold)",
+        },
         primary: {
           DEFAULT: "var(--primary)",
           foreground: "var(--primary-foreground)",

@@ -9,6 +9,7 @@ import {
 } from "../../src/test-support/search";
 import type { SearchGeneration } from "../../src/types/search";
 import { useMockApi } from "./_setup";
+import { collapseNavigationSidebar } from "../e2e-real/util";
 
 useMockApi();
 
@@ -27,7 +28,9 @@ async function serveSearch(page: Page, generation: SearchGeneration) {
     route.fulfill({ json: [generation] }),
   );
   await page.route("**/api/v1/search/status", (route) =>
-    route.fulfill({ json: searchStatus({ enabled: true, semantic_ready: false }) }),
+    route.fulfill({
+      json: searchStatus({ enabled: true, semantic_ready: generation.state === "active" }),
+    }),
   );
 }
 
@@ -44,28 +47,112 @@ test.describe("AI Search preparation", () => {
         verified_at: null,
       }),
     );
-    for (const [label, width, height] of [
-      ["desktop", 1280, 900],
-      ["mobile", 390, 844],
-    ] as const) {
-      await page.setViewportSize({ width, height });
+    await page.goto("/settings?section=ai-search");
+    await collapseNavigationSidebar(page);
+    await expect(page.getByText("212 of 567 searchable entries prepared")).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("preparation.png") });
+
+    const steps = page.getByRole("list", { name: "Preparation steps" });
+    await expect(steps).toBeVisible();
+    await expect(steps.getByRole("listitem")).toHaveText([
+      /Check library content\(done\)/,
+      /Index passages\(in progress\)/,
+      /Catch up on recent changes\(not started\)/,
+      /Verify the index\(not started\)/,
+    ]);
+    await expect(steps.locator('[aria-current="step"]')).toHaveText(/Index passages/);
+    await expect(
+      page.getByText(/bge-small-en-v1\.5 turns each passage into a vector/),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+  test("aligns the ready status with its actions", async ({ page }, testInfo) => {
+    await serveSearch(page, aSearchGeneration({ state: "active" }));
+
+    await page.goto("/settings?section=ai-search");
+    await collapseNavigationSidebar(page);
+
+    const ready = page.getByText("Ready", { exact: true });
+    const trySearch = page.getByRole("link", { name: "Try AI Search" });
+    await expect(ready).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("ready.png") });
+    await expect(ready).toHaveCSS("border-radius", "9999px", { timeout: 1000 });
+    const badge = (await ready.boundingBox())!;
+    const action = (await trySearch.boundingBox())!;
+    expect(badge.y + badge.height / 2).toBeCloseTo(action.y + action.height / 2, 0);
+    const group = page.getByRole("group", { name: "AI Search is ready" });
+    const heading = group.getByRole("heading", { name: "AI Search is ready" });
+    const panel = group.getByRole("region", { name: "Index check" });
+    await expect(panel).toBeVisible({ timeout: 1000 });
+    const title = (await heading.boundingBox())!;
+    const rows = (await panel.boundingBox())!;
+    expect(title.y + title.height).toBeLessThan(rows.y);
+  });
+
+  test("shows both processing locations in the setup form", async ({ page }, testInfo) => {
+    await serveSearch(page, aSearchGeneration({ state: "active" }));
+
+    await page.goto("/settings?section=ai-search");
+    await collapseNavigationSidebar(page);
+    await page.getByRole("button", { name: "Change setup" }).click();
+    const dialog = page.getByRole("dialog", { name: "AI Search setup" });
+    await expect(dialog.getByRole("button", { name: "Prepare my library" })).toBeVisible();
+    await dialog.screenshot({ path: testInfo.outputPath("setup.png") });
+
+    await expect(dialog.getByRole("radio", { name: "On this machine" })).toBeChecked({
+      timeout: 1000,
+    });
+    const remote = dialog.getByRole("radio", { name: "Another server" });
+    await remote.focus();
+    await remote.press("Space");
+    await expect(dialog.getByRole("form", { name: "Inference server" })).toBeVisible();
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByRole("button", { name: "Change setup" })).toBeFocused();
+  });
+  for (const { action, url, heading } of [
+    { action: "Manage indexes", url: /ai-view=indexes/, heading: "Search types" },
+    { action: "Manage servers", url: /ai-view=servers$/, heading: "Connect an AI server" },
+    { action: "Add a server", url: /ai-view=servers&server=new/, heading: "Add a server" },
+    { action: "Technical settings", url: /ai-view=technical/, heading: "Technical settings" },
+  ]) {
+    test(`opens ${action} as a reloadable Settings view`, async ({ page }) => {
+      await serveSearch(page, aSearchGeneration({ state: "active" }));
       await page.goto("/settings?section=ai-search");
-      await page.getByText("Preparation details", { exact: true }).click();
-      const steps = page.getByRole("list", { name: "Preparation steps" });
-      await expect(steps.getByRole("listitem")).toHaveText([
-        /Check library content\(done\)/,
-        /Index passages\(in progress\)/,
-        /Catch up on recent changes\(not started\)/,
-        /Verify the index\(not started\)/,
-      ]);
-      await expect(
-        page.getByText(/bge-small-en-v1\.5 turns each passage into a vector/),
-      ).toBeVisible();
-      await expect(page.getByText("212 of 567 searchable entries prepared")).toBeVisible();
-      expect(
-        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-      ).toBe(true);
-      await steps.screenshot({ path: testInfo.outputPath(`steps-${label}.png`) });
-    }
+      await collapseNavigationSidebar(page);
+
+      await page.getByRole("link", { name: action, exact: true }).click();
+
+      await expect(page).toHaveURL(url);
+      await page.reload();
+      await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await page.getByRole("link", { name: "Back to AI Search" }).click();
+      await expect(page.getByRole("link", { name: action, exact: true })).toBeVisible();
+    });
+  }
+  test("keeps the technical settings chrome in place during scrolling", async ({
+    page,
+  }, testInfo) => {
+    await serveSearch(page, aSearchGeneration({ state: "active" }));
+    await page.goto("/settings?section=ai-search&ai-view=technical");
+    await collapseNavigationSidebar(page);
+    const title = page.getByRole("heading", { name: "AI Search", level: 1 });
+    const back = page.getByRole("link", { name: "Back to AI Search" });
+    const section = page.getByRole("group", { name: "Technical settings" });
+    const body = section.locator(".settings-card-box");
+    await expect(body).toBeVisible();
+    const originalTitle = await title.boundingBox();
+    const originalBack = await back.boundingBox();
+
+    await body.hover({ position: { x: 160, y: 150 } });
+    await page.mouse.wheel(0, 480);
+
+    await page.screenshot({ path: testInfo.outputPath("technical-settings-scroll.png") });
+    await expect.poll(() => body.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    expect(await title.boundingBox()).toEqual(originalTitle);
+    expect(await back.boundingBox()).toEqual(originalBack);
   });
 });

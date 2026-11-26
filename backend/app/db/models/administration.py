@@ -5,6 +5,7 @@ from typing import Optional
 from printstash_core.mesh.preview_profile import PreviewLook
 from pydantic import NaiveDatetime
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     Column,
@@ -202,6 +203,9 @@ class SystemConfig(SQLModel, table=True):
     # ISO 4217 currency code used to render cost figures (statistics, filament
     # cost). ``None`` falls back to the default "USD".
     currency: Optional[str] = Field(default=None, max_length=3)
+    pricing_defaults: Optional[dict[str, float]] = Field(
+        default=None, sa_column=Column(JSON(none_as_null=True), nullable=True)
+    )
 
     # Generated Model preview width. Null falls back to
     # VAULT_MODEL_THUMBNAIL_WIDTH (640 by default).

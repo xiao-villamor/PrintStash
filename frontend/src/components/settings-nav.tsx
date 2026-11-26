@@ -50,9 +50,9 @@ export function SettingsNav({
   return (
     <nav
       aria-label={uiText("Settings sections")}
-      className={cn("settings-nav sticky top-0 hidden self-start lg:block", className)}
+      className={cn("hidden min-h-0 flex-col lg:flex", className)}
     >
-      <div className="mb-3 space-y-3">
+      <div className="mb-3 shrink-0 space-y-3">
         {onBack && (
           <button
             type="button"
@@ -103,39 +103,41 @@ export function SettingsNav({
           />
         </div>
       </div>
-      {filtered.length === 0 && (
-        <p className="px-2 py-3 text-sm text-muted-foreground">{uiText("No settings match")}</p>
-      )}
-      {filtered.map((group) => (
-        <div key={group.label} className="px-1 py-2">
-          <p className="px-2 pb-1 font-mono text-2xs font-medium uppercase tracking-wider text-muted-foreground">
-            {group.label}
-          </p>
-          {group.sections.map((section) => {
-            const Icon = section.icon;
-            const isActive = section.id === active;
-            return (
-              <button
-                key={section.id}
-                type="button"
-                aria-current={isActive ? "page" : undefined}
-                onClick={() => onChange(section.id)}
-                className={cn(
-                  "flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-sm transition-[color,background-color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-                  isActive
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:bg-popover-hover hover:text-foreground",
-                )}
-              >
-                <Icon className="size-4 shrink-0" aria-hidden />
-                <span className="truncate" title={section.label}>
-                  {section.label}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      ))}
+      <div className="settings-nav-options">
+        {filtered.length === 0 && (
+          <p className="px-2 py-3 text-sm text-muted-foreground">{uiText("No settings match")}</p>
+        )}
+        {filtered.map((group) => (
+          <div key={group.label} className="px-1 py-2">
+            <p className="px-2 pb-1 font-mono text-2xs font-medium uppercase tracking-wider text-muted-foreground">
+              {group.label}
+            </p>
+            {group.sections.map((section) => {
+              const Icon = section.icon;
+              const isActive = section.id === active;
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  aria-current={isActive ? "page" : undefined}
+                  onClick={() => onChange(section.id)}
+                  className={cn(
+                    "flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-sm transition-[color,background-color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                    isActive
+                      ? "bg-accent text-accent-foreground"
+                      : "text-muted-foreground hover:bg-popover-hover hover:text-foreground",
+                  )}
+                >
+                  <Icon className="size-4 shrink-0" aria-hidden />
+                  <span className="truncate" title={section.label}>
+                    {section.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
     </nav>
   );
 }

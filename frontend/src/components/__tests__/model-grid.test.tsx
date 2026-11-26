@@ -1042,9 +1042,9 @@ describe("ModelBrowser", () => {
       expect(whole).toEqual([]);
     });
 
-    it("shows server-provided folder identity in the list", async () => {
-      localStorage.setItem("ps-vault-view", "list");
+    it("shows server-provided folder identity on its card", async () => {
       renderVault({
+        at: "/?scope=all",
         models: [
           aModelListItem({
             name: "Benchy",
@@ -1055,8 +1055,8 @@ describe("ModelBrowser", () => {
         ],
       });
 
-      const row = await within(screen.getByRole("main")).findByRole("link", { name: /Benchy/ });
-      expect(within(row).getByText("Parts/Brackets")).toBeVisible();
+      const folderLabel = await within(screen.getByRole("main")).findByTitle("Parts/Brackets");
+      expect(folderLabel).toHaveTextContent("Brackets");
     });
   });
 
@@ -1400,31 +1400,6 @@ describe("ModelBrowser", () => {
       expect(requestsFor(requests, "/api/v1/models/browse", "parts")).toHaveLength(1);
     });
 
-    it("warms a folder hovered in the list view", async () => {
-      window.localStorage.setItem("ps-vault-view", "list");
-      const user = userEvent.setup();
-      const { requests } = renderVault({ at: "/?c=parts", collections: PARTS_TREE });
-      await screen.findByRole("heading", { name: "Parts" });
-
-      await user.hover(await folderCard("parts/brackets"));
-
-      await waitFor(() =>
-        expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(1),
-      );
-    });
-
-    it("warms a folder focused in the list view", async () => {
-      window.localStorage.setItem("ps-vault-view", "list");
-      const { requests } = renderVault({ at: "/?c=parts", collections: PARTS_TREE });
-      await screen.findByRole("heading", { name: "Parts" });
-
-      fireEvent.focus(await folderCard("parts/brackets"));
-
-      await waitFor(() =>
-        expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(1),
-      );
-    });
-
     it("warms multipart results after migrating the parts-only preference", async () => {
       // The retired selection becomes Everything, including multipart cards.
       window.localStorage.setItem("ps-vault-library-view", "components");
@@ -1553,22 +1528,14 @@ describe("ModelBrowser", () => {
       );
     });
 
-    it("starts in the grid the user last chose", async () => {
+    it("opens in cards with a legacy list preference", async () => {
       window.localStorage.setItem("ps-vault-view", "list");
-
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
 
-      expect(await screen.findByText("Name")).toBeInTheDocument();
-    });
-
-    it("remembers a switch to the list view", async () => {
-      const user = userEvent.setup();
-      renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await within(screen.getByRole("main")).findByText("Benchy");
-
-      await user.click(screen.getByRole("button", { name: "List View" }));
-
-      expect(window.localStorage.getItem("ps-vault-view")).toBe("list");
+      const main = screen.getByRole("main");
+      expect(await within(main).findByRole("heading", { name: "Benchy" })).toBeVisible();
+      expect(main).toHaveAttribute("data-inspector-layout", "grid");
+      expect(screen.queryByRole("button", { name: "List View" })).not.toBeInTheDocument();
     });
 
     it("writes a sort choice into the URL", async () => {
@@ -1819,9 +1786,8 @@ describe("ModelBrowser", () => {
   });
 
   describe("selection", () => {
-    it.each(["grid", "list"])("selects a multipart set directly in %s view", async (view) => {
+    it("selects a multipart set directly from its card", async () => {
       const user = userEvent.setup();
-      localStorage.setItem("ps-vault-view", view);
       renderVault({ at: "/?type=multipart", multipartModels: [aMultipartSet()] });
       const checkbox = await screen.findByRole("checkbox", { name: "Select Dragon figure" });
       await user.click(checkbox);
@@ -1833,18 +1799,14 @@ describe("ModelBrowser", () => {
       expect(checkbox).not.toBeChecked();
     });
 
-    it.each(["grid", "list"])(
-      "selects multipart cards instead of navigating in selection mode (%s)",
-      async (view) => {
-        const user = userEvent.setup();
-        localStorage.setItem("ps-vault-view", view);
-        renderVault({ at: "/?type=multipart", multipartModels: [aMultipartSet()] });
-        await screen.findByRole("link", { name: "Dragon figure" });
-        await user.keyboard("s");
-        await user.click(screen.getByRole("link", { name: "Dragon figure" }));
-        expect(screen.getByRole("checkbox", { name: "Select Dragon figure" })).toBeChecked();
-      },
-    );
+    it("selects multipart cards in selection mode", async () => {
+      const user = userEvent.setup();
+      renderVault({ at: "/?type=multipart", multipartModels: [aMultipartSet()] });
+      await screen.findByRole("link", { name: "Dragon figure" });
+      await user.keyboard("s");
+      await user.click(screen.getByRole("link", { name: "Dragon figure" }));
+      expect(screen.getByRole("checkbox", { name: "Select Dragon figure" })).toBeChecked();
+    });
 
     it("selects a range of multipart sets", async () => {
       const user = userEvent.setup();
@@ -1954,9 +1916,8 @@ describe("ModelBrowser", () => {
       expect(screen.getByRole("checkbox", { name: "Select Dragon figure" })).toBeChecked();
     });
 
-    it.each(["grid", "list"])("starts batch actions from a %s checkbox", async (view) => {
+    it("starts batch actions from a card checkbox", async () => {
       const user = userEvent.setup();
-      window.localStorage.setItem("ps-vault-view", view);
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
       const checkbox = await screen.findByRole("checkbox", { name: "Select Benchy" });
       expect(checkbox).not.toBeChecked();
@@ -1975,9 +1936,8 @@ describe("ModelBrowser", () => {
       ).not.toBeInTheDocument();
     });
 
-    it.each(["grid", "list"])("selects a folder directly in %s view", async (view) => {
+    it("selects a folder directly from its card", async () => {
       const user = userEvent.setup();
-      window.localStorage.setItem("ps-vault-view", view);
       renderVault({ collections: [aCollection({ name: "Parts", path: "parts" })] });
       const checkbox = await screen.findByRole("checkbox", { name: "Select folder Parts" });
       await user.click(checkbox);
@@ -4813,36 +4773,6 @@ describe("ModelBrowser", () => {
       };
     }
 
-    it("moves with the version captured by the native list drag", async () => {
-      window.localStorage.setItem("ps-vault-view", "list");
-      const versions: (string | null)[] = [];
-      renderVault({
-        collections: [aCollection()],
-        models: [aModelListItem({ id: 1, name: "Benchy", edit_version: 7 })],
-        routes: {
-          "PATCH /api/v1/models/1": (_url, init) => {
-            versions.push(new Headers(init?.headers).get("If-Match"));
-            return json({ id: 1, edit_version: 8, collection: "parts" });
-          },
-        },
-      });
-      const folder = await folderCard();
-      await within(screen.getByRole("main")).findByText("Benchy");
-      const values = new Map<string, string>();
-      const dataTransfer = {
-        types: [MODEL_DND_MIME],
-        setData: (kind: string, value: string) => values.set(kind, value),
-        getData: (kind: string) => values.get(kind) ?? "",
-        effectAllowed: "",
-        dropEffect: "",
-      };
-      fireEvent.dragStart(screen.getByRole("link", { name: /Benchy/ }), { dataTransfer });
-      fireEvent.drop(folder, { dataTransfer });
-      await waitFor(() =>
-        expect(versions).toEqual(['"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v7"']),
-      );
-    });
-
     it("moves the model into the folder it was dropped on", async () => {
       const { requestsWithMethod } = renderVault({
         collections: [aCollection()],
@@ -5189,12 +5119,17 @@ describe("OpenDesign Library strip", () => {
     );
     expect(lastModelsQuery(app.requests).getAll("tag")).toEqual(["Workshop"]);
   });
-  it("opens the list from its direct view control", async () => {
+  it("shows only gallery actions in the More menu", async () => {
     const user = userEvent.setup();
-    renderVault({ models: [aModelListItem({ name: "List control Model" })] });
-    await screen.findByText("List control Model");
-    await user.click(screen.getByRole("button", { name: /^List View$/ }));
-    expect(screen.getByText("Thumb", { exact: true })).toBeVisible();
-    expect(screen.getByRole("link", { name: /List control Model/ })).toBeVisible();
+    renderVault({ models: [aModelListItem({ name: "Gallery model" })] });
+    await screen.findByText("Gallery model");
+    await user.click(within(screen.getByRole("main")).getByRole("button", { name: /^More$/ }));
+    const menu = within(screen.getByRole("menu"));
+
+    expect(menu.getByRole("menuitem", { name: "Similar models" })).toBeVisible();
+    expect(menu.getByRole("menuitem", { name: "Documents" })).toBeVisible();
+    expect(menu.queryByRole("menuitem", { name: "Display" })).not.toBeInTheDocument();
+    expect(menu.queryByRole("menuitem", { name: /Saved views/ })).not.toBeInTheDocument();
+    expect(menu.queryByRole("menuitemcheckbox", { name: "Favorites" })).not.toBeInTheDocument();
   });
 });

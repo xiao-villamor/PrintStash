@@ -1,5 +1,5 @@
 /** Library controls fit the available pane without sacrificing titles or access to actions. */
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 import { aCollectionNode, aModelListItem } from "../../src/test-support/factories";
 import { useMockApi } from "./_setup";
@@ -38,17 +38,6 @@ test.beforeEach(async ({ page }) => {
     }),
   );
 });
-
-async function openDisplayMenu(page: Page): Promise<void> {
-  await expect(page.getByRole("button", { name: "Upload", exact: true })).toBeVisible();
-  const more = page.getByRole("main").getByRole("button", { name: "More", exact: true });
-  if (await more.isVisible()) await more.click();
-  else await page.getByRole("heading", { name: "Models", exact: true }).click({ button: "right" });
-  await page
-    .getByRole("button", { name: "Display", exact: true })
-    .or(page.getByRole("menuitem", { name: "Display", exact: true }))
-    .click();
-}
 
 test.describe("Library responsive layout", () => {
   for (const width of [320, 824, 1440]) {
@@ -127,9 +116,11 @@ test.describe("Library responsive layout", () => {
     for (const density of ["Comfortable", "Compact"]) {
       test(`uses the available width for a ${density} grid at ${width}px`, async ({ page }) => {
         await page.setViewportSize({ width, height: 900 });
+        await page.addInitScript(
+          (value) => localStorage.setItem("ps-vault-density", value),
+          density.toLowerCase(),
+        );
         await page.goto("/");
-        await openDisplayMenu(page);
-        await page.getByRole("menuitem", { name: density, exact: true }).click();
         await expect(page.getByRole("article")).toHaveCount(8);
 
         const bounds = await page
@@ -228,7 +219,7 @@ test.describe("Library responsive layout", () => {
     const menu = page.getByRole("menu");
     await expect(menu.getByRole("menuitem", { name: "Library tools" })).toHaveCount(0);
     await expect(menu.getByRole("menuitem", { name: "New multipart set" })).toBeVisible();
-    await expect(menu.getByRole("menuitem", { name: "Display", exact: true })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Documents", exact: true })).toBeVisible();
   });
 
   for (const width of [320, 390, 824, 1440]) {
@@ -458,7 +449,7 @@ test.describe("Collection header", () => {
     await expect(page).toHaveURL(/revision_status=known_good/);
     await filters.focus();
     await page.keyboard.press("Shift+F10");
-    await expect(page.getByRole("menuitem", { name: "Display", exact: true })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Documents", exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(filters).toBeFocused();
   });

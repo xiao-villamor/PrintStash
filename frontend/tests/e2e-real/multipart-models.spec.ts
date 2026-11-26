@@ -395,12 +395,12 @@ test.describe("Multipart auxiliary editing", () => {
 
 test.describe("Multipart selection", () => {
   for (const viewport of [
-    { label: "desktop grid", width: 1440, height: 1000, view: "grid" },
-    { label: "mobile list", width: 390, height: 844, view: "list" },
+    { label: "desktop", width: 1440, height: 1000 },
+    { label: "mobile", width: 390, height: 844 },
   ]) {
     test(`deletes a selected set from ${viewport.label}`, async ({ page }, testInfo) => {
       const api = `http://127.0.0.1:${process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410}/api/v1`;
-      const name = `selection-${viewport.view}-${Date.now()}`;
+      const name = `selection-${viewport.label}-${Date.now()}`;
       await uploadModel(page, name, { mesh: true, gcode: true });
       const href = await modelCard(page, name).getAttribute("href");
       if (!href) throw new Error("Uploaded Model has no link");
@@ -420,7 +420,7 @@ test.describe("Multipart selection", () => {
           page.getByRole("button", { name: "Move to Trash", exact: true }),
         ).toBeVisible();
         await page.screenshot({
-          path: testInfo.outputPath(`multipart-detail-${viewport.view}.png`),
+          path: testInfo.outputPath(`multipart-detail-${viewport.label}.png`),
           fullPage: true,
         });
         await page.getByRole("link", { name: "Create build", exact: true }).click();
@@ -430,26 +430,25 @@ test.describe("Multipart selection", () => {
         );
         await expect(page.getByRole("link", { name: "Cancel", exact: true })).toBeVisible();
         await page.screenshot({
-          path: testInfo.outputPath(`build-create-${viewport.view}.png`),
+          path: testInfo.outputPath(`build-create-${viewport.label}.png`),
           fullPage: true,
         });
         await page.getByRole("link", { name: "Cancel", exact: true }).click();
         await page.getByRole("link", { name: "Build history", exact: true }).click();
         await expect(page.getByRole("checkbox", { name: "Show archived builds" })).toBeVisible();
         await page.screenshot({
-          path: testInfo.outputPath(`build-history-${viewport.view}.png`),
+          path: testInfo.outputPath(`build-history-${viewport.label}.png`),
           fullPage: true,
         });
-        await page.evaluate((view) => localStorage.setItem("ps-vault-view", view), viewport.view);
         await page.goto(`/?type=multipart&q=${encodeURIComponent(set.name)}`);
         const checkbox = page.getByRole("checkbox", { name: `Select ${set.name}`, exact: true });
         await expect(page.getByRole("link", { name: set.name, exact: true })).toBeVisible();
-        if (viewport.view === "grid")
+        if (viewport.label === "desktop")
           await page.getByRole("link", { name: set.name, exact: true }).hover();
         await checkbox.check();
         await expect(checkbox).toBeChecked();
         await page.screenshot({
-          path: testInfo.outputPath(`multipart-selected-${viewport.view}.png`),
+          path: testInfo.outputPath(`multipart-selected-${viewport.label}.png`),
           fullPage: true,
         });
         await page.getByRole("button", { name: "Delete", exact: true }).click();

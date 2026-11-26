@@ -1,7 +1,11 @@
 import { SearchSettingsSnapshot } from "@/components/search-settings-snapshot";
 import { SettingsCard, SettingsNotice } from "@/components/settings-card";
+import { SETTINGS_FIELD } from "@/components/settings-controls";
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { ArrowLeft } from "lucide-react";
+import { Link } from "@/lib/link";
+import { useRouter, useSearchParams } from "@/lib/navigation";
 
 import { AiSearchSetup } from "@/components/ai-search-setup";
 import { InferenceEndpointForm } from "@/components/inference-endpoint-form";
@@ -98,12 +102,6 @@ function SettingsForm({
       }}
     >
       <fieldset disabled={readOnly || save.isPending} className="space-y-4">
-        <div>
-          <h3 className="text-base font-semibold">{t("aiSearch.technicalTitle")}</h3>
-          <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-            {t("aiSearch.technicalIntro")}
-          </p>
-        </div>
         <h4 className="text-sm font-semibold">{t("aiSearch.setupPermissions")}</h4>
         <div className="space-y-3">
           {toggles.map(([field, label, help]) => (
@@ -148,7 +146,7 @@ function SettingsForm({
             <label className="block space-y-1 text-sm">
               {t("aiSearch.sparseModel")}
               <select
-                className="block w-full rounded-md border border-input bg-field-surface p-2"
+                className={`${SETTINGS_FIELD} flex w-full items-center`}
                 value={draft.sparse_model_id ?? ""}
                 onChange={(event) =>
                   setDraft({
@@ -216,7 +214,7 @@ function SettingsForm({
             <label className="space-y-1 text-sm">
               {t("aiSearch.lexicalBackend")}
               <select
-                className="block w-full rounded-md border border-input bg-field-surface p-2"
+                className={`${SETTINGS_FIELD} flex w-full items-center`}
                 value={draft.lexical_backend}
                 onChange={(event) =>
                   setDraft({
@@ -316,7 +314,7 @@ function SettingsForm({
           <label className="mt-3 block space-y-1 text-sm">
             {t("aiSearch.chatEndpoint")}
             <select
-              className="block w-full rounded-md border border-input bg-field-surface p-2"
+              className={`${SETTINGS_FIELD} flex w-full items-center`}
               value={draft.chat_endpoint_id ?? ""}
               onChange={(event) => {
                 const endpoint = initial.endpoints.find(
@@ -449,12 +447,29 @@ function SettingsForm({
   );
 }
 
+type AiSearchView = "indexes" | "servers" | "technical";
+
+const AI_SEARCH_SETTINGS = "/settings?section=ai-search";
+
+function aiSearchViewHref(view: AiSearchView, server?: number | "new") {
+  const params = new URLSearchParams({ section: "ai-search", "ai-view": view });
+  if (server !== undefined) params.set("server", String(server));
+  return `/settings?${params}`;
+}
+
 export function AiSearchSettings() {
   const { t } = useI18n();
-  const [section, setSection] = useState<"setup" | "indexes" | "servers" | "technical">("setup");
-  const [editing, setEditing] = useState<number | "new" | null>(null);
+  const router = useRouter();
+  const params = useSearchParams();
+  const view = params.get("ai-view");
+  const section = view === "indexes" || view === "servers" || view === "technical" ? view : "setup";
   const [changing, setChanging] = useState(false);
   const settings = useQuery(searchSettingsOptions());
+  const server = params.get("server");
+  const editing =
+    server === "new"
+      ? "new"
+      : settings.data?.endpoints.find((endpoint) => String(endpoint.id) === server);
   const denied = settings.isError && [401, 403, 404].includes(parseApiError(settings.error).status);
   const catalog = useAiSearchCatalog(!!settings.data && !denied);
   const { importEndpoint: fromEnvironment } = useSearchCommands();
@@ -462,7 +477,10 @@ export function AiSearchSettings() {
     void settings.refetch();
   };
   return (
-    <div className="settings-grouped">
+    <div
+      key={section}
+      className={section === "setup" ? "settings-grouped" : "settings-grouped settings-ai-subpage"}
+    >
       {settings.isError && (
         <SettingsNotice
           role="alert"
@@ -481,214 +499,195 @@ export function AiSearchSettings() {
         </p>
       ) : (
         <>
-          <SettingsCard hideHeader title={t("AI Search setup")}>
-            <fieldset disabled={settings.isError} className="min-w-0">
-              <AiSearchSetup
-                settings={settings.data}
-                catalog={catalog}
-                changing={false}
-                onChangingChange={setChanging}
-              />
-            </fieldset>
-          </SettingsCard>
-          <Modal
-            open={changing}
-            onClose={() => setChanging(false)}
-            title={t("AI Search setup")}
-            description={t("Choose where search runs before preparing your Library.")}
-            bodyClassName="p-0"
-          >
-            <fieldset disabled={settings.isError} className="min-w-0">
-              <AiSearchSetup
-                settings={settings.data}
-                catalog={catalog}
-                changing
-                onChangingChange={setChanging}
-              />
-            </fieldset>
-          </Modal>
-          <SettingsCard
-            title={t("Setup and options")}
-            description={t("Search types, AI servers and technical limits.")}
-          >
-            <div className="settings-list-row">
-              <div>
-                <p className="settings-list-title">{t("Guided setup")}</p>
-                <p className="settings-list-meta">
-                  {t("Choose this machine or another server; prepare the Library.")}
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={settings.isError}
-                onClick={() => setChanging(true)}
-              >
-                {t(settings.data.settings.enabled ? "Change setup" : "Start setup")}
-              </Button>
-            </div>
-            <div className="settings-list-row">
-              <div>
-                <p className="settings-list-title">{t("aiSearch.navIndexes")}</p>
-                <p className="settings-list-meta">
-                  {t("Text, thumbnail, multiple views and optional point-cloud geometry")}
-                </p>
-              </div>
-              <Button variant="outline" size="sm" onClick={() => setSection("indexes")}>
-                {t("Manage indexes")}
-              </Button>
-            </div>
-            <div className="settings-list-row">
-              <div>
-                <p className="settings-list-title">{t("aiSearch.navServers")}</p>
-                <p className="settings-list-meta">
-                  {t("Embedding or chat endpoints with explicit data permissions")}
-                </p>
-              </div>
-              <div>
-                <Button variant="outline" size="sm" onClick={() => setSection("servers")}>
-                  {t("Manage servers")}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setEditing("new");
-                    setSection("servers");
-                  }}
-                >
-                  {t("aiSearch.newEndpoint")}
-                </Button>
-              </div>
-            </div>
-            <div className="settings-list-row">
-              <div>
-                <p className="settings-list-title">{t("Technical options")}</p>
-                <p className="settings-list-meta">
-                  {t("Permissions, expansion, limits, retention and timeout")}
-                </p>
-              </div>
-              <Button variant="outline" size="sm" onClick={() => setSection("technical")}>
-                {t("Technical settings")}
-              </Button>
-            </div>
-          </SettingsCard>
-          <Modal
-            open={section !== "setup"}
-            onClose={() => {
-              setSection("setup");
-              setEditing(null);
-            }}
-            title={
-              section === "indexes"
-                ? t("aiSearch.navIndexes")
-                : section === "servers"
-                  ? t("aiSearch.navServers")
-                  : t("Technical settings")
-            }
-            className="max-w-4xl"
-          >
-            {section === "indexes" ? (
+          {section === "setup" ? (
+            <>
               <fieldset disabled={settings.isError} className="min-w-0">
-                <SearchGenerationControls settings={settings.data} catalog={catalog} />
-              </fieldset>
-            ) : section === "technical" ? (
-              <>
-                <SettingsForm
-                  initial={settings.data}
+                <AiSearchSetup
+                  settings={settings.data}
                   catalog={catalog}
-                  readOnly={settings.isError}
+                  changing={false}
+                  onChangingChange={setChanging}
                 />
-              </>
-            ) : (
-              <fieldset disabled={settings.isError} className="min-w-0 space-y-5 p-4 sm:p-5">
-                <div>
-                  <h3 className="text-base font-semibold">{t("aiSearch.endpoints")}</h3>
-                  <p className="mt-1 max-w-prose text-sm text-muted-foreground">
-                    {t("aiSearch.serversIntro")}
-                  </p>
-                </div>
-                {editing === null ? (
-                  <>
-                    {settings.data.endpoints.length ? (
-                      <ul className="divide-y divide-border rounded-md border border-border">
-                        {settings.data.endpoints.map((endpoint) => (
-                          <li
-                            key={endpoint.id}
-                            className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
-                          >
-                            <div className="min-w-0">
-                              <p className="break-words text-sm font-semibold">{endpoint.model}</p>
-                              <p className="mt-1 break-all text-xs text-muted-foreground">
-                                {endpoint.host} ·{" "}
-                                {t(
-                                  endpoint.kind === "embedding"
-                                    ? "aiSearch.embeddingEndpoint"
-                                    : "aiSearch.chatEndpoint",
-                                )}
-                              </p>
-                            </div>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setEditing(endpoint.id)}
-                            >
-                              {t("aiSearch.editServer", { model: endpoint.model })}
-                            </Button>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="rounded-md border border-border p-4 text-sm text-muted-foreground">
-                        {t("aiSearch.noServers")}
-                      </p>
-                    )}
-                    <Button size="sm" onClick={() => setEditing("new")}>
-                      {t("aiSearch.newEndpoint")}
-                    </Button>
-                    {settings.data.environment_endpoints.map((kind) => (
-                      <Button
-                        size="sm"
-                        key={kind}
-                        variant="outline"
-                        loading={fromEnvironment.isPending}
-                        onClick={() =>
-                          fromEnvironment.mutate(
-                            { kind, session: getSessionVersion() },
-                            { onError: toast.error },
-                          )
-                        }
-                      >
-                        {t(
-                          kind === "embedding"
-                            ? "aiSearch.importEmbeddingEnvironment"
-                            : "aiSearch.importChatEnvironment",
-                        )}
-                      </Button>
-                    ))}
-                  </>
-                ) : (
-                  <div className="space-y-4 rounded-md border border-border p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h4 className="text-sm font-semibold">
-                        {editing === "new" ? t("aiSearch.newEndpoint") : t("aiSearch.editEndpoint")}
-                      </h4>
-                      <Button variant="ghost" size="sm" onClick={() => setEditing(null)}>
-                        {t("aiSearch.backToServers")}
-                      </Button>
-                    </div>
-                    <InferenceEndpointForm
-                      key={editing}
-                      initial={settings.data.endpoints.find((endpoint) => endpoint.id === editing)}
-                      onSaved={() => {
-                        setEditing(null);
-                      }}
-                    />
-                  </div>
-                )}
               </fieldset>
-            )}
-          </Modal>
+              <Modal
+                open={changing}
+                onClose={() => setChanging(false)}
+                title={t("AI Search setup")}
+                description={t("Choose where search runs before preparing your Library.")}
+                bodyClassName="p-0"
+              >
+                <fieldset disabled={settings.isError} className="min-w-0">
+                  <AiSearchSetup
+                    settings={settings.data}
+                    catalog={catalog}
+                    changing
+                    onChangingChange={setChanging}
+                  />
+                </fieldset>
+              </Modal>
+              <SettingsCard
+                title={t("Setup and options")}
+                description={t("Search types, AI servers and technical limits.")}
+              >
+                <div className="settings-list-row">
+                  <div>
+                    <p className="settings-list-title">{t("aiSearch.navIndexes")}</p>
+                    <p className="settings-list-meta">
+                      {t("Text, thumbnail, multiple views and optional point-cloud geometry")}
+                    </p>
+                  </div>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href={aiSearchViewHref("indexes")}>{t("Manage indexes")}</Link>
+                  </Button>
+                </div>
+                <div className="settings-list-row">
+                  <div>
+                    <p className="settings-list-title">{t("aiSearch.navServers")}</p>
+                    <p className="settings-list-meta">
+                      {t("Embedding or chat endpoints with explicit data permissions")}
+                    </p>
+                  </div>
+                  <div>
+                    <Button variant="outline" size="sm" asChild>
+                      <Link href={aiSearchViewHref("servers")}>{t("Manage servers")}</Link>
+                    </Button>
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link href={aiSearchViewHref("servers", "new")}>
+                        {t("aiSearch.newEndpoint")}
+                      </Link>
+                    </Button>
+                  </div>
+                </div>
+                <div className="settings-list-row">
+                  <div>
+                    <p className="settings-list-title">{t("Technical options")}</p>
+                    <p className="settings-list-meta">
+                      {t("Permissions, expansion, limits, retention and timeout")}
+                    </p>
+                  </div>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href={aiSearchViewHref("technical")}>{t("Technical settings")}</Link>
+                  </Button>
+                </div>
+              </SettingsCard>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" size="sm" className="self-start" asChild>
+                <Link href={AI_SEARCH_SETTINGS}>
+                  <ArrowLeft className="size-4" aria-hidden />
+                  {t("Back to AI Search")}
+                </Link>
+              </Button>
+              {section === "indexes" ? (
+                <SettingsCard title={t("aiSearch.navIndexes")}>
+                  <fieldset disabled={settings.isError} className="min-w-0">
+                    <SearchGenerationControls settings={settings.data} catalog={catalog} />
+                  </fieldset>
+                </SettingsCard>
+              ) : section === "technical" ? (
+                <SettingsCard
+                  title={t("Technical settings")}
+                  description={t("aiSearch.technicalIntro")}
+                >
+                  <SettingsForm
+                    initial={settings.data}
+                    catalog={catalog}
+                    readOnly={settings.isError}
+                  />
+                </SettingsCard>
+              ) : (
+                <SettingsCard
+                  title={t(
+                    !editing
+                      ? "aiSearch.endpoints"
+                      : editing === "new"
+                        ? "aiSearch.newEndpoint"
+                        : "aiSearch.editEndpoint",
+                  )}
+                  description={!editing ? t("aiSearch.serversIntro") : undefined}
+                >
+                  <fieldset disabled={settings.isError} className="min-w-0 space-y-3 py-3">
+                    {!editing ? (
+                      <>
+                        {settings.data.endpoints.length ? (
+                          <ul className="divide-y divide-border rounded-md border border-border">
+                            {settings.data.endpoints.map((endpoint) => (
+                              <li
+                                key={endpoint.id}
+                                className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
+                              >
+                                <div className="min-w-0">
+                                  <p className="break-words text-sm font-semibold">
+                                    {endpoint.model}
+                                  </p>
+                                  <p className="mt-1 break-all text-xs text-muted-foreground">
+                                    {endpoint.host} ·{" "}
+                                    {t(
+                                      endpoint.kind === "embedding"
+                                        ? "aiSearch.embeddingEndpoint"
+                                        : "aiSearch.chatEndpoint",
+                                    )}
+                                  </p>
+                                </div>
+                                <Button variant="outline" size="sm" asChild>
+                                  <Link href={aiSearchViewHref("servers", endpoint.id)}>
+                                    {t("aiSearch.editServer", { model: endpoint.model })}
+                                  </Link>
+                                </Button>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="rounded-md border border-border p-4 text-sm text-muted-foreground">
+                            {t("aiSearch.noServers")}
+                          </p>
+                        )}
+                        <Button size="sm" asChild>
+                          <Link href={aiSearchViewHref("servers", "new")}>
+                            {t("aiSearch.newEndpoint")}
+                          </Link>
+                        </Button>
+                        {settings.data.environment_endpoints.map((kind) => (
+                          <Button
+                            size="sm"
+                            key={kind}
+                            variant="outline"
+                            loading={fromEnvironment.isPending}
+                            onClick={() =>
+                              fromEnvironment.mutate(
+                                { kind, session: getSessionVersion() },
+                                { onError: toast.error },
+                              )
+                            }
+                          >
+                            {t(
+                              kind === "embedding"
+                                ? "aiSearch.importEmbeddingEnvironment"
+                                : "aiSearch.importChatEnvironment",
+                            )}
+                          </Button>
+                        ))}
+                      </>
+                    ) : (
+                      <div className="space-y-4">
+                        <Button variant="ghost" size="sm" asChild>
+                          <Link href={aiSearchViewHref("servers")}>
+                            {t("aiSearch.backToServers")}
+                          </Link>
+                        </Button>
+                        <InferenceEndpointForm
+                          key={editing === "new" ? editing : editing.id}
+                          initial={editing === "new" ? undefined : editing}
+                          onSaved={() => router.replace(aiSearchViewHref("servers"))}
+                        />
+                      </div>
+                    )}
+                  </fieldset>
+                </SettingsCard>
+              )}
+            </>
+          )}
         </>
       )}
     </div>

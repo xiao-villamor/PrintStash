@@ -21,18 +21,24 @@ profile information; PrintStash does not send password-reset emails.
 
 ## Your files
 
-The recommended destination uses the deployment's persistent storage volumes for
-uploads and previews. Open **View location and advanced options** to inspect
-paths or choose a remote provider. Use separate empty directories for managed
+The recommended local destination uses the deployment's persistent storage
+volumes for uploads and previews. The Storage step shows the available locations
+and their paths. Use separate empty directories for managed
 local storage. An existing folder of models belongs in **Library sources** in the
 next step, rather than becoming the managed upload directory.
 
-**Continue** checks the selected destination's access before moving on, and
-**Check storage** runs the same check without leaving the step. For local storage it
+**Continue** checks the selected destination's access before opening Appearance. For local storage it
 also reports available space when measurable. Remote checks use temporary probe
 objects to verify the required access. A successful check is current evidence of
-access, not a backup or a recovery guarantee. Review the account and destination,
-then choose **Create account**.
+access, not a backup or a recovery guarantee.
+
+## Appearance and review
+
+Choose a model preview color, whether to show the floor grid, and how many views to
+generate: one thumbnail, four angled views, or six views including top and bottom.
+On Review, check the account, storage paths, and appearance. You can
+edit each section before selecting **Create account**. PrintStash saves the preview
+preferences with the administrator account.
 
 The account and installation marker are committed together. If subsequent storage
 preparation fails, the account remains usable. Sign in and return to the guide to
@@ -40,6 +46,10 @@ retry preparation. If the browser loses the creation response, it checks whether
 registration has closed and offers sign-in instead of resubmitting creation.
 
 ## Get started
+
+After you create your account, **Getting started** opens with the options to upload
+files or connect an existing folder. You can revisit **Customize previews** from
+the guide and choose whether to add the sample collection.
 
 Upload files with the existing uploader, or explicitly enable Library sources and
 connect an existing folder. Locations are paths visible to the API process. A

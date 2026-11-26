@@ -374,12 +374,11 @@ test.describe("Model preview browsing", () => {
   for (const theme of ["light", "dark"] as const) {
     test(`outlines card controls against the image area in ${theme} mode`, async ({ page }) => {
       await page.addInitScript((value) => localStorage.setItem("printstash.theme", value), theme);
-      const { card, next } = await library(page);
+      const { card } = await library(page);
       const plate = await card
         .locator('[data-model-preview="Bracket 1"]')
         .evaluate((element) => getComputedStyle(element).backgroundColor);
       for (const control of [
-        next,
         card.getByRole("button", { name: "Model views", exact: true }),
         card.getByRole("checkbox", { name: /^Select / }),
       ]) {
@@ -396,6 +395,64 @@ test.describe("Model preview browsing", () => {
     });
   }
 
+  test("shows preview arrows without a resting outline", async ({ page }, testInfo) => {
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
+    const { card, next } = await library(page);
+    await collapseNavigationSidebar(page);
+
+    await card.locator("[data-model-preview]").hover();
+    await next.hover();
+
+    await card.screenshot({ path: testInfo.outputPath("preview-arrows.png") });
+    await expect(next).toHaveCSS("border-top-width", "0px", { timeout: 1000 });
+  });
+
+  test("uses a neutral shadow on dark card hover", async ({ page }, testInfo) => {
+    await page.addInitScript(() => localStorage.setItem("printstash.theme", "dark"));
+    const { card } = await library(page);
+    await collapseNavigationSidebar(page);
+
+    await card.locator("[data-model-preview]").hover();
+
+    await page.screenshot({ path: testInfo.outputPath("card-hover.png") });
+    const shadow = await card.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const reference = document.createElement("span");
+      reference.style.color = "var(--border-strong)";
+      element.append(reference);
+      const neutral = getComputedStyle(reference).color;
+      reference.remove();
+      return {
+        radius: style.borderRadius,
+        overflow: getComputedStyle(element.closest(".library-virtual-row")!).overflowX,
+        neutral: style.borderTopColor === neutral,
+        shadow: style.boxShadow,
+      };
+    });
+    expect(shadow).toMatchObject({ radius: "6px", neutral: true, overflow: "visible" });
+    expect(shadow.shadow).toContain("0px 8px 20px -10px");
+  });
+
+  test("persists a hidden card preview label across reload", async ({ page }) => {
+    await page.goto("/settings?section=design");
+    await collapseNavigationSidebar(page);
+    const label = page.getByRole("switch", { name: "Show preview label" });
+    await expect(label).toBeChecked();
+
+    await label.click();
+    await expect(
+      page.getByRole("article", { name: "Example bracket" }).getByText("Cover", { exact: true }),
+    ).toHaveCount(0);
+    await page.reload();
+    await expect(label).not.toBeChecked();
+    const { card } = await library(page);
+    const gallery = card.getByRole("button", { name: "Model views", exact: true });
+    await expect(gallery).toHaveText("");
+    await gallery.press("Enter");
+
+    await expect(page.getByRole("dialog", { name: "Model views" })).toBeVisible();
+  });
+
   test("keeps card arrows compact over the image", async ({ page }) => {
     const { card, next } = await library(page);
 
@@ -406,6 +463,7 @@ test.describe("Model preview browsing", () => {
 
   test("browses views with arrows inside the gallery", async ({ page }) => {
     const { card } = await library(page);
+    await card.locator("[data-model-preview]").hover();
     await card.getByRole("button", { name: "Model views", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Model views" });
 
@@ -413,7 +471,7 @@ test.describe("Model preview browsing", () => {
 
     await expect(dialog.locator("img[data-preview-view]")).toHaveAttribute(
       "data-preview-view",
-      "orbit-1",
+      "orbit-0",
     );
   });
 
@@ -439,6 +497,20 @@ test.describe("Model preview browsing", () => {
     const stage = await dialog.locator("[data-model-preview]").boundingBox();
     const strip = await dialog.getByRole("group", { name: "Model views" }).boundingBox();
     expect(Math.abs(stage!.width - strip!.width)).toBeLessThan(1);
+  });
+
+  test("rounds the gallery view indicator", async ({ page }, testInfo) => {
+    await page.emulateMedia({ colorScheme: "dark" });
+    const { card } = await library(page);
+    await collapseNavigationSidebar(page);
+
+    await card.getByRole("button", { name: "Model views", exact: true }).press("Enter");
+
+    const dialog = page.getByRole("dialog", { name: "Model views" });
+    const indicator = dialog.locator('[aria-live="polite"]');
+    await expect(indicator).toBeVisible();
+    await dialog.screenshot({ path: testInfo.outputPath("gallery-indicator.png") });
+    await expect(indicator).toHaveCSS("border-radius", "6px", { timeout: 1000 });
   });
 
   test("centers the gallery view indicator", async ({ page }) => {

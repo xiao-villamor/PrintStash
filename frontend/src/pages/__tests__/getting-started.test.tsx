@@ -213,6 +213,13 @@ describe("Getting started", () => {
     await userEvent.click(await screen.findByRole("button", { name: "I'll do this later" }));
     expect(screen.getByTestId("path")).toHaveTextContent(/^\/$/);
   });
+  it("offers preview customization after storage is ready", async () => {
+    renderGuide();
+    expect(await screen.findByRole("link", { name: "Customize previews" })).toHaveAttribute(
+      "href",
+      "/setup-appearance",
+    );
+  });
   it("links to a verified Model in the library", async () => {
     renderGuide({
       "GET /api/v1/models/page": json({

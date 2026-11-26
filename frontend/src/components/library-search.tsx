@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Camera, Folder, History, Library, Search, Sparkles, X, XCircle } from "lucide-react";
+import {
+  Camera,
+  Check,
+  Folder,
+  History,
+  Library,
+  Search,
+  Sparkles,
+  X,
+  XCircle,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -116,6 +126,7 @@ export function LibrarySearch({
   const aiReady = aiEnabled && capability?.semantic_ready === true;
   const effectiveMode = aiReady ? mode : "lexical";
   const aiActive = effectiveMode === "hybrid";
+  const AiModeIcon = aiActive ? Check : Sparkles;
   const showAi = sidebar || aiEnabled;
   const showCamera = !sidebar && visualReady;
 
@@ -190,21 +201,6 @@ export function LibrarySearch({
       router.replace(updated.size ? `/?${updated}` : "/");
     }
   }
-  const inputPadding = showAi
-    ? showCamera
-      ? value
-        ? "pr-20 sm:pr-28"
-        : "pr-20"
-      : value
-        ? "pr-20"
-        : "pr-10"
-    : showCamera
-      ? value
-        ? "pr-12 sm:pr-20"
-        : "pr-12"
-      : value
-        ? "pr-10"
-        : "pr-3";
   return (
     <div
       className={
@@ -217,7 +213,7 @@ export function LibrarySearch({
       }}
     >
       <form
-        className={`relative min-w-0 ${sidebar ? "w-full shrink-0" : "flex-1"}`}
+        className={`flex h-9 min-w-0 items-center gap-1 rounded-md border border-input bg-field-surface px-1.5 hover:border-border-strong focus-within:border-muted-foreground ${sidebar ? "w-full shrink-0" : "flex-1"}`}
         role="search"
         onSubmit={(event) => {
           event.preventDefault();
@@ -225,7 +221,7 @@ export function LibrarySearch({
         }}
       >
         <Search
-          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+          className="pointer-events-none ml-1.5 size-4 shrink-0 text-muted-foreground"
           aria-hidden
         />
         <Input
@@ -244,14 +240,14 @@ export function LibrarySearch({
           autoComplete="off"
           spellCheck={false}
           aria-label={t("aiSearch.searchLibrary")}
-          className={`block h-9 w-full rounded border border-input bg-field-surface py-2 pl-9 ${inputPadding} text-[13px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring [&::-webkit-search-cancel-button]:hidden`}
+          className="h-full flex-1 rounded-none border-0 bg-transparent px-1 py-0 text-[13px] focus:ring-0 [&::-webkit-search-cancel-button]:hidden"
           placeholder={t(aiActive ? "aiSearch.describeModel" : "Search Models, files and tags")}
           value={value}
           onChange={(event) => changeValue(event.target.value)}
           onCompositionStart={() => setComposing(true)}
           onCompositionEnd={() => setComposing(false)}
         />
-        <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center">
+        <div className="flex shrink-0 items-center gap-0.5">
           {!value && !showAi && !showCamera && (
             <kbd
               aria-hidden
@@ -263,7 +259,7 @@ export function LibrarySearch({
           {showAi && (
             <Button
               variant="ghost"
-              size="icon"
+              size="xs"
               type="button"
               disabled={!aiReady}
               aria-label={t("aiSearch.settingsTitle")}
@@ -275,10 +271,11 @@ export function LibrarySearch({
                     ? "aiSearch.turnOffAi"
                     : "aiSearch.submitAi",
               )}
-              className={`h-8 w-8 bg-transparent hover:bg-transparent ${aiActive ? "text-primary hover:text-primary" : "text-muted-foreground hover:text-foreground"}`}
+              className="h-7 gap-1.5 px-2 text-muted-foreground aria-pressed:bg-accent aria-pressed:text-accent-foreground dark:aria-pressed:bg-surface-bright dark:aria-pressed:hover:bg-surface-bright"
               onClick={toggleAi}
             >
-              <Sparkles className="h-4 w-4" aria-hidden />
+              <AiModeIcon className={aiActive ? "size-3.5 text-success" : "size-3.5"} aria-hidden />
+              {t(aiActive ? "aiSearch.activeLabel" : "aiSearch.settingsTitle")}
             </Button>
           )}
           {showCamera && (
@@ -286,7 +283,7 @@ export function LibrarySearch({
               variant="ghost"
               size="icon"
               type="button"
-              className={value ? "hidden h-8 w-8 sm:inline-flex" : "h-8 w-8"}
+              className={value ? "hidden size-7 sm:inline-flex" : "size-7"}
               aria-label={t("aiSearch.searchByImage")}
               title={t("aiSearch.searchByImage")}
               onClick={() => router.push("/search?image=1")}
@@ -299,7 +296,7 @@ export function LibrarySearch({
               variant="ghost"
               size="icon"
               type="button"
-              className="h-8 w-8"
+              className="size-7"
               aria-label={t("nav.clearSearch")}
               onClick={() => {
                 changeValue("");

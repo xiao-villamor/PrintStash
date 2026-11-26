@@ -232,6 +232,8 @@ async function reachStorage() {
 
 async function continueToReview(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Continue" }));
+  await screen.findByRole("heading", { name: "Customize previews" });
+  await user.click(screen.getByRole("button", { name: "Continue" }));
   await screen.findByRole("heading", { name: "Review before creating your account" });
 }
 
@@ -249,10 +251,12 @@ describe("SetupPage", () => {
     renderSetup();
     await screen.findByLabelText("Username");
 
-    expect(screen.getByRole("heading", { name: "Welcome to PrintStash" })).toBeVisible();
     expect(
-      screen.getByRole("list", { name: "Setup progress" }).querySelector('[aria-current="step"]'),
-    ).toHaveTextContent("Account");
+      screen.getByRole("heading", { name: "Create your administrator account", level: 1 }),
+    ).toBeVisible();
+    const progress = screen.getByRole("list", { name: "Setup progress" });
+    expect(within(progress).getAllByRole("listitem")).toHaveLength(4);
+    expect(progress.querySelector('[aria-current="step"]')).toHaveTextContent("Account");
     const fields = screen.getAllByRole("textbox").map((field) => field.getAttribute("id"));
     expect(fields.indexOf("setup-username")).toBeLessThan(fields.indexOf("setup-email"));
   });
@@ -287,7 +291,7 @@ describe("SetupPage", () => {
   it("explains the administrator account before asking for it", async () => {
     renderSetup();
     await screen.findByLabelText("Username");
-    expect(screen.getByText(/You will be the administrator/)).toBeVisible();
+    expect(screen.getByText(/This account manages your PrintStash installation/)).toBeVisible();
   });
   it("reports every invalid account field at once", async () => {
     const user = userEvent.setup();
@@ -310,10 +314,12 @@ describe("SetupPage", () => {
     expect(screen.getByLabelText("Username")).toHaveAttribute("aria-invalid", "false");
     expect(screen.getByLabelText("Password")).toHaveAttribute("aria-invalid", "true");
   });
-  it("keeps the welcome heading while focus moves to the current step", async () => {
+  it("moves heading focus to the current step", async () => {
     await reachStorage();
-    expect(screen.getByRole("heading", { name: "Welcome to PrintStash" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Your files" })).toHaveFocus();
+    expect(screen.getByRole("heading", { name: "Your files", level: 1 })).toHaveFocus();
+    expect(
+      screen.getByRole("list", { name: "Setup progress" }).querySelector('[aria-current="step"]'),
+    ).toHaveTextContent("Storage");
   });
   it("says an existing folder is connected after setup", async () => {
     await reachStorage();
@@ -343,15 +349,13 @@ describe("SetupPage", () => {
   it("checks storage when continuing without a check", async () => {
     const user = await reachStorage();
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    expect(
-      await screen.findByRole("heading", { name: "Review before creating your account" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Customize previews" })).toBeVisible();
     expect(deps.checkSetupStorage).toHaveBeenCalledTimes(1);
   });
   it("does not recheck storage that already passed", async () => {
     const user = await reachStorage();
     await continueToReview(user);
-    await user.click(screen.getByRole("button", { name: "Back" }));
+    await user.click(screen.getByRole("button", { name: "Edit storage" }));
     expect(await screen.findByText("Storage ready")).toBeVisible();
     await continueToReview(user);
     expect(deps.checkSetupStorage).toHaveBeenCalledTimes(1);
@@ -380,7 +384,7 @@ describe("SetupPage", () => {
   });
   it("reviews each storage folder with plain labels", async () => {
     const user = await reachStorage();
-    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await continueToReview(user);
     const summary = await screen.findByLabelText("Review before creating your account");
     expect(within(summary).getByText("Email")).toBeVisible();
     expect(within(summary).queryByText("Email (optional)")).not.toBeInTheDocument();
@@ -389,15 +393,35 @@ describe("SetupPage", () => {
   });
   it("returns to storage from the review", async () => {
     const user = await reachStorage();
-    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await continueToReview(user);
     await user.click(await screen.findByRole("button", { name: "Edit storage" }));
     expect(screen.getByLabelText("Data directory")).toHaveValue("/data/files");
   });
-  it("opens Appearance for the authenticated administrator", async () => {
+  it("keeps edited appearance when returning from Review", async () => {
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(await screen.findByRole("radio", { name: "Sage" }));
+    await user.click(screen.getByRole("switch", { name: "Floor grid" }));
+    const views = screen.getByRole("combobox", { name: "Preview views" });
+    expect(views).toHaveValue("single");
+    expect(within(views).getByRole("option", { name: "4 angled views" })).toBeInTheDocument();
+    await user.selectOptions(views, "oblique-poles");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    const review = within(
+      screen.getByRole("group", { name: "Review before creating your account" }),
+    );
+    expect(review.getByText("Sage")).toBeVisible();
+    expect(review.getByText("6 views · top and bottom")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Edit appearance" }));
+    expect(screen.getByRole("radio", { name: "Sage" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Floor grid" })).not.toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Preview views" })).toHaveValue("oblique-poles");
+  });
+  it("opens Getting started for the authenticated administrator", async () => {
     const user = await reachStorage();
     await continueToReview(user);
     await user.click(screen.getByRole("button", { name: "Create account" }));
-    await waitFor(() => expect(currentPath()).toBe("/setup-appearance"));
+    await waitFor(() => expect(currentPath()).toBe("/getting-started"));
     expect(deps.storeLogin).toHaveBeenCalledWith(
       "token",
       expect.objectContaining({ username: "admin" }),
@@ -410,7 +434,7 @@ describe("SetupPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Create account" }));
 
-    await waitFor(() => expect(currentPath()).toBe("/setup-appearance"));
+    await waitFor(() => expect(currentPath()).toBe("/getting-started"));
     expect(listTasks()).toHaveLength(0);
   });
   it("keeps existing tasks when account creation fails", async () => {
@@ -430,8 +454,7 @@ describe("SetupPage", () => {
     await continueToReview(user);
     await user.click(screen.getByRole("button", { name: "Create account" }));
     await screen.findByRole("alert");
-    await user.click(screen.getByRole("button", { name: "Back" }));
-    await user.click(screen.getByRole("button", { name: "Back" }));
+    await user.click(screen.getByRole("button", { name: "Edit account" }));
     expect(screen.getByLabelText("Password")).toHaveValue("Password123");
   });
   it("offers login when the creation response was lost after commit", async () => {
@@ -558,9 +581,7 @@ describe("Storage form recovery", () => {
   it("explains the required storage check", async () => {
     await reachStorage();
     expect(
-      screen.getByText(
-        "Continue checks that PrintStash can read and write here. This is not a backup.",
-      ),
+      screen.getByText("PrintStash checks read and write access when you continue."),
     ).toBeVisible();
   });
 
@@ -648,13 +669,13 @@ describe("Storage form recovery", () => {
       checks: [{ code: "data_writable", free_bytes: 412_000_000_000 }],
     });
     const user = await reachStorage();
-    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await continueToReview(user);
     const summary = await screen.findByLabelText("Review before creating your account");
-    const files = within(summary).getByText(/^Local folder · \/data\/files · /);
-    expect(files).toBeVisible();
+    expect(within(summary).getByText("Local folder")).toBeVisible();
+    expect(within(summary).getByText("/data/files")).toBeVisible();
     expect(within(summary).queryByText(/Local disk/)).not.toBeInTheDocument();
     // The size and its unit are joined by no-break spaces so they never split.
-    expect(files.textContent).toMatch(/GB\u00a0available$/);
+    expect(within(summary).getByText(/GB available$/).textContent).toMatch(/GB\u00a0available$/);
   });
 
   it("recovers a failed storage check", async () => {
@@ -690,8 +711,7 @@ describe("Storage form recovery", () => {
     completeCheck({ ready: true, storage_provider: "local", checks: [] });
     await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
     expect(screen.queryByText("Storage ready")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-    await screen.findByRole("heading", { name: "Review before creating your account" });
+    await continueToReview(user);
     expect(deps.checkSetupStorage).toHaveBeenLastCalledWith(
       expect.objectContaining({
         storage_provider_config: expect.objectContaining({ data_dir: "/different/files" }),
@@ -709,7 +729,7 @@ describe("Storage form recovery", () => {
     });
     const user = await reachStorage();
     await continueToReview(user);
-    await user.click(screen.getByRole("button", { name: "Back" }));
+    await user.click(screen.getByRole("button", { name: "Edit storage" }));
     const status = await screen.findByRole("status");
     await within(status).findByText("Storage ready");
     expect(within(status).getByText("Your files")).toBeVisible();
@@ -867,7 +887,7 @@ describe("setup source ownership", () => {
     await continueToReview(user);
 
     await user.click(screen.getByRole("button", { name: "Create account" }));
-    await waitFor(() => expect(currentPath()).toBe("/setup-appearance"));
+    await waitFor(() => expect(currentPath()).toBe("/getting-started"));
 
     const cached = JSON.stringify(
       queryClient

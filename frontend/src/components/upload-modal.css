@@ -211,17 +211,18 @@
   min-width: 0;
   height: 36px;
   padding-inline: 12px;
-  border: 1px solid var(--input);
-  border-radius: var(--radius);
-  background: var(--field-surface);
   color: var(--foreground);
   font-size: 13px;
 }
-.upload-dialog-standard .upload-field:hover {
+.upload-dialog-standard .upload-field:not(:is(select, .dropdown-field)) {
+  border: 1px solid var(--input);
+  border-radius: var(--radius);
+  background: var(--field-surface);
+}
+.upload-dialog-standard .upload-field:not(:is(select, .dropdown-field)):hover {
   border-color: var(--border-strong);
 }
-.upload-dialog-standard .upload-field:focus,
-.upload-dialog-standard .upload-field:focus-within {
+.upload-dialog-standard .upload-field:not(:is(select, .dropdown-field)):focus-within {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }

@@ -16,6 +16,8 @@ import { aJob } from "@/test-support/factories";
 const enabled = searchSettings({ enabled: true, local_models_enabled: true });
 function setup(options: RenderAppOptions = {}) {
   return renderApp(<AiSearchSettings />, {
+    at: "/settings?section=ai-search",
+    routePath: "/settings",
     ...options,
     routes: {
       "GET /api/v1/config/ai-search": json(searchConfiguration()),
@@ -524,7 +526,7 @@ describe("AiSearchSetup", () => {
     expect(within(check).getByText("9 of 9 indexed")).toBeVisible();
     expect(screen.getByRole("button", { name: "Use prepared search" })).toBeVisible();
   });
-  it("lists the preparation steps while indexing", async () => {
+  it("shows the preparation steps as soon as indexing starts", async () => {
     setup({
       routes: {
         "GET /api/v1/config/ai-search/generations": json([
@@ -532,7 +534,6 @@ describe("AiSearchSetup", () => {
         ]),
       },
     });
-    await userEvent.click(await screen.findByText("Preparation details"));
     expect(await screen.findByRole("list", { name: "Preparation steps" })).toBeVisible();
     expect(screen.queryByRole("region", { name: "Index check" })).not.toBeInTheDocument();
   });
@@ -598,11 +599,9 @@ describe("AiSearchSetup", () => {
   });
   it("keeps guided setup available while visiting technical settings", async () => {
     setup();
-    await userEvent.click(await screen.findByRole("button", { name: "Technical settings" }));
+    await userEvent.click(await screen.findByRole("link", { name: "Technical settings" }));
     expect(await screen.findByRole("checkbox", { name: "Enable AI Search" })).toBeVisible();
-    await userEvent.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }),
-    );
+    await userEvent.click(screen.getByRole("link", { name: "Back to AI Search" }));
     expect(
       await screen.findByRole("heading", { name: "Where should AI Search run?" }),
     ).toBeVisible();
@@ -681,7 +680,7 @@ describe("AiSearchSetup", () => {
           request.url,
         ),
       ).length;
-    await userEvent.click((await screen.findAllByRole("button", { name: "Change setup" }))[0]);
+    await userEvent.click(await screen.findByRole("button", { name: "Change setup" }));
     expect(await screen.findByRole("dialog", { name: "AI Search setup" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Prepare my library" })).toBeVisible();
     expect(
@@ -693,7 +692,7 @@ describe("AiSearchSetup", () => {
           ),
         ),
     ).toHaveLength(readsBefore);
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: /Location/ }), "server");
+    await userEvent.click(screen.getByRole("radio", { name: "Another server" }));
     expect(screen.getByRole("form", { name: "Inference server" })).toBeVisible();
   });
   it("explains a failed background preparation", async () => {

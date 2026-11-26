@@ -287,7 +287,7 @@ function ArchiveReview({
                       aria-haspopup="dialog"
                       aria-expanded={pickerOpen}
                       onClick={() => setPickerOpen((value) => !value)}
-                      className="w-full justify-between text-left sm:max-w-56"
+                      className="dropdown-field w-full justify-between text-left sm:max-w-56"
                     >
                       <span className="truncate">
                         {destinationLabel ??

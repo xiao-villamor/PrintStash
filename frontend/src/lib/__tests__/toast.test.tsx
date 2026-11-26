@@ -112,6 +112,46 @@ describe("toast.successAction", () => {
     expect(action).toHaveBeenCalledOnce();
   });
 });
+
+describe("toast.success", () => {
+  it("shows one confirmation for repeated identical messages", async () => {
+    renderApp(<p>the page</p>);
+    await act(async () => {
+      toast.success("Changes saved");
+      toast.success("Changes saved");
+      await vi.advanceTimersByTimeAsync(20);
+    });
+
+    expect(screen.getAllByText("Changes saved")).toHaveLength(1);
+  });
+
+  it("keeps confirmations with different messages", async () => {
+    renderApp(<p>the page</p>);
+    act(() => {
+      toast.success("Changes saved");
+      toast.success("Model uploaded");
+    });
+
+    expect(await screen.findByText("Changes saved")).toBeInTheDocument();
+    expect(await screen.findByText("Model uploaded")).toBeInTheDocument();
+  });
+
+  it("automatically removes a plain confirmation within three seconds", async () => {
+    vi.useFakeTimers();
+    renderApp(<p>the page</p>);
+    await act(async () => {
+      toast.success("Changes saved");
+      await vi.advanceTimersByTimeAsync(20);
+    });
+    expect(screen.getByText("Changes saved")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2979);
+    });
+    expect(screen.queryByText("Changes saved")).not.toBeInTheDocument();
+  });
+});
+
 describe("toast.undo", () => {
   it("invokes undo from the visible notification", async () => {
     renderApp(<p>the page</p>);

@@ -5,8 +5,7 @@ export async function scrollToEnd(page: Page): Promise<void> {
   // Scrolling an empty container reaches nothing: wait for the first page.
   await page.locator("main [data-library-entry]").first().waitFor();
   await page.getByRole("main").evaluate((main) => {
-    const list = main.querySelector<HTMLElement>("[data-library-list]");
-    const scroll = list && list.scrollHeight > list.clientHeight ? list : main;
+    const scroll = main;
     scroll.scrollTop = scroll.scrollHeight;
   });
 }
@@ -20,8 +19,7 @@ export async function scrollToLibraryEntry(
   const { expect } = await import("@playwright/test");
   if (!(await entry.count()))
     await page.getByRole("main").evaluate((main) => {
-      const list = main.querySelector<HTMLElement>("[data-library-list]");
-      const scroll = list && list.scrollHeight > list.clientHeight ? list : main;
+      const scroll = main;
       scroll.scrollTop = 0;
     });
   await expect
@@ -29,8 +27,7 @@ export async function scrollToLibraryEntry(
       async () => {
         if (await entry.count()) return true;
         await page.getByRole("main").evaluate((main) => {
-          const list = main.querySelector<HTMLElement>("[data-library-list]");
-          const scroll = list && list.scrollHeight > list.clientHeight ? list : main;
+          const scroll = main;
           scroll.scrollTop += scroll.clientHeight / 2;
         });
         if (advanceClock) await page.clock.runFor(50);

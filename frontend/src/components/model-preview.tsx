@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { LibraryPreviewPlaceholder } from "@/components/library-card-placeholder";
+import { usePreviewPreferences } from "@/lib/preview-preferences";
 import { keepOffCard } from "@/lib/card-overlay";
 import { previewTransferPolicy, type PreviewSelection } from "@/lib/use-model-previews";
 import { useModelPreviewCard, type PreviewCard } from "@/lib/use-model-preview-card";
@@ -109,7 +110,7 @@ function ViewIndicator({ state, className }: { state: PreviewCard; className?: s
   return (
     <div
       className={cn(
-        "pointer-events-none flex min-w-0 items-center gap-2 bg-card px-2 py-1 text-2xs text-card-foreground dark:bg-card/75",
+        "pointer-events-none flex min-w-0 items-center gap-2 rounded-md bg-card px-2 py-1 text-2xs text-card-foreground dark:bg-card/75",
         className,
       )}
       aria-live="polite"
@@ -187,13 +188,12 @@ function PreviewArrows({ state, size }: { state: PreviewCard; size: "card" | "ga
             <Button
               key={index}
               {...keepOffCard}
-              variant="outline"
+              variant="ghost"
               size="icon"
               data-side={index === 0 ? "previous" : "next"}
               className={cn(
                 "library-preview-arrow pointer-events-auto absolute top-1/2 -translate-y-1/2",
-                // A chip, whatever the image: a photo or render may be dark, light or busy.
-                "border-input bg-card shadow-md hover:bg-card focus-visible:bg-card",
+                "bg-card text-card-foreground shadow-md hover:bg-muted hover:text-foreground focus-visible:bg-card dark:bg-card/90 dark:hover:bg-card dark:focus-visible:bg-card",
                 size === "card" ? "h-8 w-6" : "h-11 w-8",
                 index === 0
                   ? size === "card"
@@ -242,6 +242,7 @@ export function ModelPreviewControls({
   children: ReactNode;
 }) {
   useUiLocale();
+  const { showCardPreviewLabel } = usePreviewPreferences();
   const { preview, views } = state;
   const { navigationViews } = preview;
   const shown = state.view?.id ?? "cover";
@@ -283,13 +284,19 @@ export function ModelPreviewControls({
                 state.setOpen(true);
               }}
             >
-              <span className={showPosition ? "library-preview-view-label" : undefined}>
-                {viewLabel}
-              </span>
-              {showPosition && (
-                <span className="font-mono">
-                  {viewIndex + 1}/{navigationViews.length}
-                </span>
+              {showCardPreviewLabel ? (
+                <>
+                  <span className={showPosition ? "library-preview-view-label" : undefined}>
+                    {viewLabel}
+                  </span>
+                  {showPosition && (
+                    <span className="font-mono">
+                      {viewIndex + 1}/{navigationViews.length}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <Images className="size-3.5" aria-hidden />
               )}
             </Button>
           </div>

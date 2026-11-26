@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { useUiLocale } from "@/lib/i18n";
@@ -39,6 +39,7 @@ export function RevisionPicker({
             type="button"
             variant="outline"
             size="xs"
+            className="dropdown-field"
             data-menu-trigger
             aria-haspopup="menu"
             aria-expanded={open}
@@ -61,16 +62,19 @@ export function RevisionPicker({
               setOpen(false);
               onSelect(file.id);
             }}
-            className={`flex w-full flex-col px-3 py-2 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none ${file.id === selected.id ? "bg-muted" : ""}`}
+            className="field-option aria-checked:bg-accent aria-checked:text-accent-foreground"
           >
-            <span>
-              {revisionName(file)}
-              {file.revision_label ? ` · ${file.revision_label}` : ""}
+            <span className="min-w-0 flex-1">
+              <span className="block">
+                {revisionName(file)}
+                {file.revision_label ? ` · ${file.revision_label}` : ""}
+              </span>
+              <span className="block text-xs text-muted-foreground">
+                {revisionStatusLabel(file.revision_status)}
+                {file.is_recommended ? ` · ${uiText("Recommended")}` : ""}
+              </span>
             </span>
-            <span className="text-xs text-muted-foreground">
-              {revisionStatusLabel(file.revision_status)}
-              {file.is_recommended ? ` · ${uiText("Recommended")}` : ""}
-            </span>
+            {file.id === selected.id && <Check className="size-3.5 shrink-0" aria-hidden />}
           </button>
         ))}
       </DropdownMenu>

@@ -2,15 +2,7 @@
 
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  ArrowUpRight,
-  Box,
-  ChevronRight,
-  Download,
-  Images,
-  Loader2,
-  MoreHorizontal,
-} from "lucide-react";
+import { ArrowUpRight, Box, ChevronRight, Download, Loader2, MoreHorizontal } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { modelPrinterFilesOptions, useModelDetail } from "@/features/library/model-detail";
 import { downloadAuthenticatedFile, getAssetUrl, getModel, updateModel } from "@/lib/api";
@@ -48,6 +40,8 @@ import type { FileRead, MetadataRead, ModelRead } from "@/types";
 const STLViewer = lazy(() =>
   import("@/components/stl-viewer").then((m) => ({ default: m.STLViewer })),
 );
+type PreviewMode = "model" | "images";
+
 const meshTypes = new Set(["stl", "3mf", "obj", "step", "glb", "gltf", "ply", "3dm", "fbx"]);
 
 const sectionAction = "px-0 text-muted-foreground hover:bg-transparent hover:text-foreground";
@@ -154,7 +148,7 @@ export function InspectorContent({
     setDescriptionReviewed(null);
     setDescriptionReviewing(false);
   }
-  const [preview, setPreview] = useState<"model" | "images" | null>(null);
+  const [preview, setPreview] = useState<PreviewMode | null>(null);
   const [sourceId, setSourceId] = useState<number | null>(null);
   const [fileMenu, setFileMenu] = useState<number | null>(null);
   const viewer = useRef<HTMLDivElement>(null);
@@ -169,7 +163,13 @@ export function InspectorContent({
   const imagesFirst = coverImageKind(previews, "full") === "photo";
   const showImages =
     !sourceFile || (hasImages && (preview === "images" || (!preview && imagesFirst)));
-  const canSwitchPreview = Boolean(sourceFile && hasImages);
+  const showTabs = Boolean(sourceFile && hasImages);
+  const viewerLoading = (
+    <span role="status" className="flex items-center justify-center">
+      <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden />
+      <span className="sr-only">{uiText("Loading...")}</span>
+    </span>
+  );
   function download(item: FileRead) {
     void downloadAuthenticatedFile(
       `/api/v1/files/${item.id}/download`,
@@ -366,56 +366,44 @@ export function InspectorContent({
     <div className="library-inspector-body fade-in">
       <div ref={viewer} role="region" aria-label={uiText("Preview")} className="relative">
         {widthHandle}
-        {canSwitchPreview && (
-          <TabBar
-            tabs={[
-              {
-                key: "model",
-                label: (
-                  <>
-                    <Box className="size-4" aria-hidden />
-                    {uiText("3D model")}
-                  </>
-                ),
-              },
-              {
-                key: "images",
-                label: (
-                  <>
-                    <Images className="size-4" aria-hidden />
-                    {uiText("Images")}
-                  </>
-                ),
-              },
-            ]}
-            active={showImages ? "images" : "model"}
-            onChange={setPreview}
-            showIndicator={false}
-            className="mb-2 w-fit max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-muted p-0.5"
-            tabClassName="inline-flex h-8 items-center gap-1.5 px-2.5 text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-            activeTabClassName="bg-primary/20 text-foreground"
-          />
-        )}
         <div
           className="library-inspector-preview library-preview"
-          role={canSwitchPreview ? "tabpanel" : undefined}
-          aria-label={canSwitchPreview ? uiText(showImages ? "Images" : "3D model") : undefined}
           style={{ height: previewSize.height }}
         >
-          <Suspense fallback={<Loader2 className="h-5 w-5 animate-spin" />}>
-            {!showImages && sourceFile ? (
-              <STLViewer
-                url={getAssetUrl(`/api/v1/files/${sourceFile.id}/stl`)}
-                modelId={model.id}
-              />
-            ) : (
-              <InspectorPreviewImages
-                name={model.name}
-                cover={model.thumbnail_url}
-                previews={previews}
-              />
-            )}
-          </Suspense>
+          {showTabs && (
+            <TabBar
+              tabs={[
+                { key: "model", label: uiText("3D model") },
+                { key: "images", label: uiText("Images") },
+              ]}
+              active={showImages ? "images" : "model"}
+              onChange={setPreview}
+              showIndicator={false}
+              className="absolute left-3 top-3 z-10 w-fit max-w-full flex-wrap gap-0.5 rounded-lg border border-border bg-popover p-0.5"
+              tabClassName="inline-flex h-7 items-center px-2.5 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              activeTabClassName="bg-accent text-accent-foreground"
+            />
+          )}
+          <div
+            className="absolute inset-0 flex items-center justify-center"
+            role={showTabs ? "tabpanel" : undefined}
+            aria-label={showTabs ? uiText(showImages ? "Images" : "3D model") : undefined}
+          >
+            <Suspense fallback={viewerLoading}>
+              {!showImages && sourceFile ? (
+                <STLViewer
+                  url={getAssetUrl(`/api/v1/files/${sourceFile.id}/stl`)}
+                  modelId={model.id}
+                />
+              ) : (
+                <InspectorPreviewImages
+                  name={model.name}
+                  cover={model.thumbnail_url}
+                  previews={previews}
+                />
+              )}
+            </Suspense>
+          </div>
         </div>
       </div>
       <InspectorPreviewResize {...previewSize} />
