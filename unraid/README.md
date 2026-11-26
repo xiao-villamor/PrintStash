@@ -164,6 +164,10 @@ not visible unless it is also mounted inside the container.
   mapping against the old database location before uploading anything.
 - **WebUI shows a 502:** the single container supervises both nginx and the API.
   Check its logs and health status; no `api` network alias is needed.
+- **A printer stays offline:** keep **Network** on `bridge` and enter the
+  printer's IP address, not a `.local` name, which does not resolve inside the
+  container. Run the printer's **Diagnostics** for the exact reason; see
+  [connecting to printers](../docs/deployment.md#connecting-to-printers).
 
 The default [Compose file](../docker-compose.yml) is an alternative for
 Docker Compose Manager. It uses the same image and first-run settings.

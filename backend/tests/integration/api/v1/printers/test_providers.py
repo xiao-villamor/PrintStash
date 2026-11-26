@@ -316,6 +316,7 @@ class TestBambuPrinter:
         assert body["ok"] is True
         assert [check["name"] for check in body["checks"]] == [
             "configuration",
+            "address",
             "provider_info",
             "live_status",
         ]

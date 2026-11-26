@@ -10,6 +10,7 @@ than a generic failure an operator cannot act on.
 from __future__ import annotations
 
 import asyncio
+import socket
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
@@ -22,6 +23,7 @@ from app.db.models import (
     PrintJobState,
     User,
 )
+from app.modules.printing import printer_address
 from app.modules.printing.printer_provider import ProviderError
 from tests.factories import (
     build_collection,
@@ -309,6 +311,55 @@ class TestPrinterDiagnostics:
         info_check = next(c for c in body["checks"] if c["name"] == "provider_info")
         assert info_check["ok"] is False
         assert info_check["code"] == "printer_offline"
+
+    def test_diagnostics_names_an_unresolved_local_address(
+        self, client: TestClient, auth_headers, db_session: Session, monkeypatch
+    ):
+        p = build_printer(db_session, name="MK4", moonraker_url="http://mk4.local:7125")
+
+        async def unresolvable(host: str) -> object:
+            raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+
+        monkeypatch.setattr(printer_address, "_system_resolve", unresolvable)
+
+        resp = client.get(f"/api/v1/printers/{p.id}/diagnostics", headers=auth_headers)
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is False
+        address = next(c for c in body["checks"] if c["name"] == "address")
+        assert address == {
+            "name": "address",
+            "ok": False,
+            "code": "printer_mdns_host_unresolved",
+            "detail": "mk4.local",
+        }
+
+    def test_diagnostics_skips_the_printer_after_an_address_failure(
+        self, client: TestClient, auth_headers, db_session: Session, monkeypatch
+    ):
+        p = build_printer(
+            db_session, name="Voron", moonraker_url="http://voron.lan:7125"
+        )
+
+        async def unresolvable(host: str) -> object:
+            raise socket.gaierror(socket.EAI_NONAME, "Name or service not known")
+
+        monkeypatch.setattr(printer_address, "_system_resolve", unresolvable)
+
+        with patch(
+            "app.modules.printing.printer_provider.MoonrakerProvider.info",
+            new_callable=AsyncMock,
+        ) as info:
+            resp = client.get(
+                f"/api/v1/printers/{p.id}/diagnostics", headers=auth_headers
+            )
+
+        assert [c["name"] for c in resp.json()["checks"]] == [
+            "configuration",
+            "address",
+        ]
+        info.assert_not_awaited()
 
     def test_reports_a_printer_that_was_deleted(
         self, client: TestClient, auth_headers, db_session: Session

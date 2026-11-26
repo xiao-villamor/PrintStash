@@ -36,12 +36,30 @@ function checkLabel(name: string) {
   switch (name) {
     case "configuration":
       return uiText("Connection configuration");
+    case "address":
+      return uiText("Printer address");
     case "provider_info":
       return uiText("Printer information");
     case "live_status":
       return uiText("Live status");
     default:
       return name;
+  }
+}
+
+/** What the operator can do about a check failure, when the code names one. */
+function checkRemedy(code: string | undefined) {
+  switch (code) {
+    case "printer_mdns_host_unresolved":
+      return uiText(
+        "Names ending in .local can't be resolved from the PrintStash container. Enter the printer's IP address instead.",
+      );
+    case "printer_host_unresolved":
+      return uiText(
+        "PrintStash can't resolve this name. Check the spelling, or enter the printer's IP address instead.",
+      );
+    default:
+      return null;
   }
 }
 
@@ -142,6 +160,9 @@ export function PrinterDiagnosticsPanel({
                     </td>
                     {showDetail && (
                       <td>
+                        {checkRemedy(check.code) && (
+                          <span className="block">{checkRemedy(check.code)}</span>
+                        )}
                         {check.detail}
                         {check.code && (
                           <code className="block text-xs text-muted-foreground">{check.code}</code>

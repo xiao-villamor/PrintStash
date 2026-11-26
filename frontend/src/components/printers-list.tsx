@@ -1354,19 +1354,22 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
                         ? uiText("Printer URL")
                         : uiText("Printer host or IP")
               }
+              hint={uiText(
+                "Use the printer's IP address. Names ending in .local usually can't be resolved from the PrintStash container.",
+              )}
+              hintId="printer-address-hint"
             >
               <Input
                 id="printer-address"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
+                aria-describedby="printer-address-hint"
                 placeholder={
-                  setupKind === "prusalink"
-                    ? "http://mk4.local"
-                    : setupKind === "octoprint"
-                      ? "http://octopi.local"
-                      : setupKind === "moonraker" || setupKind === "elegoo_neptune4"
-                        ? "http://printer.local:7125"
-                        : "192.168.1.50"
+                  setupKind === "prusalink" || setupKind === "octoprint"
+                    ? "http://192.168.1.50"
+                    : setupKind === "moonraker" || setupKind === "elegoo_neptune4"
+                      ? "http://192.168.1.50:7125"
+                      : "192.168.1.50"
                 }
                 required
               />

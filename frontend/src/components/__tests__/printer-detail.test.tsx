@@ -554,6 +554,60 @@ describe("PrinterDetailPage", () => {
       expect(failed).toHaveTextContent("provider_transport_error");
     });
 
+    it("tells the operator to use an IP when a .local address does not resolve", async () => {
+      renderPrinter({
+        at: "/?tab=diagnostics",
+        routes: {
+          "GET /api/v1/printers/4/diagnostics": json(
+            aPrinterDiagnostics({
+              ok: false,
+              checks: [
+                { name: "configuration", ok: true },
+                {
+                  name: "address",
+                  ok: false,
+                  detail: "mk4.local",
+                  code: "printer_mdns_host_unresolved",
+                },
+              ],
+            }),
+          ),
+        },
+      });
+      const table = await screen.findByRole("table", { name: "Connection check results" });
+      const failed = within(table).getByRole("row", { name: /Printer address/ });
+      expect(failed).toHaveTextContent("Failed");
+      expect(failed).toHaveTextContent(
+        "Names ending in .local can't be resolved from the PrintStash container. Enter the printer's IP address instead.",
+      );
+      expect(failed).toHaveTextContent("mk4.local");
+    });
+
+    it("suggests checking the spelling when another name does not resolve", async () => {
+      renderPrinter({
+        at: "/?tab=diagnostics",
+        routes: {
+          "GET /api/v1/printers/4/diagnostics": json(
+            aPrinterDiagnostics({
+              ok: false,
+              checks: [
+                {
+                  name: "address",
+                  ok: false,
+                  detail: "voron.lan",
+                  code: "printer_host_unresolved",
+                },
+              ],
+            }),
+          ),
+        },
+      });
+      const table = await screen.findByRole("table", { name: "Connection check results" });
+      expect(within(table).getByRole("row", { name: /Printer address/ })).toHaveTextContent(
+        "PrintStash can't resolve this name. Check the spelling, or enter the printer's IP address instead.",
+      );
+    });
+
     it("retries diagnostics after a failed request", async () => {
       const user = userEvent.setup();
       const app = renderPrinter({

@@ -493,6 +493,32 @@ docker compose pull && docker compose up -d
 Read [UPGRADE.md](../UPGRADE.md) and make a backup before updating. Check health
 at `http://localhost:3000/api/v1/health` (use your chosen host/port).
 
+### Connecting to printers
+
+The default bridge network reaches printers on your LAN without extra
+configuration. PrintStash opens each printer connection itself, and Docker
+forwards it through the host, so any printer the host can reach, the container
+can reach too. Host networking is not needed.
+
+If a printer shows as offline, open it and run **Diagnostics**:
+
+- **Use the printer's IP address**, for example `http://192.168.1.50:7125`.
+  Names ending in `.local` (`mk4.local`, `octopi.local`) are resolved with
+  multicast DNS, which does not reach the container, so they usually fail. The
+  **Printer address** check names this case. Give the printer a fixed address
+  with a DHCP reservation in your router so the IP does not change.
+- **Turn on the printer's local network access.** Bambu printers need LAN-only
+  mode, plus developer mode on recent firmware; Elegoo Centauri Carbon 2 needs
+  **LAN Only**. See
+  [provider support](provider-support.md) for each printer.
+- **Check the route from the host.** If the printer is on another VLAN or
+  subnet, or a host firewall filters forwarded traffic, test from the host
+  first (`curl http://<printer-ip>:7125/server/info` for Moonraker). If the
+  host cannot reach it, the container cannot either.
+- **Check for a subnet clash.** Docker's networks use `172.17.0.0/16` and nearby
+  ranges by default. If your LAN uses the same range, set `default-address-pools`
+  in Docker's `daemon.json` to a range your LAN does not use.
+
 ## Advanced deployment: every setting, PostgreSQL and S3
 
 [docker-compose.advanced.yml](../docker-compose.advanced.yml) is the reference
