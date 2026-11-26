@@ -3,10 +3,15 @@ import { acceptsEditingSnapshot } from "./editing";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { type QueryClient, queryOptions, useQueryClient } from "@tanstack/react-query";
 import { settingsTrashKeys } from "@/lib/queries/settings-trash";
-import { deleteMultipartModel, getMultipartModel } from "@/lib/api/multipart-models";
+import {
+  deleteMultipartModel,
+  getMultipartModel,
+  moveMultipartModel,
+} from "@/lib/api/multipart-models";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { queryKeys } from "@/lib/query-client";
+import type { EditingBase } from "@/types/editing";
 import type { MultipartModelRead } from "@/types";
 
 export function multipartDetailOptions(id: number | null, read = getMultipartModel) {
@@ -87,4 +92,24 @@ export async function deleteLibraryMultipart(client: QueryClient, id: number, se
   client.removeQueries({ queryKey: queryKeys.multipartModel(id), exact: true });
   void client.invalidateQueries({ queryKey: settingsTrashKeys.rows });
   refreshLibraryMetadata(client, session);
+}
+
+/** Only a confirmed move retires the set's stale reads; the acknowledged detail is kept. */
+export async function moveLibraryMultipart(
+  client: QueryClient,
+  source: { id: number } & EditingBase,
+  collectionId: number | null,
+  session: number,
+) {
+  requireSessionVersion(session);
+  await client.cancelQueries({ queryKey: queryKeys.multipartModel(source.id), exact: true });
+  requireSessionVersion(session);
+  const moved = await moveMultipartModel(source.id, collectionId, {
+    edit_epoch: source.edit_epoch,
+    edit_version: source.edit_version,
+  });
+  requireSessionVersion(session);
+  client.setQueryData(queryKeys.multipartModel(source.id), moved);
+  refreshLibraryMetadata(client, session, { kind: "multipart", id: source.id });
+  return moved;
 }

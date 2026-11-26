@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import {
   deleteLibraryMultipart,
+  moveLibraryMultipart,
   multipartDetailOptions,
   useMultipartPublication,
 } from "../multipart";
@@ -206,5 +207,77 @@ describe("deleteLibraryMultipart", () => {
       "request_session_changed",
     );
     expect(app.requestsWithMethod("DELETE")).toHaveLength(0);
+  });
+});
+
+describe("moveLibraryMultipart", () => {
+  const source = { id: 7, edit_epoch: detail.edit_epoch, edit_version: detail.edit_version };
+  const moved = (over: Partial<MultipartModelRead> = {}): MultipartModelRead => ({
+    ...detail,
+    edit_version: detail.edit_version + 1,
+    collection_id: 3,
+    collection: "toys",
+    ...over,
+  });
+
+  it("sends only the destination, keeping the acknowledged detail", async () => {
+    const app = renderApp(<p>Library</p>, {
+      seed: [[queryKeys.multipartModel(7), detail]],
+      routes: { "PATCH /api/v1/multipart-models/7": json(moved()) },
+    });
+    await moveLibraryMultipart(app.client, source, 3, getSessionVersion());
+    const [request] = app.requestsWithMethod("PATCH");
+    expect(request?.url).toBe("/api/v1/multipart-models/7");
+    expect(JSON.parse(request!.body)).toEqual({ collection_id: 3 });
+    expect(app.client.getQueryData(queryKeys.multipartModel(7))).toMatchObject({
+      collection_id: 3,
+      edit_version: detail.edit_version + 1,
+    });
+  });
+
+  it("moves a set to the Vault with a null destination", async () => {
+    const app = renderApp(<p>Library</p>, {
+      routes: {
+        "PATCH /api/v1/multipart-models/7": json(moved({ collection_id: null, collection: null })),
+      },
+    });
+    await moveLibraryMultipart(app.client, source, null, getSessionVersion());
+    expect(JSON.parse(app.requestsWithMethod("PATCH")[0]!.body)).toEqual({ collection_id: null });
+  });
+
+  it("preserves the detail after a rejected move", async () => {
+    const app = renderApp(<p>Library</p>, {
+      seed: [[queryKeys.multipartModel(7), detail]],
+      routes: {
+        "PATCH /api/v1/multipart-models/7": json({ detail: "collection_permission_denied" }, 403),
+      },
+    });
+    await expect(moveLibraryMultipart(app.client, source, 3, getSessionVersion())).rejects.toThrow(
+      "collection_permission_denied",
+    );
+    expect(app.client.getQueryData(queryKeys.multipartModel(7))).toEqual(detail);
+  });
+
+  it("rejects a receipt that does not advance the version", async () => {
+    const app = renderApp(<p>Library</p>, {
+      seed: [[queryKeys.multipartModel(7), detail]],
+      routes: {
+        "PATCH /api/v1/multipart-models/7": json(moved({ edit_version: detail.edit_version })),
+      },
+    });
+    await expect(moveLibraryMultipart(app.client, source, 3, getSessionVersion())).rejects.toThrow(
+      "Invalid Multipart acknowledgement",
+    );
+    expect(app.client.getQueryData(queryKeys.multipartModel(7))).toEqual(detail);
+  });
+
+  it("refuses a move under a retired session", async () => {
+    const app = renderApp(<p>Library</p>);
+    const previous = getSessionVersion();
+    act(() => clearLogin());
+    await expect(moveLibraryMultipart(app.client, source, 3, previous)).rejects.toThrow(
+      "request_session_changed",
+    );
+    expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
   });
 });

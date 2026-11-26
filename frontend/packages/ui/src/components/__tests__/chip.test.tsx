@@ -1,9 +1,9 @@
 /*
  * The quiet status pill shared by revision cards and multipart parts.
  *
- * Its contract is that the neutral tone stays neutral and only `destructive`
- * is loud: a tone silently falling back would repaint every ordinary status
- * in the failure colour, or hide a real failure. The icon is decoration, so
+ * Its contract is that the neutral tone stays uncoloured and each semantic tone
+ * tints only lightly: a tone silently falling back would repaint every ordinary
+ * status in the failure colour, or hide a real failure. The icon is decoration, so
  * it must never be announced, and the caller's own attributes must survive.
  */
 
@@ -21,13 +21,17 @@ describe("Chip", () => {
     expect(chip).toHaveClass("text-foreground/80");
   });
 
-  it("takes the destructive tone for an exception", () => {
-    render(<Chip tone="destructive">Failed</Chip>);
+  it.each([
+    ["success", "bg-success/10", "text-success"],
+    ["warning", "bg-warning/10", "text-warning"],
+    ["destructive", "bg-destructive/10", "text-destructive"],
+  ] as const)("tints the %s tone lightly", (tone, fill, text) => {
+    render(<Chip tone={tone}>State</Chip>);
 
-    const chip = screen.getByText("Failed");
-    expect(chip).toHaveAttribute("data-tone", "destructive");
-    expect(chip).toHaveClass("text-destructive");
-    expect(chip).not.toHaveClass("text-foreground/80");
+    const chip = screen.getByText("State");
+    expect(chip).toHaveAttribute("data-tone", tone);
+    expect(chip).toHaveClass(fill, text);
+    expect(chip).not.toHaveClass("bg-foreground/10");
   });
 
   it("hides its icon from assistive technology", () => {

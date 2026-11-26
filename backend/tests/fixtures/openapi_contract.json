@@ -14798,6 +14798,17 @@
       "MultipartModelUpdate": {
         "additionalProperties": false,
         "properties": {
+          "collection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
           "cover_image_url": {
             "anyOf": [
               {
@@ -44181,7 +44192,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Update multipart model metadata",
+        "summary": "Update multipart model metadata or move it to another collection",
         "tags": [
           "multipart-models"
         ]

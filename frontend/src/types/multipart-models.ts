@@ -72,6 +72,8 @@ export interface MultipartModelCreate {
 export interface MultipartModelUpdate {
   name?: string;
   description?: string | null;
+  /** Present moves the set (null is the Vault); absent leaves it in place. */
+  collection_id?: number | null;
 }
 
 export interface MultipartPartsWrite {

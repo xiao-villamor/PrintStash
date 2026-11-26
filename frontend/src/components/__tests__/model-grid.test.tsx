@@ -397,6 +397,15 @@ describe("ModelBrowser", () => {
         await screen.findByText("No parts yet. Pick models below.", {}, { timeout: 10_000 }),
       ).toBeVisible();
     });
+    it("puts Upload beside New multipart set in the header", async () => {
+      renderVault({ models: [aModelListItem({ name: "Benchy" })] });
+      const main = screen.getByRole("main");
+      await within(main).findByText("Benchy");
+      const upload = within(main).getByRole("button", { name: "Upload" });
+      const multipart = within(main).getByRole("button", { name: "New multipart set" });
+      expect(upload.parentElement).toBe(multipart.parentElement);
+      expect(upload).toBeEnabled();
+    });
     it("hides the multipart header button from signed-out readers", async () => {
       renderVault({ auth: signedOutSession(), models: [aModelListItem({ name: "Benchy" })] });
       const main = screen.getByRole("main");

@@ -88,6 +88,7 @@ const LIBRARY_VIEWS: LibraryViewMode[] = ["all", "multipart"];
 
 type DragPayload =
   | { type: "model"; model: OutlinerModelRead }
+  | { type: "multipart"; multipart: OutlinerModelRead }
   | { type: "collection"; collection: CollectionNodeRead };
 
 /** Data every collection drop target in this sidebar registers with dnd-kit. */
@@ -104,6 +105,7 @@ const DROP_TARGET = "bg-primary-soft text-foreground ring-1 ring-inset ring-ring
 
 function canDropOn(source: DragPayload, target: CollectionDropData): boolean {
   if (source.type === "model") return source.model.collection !== target.collectionPath;
+  if (source.type === "multipart") return source.multipart.collection !== target.collectionPath;
   const { id, parent_id, path } = source.collection;
   return (
     target.collectionId !== id &&
@@ -214,22 +216,43 @@ function DraggableModelLeaf({
   );
 }
 
-function MultipartLeaf({ multipart }: { multipart: OutlinerModelRead }) {
+function MultipartLeaf({
+  multipart,
+  isDraggingThisSet,
+  moving,
+  enabled,
+}: {
+  multipart: OutlinerModelRead;
+  isDraggingThisSet: boolean;
+  moving: boolean;
+  enabled: boolean;
+}) {
   "use memo";
   const { t: uiText } = useI18n();
   const router = useRouter();
+  const { attributes, listeners, setNodeRef } = useDraggable({
+    id: `multipart-${multipart.id}`,
+    disabled: !enabled || moving,
+    data: { type: "multipart", multipart } satisfies DragPayload,
+  });
 
   return (
     <Localized>
       <div
+        ref={setNodeRef}
+        {...listeners}
+        {...(enabled && !moving ? attributes : undefined)}
         onDoubleClick={() => router.push(`/multipart-models/${multipart.id}`)}
         role="treeitem"
+        aria-busy={moving || undefined}
         aria-level={(multipart.collection?.split("/").length ?? 0) + 1}
         tabIndex={0}
         onKeyDown={(event) => {
           if (event.key === "Enter") router.push(`/multipart-models/${multipart.id}`);
         }}
-        className="flex cursor-action select-none items-center gap-2 rounded pl-7 pr-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted"
+        className={`flex select-none items-center gap-2 rounded pl-7 pr-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted ${moving ? "cursor-wait" : enabled ? "cursor-grab active:cursor-grabbing" : "cursor-action"} ${
+          isDraggingThisSet ? "pointer-events-none opacity-30" : ""
+        }`}
         title={uiText("{value1} · Multipart set", { value1: String(multipart.name) })}
         data-outliner-entry={`/multipart-models/${multipart.id}`}
       >
@@ -265,7 +288,13 @@ function OutlinerLeaves({
         isDraggingThisModel={dragging?.type === "model" && dragging.model.id === entry.id}
       />
     ) : (
-      <MultipartLeaf key={`multipart-${entry.id}`} multipart={entry} />
+      <MultipartLeaf
+        key={`multipart-${entry.id}`}
+        multipart={entry}
+        moving={pendingMoves.has(`multipart-${entry.id}`)}
+        enabled={dragEnabled}
+        isDraggingThisSet={dragging?.type === "multipart" && dragging.multipart.id === entry.id}
+      />
     ),
   );
 }
@@ -829,6 +858,7 @@ export function FilterSidebarContent({
   onPrinterPresenceChange,
   onCreateCollection,
   onMoveModel,
+  onMoveMultipart,
   onMoveCollection,
   onDeleteCollection,
   loading,
@@ -1110,12 +1140,19 @@ export function FilterSidebarContent({
     if (payload.type === "model" && (!source || source.collection === target.collectionPath))
       return;
 
-    const name = payload.type === "model" ? payload.model.name : payload.collection.name;
+    const name =
+      payload.type === "model"
+        ? payload.model.name
+        : payload.type === "multipart"
+          ? payload.multipart.name
+          : payload.collection.name;
     setPendingMoves((previous) => new Map(previous).set(dragId, { name, target }));
     if (target.collectionPath) expand(target.collectionPath);
     else setAllModelsExpanded(true);
     try {
       if (payload.type === "model" && source) await onMoveModel?.(source, target.collectionPath);
+      else if (payload.type === "multipart")
+        await onMoveMultipart?.(payload.multipart, target.collectionId);
       else if (payload.type === "collection")
         await onMoveCollection?.(payload.collection.id, target.collectionId);
     } catch (error) {
@@ -1607,11 +1644,17 @@ export function FilterSidebarContent({
               >
                 {dragging.type === "collection" ? (
                   <Folder className="size-4 shrink-0" />
+                ) : dragging.type === "multipart" ? (
+                  <Boxes className="size-4 shrink-0" />
                 ) : (
                   <Box className="size-4 shrink-0" />
                 )}
                 <span className="truncate">
-                  {dragging.type === "collection" ? dragging.collection.name : dragging.model.name}
+                  {dragging.type === "collection"
+                    ? dragging.collection.name
+                    : dragging.type === "multipart"
+                      ? dragging.multipart.name
+                      : dragging.model.name}
                 </span>
               </div>
             )}
@@ -1647,6 +1690,10 @@ export interface FilterSidebarProps {
   onPrinterPresenceChange: (presence: "any" | "none" | null) => void;
   onCreateCollection: () => void;
   onMoveModel?: (source: ModelDrag, targetCollection: string | null) => void | Promise<void>;
+  onMoveMultipart?: (
+    multipart: OutlinerModelRead,
+    targetCollectionId: number | null,
+  ) => void | Promise<void>;
   onMoveCollection?: (collectionId: number, newParentId: number | null) => void | Promise<void>;
   onDeleteCollection?: (id: number, recursive: boolean) => void;
   canViewPrinters?: boolean;

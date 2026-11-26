@@ -449,7 +449,7 @@ def delete_multipart_model_cover(
     "/{multipart_model_id}",
     response_model=MultipartModelRead,
     dependencies=[Depends(require_auth)],
-    summary="Update multipart model metadata",
+    summary="Update multipart model metadata or move it to another collection",
 )
 def update_multipart_model(
     multipart_model_id: int,
@@ -472,6 +472,9 @@ def update_multipart_model(
             aggregate.name = name
     if "description" in payload.model_fields_set:
         aggregate.description = payload.description
+    if "collection_id" in payload.model_fields_set:
+        _collection_for_write(session, current_user, payload.collection_id)
+        aggregate.collection_id = payload.collection_id
     removed_uploaded_cover = None
     if "cover_image_url" in payload.model_fields_set:
         if payload.cover_image_url is not None and aggregate.cover_filename is not None:

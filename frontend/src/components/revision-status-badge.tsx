@@ -19,6 +19,19 @@ function statusWord(status: FileRevisionStatus) {
   }
 }
 
+function statusTone(status: FileRevisionStatus) {
+  switch (status) {
+    case "known_good":
+      return "success";
+    case "needs_test":
+      return "warning";
+    case "failed":
+      return "destructive";
+    case "archived":
+      return "neutral";
+  }
+}
+
 function statusIcon(status: FileRevisionStatus) {
   switch (status) {
     case "known_good":
@@ -51,7 +64,7 @@ export function RevisionStatusBadge({
       data-revision-status={status}
       aria-label={accessibleLabel}
       title={accessibleLabel}
-      tone={status === "failed" ? "destructive" : "neutral"}
+      tone={statusTone(status)}
       icon={statusIcon(status)}
     >
       {word}

@@ -171,10 +171,10 @@ describe("MultipartModelDetailPage", () => {
       },
     });
     await screen.findByRole("heading", { name: "Pieces to print" });
-    expect(screen.getByText("Ready")).toBeVisible();
-    expect(screen.getByText("No G-code")).toBeVisible();
-    expect(screen.getByText("Choose variant")).toBeVisible();
-    expect(screen.getByText("Unavailable")).toBeVisible();
+    expect(screen.getByText("Ready")).toHaveAttribute("data-tone", "success");
+    expect(screen.getByText("No G-code")).toHaveAttribute("data-tone", "warning");
+    expect(screen.getByText("Choose variant")).toHaveAttribute("data-tone", "warning");
+    expect(screen.getByText("Unavailable")).toHaveAttribute("data-tone", "destructive");
     const progress = screen.getByRole("progressbar", { name: "Ready to print" });
     expect(progress).toHaveAttribute("aria-valuenow", "2");
     expect(progress).toHaveAttribute("aria-valuemax", "4");

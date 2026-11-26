@@ -14,7 +14,7 @@ import { arrivingKeys, entryKeys } from "@/lib/library-arrivals";
 import { FOLDER_ENTRANCE_MS } from "@/lib/folder-transition";
 import { useEntranceWindow } from "@/lib/entrance-window";
 import { DURATION } from "@/lib/overlay";
-import { deleteLibraryMultipart } from "@/features/library/multipart";
+import { deleteLibraryMultipart, moveLibraryMultipart } from "@/features/library/multipart";
 import { useLibraryNavigationReads } from "@/features/library/navigation-reads";
 import {
   collectionIdentity,
@@ -176,6 +176,7 @@ import {
   ScanSearch,
   FolderTree,
   Boxes,
+  Upload,
 } from "lucide-react";
 import {
   listCollectionChildren,
@@ -2662,6 +2663,23 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     await modelMoves.move(source, targetCollection);
   }
 
+  async function handleMoveMultipart(
+    multipart: OutlinerModelRead,
+    targetCollectionId: number | null,
+  ) {
+    if (!auth.isAuthenticated) {
+      auth.showAuthRequiredToast();
+      return;
+    }
+    const session = getSessionVersion();
+    try {
+      await moveLibraryMultipart(queryClient, multipart, targetCollectionId, session);
+      toast.success(uiText("Moved"));
+    } catch (error) {
+      if (session === getSessionVersion()) toast.error(error);
+    }
+  }
+
   async function handleMoveCollection(collectionId: number, newParentId: number | null) {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
@@ -3285,6 +3303,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             onPrinterPresenceChange={setSelectedPrinterPresence}
             onCreateCollection={handleOpenCreateCollection}
             onMoveModel={handleMoveModel}
+            onMoveMultipart={handleMoveMultipart}
             onMoveCollection={handleMoveCollection}
             onDeleteCollection={handleDeleteCollection}
             canViewPrinters={canViewPrinters}
@@ -3535,26 +3554,25 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   )}
                 </div>
               </div>
-              {newMultipartButton}
               {!showNewCollectionCard && newCollectionButton}
-              {!hasCollectionsPane && (
-                <Button
-                  onClick={() => {
-                    setDropPreload(null);
-                    setDropCollection(null);
-                    setUploadOpen(true);
-                  }}
-                  disabled={!canUploadToVault}
-                  title={
-                    canUploadToVault
-                      ? uiText("Upload artifacts")
-                      : uiText("Sign in and get edit access to upload")
-                  }
-                  className="shrink-0 @3xl/library:h-8 @3xl/library:text-xs"
-                >
-                  {uiText("Upload")}
-                </Button>
-              )}
+              {newMultipartButton}
+              <Button
+                onClick={() => {
+                  setDropPreload(null);
+                  setDropCollection(null);
+                  setUploadOpen(true);
+                }}
+                disabled={!canUploadToVault}
+                title={
+                  canUploadToVault
+                    ? uiText("Upload artifacts")
+                    : uiText("Sign in and get edit access to upload")
+                }
+                className="shrink-0 @3xl/library:h-8 @3xl/library:text-xs"
+              >
+                <Upload className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                {uiText("Upload")}
+              </Button>
             </div>
           </div>
 

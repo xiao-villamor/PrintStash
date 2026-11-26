@@ -393,18 +393,25 @@ function MemberRow({ model }: { model: MultipartModelCandidate }) {
 }
 
 const READINESS_BADGE = {
-  ready: { key: "multipart.readiness.ready", Icon: CircleCheck },
-  "choose-variant": { key: "multipart.readiness.chooseVariant", Icon: Layers },
-  "no-gcode": { key: "multipart.readiness.noGcode", Icon: CircleDashed },
-  unavailable: { key: "multipart.readiness.unavailable", Icon: CircleX },
-} as const satisfies Record<PartReadiness, { key: string; Icon: LucideIcon }>;
+  ready: { key: "multipart.readiness.ready", Icon: CircleCheck, tone: "success" },
+  "choose-variant": {
+    key: "multipart.readiness.chooseVariant",
+    Icon: Layers,
+    tone: "warning",
+  },
+  "no-gcode": { key: "multipart.readiness.noGcode", Icon: CircleDashed, tone: "warning" },
+  unavailable: { key: "multipart.readiness.unavailable", Icon: CircleX, tone: "destructive" },
+} as const satisfies Record<
+  PartReadiness,
+  { key: string; Icon: LucideIcon; tone: "success" | "warning" | "destructive" }
+>;
 
-/** A part's readiness as the shared chip; only a missing Model is loud. */
+/** A part's readiness as the shared chip, tinted by how much attention it needs. */
 function PartReadinessBadge({ readiness }: { readiness: PartReadiness }) {
   const { t } = useI18n();
-  const { key, Icon } = READINESS_BADGE[readiness];
+  const { key, Icon, tone } = READINESS_BADGE[readiness];
   return (
-    <Chip tone={readiness === "unavailable" ? "destructive" : "neutral"} icon={<Icon />}>
+    <Chip tone={tone} icon={<Icon />}>
       {t(key)}
     </Chip>
   );

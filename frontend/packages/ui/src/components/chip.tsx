@@ -5,16 +5,20 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../lib/utils";
 
 /**
- * A quiet status pill: neutral fill, small outline icon, no colour. Only the
- * `destructive` tone is loud, so an exception stands out among ordinary states.
+ * A quiet status pill: a faint tinted fill, a small outline icon and a coloured
+ * word. `neutral` carries no meaning; `success`, `warning` and `destructive` tint
+ * lightly (10%) so a state reads at a glance without turning the list into a
+ * rainbow.
  */
 const chipVariants = cva(
-  "inline-flex h-[22px] max-w-full items-center gap-1.5 whitespace-nowrap rounded-full bg-foreground/10 pr-2 text-xs font-medium leading-none",
+  "inline-flex h-[22px] max-w-full items-center gap-1.5 whitespace-nowrap rounded-full pr-2 text-xs font-medium leading-none",
   {
     variants: {
       tone: {
-        neutral: "text-foreground/80",
-        destructive: "text-destructive",
+        neutral: "bg-foreground/10 text-foreground/80",
+        success: "bg-success/10 text-success",
+        warning: "bg-warning/10 text-warning",
+        destructive: "bg-destructive/10 text-destructive",
       },
       hasIcon: {
         true: "pl-1.5",
