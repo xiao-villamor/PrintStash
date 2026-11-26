@@ -139,7 +139,7 @@ export function MultipartModelCard({
             {t("multipart.badge")}
           </span>
         </div>
-        <div className="flex min-h-40 min-w-0 flex-1 flex-col p-3">
+        <div className="flex min-w-0 flex-1 flex-col p-3">
           <h3
             title={item.name}
             className="line-clamp-2 break-words text-sm font-semibold tracking-tight"

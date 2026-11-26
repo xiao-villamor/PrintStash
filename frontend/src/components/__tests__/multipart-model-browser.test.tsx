@@ -1787,6 +1787,17 @@ describe("MultipartModelCard editing", () => {
   });
 });
 
+describe("MultipartModelCard size", () => {
+  it("lets its body take the height of its content, like a plain Model card", () => {
+    renderApp(<MultipartModelCard item={aMultipart({ part_count: 2, model_count: 2 })} />);
+
+    // A fixed minimum here made every set taller than the Models beside it.
+    const body = screen.getByRole("heading", { name: "Desk organiser" }).parentElement;
+    expect(body).not.toBeNull();
+    expect([...(body?.classList ?? [])].filter((name) => name.startsWith("min-h-"))).toEqual([]);
+  });
+});
+
 describe("Multipart auxiliary tag recovery", () => {
   function renderCard(routes: RouteTable = {}) {
     return renderApp(<MultipartModelCard item={aMultipart()} />, {
