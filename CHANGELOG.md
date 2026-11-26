@@ -66,6 +66,7 @@
 
 ### Changed
 
+- Make multipart sets easier to find and create. **New multipart set** is now a visible button in the Library header, and selecting Models offers **Group as multipart set**. The creation dialog puts the collection beside the name, lists the chosen Models with their previews above the browser, and lets you remove one without leaving the dialog. A multipart set page opens with its cover, counts and how many parts are ready to print, and each part shows whether it is ready, needs G-code, needs a variant choice, or has lost its Model.
 - Collections moves the workspace as one surface and fits the grid after the slide. Model details reflows nearby and wrapping cards without a second layout change when the pane docks. Closing Model details returns focus to a card or control in the library.
 
 - The Trash page uses rounded surfaces and icons on its actions, shows how many days each deleted item has left (the last three days in the destructive tone), and has an illustrated empty state.

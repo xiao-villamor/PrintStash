@@ -18,8 +18,13 @@ import type {
   MultipartModelCreate,
 } from "@/types";
 import { MultipartCreationBrowser } from "@/components/multipart-creation-browser";
+import { MultipartPartsSummary } from "@/components/multipart-parts-summary";
 import { CollectionPicker } from "@/components/collection-picker";
-import { multipartError, detailHref } from "@/lib/multipart-model-presentation";
+import {
+  MULTIPART_INITIAL_LIMIT,
+  multipartError,
+  detailHref,
+} from "@/lib/multipart-model-presentation";
 
 /** The folder a new set starts in: its id is what is saved, its path what is shown chosen. */
 export type CollectionChoice = CollectionNodeRead;
@@ -41,11 +46,14 @@ export function NewMultipartModelModal({
   onClose,
   collection,
   returnTo,
+  initialModels,
 }: {
   open: boolean;
   onClose: () => void;
   collection: CollectionChoice | null;
   returnTo?: string;
+  /** Models to start with, e.g. the ones selected in the library. */
+  initialModels?: ModelListItem[];
 }) {
   useUiLocale();
   const { t } = useI18n();
@@ -54,7 +62,9 @@ export function NewMultipartModelModal({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [target, setTarget] = useState<CollectionChoice | null>(collection);
-  const [selected, setSelected] = useState<Map<number, ModelListItem>>(new Map());
+  const [selected, setSelected] = useState<Map<number, ModelListItem>>(
+    () => new Map((initialModels ?? []).map((model) => [model.id, model])),
+  );
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selectingFolder, setSelectingFolder] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -105,7 +115,7 @@ export function NewMultipartModelModal({
     >
       <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col gap-4">
         <p className="text-sm text-muted-foreground">{t("multipart.pickPartsHelp")}</p>
-        <div className="grid shrink-0 gap-3 sm:grid-cols-2">
+        <div className="grid shrink-0 gap-3 sm:grid-cols-[1fr_1.4fr_16rem]">
           <label className="block space-y-1.5">
             <span className="text-sm font-medium">{t("multipart.name")}</span>
             <Input
@@ -123,31 +133,10 @@ export function NewMultipartModelModal({
               onChange={(event) => setDescription(event.target.value)}
               placeholder={t("multipart.descriptionPlaceholder")}
               rows={1}
-              className="w-full rounded-md border border-input bg-field-surface px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="min-h-9 max-h-32 w-full resize-none rounded-md border border-input bg-field-surface px-3 py-1.5 text-sm text-foreground outline-none [field-sizing:content] focus-visible:ring-2 focus-visible:ring-ring"
             />
           </label>
-        </div>
-        <MultipartCreationBrowser
-          active={open}
-          onBusyChange={setSelectingFolder}
-          selected={selected}
-          onSelectionChange={setSelected}
-          initialCollection={collection}
-          disabled={busy}
-        />
-        {error && (
-          <p
-            role="alert"
-            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          >
-            {error}
-          </p>
-        )}
-        <div className="flex shrink-0 flex-wrap items-end justify-between gap-3 border-t border-border pt-3">
-          <p role="status" className="text-sm text-muted-foreground">
-            {t("multipart.selectedCount", { count: String(selected.size) })}
-          </p>
-          <div className="min-w-0 space-y-1.5 sm:w-64">
+          <div className="min-w-0 space-y-1.5">
             <span className="text-sm font-medium">{t("multipart.collectionLabel")}</span>
             <DropdownMenu
               open={pickerOpen}
@@ -195,7 +184,37 @@ export function NewMultipartModelModal({
               <p className="break-words text-xs text-muted-foreground">{target.display_path}</p>
             )}
           </div>
-
+        </div>
+        <MultipartPartsSummary
+          models={[...selected.values()]}
+          limit={MULTIPART_INITIAL_LIMIT}
+          disabled={busy}
+          onRemove={(modelId) => {
+            const next = new Map(selected);
+            next.delete(modelId);
+            setSelected(next);
+          }}
+        />
+        <MultipartCreationBrowser
+          active={open}
+          onBusyChange={setSelectingFolder}
+          selected={selected}
+          onSelectionChange={setSelected}
+          initialCollection={collection}
+          disabled={busy}
+        />
+        {error && (
+          <p
+            role="alert"
+            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          >
+            {error}
+          </p>
+        )}
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
+          <p role="status" className="text-sm text-muted-foreground">
+            {t("multipart.selectedCount", { count: String(selected.size) })}
+          </p>
           <div className="flex w-full justify-end gap-2 sm:w-auto">
             <Button type="button" variant="outline" onClick={closeModal} disabled={busy}>
               {t("multipart.cancel")}

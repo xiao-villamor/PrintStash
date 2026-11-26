@@ -175,6 +175,7 @@ import {
   ListChecks,
   ScanSearch,
   FolderTree,
+  Boxes,
 } from "lucide-react";
 import {
   listCollectionChildren,
@@ -591,6 +592,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [compact] = useState(() => readVaultPreference("ps-vault-density") === "compact");
   const [recentFoldersOpen, setRecentFoldersOpen] = useState(false);
   const [multipartCreateOpen, setMultipartCreateOpen] = useState(false);
+  // Models handed to the dialog when it opens from the selection bar.
+  const [multipartSeed, setMultipartSeed] = useState<ModelListItem[]>([]);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [tagTarget, setTagTarget] = useState<ModelListItem | null>(null);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
@@ -2908,6 +2911,24 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       {uiText("New collection")}
     </Button>
   );
+  const canCreateMultipart =
+    auth.isAuthenticated &&
+    docView === "models" &&
+    (!!user?.is_superuser || canWriteCollection(selectedCollectionRow));
+  const newMultipartButton = canCreateMultipart ? (
+    <Button
+      variant="outline"
+      size="xs"
+      className="shrink-0 @3xl/library:h-8"
+      onClick={() => {
+        setMultipartSeed([]);
+        setMultipartCreateOpen(true);
+      }}
+    >
+      <Boxes className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      {t("multipart.new")}
+    </Button>
+  ) : null;
   const showNewCollectionCard = canCreateCollection && !loading && visibleCollections.length > 0;
 
   const libraryMoreActions = (
@@ -2939,6 +2960,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
           onClick={() => {
             setMoreOpen(false);
+            setMultipartSeed([]);
             setMultipartCreateOpen(true);
           }}
         >
@@ -3193,8 +3215,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           onClose={() => setMultipartCreateOpen(false)}
         >
           <NewMultipartModelModal
-            key={selectedCollectionRow?.id ?? "vault"}
+            key={`${selectedCollectionRow?.id ?? "vault"}:${multipartSeed.map((model) => model.id).join(",")}`}
             open={multipartCreateOpen}
+            initialModels={multipartSeed}
             onClose={() => setMultipartCreateOpen(false)}
             collection={selectedCollectionRow ?? null}
             returnTo={currentLibraryHref}
@@ -3512,6 +3535,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   )}
                 </div>
               </div>
+              {newMultipartButton}
               {!showNewCollectionCard && newCollectionButton}
               {!hasCollectionsPane && (
                 <Button
@@ -4137,6 +4161,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               }
               onApplyTags={tagSelection}
               onDeleteSelection={deleteSelection}
+              onGroupAsMultipart={
+                canCreateMultipart && selectedIdList.length > 0
+                  ? () => {
+                      setMultipartSeed(visibleModels.filter((model) => selectedIds.has(model.id)));
+                      setMultipartCreateOpen(true);
+                    }
+                  : undefined
+              }
               onClear={clearSelection}
             />
           </Suspense>

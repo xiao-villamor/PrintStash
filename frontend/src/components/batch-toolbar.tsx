@@ -1,10 +1,10 @@
 "use client";
 
 import { uiText } from "@/lib/locale";
-import { useUiLocale } from "@/lib/i18n";
+import { useI18n, useUiLocale } from "@/lib/i18n";
 
 import { useId, useMemo, useState } from "react";
-import { FolderInput, Pencil, Plus, Tag, Trash2, X } from "lucide-react";
+import { Boxes, FolderInput, Pencil, Plus, Tag, Trash2, X } from "lucide-react";
 import { CollectionNodeRead, TagRead } from "@/types";
 import { CollectionPicker } from "@/components/collection-picker";
 import { FormField } from "@/components/ui/form-field";
@@ -31,6 +31,7 @@ export function BatchToolbar({
   onRenameCollections,
   onApplyTags,
   onDeleteSelection,
+  onGroupAsMultipart,
   onClear,
 }: {
   modelCount: number;
@@ -45,9 +46,12 @@ export function BatchToolbar({
   onRenameCollections: (names: Record<number, string>) => void;
   onApplyTags: (add: string[], remove: string[]) => void;
   onDeleteSelection: () => void;
+  /** Offered for a plain selection of models; opens the multipart dialog with them. */
+  onGroupAsMultipart?: () => void;
   onClear: () => void;
 }) {
   useUiLocale();
+  const { t } = useI18n();
   const [moveOpen, setMoveOpen] = useState(false);
   const [tagOpen, setTagOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
@@ -91,6 +95,20 @@ export function BatchToolbar({
               {uiText("Tag")}
             </button>
           )}
+          {multipartCount === 0 &&
+            modelCount > 0 &&
+            selectedCollections.length === 0 &&
+            onGroupAsMultipart && (
+              <button
+                type="button"
+                onClick={onGroupAsMultipart}
+                disabled={busy}
+                className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                <Boxes className="h-4 w-4 text-muted-foreground" />
+                {t("multipart.groupSelection")}
+              </button>
+            )}
           {multipartCount === 0 && selectedCollections.length > 0 && (
             <button
               type="button"

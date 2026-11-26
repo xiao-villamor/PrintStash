@@ -392,8 +392,11 @@ test.describe("multipart models", () => {
 
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
-    await page.getByRole("main").getByRole("button", { name: "More", exact: true }).click();
-    await page.getByRole("menuitem", { name: "New multipart set", exact: true }).click();
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: "New multipart set", exact: true })
+      .click();
+    await expect(page.getByRole("region", { name: "Parts in this set" })).toBeVisible();
     await page.getByLabel("Name", { exact: true }).fill("Desk organiser");
     await page.getByLabel("Description").fill("A complete desk organiser");
     await page.getByRole("button", { name: "Collection", exact: true }).click();

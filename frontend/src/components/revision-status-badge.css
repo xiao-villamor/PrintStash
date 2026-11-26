@@ -16,6 +16,7 @@
   line-height: 1;
   white-space: nowrap;
 }
-.revision-status-badge[data-revision-status="failed"] {
+.revision-status-badge[data-revision-status="failed"],
+.revision-status-badge[data-tone="destructive"] {
   color: var(--destructive);
 }

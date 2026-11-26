@@ -12,6 +12,11 @@ import { useUiLocale } from "@/lib/i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  CircleCheck,
+  CircleDashed,
+  CircleX,
+  Layers,
+  type LucideIcon,
   History,
   Boxes,
   CheckSquare,
@@ -24,6 +29,7 @@ import {
   Upload,
 } from "lucide-react";
 
+import "./revision-status-badge.css";
 import { Modal } from "@/components/ui/modal";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
@@ -66,7 +72,12 @@ import { queryKeys } from "@/lib/query-client";
 
 import "./library-items.css";
 import { Count, Cover } from "@/components/multipart-model-presentation";
-import { multipartError } from "@/lib/multipart-model-presentation";
+import {
+  multipartError,
+  partReadiness,
+  printablePartCount,
+  type PartReadiness,
+} from "@/lib/multipart-model-presentation";
 
 function modelLabel(model: MultipartModelCandidate, unavailable: string): string {
   return model.available && model.name ? model.name : unavailable;
@@ -381,6 +392,28 @@ function MemberRow({ model }: { model: MultipartModelCandidate }) {
   );
 }
 
+const READINESS_BADGE = {
+  ready: { key: "multipart.readiness.ready", Icon: CircleCheck },
+  "choose-variant": { key: "multipart.readiness.chooseVariant", Icon: Layers },
+  "no-gcode": { key: "multipart.readiness.noGcode", Icon: CircleDashed },
+  unavailable: { key: "multipart.readiness.unavailable", Icon: CircleX },
+} as const satisfies Record<PartReadiness, { key: string; Icon: LucideIcon }>;
+
+/** A part's readiness, in the same quiet pill revisions use; only a missing Model is loud. */
+function PartReadinessBadge({ readiness }: { readiness: PartReadiness }) {
+  const { t } = useI18n();
+  const { key, Icon } = READINESS_BADGE[readiness];
+  return (
+    <span
+      className="revision-status-badge"
+      data-tone={readiness === "unavailable" ? "destructive" : undefined}
+    >
+      <Icon aria-hidden className="size-3 shrink-0" />
+      {t(key)}
+    </span>
+  );
+}
+
 function MultipartOverview({
   model,
   onAddFirst,
@@ -418,6 +451,75 @@ function MultipartOverview({
           {model.description}
         </p>
       )}
+      <section
+        aria-label={t("multipart.detailsHeading")}
+        className="mb-4 flex min-w-0 flex-wrap gap-5 border border-border bg-card p-5"
+      >
+        <div
+          className="library-preview relative h-40 w-full shrink-0 overflow-hidden border border-border sm:w-64"
+          title={
+            model.cover_image_uploaded
+              ? t("multipart.uploadedCover")
+              : model.cover_image_url
+                ? t("multipart.customCover")
+                : coverMember
+                  ? modelLabel(coverMember, t("multipart.unavailable"))
+                  : model.name
+          }
+        >
+          <Cover src={cover} alt={model.name} />
+        </div>
+        <div className="flex min-w-0 flex-1 basis-64 flex-col justify-between gap-4">
+          <dl className="flex flex-wrap gap-x-8 gap-y-3">
+            <div>
+              <dt className="text-xs capitalize text-muted-foreground">
+                {t("multipart.parts", { count: "" }).trim()}
+              </dt>
+              <dd className="mt-1 text-xl font-semibold">{model.part_count}</dd>
+            </div>
+            <div>
+              <dt className="text-xs capitalize text-muted-foreground">
+                {t("multipart.pieces", { count: "" }).trim()}
+              </dt>
+              <dd className="mt-1 text-xl font-semibold">
+                {model.parts.reduce((total, part) => total + part.quantity, 0)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">{uiText("Models")}</dt>
+              <dd className="mt-1 text-xl font-semibold">{model.model_count}</dd>
+            </div>
+          </dl>
+          {model.parts.length > 0 && (
+            <div className="max-w-sm">
+              <div className="mb-2 flex justify-between text-xs text-muted-foreground">
+                <span>{t("multipart.readyToPrint")}</span>
+                <span className="text-foreground">
+                  {t("multipart.readyOf", {
+                    ready: String(printablePartCount(model.parts)),
+                    total: String(model.parts.length),
+                  })}
+                </span>
+              </div>
+              <div
+                role="progressbar"
+                aria-label={t("multipart.readyToPrint")}
+                aria-valuemin={0}
+                aria-valuemax={model.parts.length}
+                aria-valuenow={printablePartCount(model.parts)}
+                className="h-1.5 bg-muted"
+              >
+                <div
+                  className="h-full bg-primary"
+                  style={{
+                    width: `${(printablePartCount(model.parts) / model.parts.length) * 100}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
       <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <section
           className="min-w-0 overflow-hidden border border-border bg-card"
@@ -475,6 +577,9 @@ function MultipartOverview({
                     <span className="text-xs text-muted-foreground">
                       {part.models.length > 1 ? t("multipart.variants") : ""}
                     </span>
+                    <span className="ml-auto">
+                      <PartReadinessBadge readiness={partReadiness(part)} />
+                    </span>
                   </div>
                   <div className="space-y-3 pl-8">
                     {part.models.map((member) => (
@@ -494,49 +599,7 @@ function MultipartOverview({
 
         <aside className="min-w-0 space-y-4">
           <section className="overflow-hidden border border-border bg-card">
-            <div
-              className="library-preview relative h-[200px] border-b border-border"
-              title={
-                model.cover_image_uploaded
-                  ? t("multipart.uploadedCover")
-                  : model.cover_image_url
-                    ? t("multipart.customCover")
-                    : coverMember
-                      ? modelLabel(coverMember, t("multipart.unavailable"))
-                      : model.name
-              }
-            >
-              <Cover src={cover} alt={model.name} />
-            </div>
             <dl className="grid grid-cols-2 gap-x-5 gap-y-3 px-5 py-4 text-xs">
-              <div>
-                <dt className="capitalize text-muted-foreground">
-                  {t("multipart.parts", { count: "" }).trim()}
-                </dt>
-                <dd className="mt-1 text-sm">
-                  <Count
-                    count={model.part_count}
-                    one={t("multipart.part")}
-                    many={t("multipart.parts")}
-                  />{" "}
-                  ·{" "}
-                  <Count
-                    count={model.parts.reduce((total, part) => total + part.quantity, 0)}
-                    one={t("multipart.piece")}
-                    many={t("multipart.pieces")}
-                  />
-                </dd>
-              </div>
-              <div>
-                <dt className="capitalize text-muted-foreground">{uiText("Models")}</dt>
-                <dd className="mt-1 text-sm">
-                  <Count
-                    count={model.model_count}
-                    one={t("multipart.model")}
-                    many={t("multipart.models")}
-                  />
-                </dd>
-              </div>
               <div>
                 <dt className="text-muted-foreground">{t("multipart.collectionLabel")}</dt>
                 <dd className="mt-1 text-sm">

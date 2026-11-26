@@ -386,6 +386,37 @@ describe("ModelBrowser", () => {
       await user.click(screen.getByRole("menuitem", { name: "New multipart set" }));
       expect(screen.getByRole("dialog", { name: "New multipart set" })).toBeVisible();
     });
+    it("opens multipart creation from the visible header button", async () => {
+      const user = userEvent.setup();
+      renderVault({ models: [aModelListItem({ name: "Benchy" })] });
+      const main = screen.getByRole("main");
+      await within(main).findByText("Benchy");
+      await user.click(within(main).getByRole("button", { name: "New multipart set" }));
+      const dialog = await screen.findByRole("dialog", { name: "New multipart set" });
+      expect(within(dialog).getByText("No parts yet. Pick models below.")).toBeVisible();
+    });
+    it("hides the multipart header button from signed-out readers", async () => {
+      renderVault({ auth: signedOutSession(), models: [aModelListItem({ name: "Benchy" })] });
+      const main = screen.getByRole("main");
+      await within(main).findByText("Benchy");
+      expect(within(main).queryByRole("button", { name: "New multipart set" })).toBeNull();
+    });
+    it("groups the selected models into a new multipart set", async () => {
+      const user = userEvent.setup();
+      renderVault({
+        models: [
+          aModelListItem({ id: 1, name: "Benchy" }),
+          aModelListItem({ id: 2, name: "Calibration cube" }),
+        ],
+      });
+      await within(screen.getByRole("main")).findByText("Benchy");
+      await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
+      await user.click(await screen.findByRole("button", { name: "Group as multipart set" }));
+      const dialog = await screen.findByRole("dialog", { name: "New multipart set" });
+      const summary = within(dialog).getByRole("region", { name: "Parts in this set" });
+      expect(within(summary).getByText("Benchy")).toBeVisible();
+      expect(within(summary).queryByText("Calibration cube")).toBeNull();
+    });
     it("supports the keyboard selection lifecycle", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
