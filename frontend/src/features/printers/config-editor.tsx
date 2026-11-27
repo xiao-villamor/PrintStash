@@ -1,7 +1,7 @@
 "use client";
 
 import { useBlocker } from "@tanstack/react-router";
-import { FileCog, Folder, FolderOpen, LockKeyhole, RefreshCcw } from "lucide-react";
+import { FileCog, Folder, FolderOpen, LockKeyhole } from "lucide-react";
 import { type CSSProperties, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -325,7 +325,6 @@ function ConfigFileWorkspace({
           <h2 className="text-sm font-semibold">{uiText("Configuration files")}</h2>
         </div>
         <Button variant="outline" size="sm" onClick={onRefresh}>
-          <RefreshCcw aria-hidden className="size-4" />
           {uiText("Refresh files")}
         </Button>
       </header>

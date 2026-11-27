@@ -417,7 +417,7 @@ function MaterialEditor({
               )}
               <Button
                 size="xs"
-                variant="ghost"
+                variant="danger"
                 disabled={disabled}
                 onClick={() =>
                   setSlots((current) => current.filter((row) => row.slot_key !== slot.slot_key))

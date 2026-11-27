@@ -1,13 +1,4 @@
-import {
-  ArrowLeft,
-  ArrowRight,
-  Boxes,
-  CheckCircle2,
-  Clock3,
-  History,
-  Plus,
-  RefreshCw,
-} from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, CheckCircle2, Clock3, History } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -117,10 +108,7 @@ function BuildList() {
             </Button>
           ) : (
             <Button asChild>
-              <Link href="/?type=multipart">
-                <Plus className="h-4 w-4" />
-                {t("build.chooseMultipart")}
-              </Link>
+              <Link href="/?type=multipart">{t("build.chooseMultipart")}</Link>
             </Button>
           )
         }
@@ -273,7 +261,6 @@ function BuildList() {
                     composition.data.effective_role !== "admin")
                 }
               >
-                <Plus className="h-4 w-4" />
                 {t("build.create")}
               </Button>
             </div>
@@ -304,7 +291,6 @@ function BuildList() {
                   if (compositionId > 0) void composition.refetch();
                 }}
               >
-                <RefreshCw className="h-4 w-4" />
                 {t("build.refresh")}
               </Button>
             </div>

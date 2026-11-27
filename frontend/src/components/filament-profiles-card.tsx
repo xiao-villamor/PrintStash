@@ -30,17 +30,7 @@ import { useFleetSummary, usePrinters, useSpoolmanStatus, useVaultConfig } from 
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
-import {
-  Check,
-  ChevronRight,
-  Loader2,
-  Plus,
-  RefreshCw,
-  Trash2,
-  X,
-  Pencil,
-  type LucideIcon,
-} from "lucide-react";
+import { Check, ChevronRight, Loader2, RefreshCw, X, Pencil, type LucideIcon } from "lucide-react";
 import { FilamentSpool } from "@/components/ui/filament-spool";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { FilamentSpoolPrice } from "@/components/filament-spool-price";
@@ -411,7 +401,7 @@ function ProfileRow({
             {uiText(editing ? "profiles.closeEditorLabel" : "Edit")}
           </Button>
           {onDelete && (
-            <Button variant="ghost" size="sm" onClick={onDelete} aria-label={deleteLabel}>
+            <Button variant="danger" size="sm" onClick={onDelete} aria-label={deleteLabel}>
               {uiText("Delete")}
             </Button>
           )}
@@ -1124,7 +1114,6 @@ export function FilamentProfilesCard() {
           else setShowAddPrinter((value) => !value);
         }}
       >
-        <Plus className="h-3.5 w-3.5" />
         {translateUiText(
           locale,
           activeTab === "filaments" ? uiText("New filament preset") : uiText("New printer preset"),
@@ -1527,7 +1516,7 @@ export function FilamentProfilesCard() {
                                     <RowStatus state={rowStatus[`f${profile.id}`]} />
                                     <Button
                                       type="button"
-                                      variant="ghost"
+                                      variant="danger"
                                       size="xs"
                                       onClick={() =>
                                         setDeleteTarget({
@@ -1546,7 +1535,6 @@ export function FilamentProfilesCard() {
                                       title={uiText("Delete")}
                                       className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                                     >
-                                      <Trash2 className="h-3.5 w-3.5" aria-hidden />
                                       {uiText("Delete")}
                                     </Button>
                                   </>
@@ -1860,7 +1848,7 @@ export function FilamentProfilesCard() {
                                 <RowStatus state={rowStatus[`p${profile.id}`]} />
                                 <Button
                                   type="button"
-                                  variant="ghost"
+                                  variant="danger"
                                   size="xs"
                                   onClick={() =>
                                     setDeleteTarget({
@@ -1879,7 +1867,6 @@ export function FilamentProfilesCard() {
                                   title={uiText("Delete")}
                                   className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                                 >
-                                  <Trash2 className="h-3.5 w-3.5" aria-hidden />
                                   {uiText("Delete")}
                                 </Button>
                               </div>

@@ -2,7 +2,7 @@ import { currentLocale, type MessageKey } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, HardDrive, HeartPulse } from "lucide-react";
+import { AlertTriangle, CheckCircle2, HardDrive } from "lucide-react";
 
 import { AuditSchedulePanel } from "@/components/audit-schedule-panel";
 
@@ -203,7 +203,6 @@ export function MaintenancePanel() {
                 loading={busy}
                 disabled={busy || history.isPending || history.isError || denied || isActive(run)}
               >
-                <HeartPulse className="size-3.5" aria-hidden />
                 {t("maintenance.runQuick")}
               </Button>
             </div>

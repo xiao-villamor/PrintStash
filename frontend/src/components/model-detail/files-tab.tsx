@@ -4,7 +4,7 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { useState, type ReactNode } from "react";
-import { FileText, FolderSync, MoreHorizontal, RotateCcw, Tags, Trash2 } from "lucide-react";
+import { FileText, FolderSync, MoreHorizontal, Tags, Trash2 } from "lucide-react";
 
 import {
   downloadAuthenticatedFile,
@@ -331,7 +331,6 @@ export function FilesTab({
                       disabled={busyFileId !== null}
                       onClick={() => void restore(file)}
                     >
-                      <RotateCcw className="h-4 w-4" />
                       {uiText("Restore")}
                     </Button>
                   )}

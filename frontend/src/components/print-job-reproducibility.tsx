@@ -4,7 +4,7 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { lazy, Suspense, useState, type ComponentType } from "react";
-import { Download, Eye, ExternalLink, FileWarning, Loader2 } from "lucide-react";
+import { ExternalLink, FileWarning, Loader2 } from "lucide-react";
 
 import { downloadAuthenticatedFile } from "@/lib/api/request";
 import { useOptionalI18n } from "@/lib/i18n";
@@ -225,7 +225,6 @@ export function PrintJobReproducibility({
               onClick={() => void downloadArtifact()}
               aria-label={uiText("Download archived artifact")}
             >
-              <Download className="h-3.5 w-3.5" aria-hidden />
               {uiText("Download archived artifact")}
             </Button>
           )}
@@ -247,7 +246,6 @@ export function PrintJobReproducibility({
               onClick={() => setToolpathPreviewOpen(true)}
               aria-label={previewToolpathLabel}
             >
-              <Eye className="h-3.5 w-3.5" aria-hidden />
               {previewToolpathLabel}
             </Button>
           )}

@@ -8,8 +8,6 @@ import {
   Clock3,
   FileCheck2,
   Inbox,
-  RefreshCw,
-  Trash2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -168,7 +166,6 @@ function ImportList({
                         });
                     }}
                   >
-                    <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
                     {t("inbox.retry")}
                   </Button>
                 )}
@@ -190,12 +187,11 @@ function ImportList({
                   <Button
                     type="button"
                     size="xs"
-                    variant="outline"
+                    variant="danger"
                     aria-label={t("inbox.delete")}
                     title={t("inbox.delete")}
                     loading={deletingId === item.id}
                     onClick={() => onDelete(item)}
-                    className="text-muted-foreground hover:text-destructive"
                   >
                     {uiText("Dismiss…")}
                   </Button>
@@ -430,10 +426,9 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
             <Button
               type="button"
               size="xs"
-              variant="outline"
+              variant="danger"
               onClick={() => setClearCompletedOpen(true)}
             >
-              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
               {t("inbox.clearCompleted")}
             </Button>
           )}

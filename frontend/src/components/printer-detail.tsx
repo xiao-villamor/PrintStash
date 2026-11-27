@@ -104,17 +104,7 @@ import "./printer-detail-content.css";
 import "./printer-detail.css";
 import "./printer-sections.css";
 import { PRINTER_MODEL_OPTIONS, providerAddress, providerLabel } from "@/lib/printer-providers";
-import {
-  FolderOpen,
-  History,
-  ListOrdered,
-  OctagonAlert,
-  Pause,
-  Play,
-  Plus,
-  RefreshCcw,
-  Square,
-} from "lucide-react";
+import { ListOrdered, OctagonAlert, Pause, Play, Square } from "lucide-react";
 
 const FleetAddJobDialog = lazy(() =>
   import("./fleet-add-job").then((module) => ({ default: module.FleetAddJobDialog })),
@@ -720,13 +710,11 @@ function PrinterDetailView({
                 printer.capabilities.can_upload &&
                 printer.capabilities.can_start && (
                   <Button size="xs" onClick={() => setAddJobOpen(true)}>
-                    <Plus className="size-3.5" aria-hidden="true" />
                     {uiText("Add to queue")}
                   </Button>
                 )}
               {printer.capabilities.can_list_files && (
                 <Button variant="outline" size="xs" onClick={() => setActiveTab("files")}>
-                  <FolderOpen className="size-3.5" aria-hidden="true" />
                   {uiText("Browse files")}
                 </Button>
               )}
@@ -781,7 +769,6 @@ function PrinterDetailView({
         <div className="flex flex-wrap items-center gap-2">
           {activeState && printer.capabilities.can_list_files && (
             <Button variant="outline" size="xs" onClick={() => setActiveTab("files")}>
-              <FolderOpen className="size-3.5" aria-hidden="true" />
               {uiText("Browse files")}
             </Button>
           )}
@@ -796,7 +783,6 @@ function PrinterDetailView({
           )}
           {!bambu && (
             <Button size="xs" variant="outline" onClick={() => setActiveTab("jobs")}>
-              <History className="size-3.5" aria-hidden="true" />
               {uiText("Print history")}
             </Button>
           )}
@@ -942,7 +928,6 @@ function PrinterDetailView({
                         }}
                         disabled={activeTab === "config" && loadingConfig}
                       >
-                        <RefreshCcw className="h-3.5 w-3.5" />
                         {uiText("Refresh")}
                       </Button>
                     </>
@@ -1477,7 +1462,7 @@ export function PrinterSettings({
       {onRemove && (
         <Button
           type="button"
-          variant="ghost"
+          variant="danger"
           className="mr-auto text-destructive"
           disabled={saving}
           onClick={onRemove}

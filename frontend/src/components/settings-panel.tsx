@@ -95,7 +95,6 @@ import {
   Download,
   Eraser,
   Gpu,
-  Hourglass,
   Files,
   FolderSync,
   HardDrive,
@@ -103,7 +102,6 @@ import {
   Activity,
   Info,
   Images,
-  KeyRound,
   Copy,
   Loader2,
   Palette,
@@ -116,7 +114,6 @@ import {
   Users,
   Clock,
   CircleDollarSign,
-  RefreshCw,
   Globe,
   Folder,
 } from "lucide-react";
@@ -2170,7 +2167,6 @@ export function SettingsPanel() {
         (gcPlan !== null && ["preview", "quarantined", "finalizing"].includes(gcPlan.state))
       }
     >
-      <Hourglass className="size-3.5" aria-hidden="true" />
       {trashBusy === "gc" ? uiText("Preparing") : uiText("Review expired")}
     </Button>
   );
@@ -2793,10 +2789,6 @@ export function SettingsPanel() {
             trashPage ? (
               <>
                 <Button size="sm" variant="outline" onClick={loadTrash} disabled={trashLoading}>
-                  <RefreshCw
-                    className={cn("size-3.5", trashLoading && "animate-spin")}
-                    aria-hidden="true"
-                  />
                   {t("Refresh")}
                 </Button>
                 {user?.is_superuser && reviewExpiredButton}
@@ -3124,7 +3116,6 @@ export function SettingsPanel() {
                             size="sm"
                             onClick={() => setRestartConfirmOpen(true)}
                           >
-                            <RotateCcw className="h-3.5 w-3.5" aria-hidden />
                             {t("settings.restartAction")}
                           </Button>
                         ) : undefined
@@ -4129,7 +4120,6 @@ export function SettingsPanel() {
                               apiKeysQuery.isPending
                             }
                           >
-                            <KeyRound className="h-3.5 w-3.5" />
                             {uiText("Generate")}
                           </Button>
                         </div>

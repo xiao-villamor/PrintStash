@@ -129,7 +129,7 @@ export function FavoriteSavedViewRow({
             {uiText("Duplicate")}
           </Button>
           <Button
-            variant="ghost"
+            variant="danger"
             size="xs"
             role="menuitem"
             className="w-full justify-start text-destructive"

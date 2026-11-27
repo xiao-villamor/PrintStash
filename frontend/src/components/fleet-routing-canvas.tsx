@@ -486,7 +486,6 @@ function RoutingMap({ rows, printers, jobs, onEdit, onAdd, onJobs }: Props) {
                 )}
               </dl>
               <Button variant="outline" size="sm" onClick={() => onEdit(selectedJob)}>
-                <GitBranch />
                 {uiText("Edit routing")}
               </Button>
             </>

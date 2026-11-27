@@ -11,15 +11,12 @@ import {
   FileBox,
   Layers3,
   ListOrdered,
-  Plus,
   GitFork,
   Network,
   Table2,
   ArrowDown,
   ArrowUp,
-  CalendarClock,
   Pencil,
-  RotateCcw,
   Trash2,
   Wrench,
 } from "lucide-react";
@@ -357,7 +354,6 @@ export function FleetQueuePanel({
     </Button>
   ) : queueView === "queued" && onAdd ? (
     <Button variant="outline" size="sm" onClick={onAdd}>
-      <Plus size={15} />
       {uiText("Add to queue")}
     </Button>
   ) : null;
@@ -920,7 +916,6 @@ export function FleetQueuePanel({
                       disabled={busy === job.id}
                       onClick={() => void mutate(job.id, () => retryJob(job.id))}
                     >
-                      <RotateCcw className="h-3.5 w-3.5" />
                       {uiText("Retry")}
                     </Button>
                   )}
@@ -1497,7 +1492,6 @@ export function FleetMaintenancePanel({
                               setMode("window");
                             }}
                           >
-                            <CalendarClock className="h-3.5 w-3.5" aria-hidden />
                             {uiText("Schedule window")}
                           </Button>
                           <Button
@@ -1508,7 +1502,6 @@ export function FleetMaintenancePanel({
                               setMode("log");
                             }}
                           >
-                            <Wrench className="h-3.5 w-3.5" aria-hidden />
                             {uiText("Log service")}
                           </Button>
                         </>
@@ -1549,7 +1542,7 @@ export function FleetMaintenancePanel({
                       <div>
                         <Button
                           size="xs"
-                          variant="ghost"
+                          variant="danger"
                           disabled={mutation.isPending}
                           aria-label={uiText("Delete maintenance window")}
                           onClick={() =>
@@ -1561,7 +1554,6 @@ export function FleetMaintenancePanel({
                             })
                           }
                         >
-                          <Trash2 className="h-3.5 w-3.5" aria-hidden />
                           {uiText("Delete")}
                         </Button>
                       </div>
@@ -1593,7 +1585,7 @@ export function FleetMaintenancePanel({
                       <div>
                         <Button
                           size="xs"
-                          variant="ghost"
+                          variant="danger"
                           disabled={mutation.isPending}
                           aria-label={uiText("Delete maintenance log")}
                           onClick={() =>
@@ -1605,7 +1597,6 @@ export function FleetMaintenancePanel({
                             })
                           }
                         >
-                          <Trash2 className="h-3.5 w-3.5" aria-hidden />
                           {uiText("Delete")}
                         </Button>
                       </div>

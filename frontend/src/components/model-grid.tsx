@@ -176,8 +176,6 @@ import {
   ListChecks,
   ScanSearch,
   FolderTree,
-  Boxes,
-  Upload,
 } from "lucide-react";
 import {
   listCollectionChildren,
@@ -2926,7 +2924,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       }
       onClick={handleOpenCreateCollection}
     >
-      <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
       {uiText("New collection")}
     </Button>
   );
@@ -2944,7 +2941,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         setMultipartCreateOpen(true);
       }}
     >
-      <Boxes className="h-3.5 w-3.5 shrink-0" aria-hidden />
       {t("multipart.new")}
     </Button>
   ) : null;
@@ -3571,7 +3567,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 }
                 className="shrink-0 @3xl/library:h-8 @3xl/library:text-xs"
               >
-                <Upload className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 {uiText("Upload")}
               </Button>
             </div>

@@ -1,5 +1,5 @@
 import { useId, useRef, useState, useSyncExternalStore } from "react";
-import { Plus, X } from "lucide-react";
+import { X } from "lucide-react";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
 import { uiText } from "@/lib/locale";
@@ -174,7 +174,6 @@ export function CollectionHeaderTags({
                 setEditing(true);
               }}
             >
-              <Plus aria-hidden className="h-3.5 w-3.5" />
               {uiText("Add tag")}
             </Button>
           ))}

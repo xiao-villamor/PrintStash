@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, RefreshCw } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, inputClasses } from "@/components/ui/input";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -335,7 +335,6 @@ export function VaultMigrationPanel() {
             onClick={() => void refresh()}
             aria-label={t("migration.reload")}
           >
-            <RefreshCw className="h-4 w-4" aria-hidden />
             {t("migration.reload")}
           </Button>
         </div>

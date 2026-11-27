@@ -17,7 +17,7 @@ import {
   useState,
 } from "react";
 import { useParams } from "@tanstack/react-router";
-import { ArrowLeft, Download, Eye, FileText, Loader2, Pencil, Printer, Save } from "lucide-react";
+import { ArrowLeft, Download, Eye, FileText, Loader2, Pencil } from "lucide-react";
 
 import { printMarkdown } from "@/lib/print-markdown";
 import { MarkdownView } from "@/components/markdown-view";
@@ -496,10 +496,7 @@ export default function DocumentDetailPage({
 
           {embedded && isMarkdown && canEdit && (
             <Button variant="outline" size="sm" asChild>
-              <Link href={`/documents/${doc.id}?edit=1`}>
-                <Pencil className="size-4" aria-hidden />
-                {uiText(" Edit")}
-              </Link>
+              <Link href={`/documents/${doc.id}?edit=1`}>{uiText(" Edit")}</Link>
             </Button>
           )}
           {!embedded && isMarkdown && (canEdit || mode === "edit") && (
@@ -546,7 +543,6 @@ export default function DocumentDetailPage({
               loading={saving}
               disabled={saving || uploading || !canEdit || !!activeRecovery}
             >
-              <Save className="size-3.5" aria-hidden />
               {uiText("Save")}
             </Button>
           )}
@@ -558,7 +554,6 @@ export default function DocumentDetailPage({
               loading={printing}
               disabled={printing || !draftBody}
             >
-              <Printer className="size-4" aria-hidden />
               {uiText("Export as PDF")}
             </Button>
           )}

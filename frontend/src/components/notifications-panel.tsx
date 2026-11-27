@@ -8,7 +8,7 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Loader2, Plus, Send, Trash2 } from "lucide-react";
+import { Loader2, Send, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   createNotificationChannel,
@@ -711,7 +711,6 @@ export function NotificationsPanel({
               action={
                 canEdit ? (
                   <Button size="sm" onClick={() => setDraft(emptyDraft())}>
-                    <Plus className="size-3.5" aria-hidden />
                     {uiText("Add channel")}
                   </Button>
                 ) : undefined

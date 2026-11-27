@@ -17,16 +17,13 @@ import {
   CircleX,
   Layers,
   type LucideIcon,
-  History,
   Boxes,
   CheckSquare,
   Square,
   ArrowDown,
   ArrowUp,
   FileText,
-  Plus,
   Trash2,
-  Upload,
 } from "lucide-react";
 
 import { Chip } from "@/components/ui/chip";
@@ -553,7 +550,7 @@ function MultipartOverview({
               action={
                 onAddFirst ? (
                   <Button type="button" size="sm" onClick={onAddFirst}>
-                    <Plus className="h-4 w-4" /> {t("multipart.addFirst")}
+                    {t("multipart.addFirst")}
                   </Button>
                 ) : undefined
               }
@@ -671,9 +668,7 @@ function MultipartOverview({
           <section className="flex items-center justify-between gap-3 border border-border bg-card p-5">
             <h2 className="text-sm font-semibold">{t("build.title")}</h2>
             <Button asChild variant="outline" size="sm">
-              <Link href="/builds">
-                <History className="h-4 w-4" /> {t("build.history")}
-              </Link>
+              <Link href="/builds">{t("build.history")}</Link>
             </Button>
           </section>
           {onDelete && (
@@ -687,7 +682,7 @@ function MultipartOverview({
                 disabled={deleteBusy}
                 onClick={onDelete}
               >
-                <Trash2 className="h-4 w-4" /> {t("multipart.deleteConfirm")}
+                {t("multipart.deleteConfirm")}
               </Button>
             </section>
           )}
@@ -1613,7 +1608,6 @@ function MultipartDetail({ id }: { id: number }) {
                       disabled={!canEdit || busy || coverBusy || editProblem !== null}
                       loading={coverBusy}
                     >
-                      <Upload className="h-4 w-4" />
                       {model.cover_image_uploaded
                         ? t("multipart.replaceCover")
                         : t("multipart.uploadCover")}
@@ -1627,7 +1621,7 @@ function MultipartDetail({ id }: { id: number }) {
                         disabled={!canEdit || busy || coverBusy || editProblem !== null}
                         aria-label={t("multipart.removeUploadedCover")}
                       >
-                        <Trash2 className="h-4 w-4" /> {t("multipart.removeCover")}
+                        {t("multipart.removeCover")}
                       </Button>
                     )}
                     <input
@@ -1693,7 +1687,7 @@ function MultipartDetail({ id }: { id: number }) {
                     disabled={!canEdit || guideBusy}
                     loading={guideBusy}
                   >
-                    <Upload className="h-4 w-4" /> {t("multipart.uploadGuide")}
+                    {t("multipart.uploadGuide")}
                   </Button>
                   <input
                     ref={guideInput}

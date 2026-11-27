@@ -13,7 +13,6 @@ import {
   HardDrive,
   Images,
   Info,
-  RefreshCw,
   TrendingUp,
   Trash2,
 } from "lucide-react";
@@ -326,7 +325,6 @@ export function StorageInventoryPanel() {
       description={t("See what uses space and how your storage changes.")}
       action={
         <Button variant="outline" size="sm" disabled={busy} onClick={refresh}>
-          <RefreshCw className="h-4 w-4" aria-hidden />
           {t("Refresh measurement")}
         </Button>
       }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import { Camera, ImagePlus, X } from "lucide-react";
+import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
@@ -121,7 +121,6 @@ export function SearchImageInput({
             disabled={!enabled}
             onClick={() => input.current?.click()}
           >
-            <ImagePlus className="mr-2 h-4 w-4" />
             {t("aiSearch.chooseImage")}
           </Button>
           <Button
@@ -130,7 +129,6 @@ export function SearchImageInput({
             disabled={!enabled}
             onClick={() => camera.current?.click()}
           >
-            <Camera className="mr-2 h-4 w-4" aria-hidden />
             {t("aiSearch.takePhoto")}
           </Button>
           {image && (

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FolderOpen, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/lib/i18n";
@@ -190,7 +190,6 @@ export function SetupFolder({
                     setError("");
                   }}
                 >
-                  <FolderOpen className="h-4 w-4 shrink-0" aria-hidden />
                   {location}
                 </Button>
               ))}

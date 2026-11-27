@@ -55,18 +55,7 @@ import {
 import { printerArtwork } from "@/lib/orca-printer-images";
 import { formatNumber } from "@/lib/format";
 import { PrinterProgress } from "@/components/printer-telemetry";
-import {
-  ArrowUpRight,
-  Check,
-  Fan,
-  Layers,
-  Pencil,
-  Plus,
-  RefreshCw,
-  Search,
-  Settings,
-  Trash2,
-} from "lucide-react";
+import { ArrowUpRight, Check, Fan, Layers, Pencil, Search, Settings, Trash2 } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { PrinterStatusBadge } from "@/components/printer-status-badge";
@@ -288,7 +277,6 @@ export function PrintersPage() {
                     void queryClient.invalidateQueries({ queryKey: queryKeys.fleetQueue });
                   }}
                 >
-                  <RefreshCw className="h-3.5 w-3.5" />
                   {uiText("Refresh")}
                 </Button>
                 <Button
@@ -307,7 +295,6 @@ export function PrintersPage() {
                       : !user?.is_superuser
                   }
                 >
-                  <Plus className="h-3.5 w-3.5" />
                   {activeView === "queue"
                     ? uiText("Add to queue")
                     : user?.is_superuser
@@ -442,7 +429,6 @@ export function PrintersPage() {
                   action={
                     user?.is_superuser ? (
                       <Button size="xs" onClick={() => setAddOpen(true)}>
-                        <Plus className="h-3.5 w-3.5" />
                         {uiText("Add your first printer")}
                       </Button>
                     ) : undefined
