@@ -491,9 +491,7 @@ function ProfileRow({
     >
       <div
         className={
-          selected
-            ? "rounded-md bg-foreground/12 text-foreground"
-            : "rounded-md hover:bg-foreground/6"
+          selected ? "rounded-md bg-accent text-accent-foreground" : "rounded-md hover:bg-muted"
         }
       >
         <button
@@ -1220,7 +1218,7 @@ export function FilamentProfilesCard() {
               showIndicator={false}
               className="w-fit max-w-full gap-0.5 rounded-lg border border-border bg-card p-0.75"
               tabClassName={tabClass}
-              activeTabClassName="bg-foreground/12 text-foreground"
+              activeTabClassName="bg-accent text-accent-foreground"
             />
           </div>
           {activeTab === "pricing" ? (

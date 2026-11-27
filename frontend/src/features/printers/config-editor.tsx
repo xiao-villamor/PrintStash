@@ -96,7 +96,7 @@ function FileTree({
             size="sm"
             aria-current={file.path === selected ? "true" : undefined}
             disabled={disabled}
-            className="w-full justify-start gap-2 overflow-hidden aria-[current=true]:bg-foreground/10 aria-[current=true]:text-foreground"
+            className="w-full justify-start gap-2 overflow-hidden aria-[current=true]:bg-accent aria-[current=true]:text-accent-foreground"
             title={file.path}
             onClick={() => select(file.path)}
           >

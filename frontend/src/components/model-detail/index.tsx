@@ -1609,7 +1609,7 @@ function ModelDetailPresentation({
                   showIndicator={false}
                   className="model-detail-tab-list w-full flex-wrap gap-0.5 rounded-lg border border-border bg-card p-0.75"
                   tabClassName="model-detail-tab-label relative h-7.5 rounded-md px-2 py-0 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                  activeTabClassName="bg-foreground/12 text-foreground"
+                  activeTabClassName="bg-accent text-accent-foreground"
                 />
               </div>
             </div>

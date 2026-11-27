@@ -94,8 +94,8 @@
   scale: none;
 }
 .library-inspector-tabs button[aria-selected="true"] {
-  background: var(--muted);
-  color: var(--foreground);
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 .library-inspector-workspace select {
   width: 100%;

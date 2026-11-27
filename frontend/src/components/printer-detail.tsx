@@ -965,6 +965,7 @@ function PrinterDetailView({
 
           <div>
             <TabBar
+              variant="framed"
               tabs={[
                 {
                   key: "status" as const,
@@ -1023,10 +1024,7 @@ function PrinterDetailView({
               ]}
               active={activeTab === "maintenance" ? "materials" : activeTab}
               onChange={setActiveTab}
-              showIndicator={false}
-              className="w-fit max-w-full gap-0.5 overflow-x-auto rounded-lg border border-border bg-card p-0.75"
-              tabClassName="h-7.5 shrink-0 rounded-md px-3 text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              activeTabClassName="bg-foreground/12 text-foreground"
+              className="w-fit"
             />
           </div>
 

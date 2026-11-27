@@ -718,7 +718,8 @@ export function FleetQueuePanel({
                   <Button
                     key={view}
                     size="sm"
-                    variant={queueView === view ? "secondary" : "ghost"}
+                    variant="ghost"
+                    className="aria-pressed:bg-accent aria-pressed:text-accent-foreground"
                     aria-label={label}
                     aria-pressed={queueView === view}
                     onClick={() => setQueueView(view)}
