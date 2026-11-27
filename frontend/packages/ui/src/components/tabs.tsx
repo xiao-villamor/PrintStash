@@ -59,37 +59,30 @@ export function TabBar<K extends string>({
   useLayoutEffect(() => {
     const list = listRef.current;
     if (!list) return;
+    // A strip wider than its box fades at the cut edge so clipped tabs read as "more".
+    const measureOverflow = () =>
+      setMoreAfter(list.scrollWidth - list.clientWidth - list.scrollLeft > 2);
+    list.addEventListener("scroll", measureOverflow, { passive: true });
+    const stopScroll = () => list.removeEventListener("scroll", measureOverflow);
     const measure = () => {
+      measureOverflow();
       const el = list.querySelector<HTMLElement>('[data-active="true"]');
       if (el) setIndicator({ left: el.offsetLeft, width: el.offsetWidth });
       else setIndicator(null);
     };
     if (!canObserveResize) {
       measure();
-      return;
+      return stopScroll;
     }
     // Initial observation arrives after layout and before paint. Measuring in
     // this layout effect forced the whole library to lay out during commit.
     const ro = new ResizeObserver(measure);
     ro.observe(list);
-    return () => ro.disconnect();
-  }, [active, tabs.length]);
-
-  // A strip wider than its box fades at the cut edge so clipped tabs read as "more".
-  useLayoutEffect(() => {
-    const list = listRef.current;
-    if (!list) return;
-    const measure = () => setMoreAfter(list.scrollWidth - list.clientWidth - list.scrollLeft > 2);
-    measure();
-    list.addEventListener("scroll", measure, { passive: true });
-    if (!canObserveResize) return () => list.removeEventListener("scroll", measure);
-    const ro = new ResizeObserver(measure);
-    ro.observe(list);
     return () => {
-      list.removeEventListener("scroll", measure);
+      stopScroll();
       ro.disconnect();
     };
-  }, [tabs.length]);
+  }, [active, tabs.length]);
 
   const activeIndex = tabs.findIndex((tab) => tab.key === active);
 
