@@ -153,6 +153,7 @@ import type { LibraryFilterField } from "@/components/library-filter-picker";
 import type { UploadMode } from "@/components/upload-modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorState } from "@/components/ui/error-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FormField } from "@/components/ui/form-field";
@@ -3714,48 +3715,43 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </div>
               )}
               {error && (
-                <div
-                  role="alert"
-                  className="mx-4 mt-4 flex items-center justify-between gap-3 border border-destructive/40 bg-destructive/10 p-3 text-sm sm:mx-6"
-                >
-                  <p className="min-w-0 break-words text-foreground">
-                    {unavailableCollection ? (
+                <ErrorState
+                  className="mx-4 mt-4 sm:mx-6"
+                  message={
+                    unavailableCollection ? (
                       uiText("library.collectionUnavailableHelp")
                     ) : (
                       <>
                         {uiText("Could not load Models.")}{" "}
                         <span className="text-muted-foreground">{error}</span>
                       </>
-                    )}
-                  </p>
-                  {unavailableCollection && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="shrink-0"
-                      onClick={() => handleCollectionChange(null)}
-                    >
-                      {uiText("aiSearch.backToLibrary")}
-                    </Button>
-                  )}
-                  {(currentRefresh ||
-                    (!unavailableCollection &&
-                      modelReadError &&
-                      !modelQuery.isFetchNextPageError)) && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="shrink-0"
-                      disabled={currentRefresh?.status === "pending" || modelQuery.isFetching}
-                      onClick={() => {
-                        if (currentRefresh) void (snapshot ? reading.refresh(refresh) : refresh());
-                        else void modelQuery.refetch();
-                      }}
-                    >
-                      {uiText("Retry")}
-                    </Button>
-                  )}
-                </div>
+                    )
+                  }
+                  actions={
+                    unavailableCollection ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={() => handleCollectionChange(null)}
+                      >
+                        {uiText("aiSearch.backToLibrary")}
+                      </Button>
+                    ) : undefined
+                  }
+                  retryLabel={uiText("Retry")}
+                  retrying={currentRefresh?.status === "pending" || modelQuery.isFetching}
+                  onRetry={
+                    currentRefresh ||
+                    (!unavailableCollection && modelReadError && !modelQuery.isFetchNextPageError)
+                      ? () => {
+                          if (currentRefresh)
+                            void (snapshot ? reading.refresh(refresh) : refresh());
+                          else void modelQuery.refetch();
+                        }
+                      : undefined
+                  }
+                />
               )}
 
               {collectionOverview && (

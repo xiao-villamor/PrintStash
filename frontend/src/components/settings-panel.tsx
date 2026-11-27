@@ -129,6 +129,7 @@ import { Modal } from "@/components/ui/modal";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/ui/page-header";
 import { Badge } from "@/components/ui/badge";
+import { ErrorState } from "@/components/ui/error-state";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { TabBar } from "@/components/ui/tabs";
 import { FormField } from "@/components/ui/form-field";
@@ -4255,6 +4256,7 @@ export function SettingsPanel() {
             {activeSection === "storage" && (
               <div className="settings-storage space-y-5">
                 <TabBar
+                  variant="framed"
                   tabs={[
                     { key: "location", label: t("Location") },
                     ...(user?.is_superuser
@@ -4266,10 +4268,6 @@ export function SettingsPanel() {
                   ]}
                   active={storageTab}
                   onChange={setStorageTab}
-                  className="inline-flex gap-0.5 rounded-lg border border-border bg-card p-0.75"
-                  tabClassName="h-7.5 rounded-md px-3 text-sm font-medium text-muted-foreground hover:text-foreground"
-                  activeTabClassName="bg-accent text-accent-foreground"
-                  showIndicator={false}
                 />
                 <div className="settings-storage-pane" hidden={storageTab !== "location"}>
                   <StorageConfigCard storageHealth={storageHealth} migrationManaged />
@@ -5401,12 +5399,11 @@ export function SettingsPanel() {
             {activeSection === "design" && (
               <div className="settings-grouped">
                 {user?.is_superuser && remoteConfig.isError && (
-                  <div role="alert" className="flex items-center gap-2 text-sm">
-                    <p>{t("settings.configLoadFailed")}</p>
-                    <Button variant="outline" size="sm" onClick={() => void remoteConfig.refetch()}>
-                      {t("Retry")}
-                    </Button>
-                  </div>
+                  <ErrorState
+                    message={t("settings.configLoadFailed")}
+                    retryLabel={t("Retry")}
+                    onRetry={() => void remoteConfig.refetch()}
+                  />
                 )}
                 {user?.is_superuser && remoteConfig.isPending && (
                   <p role="status">{t("Loading…")}</p>
@@ -5667,12 +5664,11 @@ export function SettingsPanel() {
             {activeSection === "previews" && (
               <div className="settings-grouped">
                 {user?.is_superuser && remoteConfig.isError && (
-                  <div role="alert" className="flex items-center gap-2 text-sm">
-                    <p>{t("settings.configLoadFailed")}</p>
-                    <Button variant="outline" size="sm" onClick={() => void remoteConfig.refetch()}>
-                      {t("Retry")}
-                    </Button>
-                  </div>
+                  <ErrorState
+                    message={t("settings.configLoadFailed")}
+                    retryLabel={t("Retry")}
+                    onRetry={() => void remoteConfig.refetch()}
+                  />
                 )}
                 {user?.is_superuser && remoteConfig.isPending && (
                   <p role="status">{t("Loading…")}</p>
@@ -5883,12 +5879,11 @@ export function SettingsPanel() {
                   </div>
                 )}
                 {user?.is_superuser && remoteConfig.isError && (
-                  <div role="alert" className="flex items-center gap-2 text-sm">
-                    <p>{t("settings.configLoadFailed")}</p>
-                    <Button variant="outline" size="sm" onClick={() => void remoteConfig.refetch()}>
-                      {t("Retry")}
-                    </Button>
-                  </div>
+                  <ErrorState
+                    message={t("settings.configLoadFailed")}
+                    retryLabel={t("Retry")}
+                    onRetry={() => void remoteConfig.refetch()}
+                  />
                 )}
                 {trashRetentionBar}
                 {trashCleanupDetails}

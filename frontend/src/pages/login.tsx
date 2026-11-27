@@ -9,7 +9,8 @@ import { useQuery } from "@tanstack/react-query";
 import { loginProvidersOptions } from "@/features/auth/entry";
 import { Navigate } from "@tanstack/react-router";
 import { useRouter } from "@/lib/navigation";
-import { AlertCircle, Eye, EyeOff, Info } from "lucide-react";
+import { Eye, EyeOff, Info } from "lucide-react";
+import { ErrorState } from "@/components/ui/error-state";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -134,13 +135,8 @@ export default function LoginPage() {
         )}
 
         {error && (
-          <div
-            id="login-error"
-            role="alert"
-            className="flex items-start gap-2.5 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2.5 text-sm font-medium text-foreground"
-          >
-            <AlertCircle className="mt-px h-4 w-4 shrink-0 text-destructive" aria-hidden />
-            <p>{error}</p>
+          <div id="login-error">
+            <ErrorState message={error} />
           </div>
         )}
 
@@ -240,13 +236,12 @@ export default function LoginPage() {
       </form>
 
       {providerRead.error && (
-        <div className="mt-5 space-y-3">
-          <p role="alert" className="text-sm text-destructive">
-            {userMessage(providerRead.error)}
-          </p>
-          <Button type="button" variant="outline" onClick={() => void providerRead.refetch()}>
-            {uiText("Retry")}
-          </Button>
+        <div className="mt-5">
+          <ErrorState
+            message={userMessage(providerRead.error)}
+            retryLabel={uiText("Retry")}
+            onRetry={() => void providerRead.refetch()}
+          />
         </div>
       )}
       {providers?.oidc_enabled && (

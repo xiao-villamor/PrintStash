@@ -444,7 +444,7 @@ describe("SettingsPanel", () => {
       await openCreateUser();
       await user.click(screen.getByLabelText("Username"));
       await user.paste("maker");
-      await user.click(screen.getByLabelText("Email (optional)"));
+      await user.click(screen.getByLabelText(/^Email\s*\(optional\)/));
       await user.paste("maker@example.test");
       await user.click(screen.getByLabelText("Initial password"));
       await user.paste("Password123");

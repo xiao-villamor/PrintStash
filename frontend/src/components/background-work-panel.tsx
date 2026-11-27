@@ -586,16 +586,13 @@ function BackgroundWorkView({
             </div>
             <div className="border-y bg-muted/30 p-3">
               <TabBar
+                variant="framed"
                 tabs={[
                   { key: "types", label: uiText("All work types") },
                   { key: "workers", label: uiText("Worker settings") },
                 ]}
                 active={activeView}
                 onChange={setActiveView}
-                className="inline-flex gap-1 rounded-md bg-muted p-1"
-                tabClassName="rounded-sm px-3 py-1.5 text-xs font-medium text-muted-foreground transition-[color,background-color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                activeTabClassName="bg-accent text-accent-foreground"
-                showIndicator={false}
               />
             </div>
 

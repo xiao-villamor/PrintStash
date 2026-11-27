@@ -12,7 +12,19 @@ export type TabItem<K extends string = string> = { key: K; label: ReactNode };
  */
 const canObserveResize = "ResizeObserver" in globalThis;
 
+/**
+ * The one tab look: a bordered inset frame with a neutral `accent` fill on the
+ * active tab (DESIGN.md "Framed work surfaces"). Pass `variant="framed"` and
+ * add only layout classes (`w-full`, `self-start`, `overflow-x-auto`).
+ */
+const TAB_FRAME_CLASS =
+  "relative inline-flex max-w-full gap-0.5 overflow-x-auto rounded-lg border border-border bg-card p-0.75";
+const TAB_CLASS =
+  "inline-flex h-7.5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm font-medium text-muted-foreground transition-[color,background-color] duration-press hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+const TAB_ACTIVE_CLASS = "bg-accent text-accent-foreground hover:text-accent-foreground";
+
 export interface TabBarProps<K extends string> {
+  variant?: "framed";
   tabs: TabItem<K>[];
   active: K | null;
   onChange: (key: K) => void;
@@ -26,6 +38,7 @@ export interface TabBarProps<K extends string> {
 
 /** ARIA tablist with roving tabindex and a measured active underline. */
 export function TabBar<K extends string>({
+  variant,
   tabs,
   active,
   onChange,
@@ -35,6 +48,7 @@ export function TabBar<K extends string>({
   indicatorInset = 0,
   showIndicator = true,
 }: TabBarProps<K>) {
+  const framed = variant === "framed";
   const listRef = useRef<HTMLDivElement>(null);
   const [indicator, setIndicator] = useState<{
     left: number;
@@ -86,7 +100,7 @@ export function TabBar<K extends string>({
       ref={listRef}
       role="tablist"
       onKeyDown={onKeyDown}
-      className={cn("relative flex", className)}
+      className={cn(framed ? TAB_FRAME_CLASS : "relative flex", className)}
     >
       {tabs.map((tab, index) => {
         const isActive = tab.key === active;
@@ -99,13 +113,18 @@ export function TabBar<K extends string>({
             tabIndex={isActive || (activeIndex < 0 && index === 0) ? 0 : -1}
             data-active={isActive ? "true" : undefined}
             onClick={() => onChange(tab.key)}
-            className={cn(tabClassName, isActive && activeTabClassName)}
+            className={cn(
+              framed && TAB_CLASS,
+              tabClassName,
+              isActive && (framed ? TAB_ACTIVE_CLASS : null),
+              isActive && activeTabClassName,
+            )}
           >
             {tab.label}
           </button>
         );
       })}
-      {showIndicator && indicator && (
+      {showIndicator && !framed && indicator && (
         <span
           aria-hidden
           className="absolute bottom-0 left-0 h-0.5 w-px origin-left bg-foreground"

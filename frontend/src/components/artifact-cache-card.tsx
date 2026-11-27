@@ -314,6 +314,7 @@ export function ArtifactCacheCard({ api = artifactCacheApi }: { api?: typeof art
               </p>
               <div className="border-t border-border pt-4">
                 <TabBar
+                  variant="framed"
                   tabs={[
                     { key: "overview", label: uiText("Overview") },
                     { key: "limits", label: uiText("Cache limits") },
@@ -321,10 +322,6 @@ export function ArtifactCacheCard({ api = artifactCacheApi }: { api?: typeof art
                   ]}
                   active={detailView}
                   onChange={setDetailView}
-                  className="inline-flex rounded-md bg-muted/40 p-1"
-                  tabClassName="rounded-sm px-3 py-2 text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  activeTabClassName="bg-accent text-accent-foreground"
-                  showIndicator={false}
                 />
               </div>
               {detailView === "overview" && (

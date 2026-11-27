@@ -37,15 +37,14 @@ export function ModelDescriptionEditor({
       </label>
       <div className="overflow-hidden rounded border border-border">
         <TabBar
+          variant="framed"
           tabs={[
             { key: "write", label: write },
             { key: "preview", label: preview },
           ]}
           active={mode}
           onChange={setMode}
-          className="border-b border-border bg-muted/40 px-2"
-          tabClassName="px-3 py-2 text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-          activeTabClassName="font-medium text-foreground"
+          className="m-1.5"
         />
         <div role="tabpanel" aria-label={write} hidden={mode !== "write"}>
           <textarea

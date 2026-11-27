@@ -13,7 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
+import { ErrorState } from "@/components/ui/error-state";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -369,8 +369,6 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
   }
 
   const visibleItems = activeTab === "queue" ? groups.queue : groups.done;
-  const tabClass =
-    "flex items-center justify-center gap-1 border-b-2 border-transparent pb-3 pt-4 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
   return (
     <PageContainer>
@@ -394,20 +392,16 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
         }
       />
       <Card className="overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-border px-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 border-b border-border px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
           <TabBar
+            variant="framed"
             tabs={[
               {
                 key: "queue",
                 label: (
                   <>
                     {t("inbox.queue")} ·
-                    <Badge
-                      variant="secondary"
-                      className="border-0 bg-transparent px-0 text-muted-foreground"
-                    >
-                      {groups.queue.length}
-                    </Badge>
+                    <span className="font-normal text-muted-foreground">{groups.queue.length}</span>
                   </>
                 ),
               },
@@ -416,22 +410,13 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
                 label: (
                   <>
                     {t("inbox.completed")} ·
-                    <Badge
-                      variant="secondary"
-                      className="border-0 bg-transparent px-0 text-muted-foreground"
-                    >
-                      {groups.done.length}
-                    </Badge>
+                    <span className="font-normal text-muted-foreground">{groups.done.length}</span>
                   </>
                 ),
               },
             ]}
             active={activeTab}
             onChange={setActiveTab}
-            showIndicator={false}
-            className="gap-6"
-            tabClassName={tabClass}
-            activeTabClassName="border-foreground font-semibold"
           />
           {activeTab === "queue" && selectedReady.length > 0 && (
             <Button
@@ -462,12 +447,12 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
             </div>
           </div>
           {snapshot.isError ? (
-            <div role="alert" className="p-5 text-sm text-destructive">
-              <p>{userMessage(snapshot.error)}</p>
-              <Button variant="outline" onClick={() => void snapshot.refetch()}>
-                {t("inbox.retry")}
-              </Button>
-            </div>
+            <ErrorState
+              layout="block"
+              message={userMessage(snapshot.error)}
+              retryLabel={t("inbox.retry")}
+              onRetry={() => void snapshot.refetch()}
+            />
           ) : loading ? (
             <div aria-label={t("inbox.loading")} className="space-y-3 p-5">
               <Skeleton className="h-14 w-full" />

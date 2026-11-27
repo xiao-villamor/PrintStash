@@ -24,6 +24,7 @@ import { BarChart3, Settings2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
+import { ErrorState } from "@/components/ui/error-state";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { TabBar } from "@/components/ui/tabs";
@@ -921,24 +922,21 @@ export default function StatisticsPage() {
       />
 
       <TabBar
+        variant="framed"
         tabs={[
           { key: "overview", label: t("Overview") },
           { key: "rankings", label: t("Rankings") },
         ]}
         active={section}
         onChange={setSection}
-        className="gap-6 border-b border-border"
-        tabClassName="px-0 py-3 text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        activeTabClassName="font-semibold text-foreground"
       />
 
       {user?.is_superuser && config.isError && (
-        <div role="alert" className="flex items-center gap-2 text-sm">
-          <p>{t("settings.configLoadFailed")}</p>
-          <Button variant="outline" onClick={() => void config.refetch()}>
-            {t("Retry")}
-          </Button>
-        </div>
+        <ErrorState
+          message={t("settings.configLoadFailed")}
+          retryLabel={t("Retry")}
+          onRetry={() => void config.refetch()}
+        />
       )}
       {isLoading && (
         <div className="animate-panel-in py-16 text-center text-sm text-muted-foreground">
@@ -947,12 +945,12 @@ export default function StatisticsPage() {
       )}
       {isError && (
         <Card className="animate-panel-in">
-          <CardContent className="py-12 text-center text-sm text-destructive">
-            <p>{translateUiText(locale, "Failed to load statistics.")}</p>
-            <Button variant="outline" onClick={() => void refetch()}>
-              {uiText("Retry")}
-            </Button>
-          </CardContent>
+          <ErrorState
+            layout="block"
+            message={translateUiText(locale, "Failed to load statistics.")}
+            retryLabel={uiText("Retry")}
+            onRetry={() => void refetch()}
+          />
         </Card>
       )}
       {data && !denied && (

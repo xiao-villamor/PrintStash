@@ -11,6 +11,8 @@ export interface ErrorStateProps {
   retryLabel?: string;
   onRetry?: () => void;
   retrying?: boolean;
+  /** Extra actions shown before Retry, e.g. "Back to Library". */
+  actions?: ReactNode;
   /** `inline` sits inside a form or panel; `block` fills an empty surface. */
   layout?: "inline" | "block";
   className?: string;
@@ -25,6 +27,7 @@ export function ErrorState({
   retryLabel = "Retry",
   onRetry,
   retrying,
+  actions,
   layout = "inline",
   className,
 }: ErrorStateProps) {
@@ -41,6 +44,7 @@ export function ErrorState({
     >
       <AlertCircle className="h-4 w-4 shrink-0 text-destructive" aria-hidden />
       <span className="min-w-0 flex-1 text-foreground">{message}</span>
+      {actions}
       {onRetry && (
         <Button type="button" variant="outline" size="sm" loading={retrying} onClick={onRetry}>
           {retryLabel}

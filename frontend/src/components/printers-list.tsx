@@ -318,6 +318,7 @@ export function PrintersPage() {
 
           <div className="flex flex-col items-stretch gap-5">
             <TabBar
+              variant="framed"
               tabs={[
                 { key: "fleet", label: translateUiText(locale, "Fleet") },
                 ...(canSeeQueue
@@ -334,10 +335,7 @@ export function PrintersPage() {
               ]}
               active={activeView}
               onChange={setActiveView}
-              showIndicator={false}
-              className="shrink-0 gap-0.5 self-start rounded-lg border border-border bg-card p-0.75"
-              tabClassName="h-7.5 rounded-md px-3 text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              activeTabClassName="bg-foreground/12 text-foreground"
+              className="self-start"
             />
             {activeView === "fleet" && printers.length > 0 && (
               <section
