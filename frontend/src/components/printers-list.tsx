@@ -55,7 +55,18 @@ import {
 import { printerArtwork } from "@/lib/orca-printer-images";
 import { formatNumber } from "@/lib/format";
 import { PrinterProgress } from "@/components/printer-telemetry";
-import { ArrowUpRight, Check, Fan, Layers, Pencil, Search, Settings, Trash2 } from "lucide-react";
+import {
+  ArrowUpRight,
+  Check,
+  Fan,
+  Layers,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings,
+  Trash2,
+} from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { PrinterStatusBadge } from "@/components/printer-status-badge";
@@ -277,6 +288,7 @@ export function PrintersPage() {
                     void queryClient.invalidateQueries({ queryKey: queryKeys.fleetQueue });
                   }}
                 >
+                  <RefreshCw className="h-4 w-4" aria-hidden />
                   {uiText("Refresh")}
                 </Button>
                 <Button
@@ -295,6 +307,7 @@ export function PrintersPage() {
                       : !user?.is_superuser
                   }
                 >
+                  <Plus className="h-4 w-4" aria-hidden />
                   {activeView === "queue"
                     ? uiText("Add to queue")
                     : user?.is_superuser
@@ -610,7 +623,7 @@ function FleetMetric({
       type="button"
       aria-pressed={selected}
       onClick={onClick}
-      className={`${classes} ${selected ? "bg-accent text-accent-foreground" : "bg-card text-card-foreground"} hover:bg-accent hover:text-accent-foreground focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring transition-transform duration-press active:scale-[0.98] motion-reduce:transition-none`}
+      className={`${classes} ${selected ? "bg-accent text-accent-foreground" : "bg-card text-card-foreground"} hover:bg-muted hover:text-foreground focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring transition-transform duration-press active:scale-[0.98] motion-reduce:transition-none`}
     >
       {contents}
     </button>
@@ -656,7 +669,7 @@ function FleetPrinterCard({
   const Heading = grouped ? "h3" : "h2";
   const artworkUrl = printerArtwork(artworkPreference === "model" ? model : null).imageUrl;
   const itemClass =
-    "flex min-h-9 w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none";
+    "flex min-h-9 w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm hover:bg-muted focus-visible:bg-accent focus-visible:outline-none";
   const openMenu = (point: { x: number; y: number } | null, target: HTMLElement) => {
     menuOpener.current = target.querySelector<HTMLAnchorElement>("a[href]");
     setMenuPoint(point);
@@ -792,7 +805,7 @@ function FleetPrinterCard({
                   >
                     {color && (
                       <span
-                        className="size-2.5 shrink-0 border border-input"
+                        className="size-2.5 shrink-0 rounded-md border border-input"
                         style={{ backgroundColor: color }}
                       />
                     )}
@@ -1157,7 +1170,7 @@ function PrinterModelPicker({
                               onSelectedChange(model);
                               onSave(model);
                             }}
-                            className="flex min-h-10 w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none disabled:pointer-events-none disabled:opacity-60 aria-pressed:bg-accent aria-pressed:text-accent-foreground aria-pressed:font-medium"
+                            className="flex min-h-10 w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-muted focus-visible:bg-accent focus-visible:outline-none disabled:pointer-events-none disabled:opacity-60 aria-pressed:bg-accent aria-pressed:text-accent-foreground aria-pressed:font-medium"
                           >
                             {model}
                             {selected === model && (

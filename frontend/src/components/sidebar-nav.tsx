@@ -7,7 +7,7 @@ import {
   Keyboard,
   LogIn,
   Search,
-  SlidersHorizontal,
+  FileSliders,
   Trash2,
   type LucideIcon,
 } from "lucide-react";
@@ -46,7 +46,7 @@ const mainItems: NavItem[] = [
 
 const utilityItems: NavItem[] = [
   { id: "printers", href: "/printers", labelKey: "nav.printers", icon: Printer3D, adminOnly: true },
-  { id: "profiles", href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
+  { id: "profiles", href: "/profiles", labelKey: "nav.profiles", icon: FileSliders },
   {
     id: "trash",
     href: "/settings?section=trash",

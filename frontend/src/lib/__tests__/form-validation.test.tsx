@@ -57,4 +57,31 @@ describe("useFormValidation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(submit).toHaveBeenCalledTimes(1);
   });
+
+  it("names the kind of value a malformed email or URL needs", () => {
+    function Typed() {
+      const validation = useFormValidation();
+      return (
+        <form
+          aria-label="typed"
+          {...validation.formProps}
+          onSubmit={(e) => validation.handle(e, vi.fn())}
+        >
+          <FieldErrors errors={validation.errors}>
+            <FormField label="Email" htmlFor="typed-email">
+              <Input id="typed-email" type="email" defaultValue="not-an-email" />
+            </FormField>
+            <FormField label="Link" htmlFor="typed-url">
+              <Input id="typed-url" type="url" defaultValue="nope" />
+            </FormField>
+          </FieldErrors>
+          <button type="submit">Go</button>
+        </form>
+      );
+    }
+    render(<Typed />);
+    fireEvent.click(screen.getByRole("button", { name: "Go" }));
+    expect(screen.getByText("Enter a valid email address.")).toBeVisible();
+    expect(screen.getByText("Enter a valid URL.")).toBeVisible();
+  });
 });

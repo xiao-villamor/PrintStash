@@ -15,6 +15,10 @@ export function useFieldError(id: string | undefined): string | undefined {
 function messageFor(control: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement): string {
   const { validity } = control;
   if (validity.valueMissing) return uiText("This field is required.");
+  if (validity.typeMismatch && control instanceof HTMLInputElement) {
+    if (control.type === "email") return uiText("Enter a valid email address.");
+    if (control.type === "url") return uiText("Enter a valid URL.");
+  }
   if (validity.typeMismatch || validity.patternMismatch) return uiText("Enter a valid value.");
   if (validity.tooShort || validity.tooLong) return uiText("Check the length of this value.");
   if (validity.rangeUnderflow || validity.rangeOverflow || validity.stepMismatch)
@@ -86,9 +90,11 @@ export function useFormValidation() {
     () => ({
       errors,
       handle,
+      /** Validate imperatively (e.g. a save button outside the form's submit event). */
+      validate,
       /** Spread on the form: no native bubbles, errors clear as the user types. */
       formProps: { noValidate: true, onInput } as const,
     }),
-    [errors, handle, onInput],
+    [errors, handle, onInput, validate],
   );
 }

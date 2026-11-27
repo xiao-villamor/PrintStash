@@ -226,7 +226,7 @@ export function PartCoolingFan({
   const rotor = (
     <div
       aria-hidden="true"
-      className={`grid shrink-0 place-items-center border border-border bg-muted ${smallRotor ? "size-7" : "size-14"}`}
+      className={`grid shrink-0 place-items-center rounded-md border border-border bg-muted ${smallRotor ? "size-7" : "size-14"}`}
     >
       <div
         className={`grid place-items-center rounded-full border border-border bg-card ${smallRotor ? "size-6" : "size-10"}`}

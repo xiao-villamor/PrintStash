@@ -202,7 +202,7 @@ export function StorageProviderPicker(props: {
                   props.onboarding
                     ? "h-14 min-w-0 justify-start gap-2 px-2 text-left sm:px-3"
                     : "h-auto justify-start gap-2 whitespace-normal px-3 py-3 text-left",
-                  active && "border-transparent bg-accent text-accent-foreground hover:bg-accent",
+                  active && "border-transparent bg-accent text-accent-foreground hover:bg-muted",
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" aria-hidden />
@@ -312,7 +312,7 @@ export function StorageProviderPicker(props: {
                   className={cn(
                     "h-auto min-h-16 justify-start whitespace-normal px-3 py-3 text-left",
                     provider.id === props.providerId &&
-                      "border-transparent bg-accent text-accent-foreground hover:bg-accent",
+                      "border-transparent bg-accent text-accent-foreground hover:bg-muted",
                   )}
                 >
                   <span>

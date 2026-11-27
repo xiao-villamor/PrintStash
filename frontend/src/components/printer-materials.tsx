@@ -328,7 +328,7 @@ function MaterialEditor({
             {(owner.query.data ?? state).tools
               .filter((tool) => tool.tool_key !== "tool0")
               .map((tool) => (
-                <div key={tool.tool_key}>
+                <div key={`${tool.tool_key}:${tool.label}`}>
                   <dt>{tool.label}</dt>
                   <dd>
                     {!tool.stale && tool.nozzle_diameter_mm !== null
@@ -382,7 +382,7 @@ function MaterialEditor({
                   /^#[\da-f]{6}$/i.test(slot.color_hex) && (
                     <span
                       aria-hidden="true"
-                      className="size-3 border border-border"
+                      className="size-3 rounded-md border border-border"
                       style={{ backgroundColor: slot.color_hex }}
                     />
                   )}
@@ -523,7 +523,7 @@ function MaterialEditor({
                 </label>
                 <label className="block space-y-2 text-field font-medium">
                   {uiText("Color")}
-                  <div className="flex h-10 items-center gap-3 border border-input bg-field-surface px-3">
+                  <div className="flex h-10 items-center gap-3 rounded-md border border-input bg-field-surface px-3">
                     <input
                       type="color"
                       aria-label={uiText("Color")}

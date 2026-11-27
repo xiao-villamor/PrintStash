@@ -9,7 +9,7 @@ import {
   Layers,
   LogOut,
   Settings,
-  SlidersHorizontal,
+  FileSliders,
   Star,
   Trash2,
 } from "lucide-react";
@@ -54,7 +54,7 @@ export function WorkspaceMenu({
           { href: "/?favorites=true", text: uiText("Favorites"), icon: Star },
           ...(mobile && !printersInQuickAccess
             ? []
-            : [{ href: "/profiles", text: t("nav.profiles"), icon: SlidersHorizontal }]),
+            : [{ href: "/profiles", text: t("nav.profiles"), icon: FileSliders }]),
           { href: "/library/similar", text: t("similarity.title"), icon: Layers },
           ...(isAdmin
             ? [{ href: "/settings?section=trash", text: uiText("settings.trash"), icon: Trash2 }]

@@ -32,7 +32,7 @@
     --secondary-foreground: #ffffff;
     --muted: #f1f3f6;
     --muted-foreground: #5d6b7e;
-    --accent: #eef0f3;
+    --accent: #e2e7ee;
     --accent-foreground: #101828;
     --destructive: #b42318;
     --destructive-foreground: #ffffff;
@@ -148,7 +148,7 @@
     --muted-foreground: #8c97a8;
 
     /* Selected controls use a quiet neutral fill. */
-    --accent: rgb(255 255 255 / 0.08);
+    --accent: rgb(255 255 255 / 0.14);
     --accent-foreground: #edf1f7;
 
     /* Status */
@@ -569,6 +569,33 @@
 .printstash-toaster [data-sonner-toast][data-styled="true"]:hover [data-close-button]:hover {
   background: var(--popover-hover);
   color: var(--foreground);
+}
+
+/* Status is carried by the icon colour; the message stays in the foreground. */
+.printstash-toaster [data-sonner-toast][data-type="success"] [data-icon] {
+  color: var(--success);
+}
+.printstash-toaster [data-sonner-toast][data-type="error"] [data-icon] {
+  color: var(--destructive);
+}
+.printstash-toaster [data-sonner-toast][data-type="warning"] [data-icon] {
+  color: var(--warning);
+}
+.printstash-toaster [data-sonner-toast][data-styled="true"] [data-button] {
+  height: 28px;
+  padding-inline: 10px;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+.printstash-toaster [data-sonner-toast][data-styled="true"] [data-button]:hover {
+  opacity: 0.9;
+}
+.printstash-toaster [data-sonner-toast][data-styled="true"] [data-button]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
 }
 
 .printstash-toaster [data-close-button] svg {

@@ -6282,6 +6282,11 @@
   "Plum": "Ciruela",
   "Install the extension, then create a pairing code below.": "Instala la extensión y crea un código de vinculación abajo.",
   "This field is required.": "Este campo es obligatorio.",
+  "Enter a valid email address.": "Introduce un correo electrónico válido.",
+  "Enter a valid URL.": "Introduce una URL válida.",
+  "Other sign-in options could not be loaded.": "No se pudieron cargar otras opciones de inicio de sesión.",
+  "Notifications, {count} in progress": "Notificaciones, {count} en curso",
+  "Save and close": "Guardar y cerrar",
   "Enter a valid value.": "Introduce un valor válido.",
   "Check the length of this value.": "Revisa la longitud de este valor.",
   "Enter a value within the allowed range.": "Introduce un valor dentro del rango permitido."

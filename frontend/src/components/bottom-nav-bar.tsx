@@ -7,7 +7,7 @@ import {
   Inbox,
   MoreHorizontal,
   Search,
-  SlidersHorizontal,
+  FileSliders,
   type LucideIcon,
 } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
@@ -37,7 +37,7 @@ export function BottomNavBar() {
     { href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
     user?.is_superuser
       ? { href: "/printers", labelKey: "nav.printers", icon: Printer3D }
-      : { href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
+      : { href: "/profiles", labelKey: "nav.profiles", icon: FileSliders },
   ];
   const moreActive = [
     "/statistics",

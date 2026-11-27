@@ -124,7 +124,7 @@ export function CardMetricsEditor({
   return (
     <article
       aria-label={sampleName}
-      className="library-model-card flex w-full max-w-80 flex-col overflow-hidden border border-border bg-card text-card-foreground"
+      className="library-model-card flex w-full max-w-80 flex-col overflow-hidden rounded-lg border border-border bg-card text-card-foreground"
     >
       <div className="library-preview relative shrink-0 overflow-hidden">
         <img

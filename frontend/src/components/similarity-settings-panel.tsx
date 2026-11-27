@@ -415,7 +415,6 @@ export function SimilaritySettingsPanel({
             )}
           </div>
           <Button
-            size="sm"
             loading={start.isPending}
             disabled={
               status.isError ||

@@ -339,7 +339,7 @@ export function LibraryFilterPicker({
         <div
           role="group"
           aria-label={group.label}
-          className="flex shrink-0 divide-x divide-border border border-border"
+          className="flex shrink-0 divide-x divide-border rounded-md border border-border"
         >
           {[null, ...group.choices].map((choice) => {
             const pressed = choice ? choice.checked : !group.choices.some((item) => item.checked);

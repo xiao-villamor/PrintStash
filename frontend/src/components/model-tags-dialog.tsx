@@ -324,7 +324,7 @@ export function ModelTagsDialog({
                 <div
                   id={nav.listboxId}
                   role="listbox"
-                  className="mt-1 max-h-40 divide-y divide-border overflow-y-auto border border-border"
+                  className="mt-1 max-h-40 divide-y divide-border overflow-y-auto rounded-md border border-border"
                 >
                   {matching.map((tag, index) => (
                     <button

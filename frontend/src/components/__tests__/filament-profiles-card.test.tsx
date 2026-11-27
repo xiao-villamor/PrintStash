@@ -1739,10 +1739,6 @@ describe("Integrated profile settings", () => {
   it("offers settings within the existing tabs", async () => {
     const user = userEvent.setup();
     await renderCard();
-    const settings = await screen.findByRole("button", { name: "Slicer settings and variants" });
-    expect(settings).toHaveAttribute("aria-expanded", "false");
-    await user.click(settings);
-    expect(settings).toHaveAttribute("aria-expanded", "true");
     expect(screen.queryByRole("tab", { name: "Detected settings" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: /Printers/ }));
     await openProfileRows();

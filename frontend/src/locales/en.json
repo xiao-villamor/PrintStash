@@ -6282,6 +6282,11 @@
   "Plum": "Plum",
   "Install the extension, then create a pairing code below.": "Install the extension, then create a pairing code below.",
   "This field is required.": "This field is required.",
+  "Enter a valid email address.": "Enter a valid email address.",
+  "Enter a valid URL.": "Enter a valid URL.",
+  "Other sign-in options could not be loaded.": "Other sign-in options could not be loaded.",
+  "Notifications, {count} in progress": "Notifications, {count} in progress",
+  "Save and close": "Save and close",
   "Enter a valid value.": "Enter a valid value.",
   "Check the length of this value.": "Check the length of this value.",
   "Enter a value within the allowed range.": "Enter a value within the allowed range."

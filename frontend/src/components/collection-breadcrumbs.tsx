@@ -73,7 +73,7 @@ export function CollectionBreadcrumbs({
                   setOpen(false);
                   onNavigate(item.path, item.id);
                 }}
-                className="flex w-full items-start gap-2 px-3 py-2 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+                className="flex w-full items-start gap-2 px-3 py-2 text-left text-sm hover:bg-muted focus-visible:bg-accent focus-visible:outline-none"
               >
                 <Folder className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
                 <span className="min-w-0">

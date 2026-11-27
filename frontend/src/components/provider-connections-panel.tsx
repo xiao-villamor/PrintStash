@@ -252,13 +252,13 @@ export function ProviderConnectionsPanel({
             </Button>
           }
         >
-          <div className="space-y-4 px-4 pb-4 sm:px-5">
+          <div className="space-y-4 py-3">
             {pairing && (
-              <div className="border border-border bg-card p-3" role="status">
+              <div className="rounded-lg border border-border bg-card p-3" role="status">
                 <p className="text-xs text-muted-foreground">
                   {t("settings.pairedBrowsers.codeHelp")}
                 </p>
-                <code className="mt-2 block select-all break-all border border-border bg-background px-3 py-2 font-mono text-sm text-foreground">
+                <code className="mt-2 block select-all break-all rounded-md border border-border bg-background px-3 py-2 font-mono text-sm text-foreground">
                   {pairing.code}
                 </code>
                 <p className="mt-2 text-xs text-muted-foreground">
@@ -301,7 +301,7 @@ export function ProviderConnectionsPanel({
           title={t("settings.providerConnections.title")}
           description={t("settings.providerConnections.description")}
         >
-          <div className="space-y-0 px-4 pb-4 sm:px-5">
+          <div className="space-y-0 py-1">
             {error && (
               <p role="alert" className="text-sm text-destructive">
                 {error}

@@ -9,6 +9,9 @@ import { useState, useSyncExternalStore } from "react";
 import { Navigate, useParams } from "@tanstack/react-router";
 import { Link } from "@/lib/link";
 import { useSearchParams } from "@/lib/navigation";
+import { FieldErrors } from "@/components/ui/field-errors";
+import { FormField } from "@/components/ui/form-field";
+import { useFormValidation } from "@/lib/form-validation";
 import { useAuth } from "@/lib/auth-context";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -70,6 +73,7 @@ export default function MultipartBuildsPage(): React.ReactNode {
 
 function BuildList() {
   useUiLocale();
+  const validation = useFormValidation();
   const { t } = useI18n();
   const search = useSearchParams();
   const compositionId = Number(search.get("multipart"));
@@ -124,146 +128,151 @@ function BuildList() {
       <Card className="overflow-hidden">
         {compositionId > 0 && !denied(composition.error) && (
           <form
+            {...validation.formProps}
             className="border-b border-border"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!commands.isCurrent()) return;
-              setBusy(true);
-              setError(null);
-              void commands
-                .run(() =>
-                  createMultipartBuild({
-                    name,
-                    object_quantity: quantity,
-                    multipart_model_id: compositionId,
-                  }),
-                )
-                .then(
-                  (build) => {
-                    if (build && commands.isCurrent()) setCreated(build.id);
-                  },
-                  (reason) => {
-                    if (commands.isCurrent())
-                      setError(errorKey(reason instanceof Error ? reason.message : ""));
-                  },
-                )
-                .finally(() => {
-                  if (commands.isCurrent()) setBusy(false);
-                });
-            }}
+            onSubmit={(event) =>
+              validation.handle(event, () => {
+                event.preventDefault();
+                if (!commands.isCurrent()) return;
+                setBusy(true);
+                setError(null);
+                void commands
+                  .run(() =>
+                    createMultipartBuild({
+                      name,
+                      object_quantity: quantity,
+                      multipart_model_id: compositionId,
+                    }),
+                  )
+                  .then(
+                    (build) => {
+                      if (build && commands.isCurrent()) setCreated(build.id);
+                    },
+                    (reason) => {
+                      if (commands.isCurrent())
+                        setError(errorKey(reason instanceof Error ? reason.message : ""));
+                    },
+                  )
+                  .finally(() => {
+                    if (commands.isCurrent()) setBusy(false);
+                  });
+              })
+            }
           >
-            <div className="flex items-center gap-3 border-b px-4 py-4 sm:px-5">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
-                <Boxes className="h-4 w-4" aria-hidden />
+            <FieldErrors errors={validation.errors}>
+              <div className="flex items-center gap-3 border-b px-4 py-4 sm:px-5">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
+                  <Boxes className="h-4 w-4" aria-hidden />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-sm font-semibold">{t("build.plan")}</h2>
+                  <p className="text-xs text-muted-foreground">{t("build.planHelp")}</p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <h2 className="text-sm font-semibold">{t("build.plan")}</h2>
-                <p className="text-xs text-muted-foreground">{t("build.planHelp")}</p>
-              </div>
-            </div>
-            <div className="grid lg:grid-cols-2">
-              <div className="space-y-5 p-4 sm:p-5">
-                <label className="block space-y-2 text-sm font-medium">
-                  {t("build.name")}
-                  <Input
-                    required
-                    maxLength={255}
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                  />
-                </label>
-                <label className="block space-y-2 text-sm font-medium">
-                  {t("build.objects")}
-                  <Input
-                    type="number"
-                    required
-                    min={1}
-                    max={10000}
-                    value={quantity}
-                    onChange={(event) => setQuantity(Number(event.target.value))}
-                    className="max-w-40"
-                  />
-                </label>
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  {t("build.snapshotHelp")}
-                </p>
-              </div>
-              <section
-                aria-label={t("build.sourceSet")}
-                className="border-t bg-muted/30 p-4 sm:p-5 lg:border-l lg:border-t-0"
-              >
-                <h3 className="mb-3 text-xs font-semibold text-muted-foreground">
-                  {t("build.sourceSet")}
-                </h3>
-                {composition.data ? (
-                  <>
-                    <div className="flex min-w-0 items-center gap-4">
-                      <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md border border-border bg-muted">
-                        <Cover src={composition.data.cover_thumbnail_url} alt="" />
-                      </div>
-                      <div className="min-w-0">
-                        <Link
-                          href={`/multipart-models/${compositionId}`}
-                          className="break-words text-sm font-semibold hover:underline"
-                        >
-                          {composition.data.name}
-                        </Link>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          <Count
-                            count={composition.data.part_count}
-                            one={t("multipart.part")}
-                            many={t("multipart.parts")}
-                          />
-                          {" · "}
-                          <Count
-                            count={composition.data.model_count}
-                            one={t("multipart.model")}
-                            many={t("multipart.models")}
-                          />
-                        </p>
-                      </div>
-                    </div>
-                    {composition.data.parts.length > 0 && (
-                      <ul className="mt-4 max-h-48 divide-y divide-border overflow-y-auto">
-                        {composition.data.parts.map((part) => (
-                          <li
-                            key={part.id}
-                            className="flex items-center justify-between gap-3 py-2 text-sm"
+              <div className="grid lg:grid-cols-2">
+                <div className="space-y-5 p-4 sm:p-5">
+                  <FormField label={t("build.name")} htmlFor="build-name">
+                    <Input
+                      id="build-name"
+                      required
+                      maxLength={255}
+                      value={name}
+                      onChange={(event) => setName(event.target.value)}
+                    />
+                  </FormField>
+                  <FormField label={t("build.objects")} htmlFor="build-objects">
+                    <Input
+                      id="build-objects"
+                      type="number"
+                      required
+                      min={1}
+                      max={10000}
+                      value={quantity}
+                      onChange={(event) => setQuantity(Number(event.target.value))}
+                      className="max-w-40"
+                    />
+                  </FormField>
+                  <p className="text-sm leading-relaxed text-muted-foreground">
+                    {t("build.snapshotHelp")}
+                  </p>
+                </div>
+                <section
+                  aria-label={t("build.sourceSet")}
+                  className="border-t bg-muted/30 p-4 sm:p-5 lg:border-l lg:border-t-0"
+                >
+                  <h3 className="mb-3 text-xs font-semibold text-muted-foreground">
+                    {t("build.sourceSet")}
+                  </h3>
+                  {composition.data ? (
+                    <>
+                      <div className="flex min-w-0 items-center gap-4">
+                        <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md border border-border bg-muted">
+                          <Cover src={composition.data.cover_thumbnail_url} alt="" />
+                        </div>
+                        <div className="min-w-0">
+                          <Link
+                            href={`/multipart-models/${compositionId}`}
+                            className="break-words text-sm font-semibold hover:underline"
                           >
-                            <span className="min-w-0 break-words">{part.name}</span>
-                            <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                              × {part.quantity}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </>
-                ) : (
-                  <div role="status" aria-label={t("build.loading")} className="space-y-3">
-                    <Skeleton className="h-20 w-20" />
-                    <Skeleton className="h-4 w-48" />
-                  </div>
-                )}
-              </section>
-            </div>
-            <div className="flex flex-wrap items-center justify-end gap-2 border-t bg-muted/30 p-3">
-              <Button asChild variant="outline">
-                <Link href={`/multipart-models/${compositionId}`}>{uiText("Cancel")}</Link>
-              </Button>
-              <Button
-                type="submit"
-                loading={busy}
-                disabled={
-                  !composition.data ||
-                  composition.isError ||
-                  (composition.data.effective_role !== "edit" &&
-                    composition.data.effective_role !== "admin")
-                }
-              >
-                {t("build.create")}
-              </Button>
-            </div>
+                            {composition.data.name}
+                          </Link>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            <Count
+                              count={composition.data.part_count}
+                              one={t("multipart.part")}
+                              many={t("multipart.parts")}
+                            />
+                            {" · "}
+                            <Count
+                              count={composition.data.model_count}
+                              one={t("multipart.model")}
+                              many={t("multipart.models")}
+                            />
+                          </p>
+                        </div>
+                      </div>
+                      {composition.data.parts.length > 0 && (
+                        <ul className="mt-4 max-h-48 divide-y divide-border overflow-y-auto">
+                          {composition.data.parts.map((part) => (
+                            <li
+                              key={part.id}
+                              className="flex items-center justify-between gap-3 py-2 text-sm"
+                            >
+                              <span className="min-w-0 break-words">{part.name}</span>
+                              <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                                × {part.quantity}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </>
+                  ) : (
+                    <div role="status" aria-label={t("build.loading")} className="space-y-3">
+                      <Skeleton className="h-20 w-20" />
+                      <Skeleton className="h-4 w-48" />
+                    </div>
+                  )}
+                </section>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-2 border-t bg-muted/30 p-3">
+                <Button asChild variant="outline">
+                  <Link href={`/multipart-models/${compositionId}`}>{uiText("Cancel")}</Link>
+                </Button>
+                <Button
+                  type="submit"
+                  loading={busy}
+                  disabled={
+                    !composition.data ||
+                    composition.isError ||
+                    (composition.data.effective_role !== "edit" &&
+                      composition.data.effective_role !== "admin")
+                  }
+                >
+                  {t("build.create")}
+                </Button>
+              </div>
+            </FieldErrors>
           </form>
         )}
         <section aria-label={t("build.history")}>
@@ -381,6 +390,7 @@ function BuildList() {
 
 function BuildDetail({ id }: { id: number }) {
   useUiLocale();
+  const validation = useFormValidation();
   const { t } = useI18n();
   const client = useQueryClient();
   const detail = useQuery(buildDetailOptions(id, client));
@@ -468,40 +478,45 @@ function BuildDetail({ id }: { id: number }) {
           {canEdit && (
             <section className="space-y-4 border-t border-border pt-5">
               <form
+                {...validation.formProps}
                 className="flex max-w-xl flex-wrap items-end gap-3"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (!commands.isCurrent()) return;
-                  setBusy(true);
-                  setError(null);
-                  void commands
-                    .run(() => duplicateMultipartBuild(id, copyName))
-                    .then(
-                      (copy) => {
-                        if (copy && commands.isCurrent()) setCopyId(copy.id);
-                      },
-                      (reason) => {
-                        if (commands.isCurrent())
-                          setError(errorKey(reason instanceof Error ? reason.message : ""));
-                      },
-                    )
-                    .finally(() => {
-                      if (commands.isCurrent()) setBusy(false);
-                    });
-                }}
+                onSubmit={(event) =>
+                  validation.handle(event, () => {
+                    event.preventDefault();
+                    if (!commands.isCurrent()) return;
+                    setBusy(true);
+                    setError(null);
+                    void commands
+                      .run(() => duplicateMultipartBuild(id, copyName))
+                      .then(
+                        (copy) => {
+                          if (copy && commands.isCurrent()) setCopyId(copy.id);
+                        },
+                        (reason) => {
+                          if (commands.isCurrent())
+                            setError(errorKey(reason instanceof Error ? reason.message : ""));
+                        },
+                      )
+                      .finally(() => {
+                        if (commands.isCurrent()) setBusy(false);
+                      });
+                  })
+                }
               >
-                <label className="grow space-y-2">
-                  {t("build.copyName")}
-                  <Input
-                    required
-                    maxLength={255}
-                    value={copyName}
-                    onChange={(event) => setCopyName(event.target.value)}
-                  />
-                </label>
-                <Button loading={busy} type="submit" variant="outline">
-                  {t("build.duplicate")}
-                </Button>
+                <FieldErrors errors={validation.errors}>
+                  <FormField label={t("build.copyName")} htmlFor="build-copy-name" className="grow">
+                    <Input
+                      id="build-copy-name"
+                      required
+                      maxLength={255}
+                      value={copyName}
+                      onChange={(event) => setCopyName(event.target.value)}
+                    />
+                  </FormField>
+                  <Button loading={busy} type="submit" variant="outline">
+                    {t("build.duplicate")}
+                  </Button>
+                </FieldErrors>
               </form>
               <p className="text-sm text-muted-foreground">{t("build.duplicateHelp")}</p>
               <Button
@@ -535,6 +550,7 @@ function BuildPart({
   mutate: (operation: () => Promise<MultipartBuild>) => Promise<boolean>;
 }) {
   useUiLocale();
+  const validation = useFormValidation();
   const { t } = useI18n();
   const { user } = useAuth();
   const model = useQuery(modelDetailOptions(part.selected_model_id));
@@ -643,96 +659,101 @@ function BuildPart({
       )}
       <p className="text-xs text-muted-foreground">{t("build.revisionHelp")}</p>
       <form
+        {...validation.formProps}
         className="space-y-4 border-t border-border pt-4"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void mutate(() =>
-            queueBuildPart(build.id, part.id, {
-              version: build.version,
-              units_per_job: units,
-              job_count: count,
-              confirm_excess: excessAccepted,
-              routing: {
-                strategy: printer ? "manual" : "least_busy",
-                printer_id: printer ? Number(printer) : undefined,
-              },
-            }),
-          );
-        }}
+        onSubmit={(event) =>
+          validation.handle(event, () => {
+            event.preventDefault();
+            void mutate(() =>
+              queueBuildPart(build.id, part.id, {
+                version: build.version,
+                units_per_job: units,
+                job_count: count,
+                confirm_excess: excessAccepted,
+                routing: {
+                  strategy: printer ? "manual" : "least_busy",
+                  printer_id: printer ? Number(printer) : undefined,
+                },
+              }),
+            );
+          })
+        }
       >
-        <div className="grid gap-4 sm:grid-cols-3">
-          <label className="space-y-2">
-            {t("build.unitsPerFile")}
-            <Input
-              type="number"
-              min={1}
-              max={10000}
-              required
-              disabled={disabled}
-              value={units}
-              onChange={(event) => {
-                setUnits(Number(event.target.value));
-                setCountOverride(null);
-                setAcceptedExcess(null);
-              }}
-            />
-          </label>
-          <label className="space-y-2">
-            {t("build.jobs")}
-            <Input
-              type="number"
-              min={1}
-              max={1000}
-              required
-              disabled={disabled}
-              value={count}
-              onChange={(event) => {
-                setCountOverride(Number(event.target.value));
-                setAcceptedExcess(null);
-              }}
-            />
-          </label>
-          <label className="space-y-2">
-            {t("build.printer")}
-            <select
-              className={selectClass}
-              disabled={disabled}
-              value={printer}
-              onChange={(event) => setPrinter(event.target.value)}
-            >
-              <option value="">
-                {t(user?.is_superuser ? "build.automatic" : "build.choosePrinter")}
-              </option>
-              {printers.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
+        <FieldErrors errors={validation.errors}>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <FormField label={t("build.unitsPerFile")} htmlFor={`build-units-${part.id}`}>
+              <Input
+                id={`build-units-${part.id}`}
+                type="number"
+                min={1}
+                max={10000}
+                required
+                disabled={disabled}
+                value={units}
+                onChange={(event) => {
+                  setUnits(Number(event.target.value));
+                  setCountOverride(null);
+                  setAcceptedExcess(null);
+                }}
+              />
+            </FormField>
+            <FormField label={t("build.jobs")} htmlFor={`build-jobs-${part.id}`}>
+              <Input
+                id={`build-jobs-${part.id}`}
+                type="number"
+                min={1}
+                max={1000}
+                required
+                disabled={disabled}
+                value={count}
+                onChange={(event) => {
+                  setCountOverride(Number(event.target.value));
+                  setAcceptedExcess(null);
+                }}
+              />
+            </FormField>
+            <label className="space-y-2">
+              {t("build.printer")}
+              <select
+                className={selectClass}
+                disabled={disabled}
+                value={printer}
+                onChange={(event) => setPrinter(event.target.value)}
+              >
+                <option value="">
+                  {t(user?.is_superuser ? "build.automatic" : "build.choosePrinter")}
                 </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        {excess > 0 && (
-          <label className="flex items-center gap-2">
-            <Checkbox
-              disabled={disabled}
-              checked={excessAccepted}
-              onChange={(value) => setAcceptedExcess(value === true ? excess : null)}
-            />
-            {t("build.excess", { count: String(excess) })}
-          </label>
-        )}
-        <Button
-          type="submit"
-          disabled={
-            disabled ||
-            !part.queueable ||
-            part.unreserved_units === 0 ||
-            (!user?.is_superuser && !printer) ||
-            (excess > 0 && !excessAccepted)
-          }
-        >
-          {t("build.queue")}
-        </Button>
+                {printers.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {excess > 0 && (
+            <label className="flex items-center gap-2">
+              <Checkbox
+                disabled={disabled}
+                checked={excessAccepted}
+                onChange={(value) => setAcceptedExcess(value === true ? excess : null)}
+              />
+              {t("build.excess", { count: String(excess) })}
+            </label>
+          )}
+          <Button
+            type="submit"
+            disabled={
+              disabled ||
+              !part.queueable ||
+              part.unreserved_units === 0 ||
+              (!user?.is_superuser && !printer) ||
+              (excess > 0 && !excessAccepted)
+            }
+          >
+            {t("build.queue")}
+          </Button>
+        </FieldErrors>
       </form>
       {part.attempts.length > 0 && (
         <div className="space-y-3 border-t border-border pt-4">
@@ -764,6 +785,7 @@ function Result({
   mutate: (operation: () => Promise<MultipartBuild>) => Promise<boolean>;
 }) {
   useUiLocale();
+  const validation = useFormValidation();
   const { t } = useI18n();
   const [draft, setDraft] = useState<{
     base: MultipartBuildAttempt;
@@ -785,74 +807,79 @@ function Result({
             : "build.jobActive";
   return (
     <form
+      {...validation.formProps}
       className="flex flex-wrap items-end gap-4 rounded-md bg-muted/30 p-3"
       aria-label={t("build.attempt", { id: String(attempt.historical_job_id) })}
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (disabled || changed) return;
-        const submitted = draft ?? { base: attempt, valid, key: crypto.randomUUID() };
-        setDraft(submitted);
-        void mutate(() =>
-          confirmBuildResult(buildId, attempt.id, {
-            version: submitted.base.version,
-            valid_units: submitted.valid,
-            idempotency_key: submitted.key,
-          }),
-        ).then((confirmed) => {
-          if (confirmed) setDraft(null);
-        });
-      }}
+      onSubmit={(event) =>
+        validation.handle(event, () => {
+          event.preventDefault();
+          if (disabled || changed) return;
+          const submitted = draft ?? { base: attempt, valid, key: crypto.randomUUID() };
+          setDraft(submitted);
+          void mutate(() =>
+            confirmBuildResult(buildId, attempt.id, {
+              version: submitted.base.version,
+              valid_units: submitted.valid,
+              idempotency_key: submitted.key,
+            }),
+          ).then((confirmed) => {
+            if (confirmed) setDraft(null);
+          });
+        })
+      }
     >
-      <div className="grow">
-        <p className="text-sm font-medium">
-          {t("build.attempt", { id: String(attempt.historical_job_id) })} · {t(stateKey)}
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {t("build.planned", { count: String(attempt.planned_units) })}
-        </p>
-      </div>
-      {terminal && (
-        <>
-          <label className="space-y-1 text-sm">
-            {t("build.valid")}
-            <Input
-              className="w-24"
-              type="number"
-              min={0}
-              max={attempt.planned_units}
-              required
-              disabled={disabled}
-              value={valid}
-              onChange={(event) => {
-                setDraft({
-                  base: draft?.base ?? attempt,
-                  valid: Number(event.target.value),
-                  key: crypto.randomUUID(),
-                });
-              }}
-            />
-          </label>
-          {changed && (
-            <div className="space-y-2">
-              <p role="alert">{t("build.conflict")}</p>
-              <p>
-                {t("build.valid")}: {attempt.valid_units ?? attempt.suggested_valid_units}
-              </p>
-              <Button
-                type="button"
-                variant="outline"
+      <FieldErrors errors={validation.errors}>
+        <div className="grow">
+          <p className="text-sm font-medium">
+            {t("build.attempt", { id: String(attempt.historical_job_id) })} · {t(stateKey)}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {t("build.planned", { count: String(attempt.planned_units) })}
+          </p>
+        </div>
+        {terminal && (
+          <>
+            <FormField label={t("build.valid")} htmlFor={`build-valid-${attempt.id}`}>
+              <Input
+                id={`build-valid-${attempt.id}`}
+                className="w-24"
+                type="number"
+                min={0}
+                max={attempt.planned_units}
+                required
                 disabled={disabled}
-                onClick={() => setDraft({ base: attempt, valid, key: crypto.randomUUID() })}
-              >
-                {t("library.reviewLatest")}
-              </Button>
-            </div>
-          )}
-          <Button type="submit" variant="outline" disabled={disabled || changed}>
-            {t(attempt.valid_units === null ? "build.confirm" : "build.correct")}
-          </Button>
-        </>
-      )}
+                value={valid}
+                onChange={(event) => {
+                  setDraft({
+                    base: draft?.base ?? attempt,
+                    valid: Number(event.target.value),
+                    key: crypto.randomUUID(),
+                  });
+                }}
+              />
+            </FormField>
+            {changed && (
+              <div className="space-y-2">
+                <p role="alert">{t("build.conflict")}</p>
+                <p>
+                  {t("build.valid")}: {attempt.valid_units ?? attempt.suggested_valid_units}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={disabled}
+                  onClick={() => setDraft({ base: attempt, valid, key: crypto.randomUUID() })}
+                >
+                  {t("library.reviewLatest")}
+                </Button>
+              </div>
+            )}
+            <Button type="submit" variant="outline" disabled={disabled || changed}>
+              {t(attempt.valid_units === null ? "build.confirm" : "build.correct")}
+            </Button>
+          </>
+        )}
+      </FieldErrors>
     </form>
   );
 }

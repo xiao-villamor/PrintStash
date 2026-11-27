@@ -176,6 +176,9 @@ import {
   ListChecks,
   ScanSearch,
   FolderTree,
+  FolderPlus,
+  Boxes,
+  Upload,
 } from "lucide-react";
 import {
   listCollectionChildren,
@@ -2924,6 +2927,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       }
       onClick={handleOpenCreateCollection}
     >
+      <FolderPlus className="h-4 w-4" aria-hidden />
       {uiText("New collection")}
     </Button>
   );
@@ -2941,6 +2945,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         setMultipartCreateOpen(true);
       }}
     >
+      <Boxes className="h-4 w-4" aria-hidden />
       {t("multipart.new")}
     </Button>
   ) : null;
@@ -3094,7 +3099,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 aria-label={uiText("Include subfolders")}
                 disabled={loading}
                 onClick={() => setModelScope(includeSubfolders ? "here" : "all")}
-                className="aria-pressed:bg-accent aria-pressed:text-accent-foreground aria-pressed:hover:bg-accent dark:hover:bg-surface-container-highest dark:aria-pressed:bg-surface-bright dark:aria-pressed:hover:bg-surface-bright"
+                className="aria-pressed:bg-accent aria-pressed:text-accent-foreground aria-pressed:hover:bg-muted dark:hover:bg-surface-container-highest dark:aria-pressed:bg-surface-bright dark:aria-pressed:hover:bg-surface-bright"
               >
                 <SubfolderScopeIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 <span className="library-toolbar-label">{uiText("Include subfolders")}</span>
@@ -3482,7 +3487,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           {/* The pane owns breakpoints: an open outliner also consumes horizontal room. */}
           <div className="library-collection-header px-4 sm:px-6">
             <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-1">
-              <div className="library-collection-identity min-w-0 flex-[1_1_100%] sm:flex-1">
+              <div className="library-collection-identity min-w-0 flex-[1_1_100%] @2xl/library:flex-1">
                 <InlineTitleEditor
                   fieldLabel={uiText("inbox.collectionName")}
                   maxLength={COLLECTION_NAME_LIMIT}
@@ -3567,6 +3572,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 }
                 className="shrink-0 @3xl/library:h-8 @3xl/library:text-xs"
               >
+                <Upload className="h-4 w-4" aria-hidden />
                 {uiText("Upload")}
               </Button>
             </div>
@@ -4496,7 +4502,7 @@ export function ModelGridSkeleton({
           virtualize={false}
           renderItem={() => (
             <div
-              className="library-model-card flex h-full flex-col overflow-hidden border border-border bg-card"
+              className="library-model-card flex h-full flex-col overflow-hidden rounded-md border border-border bg-card"
               aria-hidden
             >
               <div className="library-preview">

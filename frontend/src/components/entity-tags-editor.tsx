@@ -249,7 +249,7 @@ export function EntityTagsEditor({
         <p className="text-sm leading-relaxed text-on-surface-variant">{help}</p>
         <h3 className="border-t border-border pt-5 text-sm font-semibold">{uiText("Tags")}</h3>
         <div
-          className="flex min-h-10 flex-wrap items-center gap-2 border border-input p-2"
+          className="flex min-h-10 flex-wrap items-center gap-2 rounded-md border border-input p-2"
           aria-label={uiText("Tags")}
         >
           {selected.length === 0 ? (

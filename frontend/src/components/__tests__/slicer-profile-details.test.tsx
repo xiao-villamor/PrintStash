@@ -25,9 +25,8 @@ function renderDetails(
   });
 }
 async function openDetails() {
-  const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: "Slicer settings and variants" }));
-  return user;
+  // The settings are always shown under their heading; there is nothing to open.
+  return userEvent.setup();
 }
 
 describe("ProfileSettingsDetails", () => {
@@ -143,11 +142,10 @@ describe("ProfileSettingsDetails", () => {
     expect(screen.getByText("No captured settings in the loaded files yet.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Load more source files" })).toBeVisible();
   });
-  it("collapses the profile details", async () => {
+  it("shows the settings under a heading without a disclosure control", () => {
     renderDetails();
-    const user = await openDetails();
-    await user.click(screen.getByRole("button", { name: "Hide slicer settings" }));
-    expect(screen.queryByRole("article")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Slicer configurations" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Slicer configurations" })).not.toBeInTheDocument();
   });
   it("collapses a variant", async () => {
     renderDetails();

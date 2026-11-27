@@ -172,7 +172,7 @@ export function DocumentBrowser({
         aria-labelledby={headingId}
         className={
           modelId === undefined
-            ? "mx-4 my-5 overflow-hidden border border-border bg-card sm:mx-6"
+            ? "mx-4 my-5 overflow-hidden rounded-lg border border-border bg-card sm:mx-6"
             : "min-w-0"
         }
       >
@@ -345,7 +345,7 @@ export function DocumentBrowser({
                 disabled={busy}
                 aria-busy={busy}
                 onClick={() => fileRef.current?.click()}
-                className={`h-auto min-h-28 w-full flex-col gap-2 rounded-lg border border-dashed px-4 py-4 text-center whitespace-normal hover:border-primary hover:bg-accent ${dragging ? "border-primary bg-accent" : "border-border-strong bg-card"}`}
+                className={`h-auto min-h-28 w-full flex-col gap-2 rounded-lg border border-dashed px-4 py-4 text-center whitespace-normal hover:border-primary hover:bg-muted ${dragging ? "border-primary bg-accent" : "border-border-strong bg-card"}`}
               >
                 <span
                   className="flex size-8 items-center justify-center rounded-md bg-muted text-muted-foreground"

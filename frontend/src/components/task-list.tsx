@@ -47,13 +47,11 @@ export function TaskList({
       className={
         compact
           ? "w-full"
-          : "w-[360px] max-w-[calc(100vw-2rem)] rounded border border-border bg-popover shadow-lg"
+          : "w-[360px] max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-popover shadow-lg"
       }
     >
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <span className="font-mono text-2xs uppercase tracking-wider text-muted-foreground">
-          {uiText("Tasks")}
-        </span>
+        <span className="text-sm font-semibold text-foreground">{uiText("Tasks")}</span>
         {tasks.some(
           (task) =>
             (task.status === "completed" || task.status === "failed") && !needsArchiveReview(task),
@@ -61,14 +59,14 @@ export function TaskList({
           <button
             type="button"
             onClick={onClear}
-            className="rounded font-mono text-3xs uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="rounded px-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {uiText("Clear done")}
           </button>
         )}
       </div>
       {tasks.length === 0 ? (
-        <div className="px-4 py-8 text-center font-mono text-xs text-muted-foreground">
+        <div className="px-4 py-8 text-center text-sm text-muted-foreground">
           {uiText("No active tasks")}
         </div>
       ) : (
@@ -107,7 +105,7 @@ function TaskRow({ task, onNavigate }: { task: TaskItem; onNavigate?: () => void
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
             <p className="truncate text-sm font-medium text-foreground">{taskTitle(task)}</p>
-            <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+            <span className="shrink-0 text-xs capitalize text-muted-foreground">
               {task.jobReason === "derivative_group_disabled"
                 ? uiText("Processing disabled")
                 : task.uploadPaused

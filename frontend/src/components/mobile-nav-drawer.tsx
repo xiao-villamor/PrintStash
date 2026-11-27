@@ -5,16 +5,7 @@ import { useUiLocale } from "@/lib/i18n";
 
 import { Link } from "@/lib/link";
 import { usePathname } from "@/lib/navigation";
-import {
-  Box,
-  SlidersHorizontal,
-  LogIn,
-  LogOut,
-  Settings,
-  User,
-  X,
-  type LucideIcon,
-} from "lucide-react";
+import { Box, FileSliders, LogIn, LogOut, Settings, User, X, type LucideIcon } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { useAuth } from "@/lib/auth-context";
 import { BrandMark } from "@/components/brand-mark";
@@ -36,7 +27,7 @@ type NavItem = {
 const mainItems: NavItem[] = [
   { href: "/", labelKey: "nav.vault", icon: Box },
   { href: "/printers", labelKey: "nav.printers", icon: Printer3D, adminOnly: true },
-  { href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
+  { href: "/profiles", labelKey: "nav.profiles", icon: FileSliders },
 ];
 
 const bottomItems: NavItem[] = [{ href: "/settings", labelKey: "nav.settings", icon: Settings }];

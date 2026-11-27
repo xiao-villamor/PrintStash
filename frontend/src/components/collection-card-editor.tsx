@@ -37,7 +37,7 @@ interface EditorProps {
 
 function CoverPreviewCard({ name, children }: { name: string; children: ReactNode }) {
   return (
-    <div className="overflow-hidden border border-border bg-card">
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
       {children}
       <div className="flex min-w-0 items-center gap-2 border-t border-border px-3 py-2">
         <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden />
@@ -242,6 +242,7 @@ export function CollectionCardRename({
 
   return (
     <form
+      noValidate
       className="relative z-20 flex min-w-0 flex-1 items-center gap-1"
       onSubmit={submit}
       onKeyDown={(event) => {

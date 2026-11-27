@@ -90,7 +90,7 @@ export function SearchResultItem({ item, view }: { item: SearchResult; view: "gr
         className={cn(
           "flex h-full min-w-0 overflow-hidden transition-[border-color,scale] duration-press ease-out active:scale-[0.99] motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
           grid
-            ? "flex-col border border-border bg-card hover:border-border-strong"
+            ? "flex-col rounded-lg border border-border bg-card hover:border-border-strong"
             : "items-start gap-3 px-2 py-2 sm:items-center",
         )}
       >

@@ -2933,7 +2933,7 @@ export function SettingsPanel() {
                 <div
                   role="status"
                   aria-live="polite"
-                  className="mb-6 flex flex-col gap-4 border border-border bg-card p-4 sm:flex-row sm:items-center"
+                  className="mb-6 flex flex-col gap-4 rounded-lg border border-border bg-card p-4 sm:flex-row sm:items-center"
                 >
                   <div className="flex min-w-0 flex-1 items-start gap-3">
                     <CircleArrowUp className="mt-0.5 h-4 w-4 shrink-0 text-foreground" />
@@ -4811,7 +4811,7 @@ export function SettingsPanel() {
                             {unownedBackups.map((candidate) => (
                               <div
                                 key={candidate.filename}
-                                className="grid gap-3 border border-border p-3 lg:grid-cols-[1fr_auto] lg:items-center"
+                                className="grid gap-3 rounded-lg border border-border p-3 lg:grid-cols-[1fr_auto] lg:items-center"
                               >
                                 <div className="min-w-0">
                                   <p className="truncate font-mono text-xs text-foreground">
@@ -4851,7 +4851,7 @@ export function SettingsPanel() {
                             {unownedS3Backups.map((candidate) => (
                               <div
                                 key={candidate.source_ref ?? `${candidate.prefix}:${candidate.key}`}
-                                className="grid gap-3 border border-border p-3 lg:grid-cols-[1fr_auto] lg:items-center"
+                                className="grid gap-3 rounded-lg border border-border p-3 lg:grid-cols-[1fr_auto] lg:items-center"
                               >
                                 <div className="min-w-0">
                                   <p className="truncate font-mono text-xs text-foreground">
@@ -4923,7 +4923,7 @@ export function SettingsPanel() {
                             {unownedRemoteBackups.map((candidate) => (
                               <div
                                 key={`${candidate.connection_id}:${candidate.key}`}
-                                className="grid gap-3 border border-border p-3 lg:grid-cols-[1fr_auto] lg:items-center"
+                                className="grid gap-3 rounded-lg border border-border p-3 lg:grid-cols-[1fr_auto] lg:items-center"
                               >
                                 <div className="min-w-0">
                                   <p className="truncate font-mono text-xs text-foreground">

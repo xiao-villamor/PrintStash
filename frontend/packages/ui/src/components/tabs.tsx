@@ -51,6 +51,7 @@ export function TabBar<K extends string>({
   const framed = variant === "framed";
   const listRef = useRef<HTMLDivElement>(null);
   const [moreAfter, setMoreAfter] = useState(false);
+  const [moreBefore, setMoreBefore] = useState(false);
   const [indicator, setIndicator] = useState<{
     left: number;
     width: number;
@@ -60,8 +61,10 @@ export function TabBar<K extends string>({
     const list = listRef.current;
     if (!list) return;
     // A strip wider than its box fades at the cut edge so clipped tabs read as "more".
-    const measureOverflow = () =>
+    const measureOverflow = () => {
       setMoreAfter(list.scrollWidth - list.clientWidth - list.scrollLeft > 2);
+      setMoreBefore(list.scrollLeft > 2);
+    };
     list.addEventListener("scroll", measureOverflow, { passive: true });
     const stopScroll = () => list.removeEventListener("scroll", measureOverflow);
     const measure = () => {
@@ -111,9 +114,16 @@ export function TabBar<K extends string>({
       role="tablist"
       onKeyDown={onKeyDown}
       data-more-after={moreAfter ? "true" : undefined}
+      data-more-before={moreBefore ? "true" : undefined}
       className={cn(
         framed ? TAB_FRAME_CLASS : "relative flex",
-        moreAfter && "[mask-image:linear-gradient(to_right,black_calc(100%-28px),transparent)]",
+        moreAfter &&
+          !moreBefore &&
+          "[mask-image:linear-gradient(to_right,black_calc(100%-28px),transparent)]",
+        moreBefore && !moreAfter && "[mask-image:linear-gradient(to_right,transparent,black_28px)]",
+        moreBefore &&
+          moreAfter &&
+          "[mask-image:linear-gradient(to_right,transparent,black_28px,black_calc(100%-28px),transparent)]",
         className,
       )}
     >

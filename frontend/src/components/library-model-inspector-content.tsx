@@ -527,7 +527,10 @@ export function InspectorContent({
         {descriptionIntent ? (
           <div className="space-y-2">
             {descriptionProblem && (
-              <div role="alert" className="space-y-2 border border-border bg-muted p-3 text-xs">
+              <div
+                role="alert"
+                className="space-y-2 rounded-lg border border-border bg-muted p-3 text-xs"
+              >
                 <p>
                   {uiText(
                     descriptionProblem === "conflict"

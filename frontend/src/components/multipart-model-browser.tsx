@@ -273,7 +273,7 @@ function ModelPicker({
                           <Square className="h-5 w-5" />
                         )}
                       </span>
-                      <span className="h-10 w-10 shrink-0 overflow-hidden border border-border">
+                      <span className="h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-border">
                         <Cover src={candidate.thumbnail_url} alt="" />
                       </span>
                       <span className="min-w-0 flex-1">
@@ -346,7 +346,7 @@ function MemberRow({ model }: { model: MultipartModelCandidate }) {
   const legacyLabel = model.available ? model.legacy_label : null;
   const content = (
     <div className="flex min-w-0 items-center gap-3">
-      <span className="library-preview h-14 w-14 shrink-0 overflow-hidden border border-border">
+      <span className="library-preview h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border">
         <Cover src={model.thumbnail_url} alt="" />
       </span>
       <span className="min-w-0">
@@ -453,10 +453,10 @@ function MultipartOverview({
       )}
       <section
         aria-label={t("multipart.detailsHeading")}
-        className="mb-4 flex min-w-0 flex-wrap gap-5 border border-border bg-card p-5"
+        className="mb-4 flex min-w-0 flex-wrap gap-5 rounded-lg border border-border bg-card p-5"
       >
         <div
-          className="library-preview relative h-40 w-full shrink-0 overflow-hidden border border-border sm:w-64"
+          className="library-preview relative h-40 w-full shrink-0 overflow-hidden rounded-lg border border-border sm:w-64"
           title={
             model.cover_image_uploaded
               ? t("multipart.uploadedCover")
@@ -522,7 +522,7 @@ function MultipartOverview({
       </section>
       <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <section
-          className="min-w-0 overflow-hidden border border-border bg-card"
+          className="min-w-0 overflow-hidden rounded-lg border border-border bg-card"
           aria-labelledby="multipart-overview-parts"
         >
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
@@ -598,7 +598,7 @@ function MultipartOverview({
         </section>
 
         <aside className="min-w-0 space-y-4">
-          <section className="overflow-hidden border border-border bg-card">
+          <section className="overflow-hidden rounded-lg border border-border bg-card">
             <dl className="grid grid-cols-2 gap-x-5 gap-y-3 px-5 py-4 text-xs">
               <div>
                 <dt className="text-muted-foreground">{t("multipart.collectionLabel")}</dt>
@@ -612,7 +612,7 @@ function MultipartOverview({
               </div>
             </dl>
           </section>
-          <section className="border border-border bg-card">
+          <section className="rounded-lg border border-border bg-card">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-5 py-4">
               <h2 className="text-sm font-semibold">{t("multipart.guidesHeading")}</h2>
               {onUploadGuide && (
@@ -665,14 +665,14 @@ function MultipartOverview({
               </ul>
             )}
           </section>
-          <section className="flex items-center justify-between gap-3 border border-border bg-card p-5">
+          <section className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-5">
             <h2 className="text-sm font-semibold">{t("build.title")}</h2>
             <Button asChild variant="outline" size="sm">
               <Link href="/builds">{t("build.history")}</Link>
             </Button>
           </section>
           {onDelete && (
-            <section className="space-y-2 border border-border bg-card p-5">
+            <section className="space-y-2 rounded-lg border border-border bg-card p-5">
               <h2 className="text-sm font-semibold">{t("multipart.delete")}</h2>
               <p className="text-xs text-muted-foreground">{t("multipart.deleteDescription")}</p>
               <Button
@@ -719,7 +719,7 @@ function PartEditorRow({
   const { t } = useI18n();
   return (
     <fieldset
-      className="min-w-0 overflow-hidden rounded-none border border-border bg-card"
+      className="min-w-0 overflow-hidden rounded-lg border border-border bg-card"
       aria-labelledby={`multipart-part-${part.id}`}
     >
       <legend className="sr-only">{part.name}</legend>
@@ -1507,7 +1507,7 @@ function MultipartDetail({ id }: { id: number }) {
               </div>
             </section>
             <aside className="grid min-w-0 gap-5 lg:grid-cols-2">
-              <section className="space-y-3 rounded-none border border-border bg-card p-4">
+              <section className="space-y-3 rounded-lg border border-border bg-card p-4">
                 <div>
                   <h2 className="font-semibold">{t("multipart.detailsHeading")}</h2>
                   <p className="mt-1 text-xs text-muted-foreground">
@@ -1671,7 +1671,7 @@ function MultipartDetail({ id }: { id: number }) {
                   </div>
                 </div>
               </section>
-              <section className="space-y-3 rounded-none border border-border bg-card p-4">
+              <section className="space-y-3 rounded-lg border border-border bg-card p-4">
                 <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <h2 className="font-semibold">{t("multipart.guidesHeading")}</h2>

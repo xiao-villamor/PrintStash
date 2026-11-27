@@ -18,7 +18,10 @@ export function MultipartPartsSummary({
 }) {
   const { t } = useI18n();
   return (
-    <section aria-labelledby="multipart-parts-summary" className="shrink-0 border border-border">
+    <section
+      aria-labelledby="multipart-parts-summary"
+      className="shrink-0 rounded-md border border-border"
+    >
       <div className="flex items-baseline justify-between gap-3 border-b border-border px-3 py-2">
         <h3 id="multipart-parts-summary" className="text-sm font-semibold">
           {t("multipart.partsInSet")}
@@ -34,9 +37,9 @@ export function MultipartPartsSummary({
           {models.map((model) => (
             <li
               key={model.id}
-              className="flex min-w-0 items-center gap-2 border border-border bg-card p-1.5 pr-1"
+              className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-card p-1.5 pr-1"
             >
-              <span className="library-preview h-10 w-10 shrink-0 overflow-hidden border border-border">
+              <span className="library-preview h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-border">
                 <Cover src={model.thumbnail_url} alt="" />
               </span>
               <span className="min-w-0 flex-1">

@@ -451,6 +451,16 @@ function ProfileRow({
           setEditorMode(null);
         }}
         title={editTitle}
+        footer={
+          <Button
+            onClick={() => {
+              onClose();
+              setEditorMode(null);
+            }}
+          >
+            {uiText("Save and close")}
+          </Button>
+        }
       >
         <div className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-6">
           <p className="col-span-full text-xs text-muted-foreground">

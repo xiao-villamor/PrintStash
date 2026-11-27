@@ -52,4 +52,11 @@ describe("Input", () => {
 
     expect(ref.current).toBe(screen.getByLabelText("Model name"));
   });
+
+  it("swaps the focus ring to the error colour on an invalid field", () => {
+    render(<Input aria-label="Model name" aria-invalid="true" />);
+
+    const input = screen.getByLabelText("Model name");
+    expect(input.className).toContain("aria-[invalid=true]:focus:ring-destructive");
+  });
 });

@@ -348,41 +348,21 @@ function ProfileSettingsContent({
 export function ProfileSettingsDetails({
   kind,
   profile,
-  initiallyExpanded = false,
 }: {
   kind: ProfileSettingsKind;
   profile: Profile;
-  initiallyExpanded?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(initiallyExpanded);
   return (
     <section
       className="min-w-0 rounded-lg border border-border"
       aria-label={uiText("profiles.settingsFor", { name: profile.name })}
     >
-      <Button
-        variant="ghost"
-        size="sm"
-        className="w-full justify-between px-4 font-semibold"
-        aria-label={uiText(
-          expanded ? "profiles.closeProfileSettings" : "profiles.openProfileSettings",
-        )}
-        aria-expanded={expanded}
-        onClick={() => setExpanded(!expanded)}
-      >
-        {uiText("profiles.settingsTitle")}
-        <ChevronDown
-          aria-hidden
-          className={`h-3.5 w-3.5 transition-transform duration-press ${expanded ? "rotate-180" : ""}`}
-        />
-      </Button>
-      {expanded && (
-        <ProfileSettingsContent
-          key={`${kind}/${profile.id}/${profile.edit_epoch}/${profile.edit_version}`}
-          kind={kind}
-          profile={profile}
-        />
-      )}
+      <h3 className="px-4 py-2 text-sm font-semibold">{uiText("profiles.settingsTitle")}</h3>
+      <ProfileSettingsContent
+        key={`${kind}/${profile.id}/${profile.edit_epoch}/${profile.edit_version}`}
+        kind={kind}
+        profile={profile}
+      />
     </section>
   );
 }

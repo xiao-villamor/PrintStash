@@ -228,7 +228,7 @@ export function NewMultipartModelModal({
               <Button type="button" variant="outline" onClick={closeModal} disabled={busy}>
                 {t("multipart.cancel")}
               </Button>
-              <Button type="submit" loading={busy} disabled={!name.trim() || selectingFolder}>
+              <Button type="submit" loading={busy} disabled={selectingFolder}>
                 {t("multipart.create")}
               </Button>
             </div>

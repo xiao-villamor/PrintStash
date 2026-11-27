@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { FieldErrors } from "@/components/ui/field-errors";
 import { FormField } from "@/components/ui/form-field";
 import { Input, inputClasses } from "@/components/ui/input";
 import {
@@ -12,6 +13,7 @@ import {
 } from "@/features/library/model-detail";
 import { pricingPageSize } from "@/lib/api/production-costing";
 import { formatPercent } from "@/lib/format";
+import { useFormValidation } from "@/lib/form-validation";
 import { uiText } from "@/lib/locale";
 import { getSessionVersion } from "@/lib/session-transport";
 import { toast } from "@/lib/toast";
@@ -106,6 +108,7 @@ export function PricingTemplatePicker({
 export function PricingTemplatesPanel({ admin }: { admin: boolean }) {
   const { query, rows, navigation, returnToFirstPage } = usePricingTemplatePage();
   const { createTemplate, deleteTemplate } = usePricingTemplateCommands();
+  const validation = useFormValidation();
   const [name, setName] = useState("");
   const [margin, setMargin] = useState("0");
   const [tax, setTax] = useState("0");
@@ -121,66 +124,77 @@ export function PricingTemplatesPanel({ admin }: { admin: boolean }) {
       </div>
       {admin && (
         <form
+          {...validation.formProps}
           className="grid gap-3 sm:grid-cols-2"
-          onSubmit={async (event) => {
-            event.preventDefault();
-            if (!name.trim() || createTemplate.isPending) return;
-            try {
-              await createTemplate.mutateAsync({
-                template: {
-                  name: name.trim(),
-                  margin_percent: Number(margin),
-                  tax_percent: Number(tax),
-                },
-                session: getSessionVersion(),
-              });
-              setName("");
-              returnToFirstPage();
-              toast.success(uiText("Pricing template saved."));
-            } catch (error) {
-              toast.error(error);
-            }
-          }}
+          onSubmit={(event) =>
+            validation.handle(event, async () => {
+              event.preventDefault();
+              if (!name.trim() || createTemplate.isPending) return;
+              try {
+                await createTemplate.mutateAsync({
+                  template: {
+                    name: name.trim(),
+                    margin_percent: Number(margin),
+                    tax_percent: Number(tax),
+                  },
+                  session: getSessionVersion(),
+                });
+                setName("");
+                returnToFirstPage();
+                toast.success(uiText("Pricing template saved."));
+              } catch (error) {
+                toast.error(error);
+              }
+            })
+          }
         >
-          <FormField label={uiText("New template name")} className="sm:col-span-2">
-            <Input
-              required
-              maxLength={200}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-            />
-          </FormField>
-          <FormField label={uiText("Profit margin (%)")}>
-            <Input
-              type="number"
-              min={0}
-              max={99.99}
-              step="any"
-              required
-              value={margin}
-              onChange={(event) => setMargin(event.target.value)}
-            />
-          </FormField>
-          <FormField label={uiText("Tax (%)")}>
-            <Input
-              type="number"
-              min={0}
-              max={100}
-              step="any"
-              required
-              value={tax}
-              onChange={(event) => setTax(event.target.value)}
-            />
-          </FormField>
-          <Button
-            type="submit"
-            size="sm"
-            className="justify-self-start"
-            disabled={!name.trim()}
-            loading={createTemplate.isPending}
-          >
-            {uiText("Save pricing template")}
-          </Button>
+          <FieldErrors errors={validation.errors}>
+            <FormField
+              label={uiText("New template name")}
+              htmlFor="pricing-template-name"
+              className="sm:col-span-2"
+            >
+              <Input
+                id="pricing-template-name"
+                required
+                maxLength={200}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+              />
+            </FormField>
+            <FormField label={uiText("Profit margin (%)")} htmlFor="pricing-template-margin">
+              <Input
+                id="pricing-template-margin"
+                type="number"
+                min={0}
+                max={99.99}
+                step="any"
+                required
+                value={margin}
+                onChange={(event) => setMargin(event.target.value)}
+              />
+            </FormField>
+            <FormField label={uiText("Tax (%)")} htmlFor="pricing-template-tax">
+              <Input
+                id="pricing-template-tax"
+                type="number"
+                min={0}
+                max={100}
+                step="any"
+                required
+                value={tax}
+                onChange={(event) => setTax(event.target.value)}
+              />
+            </FormField>
+            <Button
+              type="submit"
+              size="sm"
+              className="justify-self-start"
+              loading={createTemplate.isPending}
+            >
+              {uiText("Save pricing template")}
+            </Button>
+          </FieldErrors>
         </form>
       )}
       {query.isPending ? (

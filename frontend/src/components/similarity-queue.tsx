@@ -543,8 +543,8 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
                   : "grid w-full grid-cols-2 gap-1 @sm/similarity:grid-cols-4 @3xl/similarity:flex"
               }
               tabClassName={cn(
-                "h-9 min-w-0 whitespace-nowrap px-3 text-field text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                modelDetail && "border border-border",
+                "h-9 min-w-0 whitespace-nowrap px-3 text-field text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                modelDetail && "rounded-md border border-border",
               )}
               activeTabClassName="bg-accent text-accent-foreground"
               showIndicator={false}

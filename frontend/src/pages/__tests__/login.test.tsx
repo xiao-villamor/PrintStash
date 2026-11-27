@@ -468,7 +468,9 @@ describe("Login entry lifetime", () => {
           available ? json(WITH_SSO) : json({ detail: "unavailable" }, 503),
       },
     });
-    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Other sign-in options could not be loaded.",
+    );
     expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled();
     available = true;
 

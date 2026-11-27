@@ -337,7 +337,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
           </>
         }
       />
-      <div className="overflow-hidden border border-border bg-card">
+      <div className="overflow-hidden rounded-lg border border-border bg-card">
         <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-5">
           <div className="min-w-0">
             <h2 className="break-words text-sm font-semibold">{title}</h2>

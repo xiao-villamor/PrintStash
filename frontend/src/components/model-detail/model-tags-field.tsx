@@ -279,7 +279,7 @@ export function ModelTagsField({
               aria-expanded={open}
               aria-label={label}
               title={label}
-              className={` gap-1.5 border border-dotted border-muted-foreground/70 px-2 text-muted-foreground hover:border-foreground hover:text-foreground ${shown.length ? "w-8 px-0" : ""}`}
+              className={` gap-1.5 rounded-md border border-dotted border-muted-foreground/70 px-2 text-muted-foreground hover:border-foreground hover:text-foreground ${shown.length ? "w-8 px-0" : ""}`}
               onClick={() => setOpen((value) => !value)}
             >
               <Pencil className="size-3.5" aria-hidden />
@@ -322,7 +322,7 @@ export function ModelTagsField({
                 role="listbox"
                 aria-multiselectable="true"
                 aria-label={uiText("Tags")}
-                className="max-h-48 divide-y divide-border overflow-y-auto border border-border"
+                className="max-h-48 divide-y divide-border overflow-y-auto rounded-md border border-border"
               >
                 {matching.map((tag, index) => (
                   <button
@@ -340,7 +340,7 @@ export function ModelTagsField({
                   >
                     <span className="flex min-w-0 items-center gap-2">
                       <span
-                        className="grid size-4 shrink-0 place-items-center border border-border"
+                        className="grid size-4 shrink-0 place-items-center rounded-md border border-border"
                         aria-hidden
                       >
                         {selectedNames.has(normalized(tag.name)) && <Check className="size-3" />}
@@ -402,7 +402,10 @@ export function ModelTagsField({
               <p className="text-sm text-muted-foreground">{uiText("No tags assigned yet.")}</p>
             )}
             {problemText && (
-              <div role="alert" className="space-y-2 border border-border bg-muted p-2 text-sm">
+              <div
+                role="alert"
+                className="space-y-2 rounded-lg border border-border bg-muted p-2 text-sm"
+              >
                 <p>{problemText}</p>
                 <div className="flex flex-wrap gap-2">
                   <Button variant="outline" size="sm" loading={reviewing} onClick={retry}>

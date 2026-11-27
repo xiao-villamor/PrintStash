@@ -378,7 +378,7 @@ export function InspectorPreviewImages({
           <PreviewArrows state={state} size="gallery" />
           <ViewIndicator
             state={state}
-            className="absolute bottom-2 left-1/2 max-w-full -translate-x-1/2 border border-border"
+            className="absolute bottom-2 left-1/2 max-w-full -translate-x-1/2 rounded-md border border-border"
           />
         </>
       )}
@@ -447,7 +447,7 @@ export function ModelPreviewGallery({
         {preview.navigationViews.length >= 2 && <PreviewArrows state={state} size="gallery" />}
         <ViewIndicator
           state={state}
-          className="absolute bottom-3 left-1/2 max-w-[calc(100%-6rem)] -translate-x-1/2 border border-border"
+          className="absolute bottom-3 left-1/2 max-w-[calc(100%-6rem)] -translate-x-1/2 rounded-md border border-border"
         />
         {preview.failed && (
           <Button variant="outline" className="absolute left-2 top-2" onClick={preview.retry}>
@@ -494,7 +494,7 @@ export function ModelPreviewGallery({
                     aria-label={label}
                     title={label}
                     className={cn(
-                      "model-preview-gallery-tile flex w-24 shrink-0 flex-col gap-1 border p-1 text-left transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "model-preview-gallery-tile flex w-24 shrink-0 flex-col gap-1 rounded-md border p-1 text-left transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       selected
                         ? "border-foreground/40 bg-accent text-accent-foreground"
                         : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",

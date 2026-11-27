@@ -54,4 +54,42 @@ describe("design consistency", () => {
   it("does not force a menu radius that the floating primitive owns", () => {
     expect(offenders(/contentClassName="[^"]*\brounded(?:-md)?(?=[\s"])/)).toEqual([]);
   });
+
+  it("never draws a bordered box with square corners", () => {
+    // A class string that borders a box (`border` + a border colour) must also
+    // round it: panels 8px (rounded-lg), controls 6px (rounded-md). Popover
+    // content is rounded by the floating primitive and is exempt.
+    const colour =
+      /^border-(?:border|input|border-strong|dashed|dotted|outline-variant|destructive|warning|success|primary)(?:\/\d+)?$/;
+    const square: string[] = [];
+    for (const file of sourceFiles(root)) {
+      const text = fs.readFileSync(file, "utf8");
+      for (const match of text.matchAll(/(["`])((?:(?!\1)[^\n])*?)\1/g)) {
+        const tokens = match[2].split(/\s+/);
+        if (!tokens.includes("border")) continue;
+        if (!tokens.some((token) => colour.test(token))) continue;
+        if (tokens.some((token) => token.startsWith("rounded") || token.startsWith("[&"))) continue;
+        if (tokens.includes("bg-popover") || tokens.includes("border-0")) continue;
+        square.push(`${path.relative(root, file)}: ${match[2].slice(0, 80)}`);
+      }
+    }
+    expect(square).toEqual([]);
+  });
+
+  it("keeps the Card primitive rounded", () => {
+    const card = fs.readFileSync(
+      path.resolve(root, "../packages/ui/src/components/card.tsx"),
+      "utf8",
+    );
+    expect(card).toContain("rounded-lg");
+    expect(card).not.toContain("rounded-none");
+  });
+
+  it("keeps selection and hover visibly different", () => {
+    const globals = fs.readFileSync(path.resolve(root, "globals.css"), "utf8");
+    expect(offenders(/hover:bg-accent\b/)).toEqual([]);
+    const accent = /--accent: ([^;]+);/.exec(globals)?.[1];
+    const muted = /--muted: ([^;]+);/.exec(globals)?.[1];
+    expect(accent).not.toBe(muted);
+  });
 });

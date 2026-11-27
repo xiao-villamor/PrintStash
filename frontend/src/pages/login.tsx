@@ -266,7 +266,7 @@ export default function LoginPage() {
       {providerRead.error && (
         <div className="mt-5">
           <ErrorState
-            message={userMessage(providerRead.error)}
+            message={uiText("Other sign-in options could not be loaded.")}
             retryLabel={uiText("Retry")}
             onRetry={() => void providerRead.refetch()}
           />

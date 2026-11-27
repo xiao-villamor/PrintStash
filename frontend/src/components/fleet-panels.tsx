@@ -1426,7 +1426,7 @@ export function FleetMaintenancePanel({
           <EmptyState
             icon={Wrench}
             title={uiText("No printers to maintain")}
-            className="border border-border bg-card"
+            className="rounded-lg border border-border bg-card"
           />
         ) : (
           <section

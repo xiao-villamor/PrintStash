@@ -251,7 +251,7 @@ export function LibrarySearch({
           {!value && !showAi && !showCamera && (
             <kbd
               aria-hidden
-              className="pointer-events-none mr-1 border border-border bg-muted px-1 font-mono text-2xs text-muted-foreground"
+              className="pointer-events-none mr-1 rounded-md border border-border bg-muted px-1 font-mono text-2xs text-muted-foreground"
             >
               /
             </kbd>
@@ -314,7 +314,7 @@ export function LibrarySearch({
             <div
               role="group"
               aria-label={t("search.scope")}
-              className="mt-2 grid grid-cols-2 border border-border"
+              className="mt-2 grid grid-cols-2 rounded-md border border-border"
             >
               {(
                 [
@@ -357,7 +357,7 @@ export function LibrarySearch({
             </Button>
           )}
           {!aiReady && (
-            <div className="mt-3 flex items-start gap-2.5 border border-border bg-muted/40 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+            <div className="mt-3 flex items-start gap-2.5 rounded-md border border-border bg-muted/40 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
               <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
               <div className="min-w-0 flex-1">
                 <p role="status">

@@ -204,7 +204,7 @@ export function AddGcodeRevisionModal({
                 onDragLeave={() => setDragActive(false)}
                 onDrop={onDrop}
                 className={cn(
-                  "flex items-start gap-3 border border-dashed border-input bg-plate p-3",
+                  "flex items-start gap-3 rounded-md border border-dashed border-input bg-plate p-3",
                   dragActive && "border-primary bg-accent",
                 )}
               >

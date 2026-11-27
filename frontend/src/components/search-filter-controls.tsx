@@ -333,7 +333,7 @@ export function SearchFilterControls({
               {uiText("Filter value")}
               {choiceValues(addKey).length ? (
                 <select
-                  className="h-10 w-full border border-input bg-field-surface px-3"
+                  className="h-10 w-full rounded-md border border-input bg-field-surface px-3"
                   value={addValue}
                   onChange={(event) => setAddValue(event.target.value)}
                 >

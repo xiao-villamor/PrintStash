@@ -544,7 +544,7 @@ export function RevisionsTab({
             }
           >
             {selecting && (
-              <div className="mb-3 flex flex-wrap items-center gap-2 border border-border bg-muted/40 p-2">
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 p-2">
                 <span className="text-xs text-muted-foreground">
                   {uiText("{value1} selected", { value1: String(selectedRevisionIds.size ?? "") })}
                 </span>

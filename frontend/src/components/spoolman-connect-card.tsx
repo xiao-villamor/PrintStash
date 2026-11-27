@@ -385,7 +385,7 @@ export function SpoolmanConnectCard({
                     />
                   </div>
                   {status?.native_hook_detected && (
-                    <div className="space-y-2 border border-border p-3 text-xs text-foreground">
+                    <div className="space-y-2 rounded-lg border border-border p-3 text-xs text-foreground">
                       <div className="flex items-start gap-2">
                         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-warning" />
                         <span>

@@ -787,7 +787,7 @@ function StatsContent({
   return (
     <div className="space-y-6 animate-panel-in">
       <div hidden={section !== "overview"} className="space-y-4">
-        <div className="grid grid-cols-2 gap-px overflow-hidden border bg-border sm:grid-cols-3 2xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-3 2xl:grid-cols-6">
           <MetricCard
             label={uiText("Total cost")}
             value={

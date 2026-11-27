@@ -184,7 +184,7 @@ describe("NotificationsPanel", () => {
       await openDraft(user);
 
       const control = screen.getByLabelText(label, { exact: true });
-      await user.click(screen.getByText(label, { selector: "label", exact: true }));
+      await user.click(screen.getByText(label, { selector: "label, label > span", exact: true }));
 
       expect(control).toHaveFocus();
       expect(control).toHaveAccessibleName(label);
