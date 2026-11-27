@@ -1863,6 +1863,8 @@
   "auth.welcome": "Welcome back",
   "auth.description": "Sign in to your print library.",
   "auth.username": "Username",
+  "auth.usernameRequired": "Enter your username.",
+  "auth.passwordRequired": "Enter your password.",
   "auth.password": "Password",
   "auth.remember": "Remember me on this device",
   "auth.signIn": "Sign in",
@@ -6278,5 +6280,9 @@
   "Sage": "Sage",
   "Clay": "Clay",
   "Plum": "Plum",
-  "Install the extension, then create a pairing code below.": "Install the extension, then create a pairing code below."
+  "Install the extension, then create a pairing code below.": "Install the extension, then create a pairing code below.",
+  "This field is required.": "This field is required.",
+  "Enter a valid value.": "Enter a valid value.",
+  "Check the length of this value.": "Check the length of this value.",
+  "Enter a value within the allowed range.": "Enter a value within the allowed range."
 }

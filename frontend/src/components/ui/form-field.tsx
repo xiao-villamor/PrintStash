@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { useFieldError } from "@/lib/form-validation";
 import { uiText } from "@/lib/locale";
 import { cn } from "@/lib/utils";
 
@@ -30,6 +31,8 @@ export function FormField({
   optional?: boolean;
   className?: string;
 }) {
+  const contextError = useFieldError(htmlFor);
+  const shownError = error ?? contextError;
   const title = (
     <span className="mb-1.5 block text-field font-medium text-foreground">
       {label}
@@ -59,9 +62,9 @@ export function FormField({
           {hint}
         </p>
       )}
-      {error && (
+      {shownError && (
         <p id={errorId} role="alert" className="mt-1 text-xs text-destructive">
-          {error}
+          {shownError}
         </p>
       )}
     </div>

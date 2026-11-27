@@ -94,8 +94,6 @@ import {
   Database,
   Download,
   Eraser,
-  Eye,
-  EyeOff,
   Gpu,
   Hourglass,
   Files,
@@ -130,6 +128,9 @@ import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/ui/page-header";
 import { Badge } from "@/components/ui/badge";
 import { ErrorState } from "@/components/ui/error-state";
+import { FieldErrors } from "@/components/ui/field-errors";
+import { useFormValidation } from "@/lib/form-validation";
+import { PasswordToggle } from "@/components/ui/password-toggle";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { TabBar } from "@/components/ui/tabs";
 import { FormField } from "@/components/ui/form-field";
@@ -624,6 +625,7 @@ export function SettingsPanel() {
     : null;
   const [createUserDraft, setCreateUserDraft] = useState(EMPTY_CREATE_USER);
   const [showNewUserPasswords, setShowNewUserPasswords] = useState(false);
+  const createUserValidation = useFormValidation();
   const [deleteUserTarget, setDeleteUserTarget] = useState<number | null>(null);
   const [deleteUserError, setDeleteUserError] = useState<string | null>(null);
   const [createUserOpen, setCreateUserOpen] = useState(false);
@@ -3324,118 +3326,112 @@ export function SettingsPanel() {
                         <form
                           id="create-user-form"
                           className="grid gap-4"
-                          onSubmit={(event) => {
-                            event.preventDefault();
-                            void createUser();
-                          }}
+                          {...createUserValidation.formProps}
+                          onSubmit={(event) =>
+                            createUserValidation.handle(event, () => {
+                              event.preventDefault();
+                              void createUser();
+                            })
+                          }
                         >
-                          <FormField htmlFor="new-user-username" label={uiText("Username")}>
-                            <Input
-                              id="new-user-username"
-                              value={newUsername}
-                              onChange={(event) =>
-                                setCreateUserDraft((current) => ({
-                                  ...current,
-                                  username: event.target.value,
-                                }))
-                              }
-                              minLength={3}
-                              maxLength={128}
-                              autoComplete="off"
-                              required
-                            />
-                          </FormField>
-                          <FormField htmlFor="new-user-email" label={uiText("Email")} optional>
-                            <Input
-                              id="new-user-email"
-                              value={newUserEmail}
-                              onChange={(event) =>
-                                setCreateUserDraft((current) => ({
-                                  ...current,
-                                  email: event.target.value,
-                                }))
-                              }
-                              type="email"
-                              maxLength={255}
-                              autoComplete="off"
-                            />
-                          </FormField>
-                          <FormField
-                            htmlFor="new-user-password"
-                            label={uiText("Initial password")}
-                            hint={uiText("Initial password: at least 8 characters.")}
-                            hintId="new-user-password-help"
-                          >
-                            <div className="relative">
+                          <FieldErrors errors={createUserValidation.errors}>
+                            <FormField htmlFor="new-user-username" label={uiText("Username")}>
                               <Input
-                                id="new-user-password"
-                                value={newUserPassword}
+                                id="new-user-username"
+                                value={newUsername}
                                 onChange={(event) =>
                                   setCreateUserDraft((current) => ({
                                     ...current,
-                                    password: event.target.value,
+                                    username: event.target.value,
                                   }))
                                 }
-                                className="pe-11"
-                                type={showNewUserPasswords ? "text" : "password"}
-                                minLength={8}
-                                maxLength={256}
-                                autoComplete="new-password"
-                                aria-describedby="new-user-password-help"
+                                minLength={3}
+                                maxLength={128}
+                                autoComplete="off"
                                 required
                               />
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                className="absolute end-0 top-0"
-                                aria-controls="new-user-password new-user-confirmation"
-                                aria-label={uiText(
-                                  showNewUserPasswords ? "Hide passwords" : "Show passwords",
-                                )}
-                                onClick={() => setShowNewUserPasswords((visible) => !visible)}
-                              >
-                                {showNewUserPasswords ? (
-                                  <EyeOff aria-hidden />
-                                ) : (
-                                  <Eye aria-hidden />
-                                )}
-                              </Button>
-                            </div>
-                          </FormField>
-                          <FormField
-                            htmlFor="new-user-confirmation"
-                            label={uiText("Confirm password")}
-                          >
-                            <Input
-                              id="new-user-confirmation"
-                              value={confirmation}
-                              onChange={(event) =>
-                                setCreateUserDraft((current) => ({
-                                  ...current,
-                                  confirmation: event.target.value,
-                                }))
-                              }
-                              type={showNewUserPasswords ? "text" : "password"}
-                              maxLength={256}
-                              autoComplete="new-password"
-                              aria-invalid={confirmation !== "" && !passwordsMatch}
-                              aria-describedby={
+                            </FormField>
+                            <FormField htmlFor="new-user-email" label={uiText("Email")} optional>
+                              <Input
+                                id="new-user-email"
+                                value={newUserEmail}
+                                onChange={(event) =>
+                                  setCreateUserDraft((current) => ({
+                                    ...current,
+                                    email: event.target.value,
+                                  }))
+                                }
+                                type="email"
+                                maxLength={255}
+                                autoComplete="off"
+                              />
+                            </FormField>
+                            <FormField
+                              htmlFor="new-user-password"
+                              label={uiText("Initial password")}
+                              hint={uiText("Initial password: at least 8 characters.")}
+                              hintId="new-user-password-help"
+                            >
+                              <div className="relative">
+                                <Input
+                                  id="new-user-password"
+                                  value={newUserPassword}
+                                  onChange={(event) =>
+                                    setCreateUserDraft((current) => ({
+                                      ...current,
+                                      password: event.target.value,
+                                    }))
+                                  }
+                                  className="pe-10"
+                                  type={showNewUserPasswords ? "text" : "password"}
+                                  minLength={8}
+                                  maxLength={256}
+                                  autoComplete="new-password"
+                                  aria-describedby="new-user-password-help"
+                                  required
+                                />
+                                <PasswordToggle
+                                  visible={showNewUserPasswords}
+                                  onToggle={() => setShowNewUserPasswords((visible) => !visible)}
+                                  controls="new-user-password new-user-confirmation"
+                                  label={uiText(
+                                    showNewUserPasswords ? "Hide passwords" : "Show passwords",
+                                  )}
+                                />
+                              </div>
+                            </FormField>
+                            <FormField
+                              htmlFor="new-user-confirmation"
+                              label={uiText("Confirm password")}
+                              errorId="new-user-password-mismatch"
+                              error={
                                 confirmation !== "" && !passwordsMatch
-                                  ? "new-user-password-mismatch"
+                                  ? uiText("Passwords do not match.")
                                   : undefined
                               }
-                              required
-                            />
-                            {confirmation !== "" && !passwordsMatch && (
-                              <p
-                                id="new-user-password-mismatch"
-                                className="mt-1 text-xs text-destructive"
-                              >
-                                {uiText("Passwords do not match.")}
-                              </p>
-                            )}
-                          </FormField>
+                            >
+                              <Input
+                                id="new-user-confirmation"
+                                value={confirmation}
+                                onChange={(event) =>
+                                  setCreateUserDraft((current) => ({
+                                    ...current,
+                                    confirmation: event.target.value,
+                                  }))
+                                }
+                                type={showNewUserPasswords ? "text" : "password"}
+                                maxLength={256}
+                                autoComplete="new-password"
+                                aria-invalid={confirmation !== "" && !passwordsMatch}
+                                aria-describedby={
+                                  confirmation !== "" && !passwordsMatch
+                                    ? "new-user-password-mismatch"
+                                    : undefined
+                                }
+                                required
+                              />
+                            </FormField>
+                          </FieldErrors>
                         </form>
                       </Modal>
 

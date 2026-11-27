@@ -9,7 +9,7 @@ import {
   type SetupEntryApi,
 } from "@/features/setup/entry";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
-import { AlertTriangle, CheckCircle2, Eye, EyeOff } from "lucide-react";
+import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
 import {
   beginSetup,
@@ -24,6 +24,7 @@ import {
   storageChoiceLabel,
   type ProviderValues,
 } from "@/components/storage-provider-picker";
+import { PasswordToggle } from "@/components/ui/password-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -406,30 +407,20 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                         }}
                       />
                       {secret && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="absolute inset-y-0 right-0 h-full w-10 text-muted-foreground"
-                          aria-label={t(
-                            visiblePasswords[field] ? "setup.hideField" : "setup.showField",
-                            { field: t(`setup.${field}`) },
-                          )}
-                          aria-controls={`setup-${field}`}
-                          aria-pressed={visiblePasswords[field]}
-                          onClick={() =>
+                        <PasswordToggle
+                          visible={visiblePasswords[field]}
+                          onToggle={() =>
                             setVisiblePasswords((current) => ({
                               ...current,
                               [field]: !current[field],
                             }))
                           }
-                        >
-                          {visiblePasswords[field] ? (
-                            <EyeOff className="h-4 w-4" aria-hidden />
-                          ) : (
-                            <Eye className="h-4 w-4" aria-hidden />
+                          label={t(
+                            visiblePasswords[field] ? "setup.hideField" : "setup.showField",
+                            { field: t(`setup.${field}`) },
                           )}
-                        </Button>
+                          controls={`setup-${field}`}
+                        />
                       )}
                     </div>
                     {described && (

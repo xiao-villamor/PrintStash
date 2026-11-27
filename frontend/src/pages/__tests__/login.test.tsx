@@ -483,10 +483,30 @@ describe("Login entry lifetime", () => {
     renderLogin({ auth: signedOut({ login }) });
     const form = screen.getByLabelText("Username").closest("form");
     if (!form) throw new Error("Login form missing");
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
 
     fireEvent.submit(form);
     fireEvent.submit(form);
 
     expect(login).toHaveBeenCalledTimes(1);
+  });
+
+  it("explains a missing username and password under the fields instead of a browser bubble", () => {
+    const login = vi.fn<AuthState["login"]>();
+    renderLogin({ auth: signedOut({ login }) });
+    const form = screen.getByLabelText("Username").closest("form");
+    if (!form) throw new Error("Login form missing");
+    expect(form).toHaveAttribute("novalidate");
+
+    fireEvent.submit(form);
+
+    expect(login).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Username")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("Enter your username.")).toBeVisible();
+    expect(screen.getByText("Enter your password.")).toBeVisible();
+
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin" } });
+    expect(screen.queryByText("Enter your username.")).not.toBeInTheDocument();
   });
 });

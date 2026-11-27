@@ -1863,6 +1863,8 @@
   "auth.welcome": "Te damos la bienvenida",
   "auth.description": "Inicia sesión en tu biblioteca de impresiones.",
   "auth.username": "Usuario",
+  "auth.usernameRequired": "Introduce tu nombre de usuario.",
+  "auth.passwordRequired": "Introduce tu contraseña.",
   "auth.password": "Contraseña",
   "auth.remember": "Recordarme en este dispositivo",
   "auth.signIn": "Iniciar sesión",
@@ -6278,5 +6280,9 @@
   "Sage": "Salvia",
   "Clay": "Arcilla",
   "Plum": "Ciruela",
-  "Install the extension, then create a pairing code below.": "Instala la extensión y crea un código de vinculación abajo."
+  "Install the extension, then create a pairing code below.": "Instala la extensión y crea un código de vinculación abajo.",
+  "This field is required.": "Este campo es obligatorio.",
+  "Enter a valid value.": "Introduce un valor válido.",
+  "Check the length of this value.": "Revisa la longitud de este valor.",
+  "Enter a value within the allowed range.": "Introduce un valor dentro del rango permitido."
 }
