@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import {} from "lucide-react";
 import { SettingsCard, SettingsSwitch } from "@/components/settings-card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
+import { Input, inputClasses } from "@/components/ui/input";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   auditHistoryOptions,
@@ -127,7 +127,7 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
                 <label className="space-y-1 text-sm">
                   {t("auditSchedule.cadence")}
                   <select
-                    className="w-full rounded-md border border-input bg-field-surface p-2"
+                    className={inputClasses}
                     value={policy.cadence}
                     onChange={(event) =>
                       setPolicy({
@@ -144,7 +144,7 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
                   <label className="space-y-1 text-sm">
                     {t("auditSchedule.weekday")}
                     <select
-                      className="w-full rounded-md border border-input bg-field-surface p-2"
+                      className={inputClasses}
                       value={policy.weekday}
                       onChange={(event) =>
                         setPolicy({ ...policy, weekday: Number(event.target.value) })
@@ -252,7 +252,7 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
                   <label className="space-y-1 text-sm">
                     {t("auditSchedule.notifications")}
                     <select
-                      className="w-full rounded-md border border-input bg-field-surface p-2"
+                      className={inputClasses}
                       value={policy.notification_threshold ?? "warning"}
                       onChange={(event) => {
                         const value = event.target.value;

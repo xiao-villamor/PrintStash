@@ -16,12 +16,11 @@ import { useSpoolmanStatus, useSpools } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import type { MaterialSlotRead, PrinterMaterialStateRead, PrinterRead } from "@/types";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, inputClasses } from "@/components/ui/input";
 import { MachineMaterials } from "@/components/printer-machine";
 import { Skeleton } from "@/components/ui/skeleton";
 
-const selectClassName =
-  "h-10 w-full rounded-md border border-input bg-field-surface px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-disabled disabled:opacity-50";
+const selectClassName = inputClasses;
 
 /** Whether a manual feed is loaded with filament, known empty, or unreported. */
 type SlotState = "loaded" | "empty" | "unknown";
@@ -371,8 +370,8 @@ function MaterialEditor({
               </div>
             </div>
           ))}
-        {slots.map((slot) => (
-          <div key={slot.slot_key} className="printer-reference-row">
+        {slots.map((slot, index) => (
+          <div key={`${slot.slot_key}:${index}`} className="printer-reference-row">
             <div>
               <h3 className="flex items-center gap-2">
                 {inWorkspace &&

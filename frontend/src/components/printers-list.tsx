@@ -1157,7 +1157,7 @@ function PrinterModelPicker({
                               onSelectedChange(model);
                               onSave(model);
                             }}
-                            className="flex min-h-10 w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none disabled:pointer-events-none disabled:opacity-60 aria-pressed:bg-foreground/10 aria-pressed:font-medium"
+                            className="flex min-h-10 w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent focus-visible:bg-accent focus-visible:outline-none disabled:pointer-events-none disabled:opacity-60 aria-pressed:bg-accent aria-pressed:text-accent-foreground aria-pressed:font-medium"
                           >
                             {model}
                             {selected === model && (
@@ -1507,7 +1507,7 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
               )}
             </div>
             <div className="grid gap-4">
-              <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-muted/30 p-3">
+              <div className="flex flex-col gap-3 rounded-md border border-border bg-muted/30 p-3 sm:flex-row sm:items-center">
                 <Printer3D className="size-5 shrink-0 text-muted-foreground" aria-hidden />
                 <div className="min-w-0 flex-1">
                   <p className="text-field font-medium">
@@ -1524,22 +1524,13 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
                   type="button"
                   variant="outline"
                   size="sm"
+                  className="w-full sm:w-auto"
                   onClick={() => setModelChoiceOpen(true)}
                 >
                   {uiText("Choose printer model")}
                 </Button>
               </div>
-              <FormField
-                htmlFor="printer-notes"
-                label={
-                  <>
-                    {uiText("Notes")}{" "}
-                    <span className="font-normal text-muted-foreground">
-                      {uiText("(optional)")}
-                    </span>
-                  </>
-                }
-              >
+              <FormField htmlFor="printer-notes" label={uiText("Notes")} optional>
                 <textarea
                   id="printer-notes"
                   value={notes}

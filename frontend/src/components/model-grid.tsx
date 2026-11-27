@@ -3482,7 +3482,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           {/* The pane owns breakpoints: an open outliner also consumes horizontal room. */}
           <div className="library-collection-header px-4 sm:px-6">
             <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-1">
-              <div className="library-collection-identity min-w-0 flex-1">
+              <div className="library-collection-identity min-w-0 flex-[1_1_100%] sm:flex-1">
                 <InlineTitleEditor
                   fieldLabel={uiText("inbox.collectionName")}
                   maxLength={COLLECTION_NAME_LIMIT}

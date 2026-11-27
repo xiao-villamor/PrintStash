@@ -34,12 +34,12 @@ import type {
 } from "@/types/multipart-builds";
 import type { PrinterRead } from "@/types";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, inputClasses } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
 
-const selectClass = "h-10 w-full rounded-md border border-input bg-field-surface px-3 text-sm";
+const selectClass = inputClasses;
 function denied(error: Error | null) {
   return error instanceof ApiError && [401, 403, 404].includes(error.status);
 }

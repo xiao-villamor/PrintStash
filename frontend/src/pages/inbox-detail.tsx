@@ -15,7 +15,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { CollectionPicker } from "@/components/collection-picker";
-import { Input } from "@/components/ui/input";
+import { Input, inputClasses } from "@/components/ui/input";
 import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
 import {
@@ -489,7 +489,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
                       <select
                         value={destination}
                         onChange={(event) => setDestination(event.target.value)}
-                        className="mt-1.5 block h-10 w-full rounded-md border border-input bg-field-surface px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        className={inputClasses}
                       >
                         <option value={NEW_COLLECTION}>{t("inbox.newCollectionFromTitle")}</option>
                         <option value={NO_COLLECTION}>{t("inbox.noCollection")}</option>

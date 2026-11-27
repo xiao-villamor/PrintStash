@@ -83,6 +83,7 @@ export function PrinterConsole({
           />
           <Button
             type="submit"
+            variant="outline"
             size="sm"
             disabled={!live || busy || send.isPending || !draft.trim()}
           >

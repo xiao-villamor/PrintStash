@@ -18,7 +18,7 @@ import { listTasks, trackImportJob, updateTask } from "@/lib/task-center";
 import { toast } from "@/lib/toast";
 import type { ArchiveEntry, ArchiveManifest, CollectionNodeRead, JobStatus } from "@/types";
 
-import { Input } from "@/components/ui/input";
+import { Input, inputClasses } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
@@ -415,7 +415,7 @@ function ArchiveReview({
                     <select
                       value={cover ?? ""}
                       onChange={(event) => setCover(event.target.value || null)}
-                      className="h-10 w-full rounded border border-input bg-field-surface px-3 text-foreground"
+                      className={inputClasses}
                     >
                       <option value="">{uiText("No selected cover")}</option>
                       {manifest.entries

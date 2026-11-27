@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
+import { Input, inputClasses } from "@/components/ui/input";
 import { currentLocale, uiText } from "@/lib/locale";
 import {
   similarityHistoryOptions,
@@ -362,7 +362,7 @@ export function SimilaritySettingsPanel({
           <div className="min-w-0 basis-full space-y-1 text-xs sm:basis-72">
             {t("similarity.scope")}
             <select
-              className="block w-full rounded-md border border-input bg-field-surface p-2 text-sm"
+              className={inputClasses}
               value={scopeValue}
               onChange={(event) => {
                 const value = event.target.value;

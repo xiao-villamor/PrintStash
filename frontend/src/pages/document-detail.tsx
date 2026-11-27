@@ -489,7 +489,7 @@ export default function DocumentDetailPage({
               className="min-w-40 flex-1 rounded-md border border-transparent bg-field-surface px-2.5 py-1.5 text-base font-semibold text-foreground hover:border-border focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           ) : (
-            <h1 className="min-w-0 flex-1 break-words text-base font-semibold text-foreground">
+            <h1 className="min-w-0 flex-1 break-words text-2xl font-semibold leading-tight text-foreground">
               {doc.name}
             </h1>
           )}

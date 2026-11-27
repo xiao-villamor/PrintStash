@@ -5,7 +5,7 @@ import { structuredLibraryFilterLabel } from "@/features/library/filters";
 import { FILTER_SELECT } from "@/lib/filter-input";
 import { PrintHistoryFields } from "@/components/print-history-fields";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, inputClasses } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { uiText } from "@/lib/locale";
 import { useI18n } from "@/lib/i18n";
@@ -256,7 +256,7 @@ export function SearchFilterControls({
           <label className="block space-y-1 text-sm">
             {uiText("Filter")}
             <select
-              className="h-10 w-full border border-input bg-field-surface px-3 text-sm"
+              className={inputClasses}
               value={addKey}
               onChange={(event) => {
                 setAddKey(event.target.value);
@@ -376,7 +376,7 @@ export function SearchFilterControls({
             {editing?.key.includes("duration") && ` (${t("aiSearch.seconds")})`}
             {editing?.key === "print_outcome" || editing?.key === "printed" ? (
               <select
-                className="block w-full rounded-md border border-input bg-field-surface p-2"
+                className={inputClasses}
                 value={editValue}
                 onChange={(event) => setEditValue(event.target.value)}
               >

@@ -53,6 +53,7 @@ import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
+import { SettingsRowMenu } from "@/components/settings-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Localized } from "@/components/ui/localized";
 import { FleetRoutingCanvas } from "./fleet-routing-canvas";
@@ -1464,26 +1465,28 @@ export function FleetMaintenancePanel({
                           : uiText("Accepting scheduled work")}
                       </p>
                     </div>
-                    <div>
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        disabled={mutation.isPending}
-                        onClick={() => void toggleRouting(printer, "default")}
-                      >
-                        {uiText(printer.is_default ? "Unset default" : "Set default")}
-                      </Button>
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        disabled={mutation.isPending}
-                        onClick={() => void toggleRouting(printer, "drain")}
-                      >
-                        {uiText(printer.drain_mode ? "Resume routing" : "Soft drain")}
-                      </Button>
-                      {!compact && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {compact ? (
                         <>
-                          {" "}
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            disabled={mutation.isPending}
+                            onClick={() => void toggleRouting(printer, "default")}
+                          >
+                            {uiText(printer.is_default ? "Unset default" : "Set default")}
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            disabled={mutation.isPending}
+                            onClick={() => void toggleRouting(printer, "drain")}
+                          >
+                            {uiText(printer.drain_mode ? "Resume routing" : "Soft drain")}
+                          </Button>
+                        </>
+                      ) : (
+                        <>
                           <Button
                             size="xs"
                             variant="outline"
@@ -1504,6 +1507,20 @@ export function FleetMaintenancePanel({
                           >
                             {uiText("Log service")}
                           </Button>
+                          <SettingsRowMenu
+                            label={uiText("More actions for {value1}", { value1: printer.name })}
+                            disabled={mutation.isPending}
+                            items={[
+                              {
+                                label: uiText(printer.is_default ? "Unset default" : "Set default"),
+                                onSelect: () => void toggleRouting(printer, "default"),
+                              },
+                              {
+                                label: uiText(printer.drain_mode ? "Resume routing" : "Soft drain"),
+                                onSelect: () => void toggleRouting(printer, "drain"),
+                              },
+                            ]}
+                          />
                         </>
                       )}
                     </div>

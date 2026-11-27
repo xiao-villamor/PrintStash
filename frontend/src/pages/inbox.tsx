@@ -381,7 +381,11 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
             >
               {uiText("Refresh")}
             </Button>
-            <Button size="sm" onClick={() => setAddUrlOpen(true)}>
+            <Button
+              size="sm"
+              variant={selectedReady.length > 0 ? "outline" : "default"}
+              onClick={() => setAddUrlOpen(true)}
+            >
               {t("inbox.addUrl")}
             </Button>
           </>

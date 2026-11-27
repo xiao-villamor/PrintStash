@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
+import { Input, inputClasses } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
@@ -364,7 +364,7 @@ function CandidateReview({
           <label className="block space-y-1 text-sm">
             {t("similarity.multipartTarget")}
             <select
-              className="block w-full rounded-md border border-input bg-field-surface p-2 text-sm"
+              className={inputClasses}
               disabled={decision.isPending || readOnly}
               value={targetId ?? ""}
               onChange={(event) => {

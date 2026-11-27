@@ -404,14 +404,15 @@
   background-color: var(--surface-container-highest);
 }
 
-:is(select:not([multiple], [size]), .dropdown-field):focus {
+:is(select:not([multiple], [size]), .dropdown-field):focus:not(:focus-visible) {
   outline: none;
   box-shadow: none;
 }
 
 :is(select:not([multiple], [size]), .dropdown-field):focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
+  /* The same inset 2px ring as `inputClasses`, so every field focuses alike. */
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--ring);
 }
 
 :is(select:not([multiple], [size]), .dropdown-field)[aria-invalid="true"] {

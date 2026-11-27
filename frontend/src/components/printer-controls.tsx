@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { ArrowDownToLine, ArrowUpFromLine, Flame, Snowflake } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { PrinterFeedRows } from "@/components/printer-machine";
 import type { useMachineSetup } from "@/features/printers/materials";
@@ -512,12 +512,10 @@ export function ThermalPresets({
         </div>
       </fieldset>
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="xs" disabled={disabled} onClick={() => preheat(selected)}>
-          <Flame className="size-3.5" aria-hidden="true" />
+        <Button variant="outline" size="xs" disabled={disabled} onClick={() => preheat(selected)}>
           {uiText("Preheat")}
         </Button>
         <Button variant="outline" size="xs" disabled={disabled} onClick={cooldown}>
-          <Snowflake className="size-3.5" aria-hidden="true" />
           {uiText("Cooldown")}
         </Button>
       </div>
