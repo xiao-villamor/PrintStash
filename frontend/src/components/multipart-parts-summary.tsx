@@ -49,7 +49,7 @@ export function MultipartPartsSummary({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 shrink-0"
+                className="w-7 shrink-0"
                 disabled={disabled}
                 aria-label={t("multipart.removePickedModel", { name: model.name })}
                 onClick={() => onRemove(model.id)}

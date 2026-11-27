@@ -52,7 +52,7 @@ export function CollectionBreadcrumbs({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                className="h-7 w-7 text-muted-foreground"
+                className="w-7 text-muted-foreground"
                 aria-label={uiText("library.breadcrumb.ancestors")}
                 aria-haspopup="menu"
                 aria-expanded={open}

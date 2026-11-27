@@ -30,7 +30,7 @@ export function HashValue({
       <Button
         variant="outline"
         size="sm"
-        className="h-7 gap-2 px-2 font-mono text-xs"
+        className="gap-2 px-2 font-mono text-xs"
         title={sha}
         aria-label={t("modelHashes.copy", { kind: label, filename })}
         onClick={() => void copy()}

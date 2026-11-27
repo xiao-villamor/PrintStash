@@ -50,6 +50,7 @@ export function TabBar<K extends string>({
 }: TabBarProps<K>) {
   const framed = variant === "framed";
   const listRef = useRef<HTMLDivElement>(null);
+  const [moreAfter, setMoreAfter] = useState(false);
   const [indicator, setIndicator] = useState<{
     left: number;
     width: number;
@@ -73,6 +74,22 @@ export function TabBar<K extends string>({
     ro.observe(list);
     return () => ro.disconnect();
   }, [active, tabs.length]);
+
+  // A strip wider than its box fades at the cut edge so clipped tabs read as "more".
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const measure = () => setMoreAfter(list.scrollWidth - list.clientWidth - list.scrollLeft > 2);
+    measure();
+    list.addEventListener("scroll", measure, { passive: true });
+    if (!canObserveResize) return () => list.removeEventListener("scroll", measure);
+    const ro = new ResizeObserver(measure);
+    ro.observe(list);
+    return () => {
+      list.removeEventListener("scroll", measure);
+      ro.disconnect();
+    };
+  }, [tabs.length]);
 
   const activeIndex = tabs.findIndex((tab) => tab.key === active);
 
@@ -100,7 +117,12 @@ export function TabBar<K extends string>({
       ref={listRef}
       role="tablist"
       onKeyDown={onKeyDown}
-      className={cn(framed ? TAB_FRAME_CLASS : "relative flex", className)}
+      data-more-after={moreAfter ? "true" : undefined}
+      className={cn(
+        framed ? TAB_FRAME_CLASS : "relative flex",
+        moreAfter && "[mask-image:linear-gradient(to_right,black_calc(100%-28px),transparent)]",
+        className,
+      )}
     >
       {tabs.map((tab, index) => {
         const isActive = tab.key === active;

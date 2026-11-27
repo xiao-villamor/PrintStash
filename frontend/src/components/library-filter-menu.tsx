@@ -29,7 +29,7 @@ export function LibraryFilterMenu({
           type="button"
           variant="outline"
           size="xs"
-          className="h-8"
+
           aria-label={label}
           aria-haspopup="dialog"
           aria-expanded={open}

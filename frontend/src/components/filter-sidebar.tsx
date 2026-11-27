@@ -1804,7 +1804,7 @@ export function FilterSidebar(props: FilterSidebarProps) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7"
+                className="w-7"
                 aria-label={uiText("New collection")}
                 onClick={props.onCreateCollection}
               >
@@ -1813,7 +1813,7 @@ export function FilterSidebar(props: FilterSidebarProps) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7"
+                className="w-7"
                 aria-label={uiText(
                   treeModelsVisible ? "Hide models in tree" : "Show models in tree",
                 )}
@@ -1830,7 +1830,7 @@ export function FilterSidebar(props: FilterSidebarProps) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7"
+                className="w-7"
                 aria-label={uiText("Collapse")}
                 onClick={() => setCollapseVersion((version) => version + 1)}
               >

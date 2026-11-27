@@ -271,7 +271,7 @@ export function LibrarySearch({
                     ? "aiSearch.turnOffAi"
                     : "aiSearch.submitAi",
               )}
-              className="h-7 gap-1.5 px-2 text-muted-foreground aria-pressed:bg-accent aria-pressed:text-accent-foreground dark:aria-pressed:bg-surface-bright dark:aria-pressed:hover:bg-surface-bright"
+              className="gap-1.5 px-2 text-muted-foreground aria-pressed:bg-accent aria-pressed:text-accent-foreground dark:aria-pressed:bg-surface-bright dark:aria-pressed:hover:bg-surface-bright"
               onClick={toggleAi}
             >
               <AiModeIcon className={aiActive ? "size-3.5 text-success" : "size-3.5"} aria-hidden />
@@ -401,7 +401,7 @@ export function LibrarySearch({
                 <Button
                   variant="ghost"
                   size="xs"
-                  className="h-6 px-1.5 text-2xs"
+                  className="px-1.5 text-2xs"
                   onClick={onRecentClear}
                 >
                   {t("Clear")}
@@ -415,7 +415,7 @@ export function LibrarySearch({
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-8 w-full justify-start gap-2 px-1 pr-8 text-left text-xs font-normal"
+                      className="w-full justify-start gap-2 px-1 pr-8 text-left text-xs font-normal"
                       onClick={() => {
                         setValue(query);
                         searchFor(query, effectiveMode);
@@ -429,7 +429,7 @@ export function LibrarySearch({
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="absolute right-0 top-1/2 h-7 w-7 -translate-y-1/2 text-muted-foreground opacity-0 transition-opacity duration-press group-focus-within/recent:opacity-100 group-hover/recent:opacity-100 focus-visible:opacity-100"
+                        className="absolute right-0 top-1/2 w-7 -translate-y-1/2 text-muted-foreground opacity-0 transition-opacity duration-press group-focus-within/recent:opacity-100 group-hover/recent:opacity-100 focus-visible:opacity-100"
                         aria-label={t("search.removeRecent", { value1: query })}
                         onClick={() => onRecentRemove(query)}
                       >

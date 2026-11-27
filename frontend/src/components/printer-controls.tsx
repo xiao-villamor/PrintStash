@@ -368,14 +368,14 @@ function TuningRow({
         step="any"
         value={value}
         placeholder="%"
-        className="h-7 w-full font-mono"
+        className="w-full font-mono"
         disabled={disabled}
         readOnly={busy}
         onChange={(event) => setValue(event.target.value)}
       />
       <Button
         size="xs"
-        className="h-7"
+
         variant="outline"
         type="submit"
         disabled={disabled || busy || !valid}
@@ -455,12 +455,12 @@ export function HeaterTarget({
           disabled={disabled}
           readOnly={busy}
           onChange={(event) => setDraft(event.target.value)}
-          className="h-7 w-20 font-mono"
+          className="w-20 font-mono"
         />
         <Button
           variant="outline"
           size="xs"
-          className="h-7"
+
           type="submit"
           disabled={disabled || busy || !valid}
           aria-label={uiText("Set {value1}", { value1: label })}

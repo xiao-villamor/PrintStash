@@ -331,7 +331,7 @@ export function PrintersPage() {
                 aria-label={uiText("Fleet summary")}
                 className="flex flex-wrap items-center justify-between gap-3"
               >
-                <div className="flex divide-x divide-border overflow-hidden rounded-lg border border-border bg-card">
+                <div className="grid w-full grid-cols-2 overflow-hidden rounded-lg border border-border bg-card sm:flex sm:w-auto sm:divide-x sm:divide-border max-sm:[&>*:nth-child(even)]:border-l max-sm:[&>*:nth-child(n+3)]:border-t max-sm:[&>*]:border-border">
                   <FleetMetric
                     label={uiText("Ready")}
                     tone="ready"
@@ -368,7 +368,7 @@ export function PrintersPage() {
                     size="xs"
                     aria-pressed={grouped}
                     onClick={toggleGrouping}
-                    className="h-8 aria-pressed:bg-accent aria-pressed:text-accent-foreground dark:aria-pressed:bg-surface-bright"
+                    className="aria-pressed:bg-accent aria-pressed:text-accent-foreground dark:aria-pressed:bg-surface-bright"
                   >
                     {grouped ? (
                       <Check className="h-3.5 w-3.5" aria-hidden />

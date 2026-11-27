@@ -120,6 +120,7 @@ export function BatchToolbar({
               {uiText(" Rename")}
             </button>
           )}
+          <div className="h-5 w-px bg-border" />
           <button
             type="button"
             onClick={() => setDeleteOpen(true)}

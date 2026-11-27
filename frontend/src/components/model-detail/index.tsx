@@ -1629,8 +1629,8 @@ function ModelDetailPresentation({
                         aria-current={section === activeTab ? "page" : undefined}
                         className={
                           section === activeTab
-                            ? "h-7.5 bg-foreground/12 px-2.5 text-foreground"
-                            : "h-7.5 px-2.5 text-muted-foreground"
+                            ? " bg-foreground/12 px-2.5 text-foreground"
+                            : " px-2.5 text-muted-foreground"
                         }
                         onClick={() => {
                           setCompareOrigin(null);

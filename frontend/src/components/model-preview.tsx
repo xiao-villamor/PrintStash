@@ -194,7 +194,7 @@ function PreviewArrows({ state, size }: { state: PreviewCard; size: "card" | "ga
               className={cn(
                 "library-preview-arrow pointer-events-auto absolute top-1/2 -translate-y-1/2",
                 "bg-card text-card-foreground shadow-md hover:bg-muted hover:text-foreground focus-visible:bg-card dark:bg-card/90 dark:hover:bg-card dark:focus-visible:bg-card",
-                size === "card" ? "h-8 w-6" : "h-11 w-8",
+                size === "card" ? " w-6" : "h-11 w-8",
                 index === 0
                   ? size === "card"
                     ? "left-1"
@@ -270,7 +270,7 @@ export function ModelPreviewControls({
               {...keepOffCard}
               variant="outline"
               size="xs"
-              className="library-preview-views pointer-events-auto h-6 border-input bg-card px-1.5 py-0 text-2xs shadow-md hover:bg-card focus-visible:bg-card"
+              className="library-preview-views pointer-events-auto border-input bg-card px-1.5 py-0 text-2xs shadow-md hover:bg-card focus-visible:bg-card"
               aria-label={uiText("modelPreview.gallery")}
               title={
                 views.length >= 2
@@ -310,7 +310,7 @@ export function ModelPreviewControls({
             {...keepOffCard}
             variant="outline"
             size="icon-sm"
-            className="pointer-events-auto absolute right-1.5 top-1.5 h-8 w-8 border-input bg-card shadow-md"
+            className="pointer-events-auto absolute right-1.5 top-1.5 w-8 border-input bg-card shadow-md"
             aria-label={uiText("modelPreview.retry")}
             title={uiText("modelPreview.retry")}
             onClick={(event) => {

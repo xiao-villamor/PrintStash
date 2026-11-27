@@ -71,13 +71,13 @@ export function PendingSidebar() {
               {item.source_hostname ?? t("inbox.source")} · {timeAgoShort(item.created_at)}
             </p>
             <div className="mt-2 flex gap-2">
-              <Button asChild size="xs" variant="outline" className="h-7 px-2.5">
+              <Button asChild size="xs" variant="outline" className="px-2.5">
                 <Link href={`/inbox/${item.id}`}>{t("inbox.review")}</Link>
               </Button>
               <Button
                 size="xs"
                 variant="outline"
-                className="h-7 px-2.5"
+                className="px-2.5"
                 disabled={commands.dismiss.isPending || item.state === "importing"}
                 onClick={() => setTarget(item)}
               >

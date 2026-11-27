@@ -279,7 +279,7 @@ export function ModelTagsField({
               aria-expanded={open}
               aria-label={label}
               title={label}
-              className={`h-7 gap-1.5 border border-dotted border-muted-foreground/70 px-2 text-muted-foreground hover:border-foreground hover:text-foreground ${shown.length ? "w-8 px-0" : ""}`}
+              className={` gap-1.5 border border-dotted border-muted-foreground/70 px-2 text-muted-foreground hover:border-foreground hover:text-foreground ${shown.length ? "w-8 px-0" : ""}`}
               onClick={() => setOpen((value) => !value)}
             >
               <Pencil className="size-3.5" aria-hidden />

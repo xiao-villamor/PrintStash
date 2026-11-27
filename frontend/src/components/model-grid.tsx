@@ -2899,7 +2899,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       <Button
         variant="ghost"
         size="xs"
-        className="h-8 aria-pressed:bg-accent aria-pressed:text-accent-foreground"
+        className="aria-pressed:bg-accent aria-pressed:text-accent-foreground"
         aria-pressed={selectMode}
         aria-label={uiText("Select")}
         onClick={() => (selectMode ? clearSelection() : setKeyboardSelection(true))}
@@ -3314,7 +3314,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     aria-pressed={favoritesOnly}
                     onClick={toggleFavorites}
                     className={cn(
-                      "h-8 w-full justify-start px-3 text-sm",
+                      " w-full justify-start px-3 text-sm",
                       favoritesOnly && "bg-accent text-accent-foreground",
                     )}
                   >

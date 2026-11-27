@@ -331,7 +331,7 @@ export function TopBar() {
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 text-muted-foreground"
+            className="w-8 text-muted-foreground"
             aria-label={t("Search")}
             onClick={() => (pane ? pane.showSearch() : router.push("/"))}
           >

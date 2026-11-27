@@ -3002,7 +3002,7 @@ export function SettingsPanel() {
                     {kpiItems.map((item) => (
                       <div
                         key={item.label}
-                        className="min-w-0 border-l border-border px-4 first:border-l-0 first:pl-0"
+                        className="min-w-0 border-l border-border px-4 first:border-l-0 first:pl-0 max-lg:odd:border-l-0 max-lg:odd:pl-0"
                       >
                         <p className="flex items-center justify-between gap-2 text-xs font-medium text-muted-foreground">
                           {item.label}
