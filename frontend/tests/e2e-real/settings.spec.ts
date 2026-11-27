@@ -428,9 +428,9 @@ test.describe("settings", () => {
       await move.getByRole("button", { name: "This machine" }).click();
 
       await page.getByRole("tab", { name: "Remote cache", exact: true }).click();
-      await expect(
-        page.getByRole("switch", { name: "Enable remote Artifact cache" }),
-      ).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("switch", { name: "Enable remote Artifact cache" })).toBeVisible({
+        timeout: 30_000,
+      });
       await cacheTabs.getByRole("tab", { name: "Overview" }).click();
       await expect(page.getByRole("tabpanel", { name: "Overview" })).toBeVisible();
       await cache.scrollIntoViewIfNeeded();

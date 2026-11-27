@@ -595,7 +595,7 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
         {status.isError && (
           <div role="alert" className="border-b p-3 text-sm text-destructive">
             {t("similarity.loadError")}{" "}
-            <Button variant="ghost" size="sm" onClick={() => void status.refetch()}>
+            <Button variant="outline" size="sm" onClick={() => void status.refetch()}>
               {t("similarity.retry")}
             </Button>
           </div>
@@ -603,7 +603,7 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
         {run.isError && (
           <div role="alert" className="border-b p-3 text-sm text-destructive">
             {t("similarity.loadError")}{" "}
-            <Button variant="ghost" size="sm" onClick={() => void run.refetch()}>
+            <Button variant="outline" size="sm" onClick={() => void run.refetch()}>
               {t("similarity.retry")}
             </Button>
           </div>
@@ -650,7 +650,11 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
             <SimilarityEmptyState
               modelDetail={modelDetail}
               title={t("similarity.loadError")}
-              action={<Button onClick={() => void queue.refetch()}>{t("similarity.retry")}</Button>}
+              action={
+                <Button variant="outline" onClick={() => void queue.refetch()}>
+                  {t("similarity.retry")}
+                </Button>
+              }
             />
           ) : rows.length ? (
             <ul className="divide-y divide-border">

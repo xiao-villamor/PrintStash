@@ -43,9 +43,7 @@ describe("SimilaritySettingsPanel", () => {
   });
   it("shows the enable control directly in analysis settings", async () => {
     renderSettings({ view: "settings" });
-    expect(
-      await screen.findByRole("switch", { name: "Enable similarity analysis" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("switch", { name: "Enable similarity analysis" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Start analysis" })).not.toBeInTheDocument();
   });
   it("explains disabled analysis beside its start control", async () => {

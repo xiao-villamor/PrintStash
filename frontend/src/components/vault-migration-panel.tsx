@@ -721,7 +721,12 @@ export function VaultMigrationPanel() {
                         </p>
                       )}
                       {run.retryable && run.failed_objects > 0 && (
-                        <Button size="sm" disabled={running} onClick={() => void act("retry")}>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={running}
+                          onClick={() => void act("retry")}
+                        >
                           {t("migration.retry")}
                         </Button>
                       )}

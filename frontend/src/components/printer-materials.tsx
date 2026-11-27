@@ -206,7 +206,9 @@ function MaterialEditor({
     return (
       <div role="alert" className="space-y-3">
         <p>{uiText("materials.loadFailed")}</p>
-        <Button onClick={() => void owner.query.refetch()}>{uiText("Retry")}</Button>
+        <Button variant="outline" onClick={() => void owner.query.refetch()}>
+          {uiText("Retry")}
+        </Button>
       </div>
     );
   if (!state)

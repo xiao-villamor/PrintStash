@@ -405,7 +405,7 @@ export function ModelTagsField({
               <div role="alert" className="space-y-2 border border-border bg-muted p-2 text-sm">
                 <p>{problemText}</p>
                 <div className="flex flex-wrap gap-2">
-                  <Button size="sm" loading={reviewing} onClick={retry}>
+                  <Button variant="outline" size="sm" loading={reviewing} onClick={retry}>
                     {uiText("Retry")}
                   </Button>
                   <Button size="sm" variant="outline" disabled={reviewing} onClick={discard}>

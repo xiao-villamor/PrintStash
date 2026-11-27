@@ -189,6 +189,7 @@ export default function GettingStartedPage() {
                 <p>{t(storage === "checking" ? "setup.checking" : "setup.pending")}</p>
                 {storage === "pending" && (
                   <Button
+                    variant="outline"
                     onClick={() => {
                       setStorage("checking");
                       void prepare().then(handlePrepared, handleUnprepared);

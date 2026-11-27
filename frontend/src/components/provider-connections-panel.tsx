@@ -215,6 +215,7 @@ export function ProviderConnectionsPanel({
     <div className="space-y-3">
       <p role="alert">{t("settings.providerConnections.loadFailed")}</p>
       <Button
+        variant="outline"
         size="sm"
         onClick={() => {
           void connectionsQuery.refetch();

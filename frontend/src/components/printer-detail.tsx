@@ -941,7 +941,7 @@ function PrinterDetailView({
             <div className="rounded border border-destructive/30 bg-destructive/10 p-3 font-mono text-sm text-destructive">
               {error ?? userMessage(resources.error)}
               {resources.error && (
-                <Button size="xs" onClick={() => void resources.refreshAll()}>
+                <Button variant="outline" size="xs" onClick={() => void resources.refreshAll()}>
                   {uiText("Retry")}
                 </Button>
               )}

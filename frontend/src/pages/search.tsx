@@ -359,7 +359,11 @@ function SearchContent() {
                   ? "aiSearch.timeout"
                   : "aiSearch.loadError",
               )}
-              action={<Button onClick={() => void results.refetch()}>{t("aiSearch.retry")}</Button>}
+              action={
+                <Button variant="outline" onClick={() => void results.refetch()}>
+                  {t("aiSearch.retry")}
+                </Button>
+              }
             />
           ) : items.length ? (
             <section aria-label={t("aiSearch.resultsTitle")}>
@@ -424,7 +428,9 @@ function SearchContent() {
               )}
               action={
                 modelId ? (
-                  <Button onClick={() => void results.refetch()}>{t("aiSearch.retry")}</Button>
+                  <Button variant="outline" onClick={() => void results.refetch()}>
+                    {t("aiSearch.retry")}
+                  </Button>
                 ) : undefined
               }
             />

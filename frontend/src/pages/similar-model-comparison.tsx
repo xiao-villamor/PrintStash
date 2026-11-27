@@ -406,7 +406,7 @@ function CandidateReview({
               {t("similarity.destinationsFailed")}
               <Button
                 type="button"
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 onClick={() =>
                   void (targets.isFetchNextPageError ? targets.fetchNextPage() : targets.refetch())

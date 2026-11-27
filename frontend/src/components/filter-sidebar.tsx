@@ -384,7 +384,7 @@ function PageControls({
       <div role="status" className="py-1 text-xs text-muted-foreground">
         {uiText("Could not load this list.")}
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
           disabled={query.isFetchingNextPage}
           onClick={() =>
@@ -1387,7 +1387,7 @@ export function FilterSidebarContent({
                       <div role="status" className="py-1 text-xs text-muted-foreground">
                         {t("Could not load this list.")}
                         <Button
-                          variant="ghost"
+                          variant="outline"
                           size="sm"
                           disabled={restore.isFetching}
                           onClick={() => void restore.refetch()}

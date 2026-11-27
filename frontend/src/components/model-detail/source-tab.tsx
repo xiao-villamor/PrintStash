@@ -506,7 +506,9 @@ function SourceTabContent({
           {editor.query.isError && (
             <div role="alert">
               <p>{uiText("Couldn’t load source information.")}</p>
-              <Button onClick={editor.retryRead}>{uiText("Retry")}</Button>
+              <Button variant="outline" onClick={editor.retryRead}>
+                {uiText("Retry")}
+              </Button>
             </div>
           )}
           {(onBack || (canEditSource && data.sources.length > 0)) && (

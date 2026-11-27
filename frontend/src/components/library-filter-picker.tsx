@@ -415,7 +415,7 @@ export function LibraryFilterPicker({
         {error && (
           <div role="alert" className="px-3 py-2 text-xs">
             <p>{t("Filter values could not be loaded.")}</p>
-            <Button variant="ghost" size="xs" onClick={onRetry}>
+            <Button variant="outline" size="xs" onClick={onRetry}>
               {t("Retry")}
             </Button>
           </div>

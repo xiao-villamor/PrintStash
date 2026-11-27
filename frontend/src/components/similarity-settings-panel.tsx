@@ -124,7 +124,7 @@ function SettingsForm({ initial, readOnly }: { initial: SimilaritySettings; read
                 {t("similarity.previewError")}
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
                   onClick={() => void preview.refetch()}
                 >
@@ -338,7 +338,7 @@ export function SimilaritySettingsPanel({
           <EmptyState
             title={t("similarity.loadError")}
             action={
-              <Button size="sm" onClick={() => void status.refetch()}>
+              <Button variant="outline" size="sm" onClick={() => void status.refetch()}>
                 {t("similarity.retry")}
               </Button>
             }
@@ -453,7 +453,7 @@ export function SimilaritySettingsPanel({
         {sources.isError && (
           <div role="alert" className="p-3 text-sm text-destructive">
             {t("similarity.loadError")}{" "}
-            <Button variant="ghost" size="sm" onClick={() => void sources.refetch()}>
+            <Button variant="outline" size="sm" onClick={() => void sources.refetch()}>
               {t("similarity.retry")}
             </Button>
           </div>
@@ -475,7 +475,7 @@ export function SimilaritySettingsPanel({
             {modelChoices.isError && (
               <p role="alert" className="text-xs text-destructive">
                 {t("similarity.loadError")}
-                <Button variant="ghost" size="sm" onClick={() => void modelChoices.refetch()}>
+                <Button variant="outline" size="sm" onClick={() => void modelChoices.refetch()}>
                   {t("similarity.retry")}
                 </Button>
               </p>
@@ -542,7 +542,7 @@ export function SimilaritySettingsPanel({
           <EmptyState
             title={t("similarity.loadError")}
             action={
-              <Button size="sm" onClick={() => void status.refetch()}>
+              <Button variant="outline" size="sm" onClick={() => void status.refetch()}>
                 {t("similarity.retry")}
               </Button>
             }
@@ -585,7 +585,7 @@ export function SimilaritySettingsPanel({
           <p role="alert" className="px-4 pb-4 text-sm text-destructive">
             {t("similarity.loadError")}
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               onClick={() =>
                 void (history.isFetchNextPageError ? history.fetchNextPage() : history.refetch())

@@ -492,7 +492,7 @@ describe("Login entry lifetime", () => {
     expect(login).toHaveBeenCalledTimes(1);
   });
 
-  it("explains a missing username and password under the fields instead of a browser bubble", () => {
+  it("explains each missing field under it instead of a browser bubble", () => {
     const login = vi.fn<AuthState["login"]>();
     renderLogin({ auth: signedOut({ login }) });
     const form = screen.getByLabelText("Username").closest("form");

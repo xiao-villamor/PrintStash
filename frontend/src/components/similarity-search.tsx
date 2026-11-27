@@ -72,7 +72,7 @@ export function SimilaritySearch({ modelId }: { modelId?: number }) {
       {result.isError && (
         <p role="alert" className="text-sm text-destructive">
           {t("similarity.semanticError")}
-          <Button variant="ghost" size="sm" onClick={() => void result.refetch()}>
+          <Button variant="outline" size="sm" onClick={() => void result.refetch()}>
             {t("similarity.retry")}
           </Button>
         </p>
