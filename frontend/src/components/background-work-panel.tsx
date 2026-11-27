@@ -8,7 +8,7 @@
  */
 import type * as React from "react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Activity, AlertTriangle, ChevronDown, Cpu, Layers, Server } from "lucide-react";
+import { Activity, AlertTriangle, Cpu, Layers, Server } from "lucide-react";
 import { Link } from "@/lib/link";
 
 import { SettingsCard, SettingsEmptyRow, SettingsSwitch } from "@/components/settings-card";
@@ -234,7 +234,6 @@ function BackgroundWorkView({
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Pending | null>(null);
   const [activeView, setActiveView] = useState<"types" | "workers">("types");
-  const advancedRef = useRef<HTMLDetailsElement>(null);
   const viewRequests = useRef<AbortController | null>(null);
   useEffect(() => {
     const controller = new AbortController();
@@ -481,7 +480,6 @@ function BackgroundWorkView({
                 variant="ghost"
                 onClick={() => {
                   setActiveView("workers");
-                  if (advancedRef.current) advancedRef.current.open = true;
                 }}
               >
                 {uiText("View workers")}
@@ -544,10 +542,9 @@ function BackgroundWorkView({
                           <time dateTime={failedAt} className="text-xs text-muted-foreground">
                             {uiText("Failed {when}", { when: formatDateTime(failedAt) })}
                           </time>
-                          <details className="mt-1 text-xs text-muted-foreground">
-                            <summary className="cursor-action">{uiText("Work type")}</summary>
-                            <p className="mt-1 font-mono">{job.kind}</p>
-                          </details>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {uiText("Work type")}: <span className="font-mono">{job.kind}</span>
+                          </p>
                         </div>
                         {job.retryable && (
                           <Button
@@ -580,22 +577,13 @@ function BackgroundWorkView({
             )}
           </SettingsCard>
 
-          <details
-            ref={advancedRef}
-            className="group overflow-hidden rounded-lg border border-border bg-card"
-          >
-            <summary className="flex cursor-action list-none items-start gap-3 px-4 py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-5">
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold">{uiText("Advanced controls")}</span>
-                <span className="block text-xs text-muted-foreground">
-                  {uiText("Review every queue, rebuild previews, or adjust worker limits.")}
-                </span>
-              </span>
-              <ChevronDown
-                className="mt-2 h-4 w-4 shrink-0 text-muted-foreground group-open:rotate-180"
-                aria-hidden
-              />
-            </summary>
+          <section className="overflow-hidden rounded-lg border border-border bg-card">
+            <div className="px-4 py-4 sm:px-5">
+              <h3 className="text-sm font-semibold">{uiText("Advanced controls")}</h3>
+              <p className="text-xs text-muted-foreground">
+                {uiText("Review every queue, rebuild previews, or adjust worker limits.")}
+              </p>
+            </div>
             <div className="border-y bg-muted/30 p-3">
               <TabBar
                 tabs={[
@@ -759,7 +747,7 @@ function BackgroundWorkView({
                 )}
               </>
             )}
-          </details>
+          </section>
         </>
       ) : null}
 

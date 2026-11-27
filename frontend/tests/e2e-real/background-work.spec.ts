@@ -34,7 +34,6 @@ test.describe("background work", () => {
 
     const admin = await page.context().newPage();
     await admin.goto("/settings?section=work");
-    await admin.getByText("Advanced controls").click();
     const thumbnails = admin
       .getByRole("listitem")
       .filter({ has: admin.getByText("thumbnail", { exact: true }) });

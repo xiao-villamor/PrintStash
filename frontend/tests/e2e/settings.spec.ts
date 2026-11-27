@@ -701,7 +701,6 @@ test.describe("settings route", () => {
     await expect(
       page.getByText("Preview or metadata failures across the library: 1", { exact: false }),
     ).toBeVisible();
-    await page.getByText("Advanced controls").click();
     await page.getByRole("tab", { name: "Worker settings" }).click();
     await expect(page.getByLabel("Concurrency for derive.native")).toHaveValue("2");
     await expect(page.getByText("mock-host")).toBeVisible();

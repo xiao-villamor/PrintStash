@@ -207,9 +207,7 @@ describe("SimilaritySettingsPanel", () => {
   });
   it("keeps a dirty budget through failed background reads", async () => {
     const app = renderSettings({ view: "settings" });
-    await userEvent.click(
-      await screen.findByText("Advanced settings", { selector: "form summary" }),
-    );
+    expect(await screen.findByText("Advanced settings", { selector: "form h4" })).toBeVisible();
     const budget = screen.getByRole("spinbutton", { name: "Triangle limit per mesh" });
     await userEvent.clear(budget);
     await userEvent.type(budget, "150000");
@@ -251,9 +249,7 @@ describe("SimilaritySettingsPanel", () => {
         "PATCH /api/v1/similarity/settings": json(similaritySettings({ triangle_cap: 123456 })),
       },
     });
-    await userEvent.click(
-      await screen.findByText("Advanced settings", { selector: "form summary" }),
-    );
+    expect(await screen.findByText("Advanced settings", { selector: "form h4" })).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Save settings" }));
     await waitFor(() =>
       expect(screen.getByRole("spinbutton", { name: "Triangle limit per mesh" })).toHaveValue(
@@ -264,9 +260,7 @@ describe("SimilaritySettingsPanel", () => {
   });
   it("preserves a dirty budget during status refresh", async () => {
     const app = renderSettings({ view: "settings" });
-    await userEvent.click(
-      await screen.findByText("Advanced settings", { selector: "form summary" }),
-    );
+    expect(await screen.findByText("Advanced settings", { selector: "form h4" })).toBeVisible();
     const budget = screen.getByRole("spinbutton", { name: "Triangle limit per mesh" });
     await userEvent.clear(budget);
     await userEvent.type(budget, "150000");
@@ -287,7 +281,7 @@ describe("SimilaritySettingsPanel", () => {
   it("saves a complete dense-mesh budget", async () => {
     const user = userEvent.setup();
     const rendered = renderSettings({ view: "settings" });
-    await user.click(await screen.findByText("Advanced settings", { selector: "form summary" }));
+    expect(await screen.findByText("Advanced settings", { selector: "form h4" })).toBeVisible();
     const input = screen.getByRole("spinbutton", { name: "Triangle limit per mesh" });
     await user.clear(input);
     await user.type(input, "2000000");
@@ -345,7 +339,7 @@ describe("SimilaritySettingsPanel", () => {
       },
     });
     expect(await screen.findByText(/8 open candidates meet these thresholds/)).toBeVisible();
-    await user.click(screen.getByText("Advanced settings", { selector: "form summary" }));
+    expect(screen.getByText("Advanced settings", { selector: "form h4" })).toBeVisible();
     await user.click(screen.getByRole("checkbox", { name: "Set confidence per evidence class" }));
     const input = screen.getByRole("spinbutton", { name: /Identical geometry/ });
     await user.clear(input);

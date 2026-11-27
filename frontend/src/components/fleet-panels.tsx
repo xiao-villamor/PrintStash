@@ -1057,15 +1057,15 @@ function QueueSection({
             entries[0].job.batch_id == null ? (
               row(entries[0].job, entries[0].index)
             ) : (
-              <details key={key} open className="border-b border-border last:border-b-0">
-                <summary className="cursor-action bg-muted/30 px-4 py-3 text-sm font-semibold text-foreground">
+              <section key={key} className="border-b border-border last:border-b-0">
+                <h4 className="bg-muted/30 px-4 py-3 text-sm font-semibold text-foreground">
                   {uiText("Batch #{value1} · {value2} copies", {
                     value1: String(entries[0].job.batch_id ?? ""),
                     value2: String(entries.length ?? ""),
                   })}
-                </summary>
+                </h4>
                 {entries.map(({ job, index }) => row(job, index))}
-              </details>
+              </section>
             ),
           )}
         </div>

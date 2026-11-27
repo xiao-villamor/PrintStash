@@ -252,15 +252,6 @@
   overflow: hidden;
   border: 1px solid var(--border);
 }
-.library-inspector-section summary {
-  list-style: none;
-}
-.library-inspector-section summary::-webkit-details-marker {
-  display: none;
-}
-.library-inspector-section[open] > summary > svg {
-  transform: rotate(90deg);
-}
 .library-inspector-files {
   list-style: none;
   margin: 0;

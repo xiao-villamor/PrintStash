@@ -214,10 +214,8 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
                 {t("auditSchedule.fullCost")}
               </label>
             )}
-            <details className="border-t border-border pt-3">
-              <summary className="cursor-action text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                {t("auditSchedule.advanced")}
-              </summary>
+            <section className="border-t border-border pt-3">
+              <h4 className="text-sm font-medium text-foreground">{t("auditSchedule.advanced")}</h4>
               <div className="mt-4 space-y-3">
                 <label className="flex items-center gap-2 text-sm">
                   <Checkbox
@@ -352,7 +350,7 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
                   </p>
                 )}
               </div>
-            </details>
+            </section>
             {(initial.next_due_at || initial.last_success_at) && (
               <p className="text-xs text-muted-foreground">
                 {initial.next_due_at &&

@@ -403,10 +403,10 @@ export function VaultMigrationPanel() {
                     setValues((current) => ({ ...(current ?? values), [name]: value }))
                   }
                 />
-                <details className="border-t pt-4">
-                  <summary className="cursor-action text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <section className="border-t pt-4">
+                  <h4 className="text-sm font-medium text-foreground">
                     {t("migration.policy")} · {t("similarity.advanced")}
-                  </summary>
+                  </h4>
                   <fieldset className="mt-3 space-y-3">
                     <div className="grid gap-3 sm:grid-cols-3">
                       <label className="space-y-1 text-xs">
@@ -444,7 +444,7 @@ export function VaultMigrationPanel() {
                     </div>
                     <p className="text-xs text-muted-foreground">{t("migration.policyHelp")}</p>
                   </fieldset>
-                </details>
+                </section>
                 {backupPicker}
                 <p className="text-xs text-muted-foreground">{t("migration.preflightHelp")}</p>
                 <Button
@@ -586,10 +586,10 @@ export function VaultMigrationPanel() {
                     </p>
                   ))}
                   {run.phase_history.length > 0 && (
-                    <details className="text-xs">
-                      <summary className="cursor-action font-medium">
+                    <section className="text-xs">
+                      <h4 className="text-sm font-medium text-foreground">
                         {t("migration.timeline")}
-                      </summary>
+                      </h4>
                       <ol className="mt-2 space-y-1">
                         {run.phase_history.map((phase, index) => (
                           <li key={`${phase.phase}:${phase.at}:${index}`}>
@@ -600,13 +600,13 @@ export function VaultMigrationPanel() {
                           </li>
                         ))}
                       </ol>
-                    </details>
+                    </section>
                   )}
                   {report?.id === run.id && report.resource_kind_totals.length > 0 && (
-                    <details className="text-xs">
-                      <summary className="cursor-action font-medium">
+                    <section className="text-xs">
+                      <h4 className="text-sm font-medium text-foreground">
                         {t("migration.resourceKinds")}
-                      </summary>
+                      </h4>
                       <ul className="mt-2 space-y-1">
                         {report.resource_kind_totals.map((kind) => (
                           <li key={kind.resource_type}>
@@ -618,7 +618,7 @@ export function VaultMigrationPanel() {
                           </li>
                         ))}
                       </ul>
-                    </details>
+                    </section>
                   )}
                   {report?.id === run.id && report.recent_failures.length > 0 && (
                     <div role="alert" className="text-sm text-destructive">

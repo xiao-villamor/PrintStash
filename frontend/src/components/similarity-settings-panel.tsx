@@ -133,10 +133,8 @@ function SettingsForm({ initial, readOnly }: { initial: SimilaritySettings; read
             )}
           </div>
         </div>
-        <details className="border-t border-border pt-3">
-          <summary className="cursor-action text-sm font-medium">
-            {t("similarity.advanced")}
-          </summary>
+        <section className="border-t border-border pt-3">
+          <h4 className="text-sm font-medium text-foreground">{t("similarity.advanced")}</h4>
           <div className="mt-3 grid gap-x-6 gap-y-3 sm:grid-cols-2">
             <label className="flex items-center justify-between gap-3 text-sm">
               {t("similarity.triangleCap")}
@@ -237,7 +235,7 @@ function SettingsForm({ initial, readOnly }: { initial: SimilaritySettings; read
             />
             {t("similarity.embeddings")}
           </label>
-        </details>
+        </section>
       </fieldset>
       <Button size="sm" type="submit" loading={save.isPending} disabled={readOnly}>
         {t("similarity.save")}

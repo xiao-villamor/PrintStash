@@ -515,10 +515,10 @@ export function MaintenancePanel() {
                               })
                           : uiText("Not verified this session")}
                       </p>
-                      <details className="mt-2 text-xs text-muted-foreground">
-                        <summary className="cursor-action font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                      <section className="mt-2 text-xs text-muted-foreground">
+                        <h4 className="text-sm font-medium text-foreground">
                           {t("maintenance.backupDetails")}
-                        </summary>
+                        </h4>
                         <div className="mt-2 space-y-1 break-all font-mono text-2xs">
                           <p>
                             {t("settings.backupSourceLocator", {
@@ -542,7 +542,7 @@ export function MaintenancePanel() {
                             </p>
                           )}
                         </div>
-                      </details>
+                      </section>
                     </div>
                   </div>
                   <div>

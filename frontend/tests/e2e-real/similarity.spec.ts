@@ -70,7 +70,6 @@ test.describe("Standalone similarity", () => {
     await page.goto("/library/similar");
     await page.getByRole("tab", { name: "Analysis settings", exact: true }).click();
     const form = page.getByRole("form", { name: "Similar models" });
-    await form.getByText("Advanced settings", { exact: true }).click();
     const budget = form.getByRole("spinbutton", { name: "Triangle limit per mesh" });
     await budget.fill("150000");
     const remote = await page.request.patch(`${API}/api/v1/similarity/settings`, {

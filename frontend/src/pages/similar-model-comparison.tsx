@@ -246,10 +246,8 @@ function CandidateReview({
                     {t("similarity.incompleteMeasurements")}
                   </p>
                 ) : null}
-                <details className="border-t border-border pt-3 text-xs">
-                  <summary className="cursor-action font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    {t("similarity.lineage")}
-                  </summary>
+                <section className="border-t border-border pt-3 text-xs">
+                  <h4 className="text-sm font-medium text-foreground">{t("similarity.lineage")}</h4>
                   <p className="mt-3 text-muted-foreground">{candidate.algorithm_version}</p>
                   <ul className="mt-2 space-y-2">
                     {candidate.observations?.map((item) => (
@@ -261,7 +259,7 @@ function CandidateReview({
                   {candidate.observations_truncated && (
                     <p className="mt-2 text-muted-foreground">{t("similarity.lineageTruncated")}</p>
                   )}
-                </details>
+                </section>
               </section>
             }
           />

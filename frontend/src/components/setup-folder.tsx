@@ -234,14 +234,12 @@ export function SetupFolder({
           </p>
         </div>
       </fieldset>
-      <details className="text-sm">
-        <summary className="cursor-action py-2 text-muted-foreground">
-          {t("setup.mountHelp")}
-        </summary>
+      <section className="text-sm">
+        <h4 className="text-sm font-medium text-foreground">{t("setup.mountHelp")}</h4>
         <p className="mt-2 break-words text-sm leading-relaxed text-muted-foreground">
           {t("setup.mountInstructions")}
         </p>
-      </details>
+      </section>
       {review.phase !== "idle" && (
         <div role="alert" className="space-y-3 text-sm">
           <p>
