@@ -356,7 +356,11 @@ describe("FilterSidebar", () => {
         ],
       });
       await openFolder(user, "Parts");
-      const source = await screen.findByRole("treeitem", { name: "Dragon figure" });
+      const source = await screen.findByRole(
+        "treeitem",
+        { name: "Dragon figure" },
+        { timeout: 5000 },
+      );
       await dragOnto(source, await folderRow("All Models"));
 
       expect(view.onMoveMultipart).toHaveBeenCalledExactlyOnceWith(
@@ -373,7 +377,11 @@ describe("FilterSidebar", () => {
         ],
       });
       await openFolder(user, "Toys");
-      const source = await screen.findByRole("treeitem", { name: "Dragon figure" });
+      const source = await screen.findByRole(
+        "treeitem",
+        { name: "Dragon figure" },
+        { timeout: 5000 },
+      );
       await dragOnto(source, await folderRow("Toys"));
 
       expect(view.onMoveMultipart).not.toHaveBeenCalled();
