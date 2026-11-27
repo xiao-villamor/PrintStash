@@ -42,4 +42,16 @@ describe("design consistency", () => {
   it("does not hand-size chrome with arbitrary pixel heights", () => {
     expect(offenders(/\bh-\[(30|34|38|57)px\]/)).toEqual([]);
   });
+
+  it("uses semantic color tokens, not raw Tailwind palette colors", () => {
+    expect(
+      offenders(
+        /\b(?:text|bg|border|ring|fill|stroke|divide|outline)-(?:red|green|amber|blue|emerald|yellow|orange|rose|sky|slate|gray|zinc|neutral|stone)-\d{2,3}\b/,
+      ),
+    ).toEqual([]);
+  });
+
+  it("does not force a menu radius that the floating primitive owns", () => {
+    expect(offenders(/contentClassName="[^"]*\brounded-md\b/)).toEqual([]);
+  });
 });

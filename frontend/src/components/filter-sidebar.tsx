@@ -640,8 +640,8 @@ function CollectionTreeRow({
         data-tree-node={node.path}
       >
         {confirming ? (
-          <div className="my-0.5 rounded border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-2 py-1.5">
-            <p className="text-2xs font-medium text-red-700 dark:text-red-400 truncate mb-0.5">
+          <div className="my-0.5 rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5">
+            <p className="text-2xs font-medium text-destructive truncate mb-0.5">
               {uiText("Delete “{value1}”?", { value1: String(node.name ?? "") })}
             </p>
             {hasContent && (
@@ -676,7 +676,7 @@ function CollectionTreeRow({
                   onDelete?.(node.id, hasContent);
                   setConfirming(false);
                 }}
-                className="flex-1 rounded px-1.5 py-0.5 text-3xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors"
+                className="flex-1 rounded px-1.5 py-0.5 text-3xs font-medium bg-destructive-action text-destructive-action-foreground hover:bg-destructive-action-hover transition-colors"
               >
                 {uiText("Delete")}
               </button>
@@ -1201,12 +1201,12 @@ export function FilterSidebarContent({
     s === "printing"
       ? "bg-primary"
       : s === "ready"
-        ? "bg-green-500"
+        ? "bg-success"
         : s === "paused"
-          ? "bg-amber-500"
+          ? "bg-warning"
           : s === "error"
-            ? "bg-red-500"
-            : "bg-slate-400";
+            ? "bg-destructive"
+            : "bg-muted-foreground";
 
   const statusLabel = (status: string) =>
     knownUiText(status.charAt(0).toUpperCase() + status.slice(1), locale);
@@ -1215,11 +1215,11 @@ export function FilterSidebarContent({
     s === "printing"
       ? "text-primary"
       : s === "error"
-        ? "text-red-500"
+        ? "text-destructive"
         : s === "ready"
-          ? "text-green-500"
+          ? "text-success"
           : s === "paused"
-            ? "text-amber-500"
+            ? "text-warning"
             : "text-muted-foreground";
 
   return (

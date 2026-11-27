@@ -236,7 +236,7 @@ function RowStatus({ state }: { state?: "saving" | "saved" }) {
   if (state === "saved")
     return (
       <span role="status" aria-label={uiText("Saved")}>
-        <Check className="h-3.5 w-3.5 text-emerald-500" aria-hidden />
+        <Check className="h-3.5 w-3.5 text-success" aria-hidden />
       </span>
     );
   return null;

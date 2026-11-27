@@ -111,9 +111,9 @@ const REVISION_STATUS_LABELS = {
 export function revisionStatusClass(status: FileRevisionStatus | null): string {
   switch (status) {
     case "known_good":
-      return "bg-emerald-500/15 text-emerald-600 border-emerald-500/30";
+      return "bg-success/15 text-success border-success/30";
     case "needs_test":
-      return "bg-amber-500/15 text-amber-600 border-amber-500/30";
+      return "bg-warning/15 text-warning border-warning/30";
     case "failed":
       return "border-destructive/30 bg-destructive/10 text-destructive";
     case "archived":
@@ -194,11 +194,11 @@ export const PRINT_JOB_PRESENTATION = {
 export function printJobToneClass(tone: PrintJobTone): string {
   switch (tone) {
     case "success":
-      return "bg-emerald-500/15 text-emerald-600 border-emerald-500/30";
+      return "bg-success/15 text-success border-success/30";
     case "error":
       return "border-destructive/30 bg-destructive/10 text-destructive";
     default:
-      return "bg-amber-500/15 text-amber-600 border-amber-500/30";
+      return "bg-warning/15 text-warning border-warning/30";
   }
 }
 

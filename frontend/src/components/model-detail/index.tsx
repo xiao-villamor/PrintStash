@@ -1503,7 +1503,7 @@ function ModelDetailPresentation({
                   meshFile?.metadata?.bbox_z_mm != null && (
                     <div className="absolute bottom-4 left-4 z-10">
                       <div className="bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded px-2 py-1 flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                        <span className="w-2 h-2 rounded-full bg-success" />
                         <span>{uiText("Whole source geometry")}: </span>
                         <span className="font-mono text-field text-on-surface">
                           {uiText("{value1}×{value2}×{value3} mm", {

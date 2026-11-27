@@ -581,7 +581,7 @@ export function UploadModal({
         </div>
 
         {!auth.isAuthenticated && (
-          <div className="mx-6 mt-4 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-200 font-mono">
+          <div className="mx-6 mt-4 rounded border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning font-mono">
             {uiText("Sign in before uploading.")}{" "}
             <a href="/login" className="underline">
               {uiText("Open login")}

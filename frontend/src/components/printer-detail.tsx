@@ -953,7 +953,7 @@ function PrinterDetailView({
           </div>
 
           {(error || resources.error) && (
-            <div className="rounded border border-red-300/50 bg-red-50/30 p-3 font-mono text-sm text-red-600 dark:bg-red-950/20">
+            <div className="rounded border border-destructive/30 bg-destructive/10 p-3 font-mono text-sm text-destructive">
               {error ?? userMessage(resources.error)}
               {resources.error && (
                 <Button size="xs" onClick={() => void resources.refreshAll()}>

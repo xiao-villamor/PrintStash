@@ -30,7 +30,7 @@ export function LibraryFilterControl({
       role="dialog"
       aria-label={t("Filter Models")}
       className={className}
-      contentClassName="w-[352px] overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-lg"
+      contentClassName="w-[352px] overflow-hidden border border-border bg-popover text-popover-foreground shadow-lg"
       trigger={
         <Button
           ref={trigger}

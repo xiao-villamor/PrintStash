@@ -686,7 +686,7 @@ function FleetPrinterCard({
       returnFocusRef={menuOpener}
       className={grouped ? "w-104 max-w-full shrink-0" : "h-full min-w-0"}
       aria-label={uiText("Printer actions")}
-      contentClassName="w-60 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+      contentClassName="w-60 border border-border bg-popover p-1 text-popover-foreground shadow-lg"
       trigger={
         <article
           onContextMenu={(event) => {

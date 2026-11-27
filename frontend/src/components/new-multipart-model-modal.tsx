@@ -155,7 +155,7 @@ export function NewMultipartModelModal({
                 aria-label={t("multipart.collectionLabel")}
                 portal
                 className="w-full"
-                contentClassName="w-96 max-w-[calc(100vw-3rem)] rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-lg"
+                contentClassName="w-96 max-w-[calc(100vw-3rem)] border border-border bg-popover p-3 text-popover-foreground shadow-lg"
                 trigger={
                   <Button
                     type="button"

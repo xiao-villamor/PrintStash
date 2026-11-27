@@ -3674,7 +3674,7 @@ export function SettingsPanel() {
                             aria-label={uiText("Collection access")}
                             align="start"
                             portal
-                            contentClassName="w-80 max-w-[90vw] rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-lg"
+                            contentClassName="w-80 max-w-[90vw] border border-border bg-popover p-2 text-popover-foreground shadow-lg"
                             trigger={
                               <button
                                 type="button"

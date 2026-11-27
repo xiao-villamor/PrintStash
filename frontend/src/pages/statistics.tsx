@@ -897,7 +897,7 @@ export default function StatisticsPage() {
                   {translateUiText(locale, "Customize")}
                 </Button>
               }
-              contentClassName="w-64 rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-md"
+              contentClassName="w-64 border border-border bg-popover p-2 text-popover-foreground shadow-md"
             >
               <p className="px-2 pb-2 text-xs font-semibold">
                 {uiText("Visible statistics panels")}
