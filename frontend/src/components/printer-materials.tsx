@@ -298,7 +298,7 @@ function MaterialEditor({
         : !inWorkspace && <div className="flex justify-end">{actions}</div>}
       {!editing && !loadedTarget && reviewContent}
       <div className="printer-materials-nozzle">
-        <label htmlFor={nozzleId} className="space-y-2 text-[13px] font-medium text-foreground">
+        <label htmlFor={nozzleId} className="space-y-2 text-field font-medium text-foreground">
           {uiText("Tool 0 nozzle diameter (mm)")}
           {state.tools.some((tool) => tool.tool_key === "tool0" && tool.source !== "manual") && (
             <span className="block text-xs font-normal leading-relaxed text-muted-foreground">
@@ -310,7 +310,7 @@ function MaterialEditor({
         </label>
         <Input
           id={nozzleId}
-          className="h-[34px] text-[13px]"
+          className="text-field"
           type="number"
           min="0.1"
           max="5"
@@ -473,7 +473,7 @@ function MaterialEditor({
             {reviewContent}
             <fieldset className="space-y-4 border-t border-border pt-4">
               <legend className="pr-3 text-sm font-semibold">{uiText("Feed state")}</legend>
-              <label className="block space-y-2 text-[13px] font-medium">
+              <label className="block space-y-2 text-field font-medium">
                 {uiText("Feed label")}
                 <Input
                   value={editing.label}
@@ -481,7 +481,7 @@ function MaterialEditor({
                   onChange={(event) => setEditing({ ...editing, label: event.target.value })}
                 />
               </label>
-              <label className="block space-y-2 text-[13px] font-medium">
+              <label className="block space-y-2 text-field font-medium">
                 {uiText("State")}
                 <select
                   className={selectClassName}
@@ -500,7 +500,7 @@ function MaterialEditor({
             <fieldset className="space-y-4 border-t border-border pt-4">
               <legend className="pr-3 text-sm font-semibold">{uiText("Material")}</legend>
               <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block space-y-2 text-[13px] font-medium">
+                <label className="block space-y-2 text-field font-medium">
                   {uiText("Material type")}
                   <Input
                     value={editing.material_type}
@@ -510,7 +510,7 @@ function MaterialEditor({
                     }
                   />
                 </label>
-                <label className="block space-y-2 text-[13px] font-medium">
+                <label className="block space-y-2 text-field font-medium">
                   {uiText("Brand")}
                   <Input
                     value={editing.material_brand}
@@ -520,7 +520,7 @@ function MaterialEditor({
                     }
                   />
                 </label>
-                <label className="block space-y-2 text-[13px] font-medium">
+                <label className="block space-y-2 text-field font-medium">
                   {uiText("Color")}
                   <div className="flex h-10 items-center gap-3 border border-input bg-field-surface px-3">
                     <input
@@ -538,7 +538,7 @@ function MaterialEditor({
                   </div>
                 </label>
                 {spoolmanEnabled && (
-                  <label className="block space-y-2 text-[13px] font-medium">
+                  <label className="block space-y-2 text-field font-medium">
                     {uiText("Tracked spool")}
                     <select
                       className={selectClassName}

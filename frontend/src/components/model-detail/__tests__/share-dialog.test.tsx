@@ -162,7 +162,7 @@ describe("ShareDialog", () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderShare();
       await screen.findByRole("dialog");
-      await user.click(screen.getByRole("radio", { name: "On" }));
+      await user.click(screen.getByRole("switch", { name: "Allow file download" }));
 
       await user.click(screen.getByRole("button", { name: /Create link|Create/ }));
 

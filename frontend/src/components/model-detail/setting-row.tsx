@@ -26,7 +26,7 @@ export function SettingRow({
         </span>
       ) : (
         <span
-          className={`font-mono text-[13px] ${highlight ? "text-primary font-bold" : "text-on-surface"}`}
+          className={`font-mono text-field ${highlight ? "text-primary font-bold" : "text-on-surface"}`}
         >
           {value}
         </span>

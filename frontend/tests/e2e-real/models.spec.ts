@@ -103,7 +103,7 @@ test.describe("model library", () => {
 
       // ── Edit ──────────────────────────────────────────────────────────────────
       await clickModelAction(page, "Edit details");
-      const nameInput = page.getByRole("textbox", { name: "Name (required)" });
+      const nameInput = page.getByRole("textbox", { name: "Name" });
       await nameInput.fill(renamed);
       await page.getByRole("button", { name: "Save changes", exact: true }).click();
       await expect(page.getByRole("heading", { name: renamed })).toBeVisible();

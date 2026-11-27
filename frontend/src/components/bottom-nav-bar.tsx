@@ -53,7 +53,7 @@ export function BottomNavBar() {
   return (
     <nav
       aria-label={t("Navigation")}
-      className="shell-bottom-nav fixed bottom-0 left-0 z-40 flex min-h-16 w-full items-stretch border-t border-border bg-card px-1 pb-safe md:hidden"
+      className="shell-bottom-nav fixed bottom-0 left-0 z-nav flex min-h-16 w-full items-stretch border-t border-border bg-card px-1 pb-safe md:hidden"
     >
       {tabs.map((item) => {
         const active =

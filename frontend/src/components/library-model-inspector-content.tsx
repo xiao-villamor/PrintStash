@@ -45,7 +45,7 @@ type PreviewMode = "model" | "images";
 const meshTypes = new Set(["stl", "3mf", "obj", "step", "glb", "gltf", "ply", "3dm", "fbx"]);
 
 const sectionAction = "px-0 text-muted-foreground hover:bg-transparent hover:text-foreground";
-const descriptionText = "text-[13px] leading-5 text-muted-foreground";
+const descriptionText = "text-field leading-5 text-muted-foreground";
 
 export function InspectorContent({
   model,

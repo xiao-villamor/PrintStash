@@ -166,9 +166,7 @@ export function StorageProviderPicker(props: {
   return (
     <div className="space-y-5">
       <fieldset className="space-y-2">
-        <legend
-          className={props.onboarding ? "sr-only" : "text-[13px] font-medium text-foreground"}
-        >
+        <legend className={props.onboarding ? "sr-only" : "text-field font-medium text-foreground"}>
           {props.onboarding ? uiText("setup.storageChoice") : uiText("Storage category")}
         </legend>
         <div className={props.onboarding ? "grid grid-cols-2 gap-2" : "grid gap-2 sm:grid-cols-2"}>
@@ -251,7 +249,7 @@ export function StorageProviderPicker(props: {
       ) &&
         (props.onboarding ? (
           <div className="space-y-2">
-            <label className="block space-y-2 text-[13px] font-medium text-foreground">
+            <label className="block space-y-2 text-field font-medium text-foreground">
               {uiText("Provider")}
               <select
                 className={cn(
@@ -290,9 +288,7 @@ export function StorageProviderPicker(props: {
           </div>
         ) : (
           <fieldset className="space-y-2">
-            <legend className="text-[13px] font-medium text-foreground">
-              {uiText("Provider")}
-            </legend>
+            <legend className="text-field font-medium text-foreground">{uiText("Provider")}</legend>
             <div className="grid gap-2 sm:grid-cols-2">
               {categoryProviders.map((provider) => (
                 <Button

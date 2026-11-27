@@ -30,4 +30,16 @@ describe("design consistency", () => {
   it("has no <details>/<summary> disclosure triangles", () => {
     expect(offenders(/<(details|summary)\b/)).toEqual([]);
   });
+
+  it("uses the text-field token, not text-[13px]", () => {
+    expect(offenders(/text-\[13px\]/)).toEqual([]);
+  });
+
+  it("uses named z-index layers or local stacking (z-10/z-20), not ad hoc values", () => {
+    expect(offenders(/\bz-(30|40|50|60|\[\d+\])\b/)).toEqual([]);
+  });
+
+  it("does not hand-size chrome with arbitrary pixel heights", () => {
+    expect(offenders(/\bh-\[(30|34|38|57)px\]/)).toEqual([]);
+  });
 });

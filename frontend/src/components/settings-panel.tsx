@@ -3344,17 +3344,7 @@ export function SettingsPanel() {
                               required
                             />
                           </FormField>
-                          <FormField
-                            htmlFor="new-user-email"
-                            label={
-                              <>
-                                {uiText("Email")}{" "}
-                                <span className="font-normal text-muted-foreground">
-                                  {uiText("(optional)")}
-                                </span>
-                              </>
-                            }
-                          >
+                          <FormField htmlFor="new-user-email" label={uiText("Email")} optional>
                             <Input
                               id="new-user-email"
                               value={newUserEmail}
@@ -3657,7 +3647,7 @@ export function SettingsPanel() {
                     <div className="space-y-4 py-4">
                       <div className="settings-access-fields">
                         <label className="settings-preference-row">
-                          <span className="text-[13px] font-medium text-foreground">
+                          <span className="text-field font-medium text-foreground">
                             {uiText("User")}
                           </span>
                           <select
@@ -3677,7 +3667,7 @@ export function SettingsPanel() {
                           </select>
                         </label>
                         <div className="settings-preference-row">
-                          <span className="text-[13px] font-medium text-foreground">
+                          <span className="text-field font-medium text-foreground">
                             {uiText("Collection")}
                           </span>
                           <DropdownMenu
@@ -3713,7 +3703,7 @@ export function SettingsPanel() {
                           </DropdownMenu>
                         </div>
                         <label className="settings-preference-row">
-                          <span className="text-[13px] font-medium text-foreground">
+                          <span className="text-field font-medium text-foreground">
                             {uiText("Role")}
                           </span>
                           <select
@@ -3853,7 +3843,7 @@ export function SettingsPanel() {
                     <div className="space-y-4 py-4">
                       <div className="settings-access-fields">
                         <label className="settings-preference-row">
-                          <span className="text-[13px] font-medium text-foreground">
+                          <span className="text-field font-medium text-foreground">
                             {uiText("User")}
                           </span>
                           <select
@@ -3876,7 +3866,7 @@ export function SettingsPanel() {
                           </select>
                         </label>
                         <label className="settings-preference-row">
-                          <span className="text-[13px] font-medium text-foreground">
+                          <span className="text-field font-medium text-foreground">
                             {uiText("Printer")}
                           </span>
                           <select
@@ -5507,7 +5497,7 @@ export function SettingsPanel() {
                 >
                   <div className="settings-preference-fields">
                     <div className="settings-preference-row">
-                      <label htmlFor="display-currency" className="text-[13px] text-foreground">
+                      <label htmlFor="display-currency" className="text-field text-foreground">
                         {uiText("Display currency")}
                       </label>
                       <select
@@ -5946,7 +5936,7 @@ export function SettingsPanel() {
                               aria-hidden
                             />
                             <div>
-                              <p className="text-[13px] font-semibold text-foreground">
+                              <p className="text-field font-semibold text-foreground">
                                 {uiText("Update available: v")}
                                 {releaseStatus.latest_version}
                               </p>
@@ -5973,7 +5963,7 @@ export function SettingsPanel() {
                       )}
                     <div className="settings-readonly-row">
                       <div>
-                        <p className="text-[13px] font-medium text-foreground">
+                        <p className="text-field font-medium text-foreground">
                           {uiText("Installed")}
                         </p>
                         <p className="settings-row-hint">
@@ -5984,15 +5974,15 @@ export function SettingsPanel() {
                               : uiText("API server status and version")}
                         </p>
                       </div>
-                      <span className="font-mono text-[13px] text-foreground">
+                      <span className="font-mono text-field text-foreground">
                         {health?.version
                           ? uiText("v{value1}", { value1: health.version })
                           : uiText("Loading…")}
                       </span>
                     </div>
                     <div className="settings-readonly-row">
-                      <p className="text-[13px] font-medium text-foreground">{uiText("Source")}</p>
-                      <span className="font-mono text-[13px] text-foreground">
+                      <p className="text-field font-medium text-foreground">{uiText("Source")}</p>
+                      <span className="font-mono text-field text-foreground">
                         {GITHUB_REPO_LABEL}
                       </span>
                     </div>
@@ -6012,7 +6002,7 @@ export function SettingsPanel() {
                           {knownUiText(latestRelease.date)}
                         </span>
                       </p>
-                      <ul className="mt-2 list-disc space-y-1.5 pl-5 text-[13px] text-foreground marker:text-muted-foreground">
+                      <ul className="mt-2 list-disc space-y-1.5 pl-5 text-field text-foreground marker:text-muted-foreground">
                         {latestRelease.changes.map((change, i) => (
                           <li key={i}>{knownUiText(change)}</li>
                         ))}

@@ -1130,7 +1130,7 @@ function ModelDetailPresentation({
             ) : (
               <>
                 <label className="block space-y-1.5 text-sm font-medium">
-                  {uiText("Name (required)")}
+                  {uiText("Name")}
                   <Input
                     ref={nameInput}
                     required
@@ -1505,7 +1505,7 @@ function ModelDetailPresentation({
                       <div className="bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded px-2 py-1 flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-emerald-500" />
                         <span>{uiText("Whole source geometry")}: </span>
-                        <span className="font-mono text-[13px] text-on-surface">
+                        <span className="font-mono text-field text-on-surface">
                           {uiText("{value1}×{value2}×{value3} mm", {
                             value1: formatNumber(meshFile.metadata.bbox_x_mm, {
                               maximumFractionDigits: 1,

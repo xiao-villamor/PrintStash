@@ -225,7 +225,7 @@ export default function LoginPage() {
         </div>
 
         {/* The whole row toggles the box, as a native checkbox label would. */}
-        <label className="flex min-h-6 w-fit cursor-action items-center gap-2.5 text-[13px] text-on-surface-variant">
+        <label className="flex min-h-6 w-fit cursor-action items-center gap-2.5 text-field text-on-surface-variant">
           <Checkbox
             checked={remember_me}
             onChange={setremember_me}

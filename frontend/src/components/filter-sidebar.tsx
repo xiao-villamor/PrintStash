@@ -33,6 +33,7 @@ import { useRouter } from "@/lib/navigation";
 import { Link } from "@/lib/link";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { CollectionNodeRead, OutlinerModelRead, PrinterRead, TagRead } from "@/types";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ancestorPaths } from "@/lib/collection-tree";
 import {
@@ -1556,7 +1557,7 @@ export function FilterSidebarContent({
                   </h3>
                   <div className="relative mb-2">
                     <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                    <input
+                    <Input
                       type="text"
                       placeholder={t("Filter tags...")}
                       value={tagFilter}
@@ -1564,7 +1565,7 @@ export function FilterSidebarContent({
                         setTagFilter(e.target.value);
                         setShowAllTags(false);
                       }}
-                      className="w-full pl-7 pr-2 py-1.5 text-sm border border-border rounded bg-field-surface text-foreground font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-primary transition-colors"
+                      className="pl-7 pr-2 font-mono"
                     />
                     {tagFilter && (
                       <button
@@ -1847,9 +1848,9 @@ export function FilterSidebar(props: FilterSidebarProps) {
             <span className="absolute inset-y-0 left-0 pl-2 flex items-center text-muted-foreground">
               <Search className="h-3.5 w-3.5" />
             </span>
-            <input
+            <Input
               data-tree-filter
-              className={`block w-full min-w-0 pl-7 pr-6 border border-border rounded text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring ${props.collectionsOnly ? "h-[34px] bg-field-surface text-xs" : "py-1.5 text-sm bg-field-surface"}`}
+              className={`pl-7 pr-6 ${props.collectionsOnly ? "h-8 text-xs" : ""}`}
               placeholder={
                 props.collectionsOnly ? uiText("Filter collections") : uiText("Filter outliner...")
               }
@@ -1954,7 +1955,7 @@ export function FilterSidebar(props: FilterSidebarProps) {
             event.preventDefault();
             setSidebarWidth(Math.min(520, Math.max(minimumWidth, width)));
           }}
-          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/50 transition-colors z-50"
+          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/50 transition-colors z-dropdown"
         />
       </aside>
     </Localized>

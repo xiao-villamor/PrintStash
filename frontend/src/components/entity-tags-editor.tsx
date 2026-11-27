@@ -241,7 +241,7 @@ export function EntityTagsEditor({
       <div className="space-y-5">
         <section className="space-y-3">
           <h3 className="text-sm font-semibold">{uiText("Tag ownership")}</h3>
-          <div className="grid grid-cols-[1fr_2fr] gap-4 bg-plate p-4 text-[13px]">
+          <div className="grid grid-cols-[1fr_2fr] gap-4 bg-plate p-4 text-field">
             <span className="text-muted-foreground">{uiText("Applies to")}</span>
             <span className="break-words">{entityLabel}</span>
           </div>
@@ -267,7 +267,7 @@ export function EntityTagsEditor({
                     current.filter((value) => normalized(value) !== normalized(tag)),
                   )
                 }
-                className="inline-flex max-w-full items-center gap-1 bg-accent px-2 py-0.5 text-[13px] text-on-surface hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex max-w-full items-center gap-1 bg-accent px-2 py-0.5 text-field text-on-surface hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 title={uiText("Remove {value1}", { value1: String(tag) })}
               >
                 <span className="truncate">{tag}</span>

@@ -240,7 +240,7 @@ export function LibrarySearch({
           autoComplete="off"
           spellCheck={false}
           aria-label={t("aiSearch.searchLibrary")}
-          className="h-full flex-1 rounded-none border-0 bg-transparent px-1 py-0 text-[13px] focus:ring-0 [&::-webkit-search-cancel-button]:hidden"
+          className="h-full flex-1 rounded-none border-0 bg-transparent px-1 py-0 text-field focus:ring-0 [&::-webkit-search-cancel-button]:hidden"
           placeholder={t(aiActive ? "aiSearch.describeModel" : "Search Models, files and tags")}
           value={value}
           onChange={(event) => changeValue(event.target.value)}

@@ -77,6 +77,8 @@ module.exports = {
         "3xs": "0.625rem",
       },
       zIndex: {
+        floating: "30",
+        nav: "40",
         dropdown: "50",
         overlay: "100",
       },

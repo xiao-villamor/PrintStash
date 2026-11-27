@@ -182,7 +182,7 @@ export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
                           editor.toggleTag(t.name);
                           editor.setTagInput("");
                         }}
-                        className="flex-1 min-w-0 text-left px-3 py-1.5 text-[13px] text-on-surface-variant flex justify-between gap-2"
+                        className="flex-1 min-w-0 text-left px-3 py-1.5 text-field text-on-surface-variant flex justify-between gap-2"
                       >
                         <span className="truncate">{t.name}</span>
                         <span className="opacity-50">({t.model_count})</span>
@@ -208,7 +208,7 @@ export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
                         editor.createTag(editor.tagInput);
                         editor.setTagInput("");
                       }}
-                      className={`w-full text-left px-3 py-1.5 text-[13px] text-primary hover:bg-surface-container-low flex items-center gap-2 ${tagShown.length === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
+                      className={`w-full text-left px-3 py-1.5 text-field text-primary hover:bg-surface-container-low flex items-center gap-2 ${tagShown.length === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
                     >
                       <Plus className="size-3 shrink-0" aria-hidden="true" />
                       <span className="min-w-0 wrap-anywhere">

@@ -88,7 +88,7 @@ export function SimilarityRow({
           <p className="break-words text-sm font-semibold">
             {candidate.model_a.name} ↔ {candidate.model_b.name}
           </p>
-          <p className="mt-1 text-[13px] text-muted-foreground">
+          <p className="mt-1 text-field text-muted-foreground">
             {evidenceLabel(candidate.evidence_class)} · {Math.round(candidate.confidence * 100)}% ·{" "}
             {evidenceDescription(candidate)}
           </p>
@@ -499,7 +499,7 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
             <h2 className="text-base font-semibold text-foreground">{t("similarity.title")}</h2>
             {queueActions}
           </div>
-          <p className="mt-3 text-[13px] text-muted-foreground">
+          <p className="mt-3 text-field text-muted-foreground">
             {uiText("Review measured geometry before linking models.")}
           </p>
         </div>
@@ -521,7 +521,7 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
         >
           <div className="min-w-0 basis-full @3xl/similarity:flex-1 @3xl/similarity:basis-auto">
             {modelDetail && (
-              <p className="mb-2 text-[13px] text-muted-foreground">{uiText("Review state")}</p>
+              <p className="mb-2 text-field text-muted-foreground">{uiText("Review state")}</p>
             )}
             <TabBar
               tabs={[
@@ -542,7 +542,7 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
                   : "grid w-full grid-cols-2 gap-1 @sm/similarity:grid-cols-4 @3xl/similarity:flex"
               }
               tabClassName={cn(
-                "h-9 min-w-0 whitespace-nowrap px-3 text-[13px] text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "h-9 min-w-0 whitespace-nowrap px-3 text-field text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 modelDetail && "border border-border",
               )}
               activeTabClassName="bg-accent text-accent-foreground"
@@ -721,7 +721,7 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
           </div>
         )}
         {modelDetail && (
-          <p className="mt-5 text-[13px] text-muted-foreground">
+          <p className="mt-5 text-field text-muted-foreground">
             {uiText("A match does not merge models or delete files.")}
           </p>
         )}

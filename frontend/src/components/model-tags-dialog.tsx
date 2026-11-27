@@ -302,7 +302,7 @@ export function ModelTagsDialog({
           <div>
             <label
               htmlFor={`model-tags-${model.id}`}
-              className="mb-1.5 block text-[13px] font-medium text-foreground"
+              className="mb-1.5 block text-field font-medium text-foreground"
             >
               {uiText("Find or create tag")}
             </label>

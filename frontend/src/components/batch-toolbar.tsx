@@ -64,7 +64,7 @@ export function BatchToolbar({
 
   return (
     <>
-      <div className="fixed inset-x-0 bottom-20 z-50 md:bottom-4 flex justify-center px-4 pointer-events-none">
+      <div className="fixed inset-x-0 bottom-20 z-dropdown md:bottom-4 flex justify-center px-4 pointer-events-none">
         <div
           data-state={state}
           className="pointer-events-auto flex items-center gap-2 rounded-full border border-border bg-background/95 px-3 py-2 shadow-lg backdrop-blur transition-[opacity,transform] duration-fast ease-out data-[state=closed]:translate-y-2 data-[state=closed]:opacity-0 motion-reduce:data-[state=closed]:translate-y-0"

@@ -147,7 +147,7 @@ test.describe("role-based access", () => {
       await e.page.goto(modelUrl);
       await clickModelAction(e.page, "Edit details");
       const renamed = `${model}-edited`;
-      await e.page.getByRole("textbox", { name: "Name (required)", exact: true }).fill(renamed);
+      await e.page.getByRole("textbox", { name: "Name", exact: true }).fill(renamed);
       await e.page.getByRole("button", { name: "Save changes", exact: true }).click();
       await expect(e.page.getByRole("heading", { name: renamed })).toBeVisible();
 

@@ -541,13 +541,13 @@ export function FleetQueuePanel({
         >
           {editTarget && draft && (
             <div className="space-y-5">
-              <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-4 bg-plate p-4 text-[13px]">
+              <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-4 bg-plate p-4 text-field">
                 <dt className="text-muted-foreground">{uiText("Revision")}</dt>
                 <dd className="break-all font-medium">{editTarget.remote_filename}</dd>
               </dl>
               <fieldset className="space-y-4 border-t border-border pt-4">
                 <legend className="pr-3 text-sm font-semibold">{uiText("Routing")}</legend>
-                <label className="block space-y-2 text-[13px] font-medium">
+                <label className="block space-y-2 text-field font-medium">
                   {uiText("Routing")}
                   <select
                     className={inputClasses}
@@ -563,7 +563,7 @@ export function FleetQueuePanel({
                   </select>
                 </label>
                 {draft.strategy === "manual" && (
-                  <label className="block space-y-2 text-[13px] font-medium">
+                  <label className="block space-y-2 text-field font-medium">
                     {uiText("Printer")}
                     <select
                       className={inputClasses}
@@ -580,7 +580,7 @@ export function FleetQueuePanel({
                     </select>
                   </label>
                 )}
-                <label className="block space-y-2 text-[13px] font-medium">
+                <label className="block space-y-2 text-field font-medium">
                   {uiText("Target group")}
                   <Input
                     value={draft.targetGroup}
@@ -593,7 +593,7 @@ export function FleetQueuePanel({
               <fieldset className="space-y-4 border-t border-border pt-4">
                 <legend className="pr-3 text-sm font-semibold">{uiText("Queue settings")}</legend>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="block space-y-2 text-[13px] font-medium">
+                  <label className="block space-y-2 text-field font-medium">
                     {uiText("Priority")}
                     <select
                       className={inputClasses}
@@ -608,7 +608,7 @@ export function FleetQueuePanel({
                       <option value="rush">{uiText("Rush")}</option>
                     </select>
                   </label>
-                  <label className="block space-y-2 text-[13px] font-medium">
+                  <label className="block space-y-2 text-field font-medium">
                     {uiText("Queue position")}
                     <Input
                       type="number"
@@ -621,7 +621,7 @@ export function FleetQueuePanel({
                     />
                   </label>
                 </div>
-                <label className="block space-y-2 text-[13px] font-medium">
+                <label className="block space-y-2 text-field font-medium">
                   {uiText("Material compatibility")}
                   <select
                     className={inputClasses}
@@ -1311,12 +1311,12 @@ export function FleetMaintenancePanel({
         >
           <div className="space-y-5">
             {compact ? (
-              <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-4 bg-plate p-4 text-[13px]">
+              <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-4 bg-plate p-4 text-field">
                 <dt className="text-muted-foreground">{uiText("Printer")}</dt>
                 <dd className="font-medium">{selected?.name}</dd>
               </dl>
             ) : (
-              <label className="block space-y-2 text-[13px] font-medium">
+              <label className="block space-y-2 text-field font-medium">
                 {uiText("Printer")}
                 <select
                   className={inputClasses}
@@ -1344,7 +1344,7 @@ export function FleetMaintenancePanel({
                   {uiText("Maintenance window")}
                 </legend>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="block space-y-2 text-[13px] font-medium">
+                  <label className="block space-y-2 text-field font-medium">
                     {uiText("Starts")}
                     <Input
                       type="datetime-local"
@@ -1352,7 +1352,7 @@ export function FleetMaintenancePanel({
                       onChange={(event) => setStartsAt(event.target.value)}
                     />
                   </label>
-                  <label className="block space-y-2 text-[13px] font-medium">
+                  <label className="block space-y-2 text-field font-medium">
                     {uiText("Ends")}
                     <Input
                       type="datetime-local"
@@ -1361,7 +1361,7 @@ export function FleetMaintenancePanel({
                     />
                   </label>
                 </div>
-                <label className="block space-y-2 text-[13px] font-medium">
+                <label className="block space-y-2 text-field font-medium">
                   {uiText("Reason")}
                   <textarea
                     rows={3}
@@ -1380,7 +1380,7 @@ export function FleetMaintenancePanel({
               <fieldset className="space-y-4 border-t border-border pt-4">
                 <legend className="pr-3 text-sm font-semibold">{uiText("Service record")}</legend>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="block space-y-2 text-[13px] font-medium">
+                  <label className="block space-y-2 text-field font-medium">
                     {uiText("Date")}
                     <Input
                       type="date"
@@ -1388,12 +1388,12 @@ export function FleetMaintenancePanel({
                       onChange={(event) => setPerformedAt(event.target.value)}
                     />
                   </label>
-                  <label className="block space-y-2 text-[13px] font-medium">
+                  <label className="block space-y-2 text-field font-medium">
                     {uiText("Category")}
                     <Input value={category} onChange={(event) => setCategory(event.target.value)} />
                   </label>
                 </div>
-                <label className="block space-y-2 text-[13px] font-medium">
+                <label className="block space-y-2 text-field font-medium">
                   {uiText("Service notes")}
                   <textarea
                     rows={4}
@@ -1438,7 +1438,7 @@ export function FleetMaintenancePanel({
           >
             {!compact && <h2>{uiText("Routing & service")}</h2>}
             {visiblePrinters.length === 0 && (
-              <p className="p-5 text-[13px] text-muted-foreground">
+              <p className="p-5 text-field text-muted-foreground">
                 {uiText("No maintenance records match these filters.")}
               </p>
             )}
@@ -1457,7 +1457,7 @@ export function FleetMaintenancePanel({
                 <div key={printer.id} className="border-b border-border last:border-b-0">
                   <div className="fleet-plain-row">
                     <div>
-                      <h3 className="text-[13px] font-semibold">
+                      <h3 className="text-field font-semibold">
                         {compact ? uiText("Routing") : printer.name}
                       </h3>
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -1531,7 +1531,7 @@ export function FleetMaintenancePanel({
                   {printerWindows.map((row) => (
                     <div key={`window-${row.id}`} className="fleet-plain-row">
                       <div>
-                        <h3 className="text-[13px] font-medium">
+                        <h3 className="text-field font-medium">
                           {compact
                             ? uiText("Maintenance window")
                             : `${printer.name} · ${uiText("Maintenance window")}`}
@@ -1581,7 +1581,7 @@ export function FleetMaintenancePanel({
                   {printerLogs.map((row) => (
                     <div key={`log-${row.id}`} className="fleet-plain-row">
                       <div>
-                        <h3 className="text-[13px] font-medium">
+                        <h3 className="text-field font-medium">
                           {compact ? row.category : `${printer.name} · ${row.category}`}
                         </h3>
                         <p className="mt-1 text-xs text-muted-foreground">

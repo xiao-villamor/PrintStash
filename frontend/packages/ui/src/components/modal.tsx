@@ -148,7 +148,7 @@ export function Modal({
                   "max-w-[65ch] wrap-anywhere",
                   confirmation
                     ? "mt-2 text-sm leading-relaxed text-card-foreground"
-                    : "mt-1.5 text-[13px] leading-normal text-muted-foreground",
+                    : "mt-1.5 text-field leading-normal text-muted-foreground",
                 )}
               >
                 {description}

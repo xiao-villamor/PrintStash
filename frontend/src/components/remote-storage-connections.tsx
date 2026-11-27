@@ -733,7 +733,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
             {connectionReview}
             <div className="space-y-5">
               <fieldset className="space-y-2">
-                <legend className="text-[13px] font-medium text-foreground">
+                <legend className="text-field font-medium text-foreground">
                   {uiText("Storage category")}
                 </legend>
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -767,7 +767,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                 </div>
               </fieldset>
               <fieldset className="space-y-2">
-                <legend className="text-[13px] font-medium text-foreground">
+                <legend className="text-field font-medium text-foreground">
                   {uiText("Provider")}
                 </legend>
                 <div className="grid gap-2 sm:grid-cols-3">

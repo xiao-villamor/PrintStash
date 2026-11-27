@@ -135,7 +135,7 @@ export function SettingsNotice({
         {title && (
           <p
             className={cn(
-              "text-[13px] font-medium",
+              "text-field font-medium",
               tone === "danger" ? "text-destructive" : "text-foreground",
             )}
           >

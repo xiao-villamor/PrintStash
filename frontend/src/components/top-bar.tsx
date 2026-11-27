@@ -203,7 +203,7 @@ export function TopBar() {
       data-current-collection={
         recordRoute ? record?.collection : pathname === "/" ? searchParams.get("c") : undefined
       }
-      className="shell-topbar relative z-dropdown flex h-[57px] shrink-0 items-center gap-2 border-b border-border bg-card px-2 sm:gap-3 sm:px-3"
+      className="shell-topbar relative z-dropdown flex h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-2 sm:gap-3 sm:px-3"
     >
       {!desktop && recordRoute && (
         <LibraryBackLink
@@ -224,7 +224,7 @@ export function TopBar() {
           <ArrowLeft className="h-4 w-4" aria-hidden />
         </Link>
       )}
-      <span className="min-w-0 flex-1 truncate text-[13px] font-semibold md:hidden">
+      <span className="min-w-0 flex-1 truncate text-field font-semibold md:hidden">
         {printerName
           ? printerName
           : recordRoute && record
@@ -343,7 +343,6 @@ export function TopBar() {
           <Button
             type="button"
             size="sm"
-            className="h-[34px]"
             onClick={openUpload}
             disabled={!canUpload}
             aria-label={uiText("Upload")}

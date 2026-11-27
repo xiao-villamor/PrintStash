@@ -64,7 +64,7 @@ export function PendingSidebar() {
         )}
         {pending.map((item) => (
           <article key={item.id} className="border-b border-border py-3 first:pt-0">
-            <h3 className="truncate text-[13px] font-semibold">
+            <h3 className="truncate text-field font-semibold">
               {item.display_title ?? item.source_url ?? t("inbox.pendingImport")}
             </h3>
             <p className="mt-1 truncate text-xs text-muted-foreground">
@@ -155,7 +155,7 @@ export function SavedViewsSidebar() {
           <button
             key={view.id}
             type="button"
-            className="flex h-[30px] w-full items-center gap-2 px-2.5 text-left text-[13px] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            className="flex h-8 w-full items-center gap-2 px-2.5 text-left text-field hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             onClick={() => {
               if (pathname === "/")
                 window.dispatchEvent(

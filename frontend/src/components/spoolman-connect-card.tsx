@@ -411,7 +411,7 @@ export function SpoolmanConnectCard({
               {/* Inventory */}
               {enabled && connected && spools && spools.length > 0 && (
                 <div className="pt-1 border-t border-border">
-                  <h4 className="pb-2 pt-3 text-[13px] font-medium text-foreground">
+                  <h4 className="pb-2 pt-3 text-field font-medium text-foreground">
                     {uiText("Inventory")}
                   </h4>
                   <ul className="space-y-1">

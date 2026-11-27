@@ -128,7 +128,7 @@ export function AddGcodeRevisionModal({
       >
         <form id={formId} onSubmit={submit} className="space-y-4">
           {modelName && (
-            <dl className="grid grid-cols-[1fr_2fr] gap-x-4 gap-y-2 bg-plate p-4 text-[13px]">
+            <dl className="grid grid-cols-[1fr_2fr] gap-x-4 gap-y-2 bg-plate p-4 text-field">
               <dt className="text-muted-foreground">{uiText("Model")}</dt>
               <dd className="min-w-0 wrap-anywhere">{modelName}</dd>
               <dt className="text-muted-foreground">{uiText("Current recommended Revision")}</dt>
@@ -290,7 +290,7 @@ export function AddGcodeRevisionModal({
           <p className="text-xs text-muted-foreground">
             {uiText("Making this Revision recommended is an explicit choice.")}
           </p>
-          <div className="flex items-center justify-between gap-4 border-t border-border pt-4 text-[13px]">
+          <div className="flex items-center justify-between gap-4 border-t border-border pt-4 text-field">
             <span>{uiText("New Revision status")}</span>
             <span className="text-xs text-warning">{uiText("Needs test")}</span>
           </div>
