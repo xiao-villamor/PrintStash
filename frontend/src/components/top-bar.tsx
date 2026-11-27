@@ -338,24 +338,27 @@ export function TopBar() {
             <Search className="h-4 w-4" aria-hidden />
           </Button>
         )}
-        <Button
-          type="button"
-          size="sm"
-          className="h-[34px]"
-          onClick={openUpload}
-          disabled={!canUpload}
-          aria-label={uiText("Upload")}
-          title={
-            writableProbe.isError
-              ? userMessage(writableProbe.error)
-              : canUpload
-                ? uiText("Upload artifacts")
-                : uiText("Sign in and get edit access to upload")
-          }
-        >
-          <Upload className="h-4 w-4" aria-hidden />
-          <span className="hidden sm:inline">{uiText("Upload")}</span>
-        </Button>
+        {/* The Library keeps Upload beside its other creation actions. */}
+        {pathname !== "/" && (
+          <Button
+            type="button"
+            size="sm"
+            className="h-[34px]"
+            onClick={openUpload}
+            disabled={!canUpload}
+            aria-label={uiText("Upload")}
+            title={
+              writableProbe.isError
+                ? userMessage(writableProbe.error)
+                : canUpload
+                  ? uiText("Upload artifacts")
+                  : uiText("Sign in and get edit access to upload")
+            }
+          >
+            <Upload className="h-4 w-4" aria-hidden />
+            <span className="hidden sm:inline">{uiText("Upload")}</span>
+          </Button>
+        )}
         <DropdownMenu
           open={tasksOpen}
           onOpenChange={(open) => {

@@ -798,6 +798,115 @@ class TestMultipartModels:
         listed = client.get("/api/v1/multipart-models?q=Renamed", headers=auth_headers)
         assert [item["id"] for item in listed.json()] == [aggregate_id]
 
+    def test_patch_moves_the_set_into_a_collection(
+        self, client, auth_headers, make_collection
+    ) -> None:
+        collection = make_collection("Patch destination")
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Loose assembly"},
+        ).json()
+
+        response = client.patch(
+            f"/api/v1/multipart-models/{created['id']}",
+            headers=auth_headers,
+            json={"collection_id": collection.id},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["collection_id"] == collection.id
+        assert response.json()["collection"] == collection.path
+        assert response.json()["name"] == "Loose assembly"
+
+    def test_patch_moves_the_set_to_the_vault(
+        self, client, auth_headers, make_collection
+    ) -> None:
+        collection = make_collection("Patch source")
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Filed assembly", "collection_id": collection.id},
+        ).json()
+
+        response = client.patch(
+            f"/api/v1/multipart-models/{created['id']}",
+            headers=auth_headers,
+            json={"collection_id": None},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["collection_id"] is None
+        assert response.json()["collection"] is None
+
+    def test_patch_without_a_collection_keeps_the_set_in_place(
+        self, client, auth_headers, make_collection
+    ) -> None:
+        collection = make_collection("Patch stays")
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Stay put", "collection_id": collection.id},
+        ).json()
+
+        response = client.patch(
+            f"/api/v1/multipart-models/{created['id']}",
+            headers=auth_headers,
+            json={"description": "Renamed elsewhere"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["collection_id"] == collection.id
+
+    def test_patch_rejects_a_missing_destination(self, client, auth_headers) -> None:
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Nowhere to go"},
+        ).json()
+
+        response = client.patch(
+            f"/api/v1/multipart-models/{created['id']}",
+            headers=auth_headers,
+            json={"collection_id": 999_999},
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "collection_not_found"
+
+    def test_patch_rejects_a_destination_the_caller_cannot_edit(
+        self,
+        client,
+        auth_headers,
+        make_collection,
+        make_user,
+        headers_for,
+        grant_role,
+    ) -> None:
+        source = make_collection("Editable source")
+        target = make_collection("Read-only destination")
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Guarded move", "collection_id": source.id},
+        ).json()
+        editor = make_user("multipart-mover")
+        grant_role(editor, source, CollectionRole.EDIT)
+        grant_role(editor, target, CollectionRole.VIEW)
+
+        response = client.patch(
+            f"/api/v1/multipart-models/{created['id']}",
+            headers=headers_for(editor),
+            json={"collection_id": target.id},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "collection_permission_denied"
+        unchanged = client.get(
+            f"/api/v1/multipart-models/{created['id']}", headers=auth_headers
+        )
+        assert unchanged.json()["collection_id"] == source.id
+
     def test_patch_rejects_whitespace_name(self, client, auth_headers) -> None:
         created = client.post(
             "/api/v1/multipart-models",

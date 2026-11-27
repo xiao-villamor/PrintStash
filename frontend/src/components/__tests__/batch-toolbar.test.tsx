@@ -85,6 +85,26 @@ describe("BatchToolbar", () => {
     );
   });
 
+  it("groups a plain model selection into a multipart set", async () => {
+    const props = setup({ onGroupAsMultipart: vi.fn<() => void>() });
+    await userEvent.click(screen.getByRole("button", { name: "Group as multipart set" }));
+    expect(props.onGroupAsMultipart).toHaveBeenCalledOnce();
+  });
+
+  it("offers no grouping without a handler", () => {
+    setup();
+    expect(
+      screen.queryByRole("button", { name: "Group as multipart set" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers no grouping once a multipart set or folder is selected", () => {
+    setup({ multipartCount: 1, onGroupAsMultipart: vi.fn<() => void>() });
+    expect(
+      screen.queryByRole("button", { name: "Group as multipart set" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders nothing when nothing is selected", () => {
     setup({ modelCount: 0 });
     expect(screen.queryByText(/selected/)).not.toBeInTheDocument();

@@ -14,9 +14,9 @@ import {
   SelectionFolderCard,
   SelectionItemCard,
 } from "@/components/selection-browser";
+import { MULTIPART_INITIAL_LIMIT } from "@/lib/multipart-model-presentation";
 import type { CollectionNodeRead, ModelListItem } from "@/types";
 
-const MULTIPART_INITIAL_LIMIT = 100;
 const PAGE_SIZE = 24;
 
 export function MultipartCreationBrowser({
@@ -192,10 +192,7 @@ export function MultipartCreationBrowser({
         query={query}
         onQueryChange={setQuery}
         searchLabel={t("multipart.searchModels")}
-        summary={t("multipart.creationSelectionHelp", {
-          count: String(selected.size),
-          limit: String(MULTIPART_INITIAL_LIMIT),
-        })}
+        summary={t("multipart.creationLimitHelp", { limit: String(MULTIPART_INITIAL_LIMIT) })}
         selectLabel={t("multipart.selectPage")}
         clearLabel={uiText("Clear selection")}
         selectDisabled={

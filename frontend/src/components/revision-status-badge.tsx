@@ -4,7 +4,7 @@ import { Archive, CircleCheck, CircleX, FlaskConical } from "lucide-react";
 import type { FileRevisionStatus } from "@/types";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import "./revision-status-badge.css";
+import { Chip } from "@/components/ui/chip";
 
 function statusWord(status: FileRevisionStatus) {
   switch (status) {
@@ -19,16 +19,29 @@ function statusWord(status: FileRevisionStatus) {
   }
 }
 
+function statusTone(status: FileRevisionStatus) {
+  switch (status) {
+    case "known_good":
+      return "success";
+    case "needs_test":
+      return "warning";
+    case "failed":
+      return "destructive";
+    case "archived":
+      return "neutral";
+  }
+}
+
 function statusIcon(status: FileRevisionStatus) {
   switch (status) {
     case "known_good":
-      return <CircleCheck aria-hidden className="size-3 shrink-0" />;
+      return <CircleCheck />;
     case "needs_test":
-      return <FlaskConical aria-hidden className="size-3 shrink-0" />;
+      return <FlaskConical />;
     case "failed":
-      return <CircleX aria-hidden className="size-3 shrink-0" />;
+      return <CircleX />;
     case "archived":
-      return <Archive aria-hidden className="size-3 shrink-0" />;
+      return <Archive />;
   }
 }
 
@@ -47,14 +60,14 @@ export function RevisionStatusBadge({
     ? uiText("Revision status: {status}; label: {label}", { status: word, label })
     : uiText("Revision status: {status}", { status: word });
   return (
-    <span
+    <Chip
       data-revision-status={status}
       aria-label={accessibleLabel}
       title={accessibleLabel}
-      className="revision-status-badge"
+      tone={statusTone(status)}
+      icon={statusIcon(status)}
     >
-      {statusIcon(status)}
       {word}
-    </span>
+    </Chip>
   );
 }

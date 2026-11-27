@@ -14,7 +14,7 @@ import { arrivingKeys, entryKeys } from "@/lib/library-arrivals";
 import { FOLDER_ENTRANCE_MS } from "@/lib/folder-transition";
 import { useEntranceWindow } from "@/lib/entrance-window";
 import { DURATION } from "@/lib/overlay";
-import { deleteLibraryMultipart } from "@/features/library/multipart";
+import { deleteLibraryMultipart, moveLibraryMultipart } from "@/features/library/multipart";
 import { useLibraryNavigationReads } from "@/features/library/navigation-reads";
 import {
   collectionIdentity,
@@ -175,6 +175,8 @@ import {
   ListChecks,
   ScanSearch,
   FolderTree,
+  Boxes,
+  Upload,
 } from "lucide-react";
 import {
   listCollectionChildren,
@@ -591,6 +593,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [compact] = useState(() => readVaultPreference("ps-vault-density") === "compact");
   const [recentFoldersOpen, setRecentFoldersOpen] = useState(false);
   const [multipartCreateOpen, setMultipartCreateOpen] = useState(false);
+  // Models handed to the dialog when it opens from the selection bar.
+  const [multipartSeed, setMultipartSeed] = useState<ModelListItem[]>([]);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [tagTarget, setTagTarget] = useState<ModelListItem | null>(null);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
@@ -2659,6 +2663,23 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     await modelMoves.move(source, targetCollection);
   }
 
+  async function handleMoveMultipart(
+    multipart: OutlinerModelRead,
+    targetCollectionId: number | null,
+  ) {
+    if (!auth.isAuthenticated) {
+      auth.showAuthRequiredToast();
+      return;
+    }
+    const session = getSessionVersion();
+    try {
+      await moveLibraryMultipart(queryClient, multipart, targetCollectionId, session);
+      toast.success(uiText("Moved"));
+    } catch (error) {
+      if (session === getSessionVersion()) toast.error(error);
+    }
+  }
+
   async function handleMoveCollection(collectionId: number, newParentId: number | null) {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
@@ -2908,6 +2929,24 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       {uiText("New collection")}
     </Button>
   );
+  const canCreateMultipart =
+    auth.isAuthenticated &&
+    docView === "models" &&
+    (!!user?.is_superuser || canWriteCollection(selectedCollectionRow));
+  const newMultipartButton = canCreateMultipart ? (
+    <Button
+      variant="outline"
+      size="xs"
+      className="shrink-0 @3xl/library:h-8"
+      onClick={() => {
+        setMultipartSeed([]);
+        setMultipartCreateOpen(true);
+      }}
+    >
+      <Boxes className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      {t("multipart.new")}
+    </Button>
+  ) : null;
   const showNewCollectionCard = canCreateCollection && !loading && visibleCollections.length > 0;
 
   const libraryMoreActions = (
@@ -2939,6 +2978,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
           onClick={() => {
             setMoreOpen(false);
+            setMultipartSeed([]);
             setMultipartCreateOpen(true);
           }}
         >
@@ -3193,8 +3233,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           onClose={() => setMultipartCreateOpen(false)}
         >
           <NewMultipartModelModal
-            key={selectedCollectionRow?.id ?? "vault"}
+            key={`${selectedCollectionRow?.id ?? "vault"}:${multipartSeed.map((model) => model.id).join(",")}`}
             open={multipartCreateOpen}
+            initialModels={multipartSeed}
             onClose={() => setMultipartCreateOpen(false)}
             collection={selectedCollectionRow ?? null}
             returnTo={currentLibraryHref}
@@ -3262,6 +3303,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             onPrinterPresenceChange={setSelectedPrinterPresence}
             onCreateCollection={handleOpenCreateCollection}
             onMoveModel={handleMoveModel}
+            onMoveMultipart={handleMoveMultipart}
             onMoveCollection={handleMoveCollection}
             onDeleteCollection={handleDeleteCollection}
             canViewPrinters={canViewPrinters}
@@ -3513,24 +3555,24 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </div>
               </div>
               {!showNewCollectionCard && newCollectionButton}
-              {!hasCollectionsPane && (
-                <Button
-                  onClick={() => {
-                    setDropPreload(null);
-                    setDropCollection(null);
-                    setUploadOpen(true);
-                  }}
-                  disabled={!canUploadToVault}
-                  title={
-                    canUploadToVault
-                      ? uiText("Upload artifacts")
-                      : uiText("Sign in and get edit access to upload")
-                  }
-                  className="shrink-0 @3xl/library:h-8 @3xl/library:text-xs"
-                >
-                  {uiText("Upload")}
-                </Button>
-              )}
+              {newMultipartButton}
+              <Button
+                onClick={() => {
+                  setDropPreload(null);
+                  setDropCollection(null);
+                  setUploadOpen(true);
+                }}
+                disabled={!canUploadToVault}
+                title={
+                  canUploadToVault
+                    ? uiText("Upload artifacts")
+                    : uiText("Sign in and get edit access to upload")
+                }
+                className="shrink-0 @3xl/library:h-8 @3xl/library:text-xs"
+              >
+                <Upload className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                {uiText("Upload")}
+              </Button>
             </div>
           </div>
 
@@ -4137,6 +4179,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               }
               onApplyTags={tagSelection}
               onDeleteSelection={deleteSelection}
+              onGroupAsMultipart={
+                canCreateMultipart && selectedIdList.length > 0
+                  ? () => {
+                      setMultipartSeed(visibleModels.filter((model) => selectedIds.has(model.id)));
+                      setMultipartCreateOpen(true);
+                    }
+                  : undefined
+              }
               onClear={clearSelection}
             />
           </Suspense>

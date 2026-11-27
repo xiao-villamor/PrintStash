@@ -85,6 +85,7 @@ function renderSidebar({
     onPrinterPresenceChange: vi.fn<FilterSidebarProps["onPrinterPresenceChange"]>(),
     onCreateCollection: vi.fn<FilterSidebarProps["onCreateCollection"]>(),
     onMoveModel: vi.fn<NonNullable<FilterSidebarProps["onMoveModel"]>>(),
+    onMoveMultipart: vi.fn<NonNullable<FilterSidebarProps["onMoveMultipart"]>>(),
     onMoveCollection: vi.fn<NonNullable<FilterSidebarProps["onMoveCollection"]>>(),
     onDeleteCollection: vi.fn<NonNullable<FilterSidebarProps["onDeleteCollection"]>>(),
     onLibraryViewChange: vi.fn<FilterSidebarProps["onLibraryViewChange"]>(),
@@ -312,6 +313,93 @@ describe("FilterSidebar", () => {
       sourceRect.mockRestore();
       destinationRect.mockRestore();
     }
+  });
+
+  describe("moving a multipart set", () => {
+    /** jsdom has no geometry; give the real mouse sensor two separated hit regions. */
+    async function dragOnto(source: HTMLElement, destination: HTMLElement, settle = true) {
+      const sourceRect = vi
+        .spyOn(source, "getBoundingClientRect")
+        .mockReturnValue(new DOMRect(0, 0, 100, 20));
+      const destinationRect = vi
+        .spyOn(destination, "getBoundingClientRect")
+        .mockReturnValue(new DOMRect(0, 100, 100, 20));
+      try {
+        fireEvent.mouseDown(source, { button: 0, buttons: 1, clientX: 10, clientY: 10 });
+        fireEvent.mouseMove(document, { buttons: 1, clientX: 20, clientY: 10 });
+        fireEvent.mouseMove(document, { buttons: 1, clientX: 20, clientY: 110 });
+        fireEvent.mouseUp(document, { button: 0, clientX: 20, clientY: 110 });
+        if (settle) await act(async () => undefined);
+      } finally {
+        sourceRect.mockRestore();
+        destinationRect.mockRestore();
+      }
+    }
+
+    it("moves a set dropped on a folder", async () => {
+      const view = renderSidebar({ multipartModels: [multipartSet()] });
+      const source = await screen.findByRole("treeitem", { name: "Dragon figure" });
+      await dragOnto(source, await folderRow("Toys"));
+
+      expect(view.onMoveMultipart).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ id: 40, edit_version: 1 }),
+        3,
+      );
+      expect(view.onMoveModel).not.toHaveBeenCalled();
+    });
+
+    it("moves a set dropped on All Models to the Vault", async () => {
+      const user = userEvent.setup();
+      const view = renderSidebar({
+        multipartModels: [
+          multipartSet({ collection: "parts", collection_id: 1, collection_label: "Parts" }),
+        ],
+      });
+      await openFolder(user, "Parts");
+      const source = await screen.findByRole("treeitem", { name: "Dragon figure" });
+      await dragOnto(source, await folderRow("All Models"));
+
+      expect(view.onMoveMultipart).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ id: 40 }),
+        null,
+      );
+    });
+
+    it("ignores a set dropped on the folder it is already in", async () => {
+      const user = userEvent.setup();
+      const view = renderSidebar({
+        multipartModels: [
+          multipartSet({ collection: "toys", collection_id: 3, collection_label: "Toys" }),
+        ],
+      });
+      await openFolder(user, "Toys");
+      const source = await screen.findByRole("treeitem", { name: "Dragon figure" });
+      await dragOnto(source, await folderRow("Toys"));
+
+      expect(view.onMoveMultipart).not.toHaveBeenCalled();
+    });
+
+    it("keeps the set busy until the move settles", async () => {
+      const move = Promise.withResolvers<void>();
+      renderSidebar({
+        multipartModels: [multipartSet()],
+        onMoveMultipart: vi.fn<NonNullable<FilterSidebarProps["onMoveMultipart"]>>(
+          () => move.promise,
+        ),
+      });
+      const source = await screen.findByRole("treeitem", { name: "Dragon figure" });
+      try {
+        await dragOnto(source, await folderRow("Toys"), false);
+
+        expect(await screen.findByText("Moving Dragon figure to Toys…")).toBeVisible();
+        expect(source).toHaveAttribute("aria-busy", "true");
+        await act(async () => move.resolve());
+        expect(screen.queryByText("Moving Dragon figure to Toys…")).toBeNull();
+        expect(source).not.toHaveAttribute("aria-busy");
+      } finally {
+        move.resolve();
+      }
+    });
   });
 
   describe("the folder tree", () => {

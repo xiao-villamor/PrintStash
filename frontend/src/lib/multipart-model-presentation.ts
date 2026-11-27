@@ -1,5 +1,6 @@
 import type { useI18n } from "@/lib/i18n";
 import { parseApiError } from "@/lib/errors";
+import type { MultipartPartRead } from "@/types";
 
 /**
  * Keep server details behind the same error translation seam as the rest of
@@ -38,3 +39,24 @@ export function detailHref(id: number, returnTo?: string): string {
   const search = new URLSearchParams({ return: returnTo });
   return `/multipart-models/${id}?${search.toString()}`;
 }
+
+/** What a part still needs before it can be printed, from the Models it links. */
+export type PartReadiness = "ready" | "choose-variant" | "no-gcode" | "unavailable";
+
+function isPrintable(model: MultipartPartRead["models"][number]): boolean {
+  return model.available && model.gcode_revision_count > 0;
+}
+
+export function partReadiness(part: MultipartPartRead): PartReadiness {
+  if (part.models.every((model) => !model.available)) return "unavailable";
+  if (!part.models.some(isPrintable)) return "no-gcode";
+  return part.models.length > 1 ? "choose-variant" : "ready";
+}
+
+/** Parts with at least one linked Model that already has a G-code revision. */
+export function printablePartCount(parts: MultipartPartRead[]): number {
+  return parts.filter((part) => part.models.some(isPrintable)).length;
+}
+
+/** Most Models a multipart set can start with. */
+export const MULTIPART_INITIAL_LIMIT = 100;

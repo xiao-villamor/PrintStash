@@ -223,10 +223,24 @@ describe("TopBar", () => {
         },
       );
 
-      await waitFor(() => expect(screen.getByRole("button", { name: "Upload" })).toBeEnabled());
-      expect(
-        app.requests().filter((request) => request.url.includes("/collections/search")),
-      ).toHaveLength(1);
+      await waitFor(() =>
+        expect(
+          app.requests().filter((request) => request.url.includes("/collections/search")),
+        ).toHaveLength(1),
+      );
+      expect(app.requests().filter((r) => r.url.includes("/collections/search"))).toHaveLength(1);
+    });
+
+    it("leaves Upload to the Library header on the Library itself", () => {
+      renderTopBar({ at: "/", auth: memberSession() });
+
+      expect(screen.queryByRole("button", { name: "Upload" })).not.toBeInTheDocument();
+    });
+
+    it("keeps Upload in the top bar on other screens", () => {
+      renderTopBar({ at: "/printers", auth: memberSession() });
+
+      expect(screen.getByRole("button", { name: "Upload" })).toBeVisible();
     });
   });
 

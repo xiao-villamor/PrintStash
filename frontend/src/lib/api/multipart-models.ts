@@ -18,6 +18,7 @@ import type {
   MultipartModelCreate,
   MultipartModelListItem,
   MultipartModelRead,
+  MultipartModelUpdate,
   MultipartPartsWrite,
 } from "@/types";
 
@@ -90,6 +91,24 @@ export function saveMultipartModel(
     `/api/v1/multipart-models/${id}`,
     {
       method: "PUT",
+      headers: { ...jsonHeaders(), ...editHeaders("multipart", id, base) },
+      body: JSON.stringify(payload),
+    },
+    editingReceipt(id, base),
+  );
+}
+
+/** Move a set to another collection (null is the Vault) without touching its parts. */
+export function moveMultipartModel(
+  id: number,
+  collectionId: number | null,
+  base: EditingBase,
+): Promise<MultipartModelRead> {
+  const payload: MultipartModelUpdate = { collection_id: collectionId };
+  return requestApi<MultipartModelRead>(
+    `/api/v1/multipart-models/${id}`,
+    {
+      method: "PATCH",
       headers: { ...jsonHeaders(), ...editHeaders("multipart", id, base) },
       body: JSON.stringify(payload),
     },

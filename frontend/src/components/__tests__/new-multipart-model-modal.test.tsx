@@ -466,3 +466,73 @@ describe("NewMultipartModelModal destination", () => {
     expect(view.requestsWithMethod("POST")).toHaveLength(0);
   });
 });
+
+describe("NewMultipartModelModal picked parts", () => {
+  function renderSeeded(models: ReturnType<typeof aModelListItem>[]) {
+    const onClose = vi.fn<() => void>();
+    const view = renderApp(
+      <NewMultipartModelModal open onClose={onClose} collection={null} initialModels={models} />,
+      {
+        routes: {
+          ...collectionTreeRoutes([parent, child]),
+          "POST /api/v1/multipart-models": json(aMultipartModel()),
+          "GET /api/v1/models/page": json({ items: [], total: 0, next_cursor: null }),
+        },
+      },
+    );
+    return { ...view, onClose };
+  }
+
+  it("starts from the models handed in, listed above the browser", async () => {
+    renderSeeded([
+      aModelListItem({ id: 10, name: "Base", collection_label: "Workshop" }),
+      aModelListItem({ id: 11, name: "Lid" }),
+    ]);
+    const summary = screen.getByRole("region", { name: "Parts in this set" });
+    expect(within(summary).getByText("Base")).toBeVisible();
+    expect(within(summary).getByText("Lid")).toBeVisible();
+    expect(within(summary).getByText("2 of 100")).toBeVisible();
+    expect(screen.getByText("2 selected")).toBeVisible();
+  });
+
+  it("creates the handed-in models as parts", async () => {
+    const user = userEvent.setup();
+    const view = renderSeeded([aModelListItem({ id: 10, name: "Base" })]);
+    await user.type(screen.getByLabelText("Name", { exact: true }), "Desk organiser");
+    await user.click(screen.getByRole("button", { name: "Create multipart set" }));
+    await waitFor(() => expect(view.requestsWithMethod("POST")).toHaveLength(1));
+    expect(JSON.parse(view.requestsWithMethod("POST")[0]!.body)).toMatchObject({
+      name: "Desk organiser",
+      parts: [{ name: "Base", quantity: 1, choices: [{ model_id: 10 }] }],
+    });
+  });
+
+  it("drops a part when its chip is removed", async () => {
+    const user = userEvent.setup();
+    const view = renderSeeded([
+      aModelListItem({ id: 10, name: "Base" }),
+      aModelListItem({ id: 11, name: "Lid" }),
+    ]);
+    await user.type(screen.getByLabelText("Name", { exact: true }), "Desk organiser");
+    await user.click(screen.getByRole("button", { name: "Remove Base" }));
+    const summary = screen.getByRole("region", { name: "Parts in this set" });
+    expect(within(summary).queryByText("Base")).toBeNull();
+    expect(within(summary).getByText("1 of 100")).toBeVisible();
+    expect(screen.getByText("1 selected")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Create multipart set" }));
+    await waitFor(() => expect(view.requestsWithMethod("POST")).toHaveLength(1));
+    expect(JSON.parse(view.requestsWithMethod("POST")[0]!.body).parts).toEqual([
+      { name: "Lid", quantity: 1, choices: [{ model_id: 11 }] },
+    ]);
+  });
+
+  it("creates a bare set when nothing is picked", async () => {
+    const user = userEvent.setup();
+    const view = renderSeeded([]);
+    expect(screen.getByText("No parts yet. Pick models below.")).toBeVisible();
+    await user.type(screen.getByLabelText("Name", { exact: true }), "Bare");
+    await user.click(screen.getByRole("button", { name: "Create multipart set" }));
+    await waitFor(() => expect(view.requestsWithMethod("POST")).toHaveLength(1));
+    expect(JSON.parse(view.requestsWithMethod("POST")[0]!.body)).not.toHaveProperty("parts");
+  });
+});

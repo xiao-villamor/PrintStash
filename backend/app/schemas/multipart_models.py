@@ -51,6 +51,8 @@ class MultipartModelUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = Field(default=None, max_length=1_000_000)
     cover_image_url: Optional[AnyHttpUrl] = None
+    # Present moves the set (null is the Vault); absent leaves it where it is.
+    collection_id: Optional[int] = None
 
 
 class MultipartMemberRead(BaseModel):
@@ -112,7 +114,6 @@ class MultipartPartsReplace(BaseModel):
 class MultipartModelSave(MultipartModelUpdate):
     """Atomic metadata and composition replacement."""
 
-    collection_id: Optional[int] = None
     parts: list[MultipartPartWrite] = Field(default_factory=list, max_length=100)
     cover_model_id: Optional[int] = Field(default=None, gt=0)
 

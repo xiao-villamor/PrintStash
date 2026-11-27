@@ -137,6 +137,60 @@ describe("MultipartModelDetailPage", () => {
     );
   });
 
+  it("summarises readiness for every part plus the set total", async () => {
+    renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: {
+        "GET /api/v1/multipart-models/7": json(
+          aMultipart({
+            part_count: 4,
+            model_count: 5,
+            parts: [
+              { id: 1, name: "Base", sort_order: 0, quantity: 1, models: [model] },
+              {
+                id: 2,
+                name: "Lid",
+                sort_order: 1,
+                quantity: 2,
+                models: [
+                  { ...model, id: 20, choice_id: 201, name: "Lid", gcode_revision_count: 0 },
+                ],
+              },
+              { id: 3, name: "Handle", sort_order: 2, quantity: 1, models: [model, alternative] },
+              {
+                id: 4,
+                name: "Gone",
+                sort_order: 3,
+                quantity: 1,
+                models: [{ ...model, id: 30, choice_id: 301, available: false }],
+              },
+            ],
+          }),
+        ),
+      },
+    });
+    await screen.findByRole("heading", { name: "Pieces to print" });
+    expect(screen.getByText("Ready")).toHaveAttribute("data-tone", "success");
+    expect(screen.getByText("No G-code")).toHaveAttribute("data-tone", "warning");
+    expect(screen.getByText("Choose variant")).toHaveAttribute("data-tone", "warning");
+    expect(screen.getByText("Unavailable")).toHaveAttribute("data-tone", "destructive");
+    const progress = screen.getByRole("progressbar", { name: "Ready to print" });
+    expect(progress).toHaveAttribute("aria-valuenow", "2");
+    expect(progress).toHaveAttribute("aria-valuemax", "4");
+    expect(screen.getByText("2 of 4 parts")).toBeVisible();
+  });
+
+  it("shows no readiness progress for a set without parts", async () => {
+    renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: { "GET /api/v1/multipart-models/7": json(aMultipart()) },
+    });
+    await screen.findByRole("heading", { name: "Pieces to print" });
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
   it("keeps the detail available after deletion fails", async () => {
     const user = userEvent.setup();
     renderApp(<MultipartModelDetailPage />, {
@@ -1730,6 +1784,17 @@ describe("MultipartModelCard editing", () => {
       edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 9,
     });
+  });
+});
+
+describe("MultipartModelCard size", () => {
+  it("lets its body take the height of its content, like a plain Model card", () => {
+    renderApp(<MultipartModelCard item={aMultipart({ part_count: 2, model_count: 2 })} />);
+
+    // A fixed minimum here made every set taller than the Models beside it.
+    const body = screen.getByRole("heading", { name: "Desk organiser" }).parentElement;
+    expect(body).not.toBeNull();
+    expect([...(body?.classList ?? [])].filter((name) => name.startsWith("min-h-"))).toEqual([]);
   });
 });
 
