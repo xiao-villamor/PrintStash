@@ -384,7 +384,7 @@ describe("TabBar", () => {
       expect(list).not.toHaveAttribute("data-more-before");
     });
 
-    it("fades the left edge once the strip is scrolled, and both mid-way", () => {
+    it("fades the left edge once the strip is scrolled, then both edges mid-way", () => {
       const list = strip(600, 300);
       act(() => resizeObservers.at(-1)?.reflow());
 

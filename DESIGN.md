@@ -116,7 +116,14 @@ The model detail inspector uses these action rules with the shared `Button`,
   large radius utility. Library Model cards, Multipart Model cards and their
   loading cards use 6px corners. Panels and groups inside the Model inspector
   use 8px corners. Circular avatars, status dots, and count
-  badges retain their shape.
+  badges retain their shape. Every bordered box is rounded: panels and `Card`
+  take `rounded-lg`, controls `rounded-md`; a repo test fails on a bordered
+  class string or CSS rule without a radius.
+- Hover and selection are different fills: hover is `bg-muted` (or a neutral
+  lift on cards), selection is `bg-accent`, and the accent ring is reserved for
+  the open (inspected) item.
+- Page-header actions (Upload, New collection, Add printer, Refresh) carry a
+  leading 16px icon so a row of them reads the same everywhere.
 - Type ramp adds `text-2xs` (0.6875rem) and `text-3xs` (0.625rem) for the mono
   label style. No `text-[11px]`.
 - Text a person reads to decide something — field labels, values, status words,

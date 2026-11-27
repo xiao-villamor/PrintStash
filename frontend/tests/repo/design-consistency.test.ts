@@ -85,11 +85,41 @@ describe("design consistency", () => {
     expect(card).not.toContain("rounded-none");
   });
 
-  it("keeps selection and hover visibly different", () => {
+  it("keeps hover visibly different from selection", () => {
     const globals = fs.readFileSync(path.resolve(root, "globals.css"), "utf8");
     expect(offenders(/hover:bg-accent\b/)).toEqual([]);
     const accent = /--accent: ([^;]+);/.exec(globals)?.[1];
     const muted = /--muted: ([^;]+);/.exec(globals)?.[1];
     expect(accent).not.toBe(muted);
+  });
+
+  it("rounds every CSS rule that draws a 1px border box", () => {
+    // Tag chips take their radius from a later, more specific rule.
+    const exempt = new Set([
+      ".collection-header-tag",
+      ".collection-header-tags .collection-add-tag",
+      ".collection-header-tag-input",
+    ]);
+    const square: string[] = [];
+    const walk = (dir: string): string[] =>
+      fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) return entry.name === "__tests__" ? [] : walk(full);
+        return entry.name.endsWith(".css") ? [full] : [];
+      });
+    for (const file of walk(root)) {
+      const css = fs.readFileSync(file, "utf8");
+      for (const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        const selector = rule[1].trim().replace(/\s+/g, " ");
+        if (exempt.has(selector)) continue;
+        if (
+          /(?:^|[;\n])\s*border:\s*1px\s+(?:solid|dashed|dotted)/.test(rule[2]) &&
+          !rule[2].includes("radius")
+        ) {
+          square.push(`${path.relative(root, file)}: ${selector}`);
+        }
+      }
+    }
+    expect(square).toEqual([]);
   });
 });

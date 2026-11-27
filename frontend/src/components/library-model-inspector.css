@@ -201,6 +201,7 @@
   min-height: 32px;
   resize: vertical;
   border: 1px solid var(--input);
+  border-radius: var(--radius);
   padding: 6px 8px;
   background: var(--card);
   font-size: 13px;
@@ -251,6 +252,7 @@
   width: 100%;
   overflow: hidden;
   border: 1px solid var(--border);
+  border-radius: var(--radius-popover);
 }
 .library-inspector-files {
   list-style: none;
@@ -271,6 +273,7 @@
   width: 34px;
   height: 22px;
   border: 1px solid var(--border);
+  border-radius: var(--radius);
   background: var(--muted);
   font: 500 12px var(--font-mono);
 }
