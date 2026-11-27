@@ -79,7 +79,7 @@ export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
               onOpenChange={editor.setCatOpen}
               align="start"
               role="dialog"
-              contentClassName="w-full bg-surface-container-lowest border border-outline-variant rounded shadow-lg p-2"
+              contentClassName="w-full bg-surface-container-lowest border border-outline-variant shadow-lg p-2"
               trigger={
                 <button
                   type="button"

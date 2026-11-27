@@ -52,6 +52,6 @@ describe("design consistency", () => {
   });
 
   it("does not force a menu radius that the floating primitive owns", () => {
-    expect(offenders(/contentClassName="[^"]*\brounded-md\b/)).toEqual([]);
+    expect(offenders(/contentClassName="[^"]*\brounded(?:-md)?(?=[\s"])/)).toEqual([]);
   });
 });

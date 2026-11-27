@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Make the interface consistent after a UI audit. Failed reads show one error block with Retry, forms report missing or invalid fields under the field instead of the browser bubble, optional fields say "(optional)", password fields share one reveal button, and tabs, selected states, field heights and focus rings share one look. Destructive actions use the danger button, settings toggles are switches, Retry is always an outline button, and decorative icons are gone from text buttons. Disclosure triangles became visible sections. Phones keep the collection title readable, stack the Add printer model row, fade clipped tab strips, use a two-column KPI grid and no longer leave a gap above the bottom navigation.
 - Suggest IP addresses when adding a printer and explain that `.local` names usually can't be resolved from the container. Printer diagnostics now check the address first and name an unresolvable `.local` or other hostname instead of reporting a generic connection failure.
 - Open Trash from one workspace with an aligned selection header and a clearer review of expired items.
 - Keep the Model details title and actions clear while scrolling past the image preview. Show G-code in the full Model page and give its toolbar and layer controls dedicated space.

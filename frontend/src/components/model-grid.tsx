@@ -3438,7 +3438,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       <span className="hidden @xl/trail:inline">{ui("Recent")}</span>
                     </Button>
                   }
-                  contentClassName="w-64 max-w-[calc(100vw-2rem)] rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+                  contentClassName="w-64 max-w-[calc(100vw-2rem)] border border-border bg-popover p-1 text-popover-foreground shadow-lg"
                 >
                   <p className="px-2.5 py-1.5 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                     {uiText("Recent folders")}

@@ -230,7 +230,7 @@ describe("ShareDialog", () => {
       const { onClose } = renderShare();
       await screen.findByRole("dialog");
 
-      await user.click(screen.getAllByRole("button", { name: "Close" }).at(-1)!);
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
 
       expect(onClose).toHaveBeenCalled();
     });

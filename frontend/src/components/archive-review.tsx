@@ -279,7 +279,7 @@ function ArchiveReview({
                   onOpenChange={setPickerOpen}
                   align="end"
                   role="dialog"
-                  contentClassName="w-72 rounded border border-border bg-popover p-2 text-popover-foreground shadow-lg"
+                  contentClassName="w-72 border border-border bg-popover p-2 text-popover-foreground shadow-lg"
                   trigger={
                     <Button
                       type="button"

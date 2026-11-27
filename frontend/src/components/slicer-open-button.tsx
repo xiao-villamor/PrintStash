@@ -157,7 +157,7 @@ export function SlicerOpenButton({
           </button>
         )
       }
-      contentClassName="w-48 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+      contentClassName="w-48 border border-border bg-popover p-1 text-popover-foreground shadow-lg"
     >
       <p className="px-3 py-2 text-xs text-muted-foreground">
         {slicers.length === 0

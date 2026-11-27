@@ -563,7 +563,10 @@ these calls at zero.
 | `ModalShell` / `Modal` | Portal, focus trap + restore, Escape, scroll lock, symmetric enter/exit |
 | `Drawer` | The above, sliding from an edge, interruptible mid-flight |
 | `DropdownMenu` | Origin-aware scale/fade, outside-`pointerdown` dismiss, Escape refocuses trigger, arrow-key roving |
-| `TabBar` | ARIA `tablist`, arrow-key nav, sliding indicator |
+| `TabBar` | ARIA `tablist`, arrow-key nav. `variant="framed"` is the one tab look (inset frame, neutral `accent` active fill, fades when clipped); pass only layout classes |
+| `ErrorState` | The one failed-read block: alert icon, message, optional actions and a Retry outline button. Never pair it with a toast |
+| `FormField` | Label, control, hint and the error line under the control. Required fields carry no mark; optional ones say "(optional)" via `optional`. Use `useFormValidation` + `FieldErrors` for submit-time validation: forms are `noValidate` and never show the browser bubble |
+| `PasswordToggle` | The show/hide button inside every password field |
 | `Switch` | Settings toggle with a pill 38×22 track and written On/Off states |
 | `Checkbox` | Form options and selection with an outlined square, a checkmark on a neutral fill when selected, and a visible keyboard ring |
 | `Input`, `Badge`, `Spinner`, `EmptyState`, `Card`, `Skeleton` | Token-correct defaults |
@@ -578,7 +581,10 @@ keyboard focus in both themes.
 beside ordinary ones (neutral outline, label in `destructive`). The filled
 `destructive` variant is reserved for the confirm button inside a destructive
 dialog. Buttons carry text, not decorative leading icons, and are never
-uppercase.
+uppercase. Retry is always `outline`, a destructive action outside a
+confirmation is always `danger`, and size comes only from the `size` variant —
+no height classes on a `Button`. A setting that is on or off is a `Switch`; a
+choice inside a form is a `Checkbox` or `RadioOption`.
 
 Use `ConfirmModal` for a warning that asks the user to approve an action. The
 compact dialog puts the consequence below its question, with Cancel followed by

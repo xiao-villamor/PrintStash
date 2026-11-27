@@ -136,7 +136,7 @@ export function ShareDialog({
         footer={
           <>
             <Button variant="outline" onClick={onClose}>
-              {uiText("Close")}
+              {uiText("Cancel")}
             </Button>
             <Button type="button" onClick={doCreate} disabled={createDisabled} loading={creating}>
               {uiText("Create link")}
