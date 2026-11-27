@@ -37,7 +37,10 @@ export function FormField({
     <span className="mb-1.5 block text-field font-medium text-foreground">
       {label}
       {optional && (
-        <span className="ml-1 font-normal text-muted-foreground">{uiText("(optional)")}</span>
+        <>
+          {" "}
+          <span className="font-normal text-muted-foreground">{uiText("(optional)")}</span>
+        </>
       )}
     </span>
   );

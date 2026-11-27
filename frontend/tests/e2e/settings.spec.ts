@@ -734,7 +734,7 @@ test.describe("settings route", () => {
     ).toHaveAttribute("aria-valuenow", "45");
     await expect(page.getByText(/Open the model and look in Files/)).toBeVisible();
     await expect(page.getByLabel("Concurrency for derive.native")).toHaveCount(0);
-    await expect(page.getByRole("tab", { name: "All work types" })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "All work types" })).toBeVisible();
 
     await page.getByRole("link", { name: "Browse models" }).click();
     await expect(page).toHaveURL(
