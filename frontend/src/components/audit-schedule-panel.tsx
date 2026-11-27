@@ -217,13 +217,14 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
             <section className="border-t border-border pt-3">
               <h4 className="text-sm font-medium text-foreground">{t("auditSchedule.advanced")}</h4>
               <div className="mt-4 space-y-3">
-                <label className="flex items-center gap-2 text-sm">
-                  <Checkbox
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span>{t("auditSchedule.paused")}</span>
+                  <SettingsSwitch
+                    label={t("auditSchedule.paused")}
                     checked={policy.paused}
                     onChange={(paused) => setPolicy({ ...policy, paused })}
                   />
-                  {t("auditSchedule.paused")}
-                </label>
+                </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1 text-sm">
                     {t("auditSchedule.jitter")}

@@ -1,3 +1,4 @@
+import { SettingsSwitch } from "@/components/settings-card";
 import { useEffect, useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { History, ScanSearch, SlidersHorizontal } from "lucide-react";
@@ -75,25 +76,25 @@ function SettingsForm({ initial, readOnly }: { initial: SimilaritySettings; read
       <fieldset disabled={save.isPending || readOnly} className="space-y-4">
         <div className="grid gap-4 lg:grid-cols-2 lg:gap-8">
           <div className="space-y-3">
-            <label className="flex items-center gap-2 text-sm font-medium">
-              <Checkbox
-                ariaLabel={t("similarity.enable")}
+            <div className="flex items-center justify-between gap-3 text-sm font-medium">
+              <span>{t("similarity.enable")}</span>
+              <SettingsSwitch
+                label={t("similarity.enable")}
                 checked={draft.enabled}
                 onChange={(enabled) => setDraft({ ...draft, enabled })}
               />
-              {t("similarity.enable")}
-            </label>
+            </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
               {t("similarity.localHelp")}
             </p>
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox
-                ariaLabel={t("similarity.onIngest")}
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span>{t("similarity.onIngest")}</span>
+              <SettingsSwitch
+                label={t("similarity.onIngest")}
                 checked={draft.fingerprint_on_ingest}
                 onChange={(fingerprint_on_ingest) => setDraft({ ...draft, fingerprint_on_ingest })}
               />
-              {t("similarity.onIngest")}
-            </label>
+            </div>
           </div>
           <div className="space-y-2">
             <label className="block space-y-2 text-sm">

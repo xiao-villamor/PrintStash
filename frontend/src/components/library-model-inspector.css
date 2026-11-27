@@ -371,13 +371,13 @@
 }
 .library-inspector-stats dt {
   color: var(--muted-foreground);
-  font-size: 0.6875rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 0.875rem;
 }
 .library-inspector-stats dd {
   margin: 0;
-  font: 500 13px/1.2 var(--font-mono);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.2;
   overflow-wrap: anywhere;
 }
 
@@ -419,10 +419,8 @@ details.library-inspector-section > summary {
 .library-inspector-eyebrow {
   margin: 0 0 4px;
   color: var(--muted-foreground);
-  font-size: 0.6875rem;
+  font-size: 0.875rem;
   font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 /* The block's head: its label on the left, the revision on the right. */
@@ -439,9 +437,8 @@ details.library-inspector-section > summary {
 .library-inspector-block-head select {
   width: auto;
   max-width: 60%;
-  height: 28px;
-  font-family: var(--font-mono);
-  font-size: 12px;
+  height: 32px;
+  font-size: 0.875rem;
   font-weight: 500;
 }
 .library-inspector-rev-chip {

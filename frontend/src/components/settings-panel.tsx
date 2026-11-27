@@ -2589,7 +2589,7 @@ export function SettingsPanel() {
 
   return (
     <Localized>
-      <div className={cn("settings-frame", !trashPage && "mx-auto max-w-7xl")}>
+      <div className="settings-frame">
         <ConfirmModal
           open={restartConfirmOpen}
           variant="default"

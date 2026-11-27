@@ -429,7 +429,7 @@ test.describe("settings", () => {
 
       await page.getByRole("tab", { name: "Remote cache", exact: true }).click();
       await expect(
-        page.getByRole("checkbox", { name: "Enable remote Artifact cache" }),
+        page.getByRole("switch", { name: "Enable remote Artifact cache" }),
       ).toBeVisible({ timeout: 30_000 });
       await cacheTabs.getByRole("tab", { name: "Overview" }).click();
       await expect(page.getByRole("tabpanel", { name: "Overview" })).toBeVisible();
@@ -831,7 +831,7 @@ test.describe("settings", () => {
       await page.getByRole("tab", { name: "Analysis settings", exact: true }).click();
       const settings = page.getByRole("form", { name: "Similar models" });
       await expect(
-        settings.getByRole("checkbox", { name: "Enable similarity analysis" }),
+        settings.getByRole("switch", { name: "Enable similarity analysis" }),
       ).toBeVisible();
       await settings.screenshot({ path: testInfo.outputPath(`similar-settings-${width}.png`) });
       await page.getByRole("tab", { name: "Analysis history", exact: true }).click();
@@ -1624,7 +1624,7 @@ test.describe("settings", () => {
     await form.getByLabel("Frequency").selectOption("monthly");
     await form.getByLabel("Issue notification threshold").selectOption("critical");
     await form.getByLabel("Overdue after (minutes)").fill("45");
-    const paused = form.getByRole("checkbox", { name: "Paused" });
+    const paused = form.getByRole("switch", { name: "Paused" });
     if ((await paused.getAttribute("aria-checked")) !== "true") await paused.click();
     await Promise.all([
       page.waitForResponse(
@@ -1644,7 +1644,7 @@ test.describe("settings", () => {
       "aria-checked",
       "true",
     );
-    await expect(form.getByRole("checkbox", { name: "Paused" })).toHaveAttribute(
+    await expect(form.getByRole("switch", { name: "Paused" })).toHaveAttribute(
       "aria-checked",
       "true",
     );

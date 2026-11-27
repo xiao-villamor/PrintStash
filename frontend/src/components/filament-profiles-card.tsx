@@ -526,9 +526,13 @@ function ProfileFacts({
   );
 }
 
-function formatProfileRate(value: number | null, currency: string | null): string | null {
+function formatProfileRate(
+  value: number | null,
+  currency: string | null,
+  maximumFractionDigits = 4,
+): string | null {
   if (value === null) return null;
-  const options: Intl.NumberFormatOptions = { maximumFractionDigits: 4 };
+  const options: Intl.NumberFormatOptions = { maximumFractionDigits };
   if (currency) {
     options.style = "currency";
     options.currency = currency;
@@ -1371,7 +1375,7 @@ export function FilamentProfilesCard() {
                           notes={profile.notes}
                           rate={{
                             label: uiText("Cost per kg"),
-                            value: formatProfileRate(profile.cost_per_kg, currency),
+                            value: formatProfileRate(profile.cost_per_kg, currency, 2),
                             canConfigure: false,
                           }}
                           summary={[

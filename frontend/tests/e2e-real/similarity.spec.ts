@@ -115,7 +115,7 @@ test.describe("Standalone similarity", () => {
     });
     await page.getByRole("tab", { name: "Analysis settings", exact: true }).click();
     const settings = page.getByRole("form", { name: "Similar models" });
-    const enabled = settings.getByRole("checkbox", { name: "Enable similarity analysis" });
+    const enabled = settings.getByRole("switch", { name: "Enable similarity analysis" });
     if (!(await enabled.isChecked())) await enabled.click();
     await settings.getByRole("button", { name: "Save settings" }).click();
     await expect(page.getByText("Similarity settings saved")).toBeVisible();

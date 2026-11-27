@@ -31,7 +31,7 @@ describe("ArtifactCacheCard", () => {
     expect(screen.getByRole("status", { name: "Loading cache settings…" })).toBeVisible();
     finish(INITIAL);
     expect(
-      await screen.findByRole("checkbox", { name: "Enable remote Artifact cache" }),
+      await screen.findByRole("switch", { name: "Enable remote Artifact cache" }),
     ).toBeVisible();
     expect(screen.queryByRole("status", { name: "Loading cache settings…" })).toBeNull();
   });
@@ -129,7 +129,7 @@ describe("ArtifactCacheCard", () => {
       />,
     );
     await userEvent.click(
-      await screen.findByRole("checkbox", { name: "Enable remote Artifact cache" }),
+      await screen.findByRole("switch", { name: "Enable remote Artifact cache" }),
     );
     await userEvent.click(screen.getByRole("button", { name: "Save cache settings" }));
     expect(persisted.policy.enabled).toBe(true);
@@ -186,7 +186,7 @@ describe("ArtifactCacheCard", () => {
     failed = false;
     await userEvent.click(retry);
     expect(
-      await screen.findByRole("checkbox", { name: "Enable remote Artifact cache" }),
+      await screen.findByRole("switch", { name: "Enable remote Artifact cache" }),
     ).toBeInTheDocument();
   });
 
@@ -494,7 +494,7 @@ describe("Artifact cache ownership", () => {
       },
     });
     await userEvent.click(
-      await screen.findByRole("checkbox", { name: "Enable remote Artifact cache" }),
+      await screen.findByRole("switch", { name: "Enable remote Artifact cache" }),
     );
     await userEvent.click(screen.getByRole("button", { name: "Save cache settings" }));
     view.route({

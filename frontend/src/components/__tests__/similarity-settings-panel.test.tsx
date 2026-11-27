@@ -44,7 +44,7 @@ describe("SimilaritySettingsPanel", () => {
   it("shows the enable control directly in analysis settings", async () => {
     renderSettings({ view: "settings" });
     expect(
-      await screen.findByRole("checkbox", { name: "Enable similarity analysis" }),
+      await screen.findByRole("switch", { name: "Enable similarity analysis" }),
     ).toBeVisible();
     expect(screen.queryByRole("button", { name: "Start analysis" })).not.toBeInTheDocument();
   });
@@ -298,7 +298,7 @@ describe("SimilaritySettingsPanel", () => {
   it("persists the operator opt-in", async () => {
     const user = userEvent.setup();
     const rendered = renderSettings({ view: "settings" });
-    await user.click(await screen.findByRole("checkbox", { name: "Enable similarity analysis" }));
+    await user.click(await screen.findByRole("switch", { name: "Enable similarity analysis" }));
     await user.click(screen.getByRole("button", { name: "Save settings" }));
     await waitFor(() => expect(rendered.requestsWithMethod("PATCH")).toHaveLength(1));
     expect(JSON.parse(rendered.requestsWithMethod("PATCH")[0].body)).toMatchObject({

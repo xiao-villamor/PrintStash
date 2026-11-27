@@ -1,7 +1,7 @@
 import { useState } from "react";
+import { SettingsSwitch } from "@/components/settings-card";
 import { Button } from "@/components/ui/button";
 import { SettingsCard } from "@/components/settings-card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Localized } from "@/components/ui/localized";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -291,17 +291,17 @@ export function ArtifactCacheCard({ api = artifactCacheApi }: { api?: typeof art
                 void perform("save");
               }}
             >
-              <label className="flex min-h-11 items-center gap-3 font-medium">
-                <Checkbox
+              <div className="flex min-h-11 items-center justify-between gap-3 font-medium">
+                <span>{uiText("Enable remote Artifact cache")}</span>
+                <SettingsSwitch
                   checked={policy.enabled}
                   disabled={busy}
-                  ariaLabel={uiText("Enable remote Artifact cache")}
+                  label={uiText("Enable remote Artifact cache")}
                   onChange={(checked) =>
                     setValue({ ...value, policy: { ...policy, enabled: checked === true } })
                   }
                 />
-                <span>{uiText("Enable remote Artifact cache")}</span>
-              </label>
+              </div>
               <p className="text-sm tabular-nums text-muted-foreground">
                 {readableCacheSize(usage.bytes ?? 0)} {uiText("cached")} · {usage.entries ?? 0}{" "}
                 {uiText("files")}

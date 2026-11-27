@@ -1124,14 +1124,14 @@ function ChannelForm({
           )}
         </fieldset>
 
-        <label className="inline-flex items-center gap-1.5 text-sm text-foreground">
-          <Checkbox
+        <div className="flex items-center justify-between gap-3 text-sm text-foreground">
+          <span>{uiText("Enabled")}</span>
+          <SettingsSwitch
+            label={uiText("Enabled")}
             checked={draft.enabled}
             onChange={(checked) => setDraft({ ...draft, enabled: checked })}
-            className="shrink-0"
           />
-          {uiText("Enabled")}
-        </label>
+        </div>
       </form>
     </Localized>
   );
