@@ -37,7 +37,7 @@ function Demo({ onSubmit }: { onSubmit: () => void }) {
 
 describe("useFormValidation", () => {
   it("shows the error under the field, focuses it, and never submits an invalid form", () => {
-    const submit = vi.fn();
+    const submit = vi.fn<() => void>();
     render(<Demo onSubmit={submit} />);
     expect(screen.getByRole("form", { name: "demo" })).toHaveAttribute("novalidate");
 
@@ -51,7 +51,7 @@ describe("useFormValidation", () => {
   });
 
   it("clears the error as the person types and then submits", () => {
-    const submit = vi.fn();
+    const submit = vi.fn<() => void>();
     render(<Demo onSubmit={submit} />);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -83,7 +83,7 @@ describe("FormField", () => {
 
 describe("ErrorState", () => {
   it("announces the failure and offers Retry in the same place every time", () => {
-    const retry = vi.fn();
+    const retry = vi.fn<() => void>();
     render(<ErrorState message="Could not load." onRetry={retry} />);
     expect(screen.getByRole("alert")).toHaveTextContent("Could not load.");
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -98,7 +98,7 @@ describe("ErrorState", () => {
 
 describe("PasswordToggle", () => {
   it("reports its state and controlled field", () => {
-    const toggle = vi.fn();
+    const toggle = vi.fn<() => void>();
     render(
       <div className="relative">
         <PasswordToggle visible={false} onToggle={toggle} label="Show password" controls="pw" />
