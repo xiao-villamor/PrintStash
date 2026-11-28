@@ -727,8 +727,11 @@ function PartEditorRow({
         <span className="mb-2 flex h-6 w-6 shrink-0 items-center justify-center bg-muted text-xs font-semibold text-foreground">
           {index + 1}
         </span>
-        <div className="min-w-0 flex-1">
-          <label htmlFor={`multipart-part-${part.id}`} className="text-xs text-muted-foreground">
+        <div className="min-w-0 flex-1 space-y-1">
+          <label
+            htmlFor={`multipart-part-${part.id}`}
+            className="block text-xs text-muted-foreground"
+          >
             {t("multipart.partName")}
           </label>
           <Input
@@ -736,10 +739,9 @@ function PartEditorRow({
             value={part.name}
             onChange={(event) => onName(event.target.value)}
             placeholder={t("multipart.partNamePlaceholder")}
-            className="mt-1"
           />
         </div>
-        <label className="col-start-2 space-y-1 text-xs text-muted-foreground sm:col-start-3 sm:row-start-1">
+        <label className="col-start-2 block space-y-1 text-xs text-muted-foreground sm:col-start-3 sm:row-start-1">
           {t("build.quantity")}
           <Input
             type="number"
@@ -774,7 +776,7 @@ function PartEditorRow({
           </Button>
           <Button
             type="button"
-            variant="ghost"
+            variant="danger"
             size="sm"
             onClick={onRemovePart}
             aria-label={`${t("multipart.removePart")}: ${index + 1}`}
@@ -793,7 +795,7 @@ function PartEditorRow({
             <MemberRow model={model} />
             <Button
               type="button"
-              variant="ghost"
+              variant="danger"
               size="sm"
               onClick={() => onRemoveModel(model.choice_id, model.id)}
               aria-label={`${t("multipart.removeModel")}: ${model.available ? modelLabel(model, t("multipart.unavailable")) : t("multipart.unavailable")}`}

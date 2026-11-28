@@ -64,8 +64,9 @@ export default function LoginPage() {
   // Kept out of state so the message follows the locale toggle on this page.
   const error = formError ?? (ssoFailed ? t("auth.ssoFailed") : null);
   const fieldDescription =
-    [sessionExpired && "login-session-expired", error && "login-error"].filter(Boolean).join(" ") ||
-    undefined;
+    [sessionExpired && !error && "login-session-expired", error && "login-error"]
+      .filter(Boolean)
+      .join(" ") || undefined;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -133,7 +134,7 @@ export default function LoginPage() {
       </p>
 
       <form onSubmit={handleSubmit} noValidate className="mt-6 grid gap-4">
-        {sessionExpired && (
+        {sessionExpired && !error && (
           <div
             id="login-session-expired"
             role="status"
@@ -265,15 +266,6 @@ export default function LoginPage() {
         </Button>
       </form>
 
-      {providerRead.error && (
-        <div className="mt-5">
-          <ErrorState
-            message={uiText("Other sign-in options could not be loaded.")}
-            retryLabel={uiText("Retry")}
-            onRetry={() => void providerRead.refetch()}
-          />
-        </div>
-      )}
       {providers?.oidc_enabled && (
         <>
           <div

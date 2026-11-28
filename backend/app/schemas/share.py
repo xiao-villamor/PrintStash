@@ -12,14 +12,14 @@ from datetime import datetime
 from typing import Optional
 
 from printstash_core.mesh.preview_profile import PreviewLook
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.db.models import FileRevisionStatus
 from app.schemas.previews import ModelPreviewRead
 
 
 class ShareLinkCreate(BaseModel):
-    expires_in_days: int = 7
+    expires_in_days: int = Field(default=7, ge=1, le=365)
     allow_download: bool = False
     revision_file_ids: Optional[list[int]] = None
 

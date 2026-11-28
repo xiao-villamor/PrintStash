@@ -52,6 +52,8 @@ import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Modal } from "@/components/ui/modal";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FieldErrors } from "@/components/ui/field-errors";
+import { useFormValidation } from "@/lib/form-validation";
 import { FormField } from "@/components/ui/form-field";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -555,6 +557,8 @@ export function FilamentProfilesCard() {
   const helpId = useId();
   const filamentFormId = useId();
   const printerFormId = useId();
+  const filamentValidation = useFormValidation();
+  const printerValidation = useFormValidation();
   const auth = useRequireAuth();
   const { locale, t } = useI18n();
   const { user } = useAuth();
@@ -1255,7 +1259,6 @@ export function FilamentProfilesCard() {
                       type="submit"
                       form={filamentFormId}
                       loading={commands.createFilament.isPending}
-                      disabled={!newName.trim()}
                     >
                       {uiText("Add preset")}
                     </Button>
@@ -1264,90 +1267,101 @@ export function FilamentProfilesCard() {
               >
                 <form
                   id={filamentFormId}
+                  {...filamentValidation.formProps}
                   onSubmit={(e) => {
-                    e.preventDefault();
-                    handleCreateFilament();
+                    filamentValidation.handle(e, () => {
+                      e.preventDefault();
+                      void handleCreateFilament();
+                    });
                   }}
                   aria-label={uiText("Create filament preset")}
                   className="space-y-5"
                 >
-                  <FormField
-                    label={uiText("Name")}
-                    hintId={`${helpId}-filament-name`}
-                    hint={uiText("Required · up to 128 characters.")}
-                  >
-                    <Input
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      placeholder={uiText("Everyday PLA")}
-                      data-autofocus
-                      required
-                      maxLength={128}
-                      aria-describedby={`${helpId}-filament-name`}
-                    />
-                  </FormField>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <h3 className="col-span-full text-field font-semibold">
-                      {uiText("Material & cost")}
-                    </h3>
-                    <FormField label={uiText("Material")}>
-                      <Input
-                        value={newType}
-                        onChange={(e) => setNewType(e.target.value)}
-                        placeholder={uiText("PLA, PETG…")}
-                      />
-                    </FormField>
-                    <FormField label={uiText("Brand")}>
-                      <Input
-                        value={newBrand}
-                        onChange={(e) => setNewBrand(e.target.value)}
-                        placeholder={uiText("Manufacturer")}
-                      />
-                    </FormField>
+                  <FieldErrors errors={filamentValidation.errors}>
                     <FormField
-                      className="col-span-full"
-                      label={
-                        currency
-                          ? t("Cost per kg ({currency})", { currency })
-                          : uiText("Cost per kg")
-                      }
-                      hintId={`${helpId}-filament-cost`}
-                      hint={
-                        currencyName
-                          ? t("{currency} per kilogram. Enter zero or a positive amount.", {
-                              currency: currencyName,
-                            })
-                          : t("Enter zero or a positive amount.")
-                      }
+                      label={uiText("Name")}
+                      htmlFor={`${helpId}-filament-name-input`}
+                      hintId={`${helpId}-filament-name`}
+                      hint={uiText("Required · up to 128 characters.")}
                     >
                       <Input
-                        value={newCost}
-                        onChange={(e) => setNewCost(e.target.value)}
-                        inputMode="decimal"
-                        placeholder="0.00"
-                        className="max-w-40"
-                        aria-describedby={`${helpId}-filament-cost`}
+                        id={`${helpId}-filament-name-input`}
+                        value={newName}
+                        onChange={(e) => setNewName(e.target.value)}
+                        placeholder={uiText("Everyday PLA")}
+                        data-autofocus
+                        required
+                        maxLength={128}
+                        aria-describedby={`${helpId}-filament-name`}
                       />
                     </FormField>
-                    <FilamentSpoolPrice
-                      currency={currency}
-                      disabled={commands.createFilament.isPending}
-                      onApply={setNewCost}
-                    />
-                  </div>
-                  <FormField
-                    label={uiText("Notes")}
-                    hintId={`${helpId}-filament-notes`}
-                    hint={uiText("Optional details to keep with this preset.")}
-                  >
-                    <textarea
-                      value={newNotes}
-                      onChange={(e) => setNewNotes(e.target.value)}
-                      placeholder={uiText("Optional")}
-                      className={inputClasses}
-                      aria-describedby={`${helpId}-filament-notes`}
-                    />
-                  </FormField>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <h3 className="col-span-full text-field font-semibold">
+                        {uiText("Material & cost")}
+                      </h3>
+                      <FormField label={uiText("Material")}>
+                        <Input
+                          value={newType}
+                          onChange={(e) => setNewType(e.target.value)}
+                          placeholder={uiText("PLA, PETG…")}
+                        />
+                      </FormField>
+                      <FormField label={uiText("Brand")}>
+                        <Input
+                          value={newBrand}
+                          onChange={(e) => setNewBrand(e.target.value)}
+                          placeholder={uiText("Manufacturer")}
+                        />
+                      </FormField>
+                      <FormField
+                        className="col-span-full"
+                        label={
+                          currency
+                            ? t("Cost per kg ({currency})", { currency })
+                            : uiText("Cost per kg")
+                        }
+                        htmlFor={`${helpId}-filament-cost-input`}
+                        hintId={`${helpId}-filament-cost`}
+                        hint={
+                          currencyName
+                            ? t("{currency} per kilogram. Enter zero or a positive amount.", {
+                                currency: currencyName,
+                              })
+                            : t("Enter zero or a positive amount.")
+                        }
+                      >
+                        <Input
+                          id={`${helpId}-filament-cost-input`}
+                          value={newCost}
+                          onChange={(e) => setNewCost(e.target.value)}
+                          pattern="\s*\d*[.,]?\d*\s*"
+                          title={uiText("Invalid filament cost")}
+                          inputMode="decimal"
+                          placeholder="0.00"
+                          className="max-w-40"
+                          aria-describedby={`${helpId}-filament-cost`}
+                        />
+                      </FormField>
+                      <FilamentSpoolPrice
+                        currency={currency}
+                        disabled={commands.createFilament.isPending}
+                        onApply={setNewCost}
+                      />
+                    </div>
+                    <FormField
+                      label={uiText("Notes")}
+                      hintId={`${helpId}-filament-notes`}
+                      hint={uiText("Optional details to keep with this preset.")}
+                    >
+                      <textarea
+                        value={newNotes}
+                        onChange={(e) => setNewNotes(e.target.value)}
+                        placeholder={uiText("Optional")}
+                        className={inputClasses}
+                        aria-describedby={`${helpId}-filament-notes`}
+                      />
+                    </FormField>
+                  </FieldErrors>
                 </form>
               </Modal>
 
@@ -1630,7 +1644,6 @@ export function FilamentProfilesCard() {
                       type="submit"
                       form={printerFormId}
                       loading={commands.createPrinter.isPending}
-                      disabled={!newPrinterName.trim()}
                     >
                       {uiText("Add preset")}
                     </Button>
@@ -1639,58 +1652,65 @@ export function FilamentProfilesCard() {
               >
                 <form
                   id={printerFormId}
+                  {...printerValidation.formProps}
                   onSubmit={(e) => {
-                    e.preventDefault();
-                    handleCreatePrinter();
+                    printerValidation.handle(e, () => {
+                      e.preventDefault();
+                      void handleCreatePrinter();
+                    });
                   }}
                   aria-label={uiText("Create printer preset")}
                   className="space-y-5"
                 >
-                  <FormField
-                    label={uiText("Name")}
-                    hintId={`${helpId}-printer-name`}
-                    hint={uiText("Required · up to 128 characters.")}
-                  >
-                    <Input
-                      value={newPrinterName}
-                      onChange={(e) => setNewPrinterName(e.target.value)}
-                      placeholder={uiText("Voron 2.4 — 0.4 mm")}
-                      data-autofocus
-                      required
-                      maxLength={128}
-                      aria-describedby={`${helpId}-printer-name`}
-                    />
-                  </FormField>
-                  <div className="space-y-4">
-                    <h3 className="text-field font-semibold">{uiText("Printer & nozzle")}</h3>
-                    <PrinterProfileFields
+                  <FieldErrors errors={printerValidation.errors}>
+                    <FormField
+                      label={uiText("Name")}
+                      htmlFor={`${helpId}-printer-name-input`}
+                      hintId={`${helpId}-printer-name`}
+                      hint={uiText("Required · up to 128 characters.")}
+                    >
+                      <Input
+                        id={`${helpId}-printer-name-input`}
+                        value={newPrinterName}
+                        onChange={(e) => setNewPrinterName(e.target.value)}
+                        placeholder={uiText("Voron 2.4 — 0.4 mm")}
+                        data-autofocus
+                        required
+                        maxLength={128}
+                        aria-describedby={`${helpId}-printer-name`}
+                      />
+                    </FormField>
+                    <div className="space-y-4">
+                      <h3 className="text-field font-semibold">{uiText("Printer & nozzle")}</h3>
+                      <PrinterProfileFields
+                        model={newPrinterModel}
+                        nozzle={newPrinterNozzle}
+                        disabled={commands.createPrinter.isPending}
+                        onModelChange={setNewPrinterModel}
+                        onNozzleChange={setNewPrinterNozzle}
+                      />
+                    </div>
+                    <FormField
+                      label={uiText("Notes")}
+                      hintId={`${helpId}-printer-notes`}
+                      hint={uiText("Optional details to keep with this preset.")}
+                    >
+                      <textarea
+                        value={newPrinterNotes}
+                        onChange={(e) => setNewPrinterNotes(e.target.value)}
+                        placeholder={uiText("Optional")}
+                        className={inputClasses}
+                        aria-describedby={`${helpId}-printer-notes`}
+                      />
+                    </FormField>
+                    <PrinterExpenseFields
+                      currency={currency}
+                      draft={newPrinterExpenses}
                       model={newPrinterModel}
-                      nozzle={newPrinterNozzle}
                       disabled={commands.createPrinter.isPending}
-                      onModelChange={setNewPrinterModel}
-                      onNozzleChange={setNewPrinterNozzle}
+                      onChange={setNewPrinterExpenses}
                     />
-                  </div>
-                  <FormField
-                    label={uiText("Notes")}
-                    hintId={`${helpId}-printer-notes`}
-                    hint={uiText("Optional details to keep with this preset.")}
-                  >
-                    <textarea
-                      value={newPrinterNotes}
-                      onChange={(e) => setNewPrinterNotes(e.target.value)}
-                      placeholder={uiText("Optional")}
-                      className={inputClasses}
-                      aria-describedby={`${helpId}-printer-notes`}
-                    />
-                  </FormField>
-                  <PrinterExpenseFields
-                    currency={currency}
-                    draft={newPrinterExpenses}
-                    model={newPrinterModel}
-                    disabled={commands.createPrinter.isPending}
-                    onChange={setNewPrinterExpenses}
-                  />
+                  </FieldErrors>
                 </form>
               </Modal>
 

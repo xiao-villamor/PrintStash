@@ -102,12 +102,16 @@ const onDemand = {
 } as const;
 
 export function usePrinterHeaterHistory(
-  printer: Pick<PrinterRead, "id" | "provider" | "access"> | null,
+  printer: Pick<PrinterRead, "id" | "provider" | "access" | "status"> | null,
   live: HeaterHistory,
 ): DisplayHeaterHistory {
   const session = useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
   const id = printer?.id;
-  const enabled = isLoggedIn() && printer?.provider === "moonraker" && printer.access.can_view;
+  const enabled =
+    isLoggedIn() &&
+    printer?.provider === "moonraker" &&
+    printer.access.can_view &&
+    printer.status !== "offline";
   const query = useQuery({
     ...onDemand,
     queryKey: ["printer-inspection", id, session, "heater-history"],

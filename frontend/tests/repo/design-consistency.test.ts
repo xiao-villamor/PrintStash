@@ -122,4 +122,14 @@ describe("design consistency", () => {
     }
     expect(square).toEqual([]);
   });
+
+  it("keeps one baseline focus indicator for elements without their own ring", () => {
+    const globals = fs.readFileSync(path.resolve(root, "globals.css"), "utf8");
+    expect(globals).toMatch(/:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--ring\)/);
+  });
+
+  it("lightens primary-coloured text on dark surfaces", () => {
+    const globals = fs.readFileSync(path.resolve(root, "globals.css"), "utf8");
+    expect(globals).toMatch(/\.dark \.text-primary\s*\{[^}]*color:\s*#7896bc/);
+  });
 });

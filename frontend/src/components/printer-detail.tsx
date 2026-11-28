@@ -2,6 +2,7 @@
 
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
+import { ErrorState } from "@/components/ui/error-state";
 
 import { usePrinterSettingsCommand } from "@/features/printers/settings-edit";
 import { PrinterSettingsReview } from "@/features/printers/settings-review";
@@ -955,14 +956,11 @@ function PrinterDetailView({
           </div>
 
           {(error || resources.error) && (
-            <div className="rounded border border-destructive/30 bg-destructive/10 p-3 font-mono text-sm text-destructive">
-              {error ?? userMessage(resources.error)}
-              {resources.error && (
-                <Button variant="outline" size="xs" onClick={() => void resources.refreshAll()}>
-                  {uiText("Retry")}
-                </Button>
-              )}
-            </div>
+            <ErrorState
+              message={error ?? userMessage(resources.error)}
+              onRetry={resources.error ? () => void resources.refreshAll() : undefined}
+              retryLabel={uiText("Retry")}
+            />
           )}
 
           <div>

@@ -1027,13 +1027,13 @@ function ChannelForm({
           </div>
 
           {fields.map((f) => (
-            <div key={f.key}>
-              <label className={LABEL} htmlFor={formId + "-config-" + f.key}>
-                {f.label}
-              </label>
+            <FormField key={f.key} label={f.label} htmlFor={formId + "-config-" + f.key}>
               <input
                 id={formId + "-config-" + f.key}
-                type={f.secret ? "password" : "text"}
+                type={
+                  f.key === "url" || f.key === "server_url" ? "url" : f.secret ? "password" : "text"
+                }
+                required={f.key === "url" && draft.id === null}
                 value={draft.config[f.key] ?? ""}
                 onChange={(e) =>
                   setDraft({ ...draft, config: { ...draft.config, [f.key]: e.target.value } })
@@ -1044,7 +1044,7 @@ function ChannelForm({
                 className={INPUT}
                 autoComplete="off"
               />
-            </div>
+            </FormField>
           ))}
 
           <fieldset>

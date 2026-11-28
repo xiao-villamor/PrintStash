@@ -778,3 +778,22 @@
     max-inline-size: 54rem;
   }
 }
+
+/* The action blue is too dark to read as text on dark surfaces (3.2:1); links
+   and primary-coloured labels use the lighter ring blue there. Fills keep the
+   action blue. */
+@layer utilities {
+  .dark .text-primary {
+    color: #7896bc;
+  }
+}
+
+/* One baseline focus indicator. Components that draw their own ring (inputs,
+   cards, tabs) override it; anything else keeps this instead of the browser's
+   thin default outline. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}

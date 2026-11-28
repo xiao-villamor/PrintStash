@@ -45,6 +45,7 @@ export function TaskList({
   useUiLocale();
   return (
     <div
+      data-task-panel
       className={
         compact
           ? "w-full"

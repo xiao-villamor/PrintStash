@@ -2912,20 +2912,18 @@ export function SettingsPanel() {
               )}
 
             {activeSection !== "trash" && user?.is_superuser && healthRead.isError && (
-              <div role="alert" className="flex items-center gap-2 text-sm">
-                <p>{uiText("settings.healthLoadFailed")}</p>
-                <Button size="sm" variant="outline" onClick={() => void healthRead.refetch()}>
-                  {uiText("Retry health check")}
-                </Button>
-              </div>
+              <ErrorState
+                message={uiText("settings.healthLoadFailed")}
+                retryLabel={uiText("Retry health check")}
+                onRetry={() => void healthRead.refetch()}
+              />
             )}
             {activeSection !== "trash" && user?.is_superuser && releaseRead.isError && (
-              <div role="alert" className="flex items-center gap-2 text-sm">
-                <p>{uiText("settings.releaseLoadFailed")}</p>
-                <Button size="sm" variant="outline" onClick={() => void checkForUpdates(true)}>
-                  {uiText("Retry update check")}
-                </Button>
-              </div>
+              <ErrorState
+                message={uiText("settings.releaseLoadFailed")}
+                retryLabel={uiText("Retry update check")}
+                onRetry={() => void checkForUpdates(true)}
+              />
             )}
             {activeSection === "overview" &&
               releaseStatus?.update_available &&
@@ -3301,13 +3299,7 @@ export function SettingsPanel() {
                               type="submit"
                               form="create-user-form"
                               loading={usersBusy === "create"}
-                              disabled={
-                                usersBusy !== null ||
-                                !usersQuery.isSuccess ||
-                                newUsername.trim().length < 3 ||
-                                newUserPassword.length < 8 ||
-                                !passwordsMatch
-                              }
+                              disabled={usersBusy !== null || !usersQuery.isSuccess}
                             >
                               {uiText("Create")}
                             </Button>

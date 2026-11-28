@@ -20,6 +20,7 @@ function messageFor(control: HTMLInputElement | HTMLSelectElement | HTMLTextArea
     if (control.type === "email") return uiText("Enter a valid email address.");
     if (control.type === "url") return uiText("Enter a valid URL.");
   }
+  if (validity.patternMismatch && control.title) return control.title;
   if (validity.typeMismatch || validity.patternMismatch) return uiText("Enter a valid value.");
   if (validity.tooShort || validity.tooLong) return uiText("Check the length of this value.");
   if (validity.rangeUnderflow || validity.rangeOverflow || validity.stepMismatch)
@@ -64,9 +65,11 @@ export function useFormValidation() {
   const onInput = useCallback((event: FormEvent<HTMLFormElement>) => {
     const target = event.target;
     if (!(target instanceof HTMLElement) || !target.id) return;
-    target.removeAttribute("aria-invalid");
     setErrors((current) => {
       if (!(target.id in current)) return current;
+      // Only a mark this hook set is cleared; a control the component marks
+      // itself keeps the attribute React renders.
+      target.removeAttribute("aria-invalid");
       const { [target.id]: _removed, ...rest } = current;
       return rest;
     });

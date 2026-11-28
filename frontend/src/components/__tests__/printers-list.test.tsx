@@ -95,15 +95,28 @@ function renderPrintersPage(
     summary?: FleetSummary;
     jobs?: PrintJobRead[];
     auth?: AuthState;
+    printersFailed?: boolean;
   } = {},
 ) {
   const client = new QueryClient({
     defaultOptions: {
       // Seeded data must stay put: nothing here may fall back to the network.
-      queries: { retry: false, staleTime: Infinity, refetchOnWindowFocus: false },
+      queries: {
+        retry: false,
+        retryOnMount: false,
+        staleTime: Infinity,
+        refetchOnWindowFocus: false,
+      },
     },
   });
-  client.setQueryData(queryKeys.printers, seed.printers ?? []);
+  if (seed.printersFailed) {
+    client
+      .getQueryCache()
+      .build(client, { queryKey: queryKeys.printers })
+      .setState({ status: "error", error: new Error("boom"), data: undefined });
+  } else {
+    client.setQueryData(queryKeys.printers, seed.printers ?? []);
+  }
   client.setQueryData([...queryKeys.fleetQueue, FLEET_QUEUE_HISTORY_LIMIT], seed.jobs ?? []);
   client.setQueryData(queryKeys.fleetSummary, seed.summary ?? EMPTY_FLEET_SUMMARY);
 
@@ -752,6 +765,16 @@ describe("PrintersPage", () => {
       renderPrintersPage();
 
       expect(screen.getByText("No printers configured yet.")).toBeVisible();
+    });
+  });
+
+  describe("when printers fail to load", () => {
+    it("shows one error with Retry instead of an empty fleet", async () => {
+      renderPrintersPage({ printersFailed: true });
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Printers could not be loaded.");
+      expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
+      expect(screen.queryByText("No printers configured yet.")).toBeNull();
     });
   });
 

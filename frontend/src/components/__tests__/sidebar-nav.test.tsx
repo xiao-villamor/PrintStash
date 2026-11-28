@@ -79,7 +79,7 @@ describe("SidebarNav", () => {
     it("links to the vault", () => {
       renderNav();
 
-      expect(screen.getByRole("link", { name: "Collections" })).toHaveAttribute("href", "/");
+      expect(screen.getByRole("link", { name: "Library" })).toHaveAttribute("href", "/");
     });
 
     it("leaves Favorites to the Library filters", () => {
@@ -91,7 +91,7 @@ describe("SidebarNav", () => {
 
     it("leaves modified link clicks to the browser", () => {
       renderNav({ at: "/inbox" });
-      const link = screen.getByRole("link", { name: "Collections" });
+      const link = screen.getByRole("link", { name: "Library" });
       let intercepted: boolean | undefined;
       document.addEventListener(
         "click",
@@ -187,7 +187,7 @@ describe("SidebarNav", () => {
     it("does not mark the vault on a different route", () => {
       renderNav({ at: "/inbox" });
 
-      expect(screen.getByRole("link", { name: "Collections" })).not.toHaveAttribute("aria-current");
+      expect(screen.getByRole("link", { name: "Library" })).not.toHaveAttribute("aria-current");
     });
 
     it("returns the brand link to the remembered collection", () => {

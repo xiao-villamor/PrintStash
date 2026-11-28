@@ -361,55 +361,67 @@ export function TopBar() {
             <span className="hidden sm:inline">{uiText("Upload")}</span>
           </Button>
         )}
-        <DropdownMenu
-          open={tasksOpen}
-          onOpenChange={(open) => {
-            if (open) startup.request("activity");
-            setTasksOpen(open);
+        <div
+          className="contents"
+          onBlur={(event) => {
+            const next = event.relatedTarget;
+            if (!tasksOpen || !(next instanceof Element)) return;
+            if (event.currentTarget.contains(next) || next.closest("[data-task-panel]")) return;
+            setTasksOpen(false);
           }}
-          align="end"
-          role="dialog"
-          aria-label={t("nav.notifications")}
-          className="flex"
-          trigger={
-            <button
-              type="button"
-              data-menu-trigger
-              onClick={() => {
-                startup.request("activity");
-                setTasksOpen((v) => !v);
-              }}
-              className="relative flex h-10 w-10 items-center justify-center rounded-md md:h-9 md:w-9 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label={
-                activeTaskCount > 0
-                  ? uiText("Notifications, {count} in progress", { count: String(activeTaskCount) })
-                  : t("nav.notifications")
-              }
-              title={t("nav.notifications")}
-              aria-haspopup="dialog"
-              aria-expanded={tasksOpen}
-            >
-              <Bell className="h-4 w-4" />
-              {activeTaskCount > 0 && (
-                <span
-                  aria-hidden
-                  className="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-2xs font-semibold leading-none text-primary-foreground ring-2 ring-background"
-                >
-                  {activeTaskCount > 9 ? "9+" : activeTaskCount}
-                </span>
-              )}
-            </button>
-          }
         >
-          <TaskList
-            onNavigate={() => setTasksOpen(false)}
-            tasks={tasks}
-            onClear={() => {
-              clearCompletedTasks();
-              setTasks(listTasks());
+          <DropdownMenu
+            open={tasksOpen}
+            onOpenChange={(open) => {
+              if (open) startup.request("activity");
+              setTasksOpen(open);
             }}
-          />
-        </DropdownMenu>
+            align="end"
+            role="dialog"
+            aria-label={t("nav.notifications")}
+            className="flex"
+            trigger={
+              <button
+                type="button"
+                data-menu-trigger
+                onClick={() => {
+                  startup.request("activity");
+                  setTasksOpen((v) => !v);
+                }}
+                className="relative flex h-10 w-10 items-center justify-center rounded-md md:h-9 md:w-9 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={
+                  activeTaskCount > 0
+                    ? uiText("Notifications, {count} in progress", {
+                        count: String(activeTaskCount),
+                      })
+                    : t("nav.notifications")
+                }
+                title={t("nav.notifications")}
+                aria-haspopup="dialog"
+                aria-expanded={tasksOpen}
+              >
+                <Bell className="h-4 w-4" />
+                {activeTaskCount > 0 && (
+                  <span
+                    aria-hidden
+                    className="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-2xs font-semibold leading-none text-primary-foreground ring-2 ring-background"
+                  >
+                    {activeTaskCount > 9 ? "9+" : activeTaskCount}
+                  </span>
+                )}
+              </button>
+            }
+          >
+            <TaskList
+              onNavigate={() => setTasksOpen(false)}
+              tasks={tasks}
+              onClear={() => {
+                clearCompletedTasks();
+                setTasks(listTasks());
+              }}
+            />
+          </DropdownMenu>
+        </div>
         {pathname === "/" && inspector.available && (
           <button
             type="button"

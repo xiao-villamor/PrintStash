@@ -1,3 +1,5 @@
+import { FieldErrors } from "@/components/ui/field-errors";
+import { useFormValidation } from "@/lib/form-validation";
 import { inboxFiles, inboxProviderLabel, inboxCanImport } from "./inbox-summary";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -8,6 +10,8 @@ import {
   Clock3,
   FileCheck2,
   Inbox,
+  Link2,
+  RefreshCw,
   type LucideIcon,
 } from "lucide-react";
 
@@ -252,6 +256,7 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
   const router = useRouter();
   const sourceUrlId = useId();
   const captureFormId = useId();
+  const captureValidation = useFormValidation();
   const captureInFlight = useRef(false);
   const [addUrlOpen, setAddUrlOpen] = useState(false);
   const [sourceUrl, setSourceUrl] = useState("");
@@ -379,6 +384,7 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
               loading={snapshot.isFetching}
               onClick={() => void snapshot.refetch()}
             >
+              <RefreshCw className="h-4 w-4" aria-hidden />
               {uiText("Refresh")}
             </Button>
             <Button
@@ -386,6 +392,7 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
               variant={selectedReady.length > 0 ? "outline" : "default"}
               onClick={() => setAddUrlOpen(true)}
             >
+              <Link2 className="h-4 w-4" aria-hidden />
               {t("inbox.addUrl")}
             </Button>
           </>
@@ -506,7 +513,7 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
             <Button
               type="submit"
               form={captureFormId}
-              disabled={!sourceUrl.trim() || commands.capture.isPending}
+              disabled={commands.capture.isPending}
               loading={commands.capture.isPending}
             >
               {uiText("Capture for review")}
@@ -514,26 +521,33 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
           </>
         }
       >
-        <form id={captureFormId} onSubmit={(event) => void submitCapture(event)}>
-          <FormField
-            label={uiText("Source URL")}
-            htmlFor={sourceUrlId}
-            hintId={`${sourceUrlId}-hint`}
-            hint={uiText(
-              "Create a durable capture, then review its files and confirm or change the collection and tags.",
-            )}
-          >
-            <Input
-              id={sourceUrlId}
-              type="url"
-              inputMode="url"
-              value={sourceUrl}
-              readOnly={commands.capture.isPending}
-              onChange={(event) => setSourceUrl(event.target.value)}
-              placeholder={uiText("Model page, collection, or direct .stl/.zip link")}
-              aria-describedby={`${sourceUrlId}-hint`}
-            />
-          </FormField>
+        <form
+          id={captureFormId}
+          {...captureValidation.formProps}
+          onSubmit={(event) => captureValidation.handle(event, submitCapture)}
+        >
+          <FieldErrors errors={captureValidation.errors}>
+            <FormField
+              label={uiText("Source URL")}
+              htmlFor={sourceUrlId}
+              hintId={`${sourceUrlId}-hint`}
+              hint={uiText(
+                "Create a durable capture, then review its files and confirm or change the collection and tags.",
+              )}
+            >
+              <Input
+                id={sourceUrlId}
+                type="url"
+                inputMode="url"
+                required
+                value={sourceUrl}
+                readOnly={commands.capture.isPending}
+                onChange={(event) => setSourceUrl(event.target.value)}
+                placeholder={uiText("Model page, collection, or direct .stl/.zip link")}
+                aria-describedby={`${sourceUrlId}-hint`}
+              />
+            </FormField>
+          </FieldErrors>
         </form>
       </Modal>
       <ConfirmModal

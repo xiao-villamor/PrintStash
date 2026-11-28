@@ -486,7 +486,21 @@ describe("FilamentProfilesCard", () => {
 
       await openForm(user);
 
-      expect(screen.getByRole("button", { name: "Add preset" })).toBeDisabled();
+      await user.click(screen.getByRole("button", { name: "Add preset" }));
+
+      expect(await screen.findByText("This field is required.")).toBeVisible();
+    });
+
+    it("explains an invalid filament cost beside the field", async () => {
+      const user = userEvent.setup();
+      await renderCard();
+      await openForm(user);
+      await user.type(screen.getByPlaceholderText("Everyday PLA"), "PETG");
+      await user.type(screen.getAllByLabelText(/Cost per kg/)[0]!, "12x");
+
+      await user.click(screen.getByRole("button", { name: "Add preset" }));
+
+      expect(await screen.findByText("Invalid filament cost")).toBeVisible();
     });
 
     it("POSTs the preset the user described", async () => {

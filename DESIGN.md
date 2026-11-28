@@ -124,6 +124,11 @@ The model detail inspector uses these action rules with the shared `Button`,
   the open (inspected) item.
 - Page-header actions (Upload, New collection, Add printer, Refresh) carry a
   leading 16px icon so a row of them reads the same everywhere.
+- One variant per role: Refresh and Retry are `outline` with the refresh icon
+  (`size="sm"` in headers, `xs` inside a banner); Upload and Create are the
+  primary `default`; Remove and Delete are `danger` (or `destructive` once
+  confirmed); Cancel is `outline`; Discard is `ghost`. A failed read is an
+  `ErrorState`, never a bespoke red box.
 - Type ramp adds `text-2xs` (0.6875rem) and `text-3xs` (0.625rem) for the mono
   label style. No `text-[11px]`.
 - Text a person reads to decide something — field labels, values, status words,

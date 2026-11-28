@@ -189,6 +189,21 @@ describe("ShareDialog", () => {
       );
     });
 
+    it("refuses an expiry outside one to 365 days", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderShare();
+      await screen.findByRole("dialog");
+      const days = screen.getByLabelText("Expires (days)");
+      await user.clear(days);
+      await user.type(days, "0");
+
+      await user.click(screen.getByRole("button", { name: /Create link|Create/ }));
+
+      expect(await screen.findByText("Enter a whole number of days from 1 to 365.")).toBeVisible();
+      expect(days).toBeInvalid();
+      expect(requestsWithMethod("POST")).toEqual([]);
+    });
+
     it("shows the created link so it can be sent", async () => {
       const user = userEvent.setup();
       renderShare({

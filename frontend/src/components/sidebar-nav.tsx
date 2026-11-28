@@ -39,7 +39,7 @@ type NavItem = {
 };
 
 const mainItems: NavItem[] = [
-  { id: "library", href: "/", labelKey: "Collections", icon: FolderClosed },
+  { id: "library", href: "/", labelKey: "Library", icon: FolderClosed },
   { id: "search", href: "/search", labelKey: "Search", icon: Search },
   { id: "inbox", href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
 ];

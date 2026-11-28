@@ -29,6 +29,8 @@ import {
   type PrinterSetupKind,
 } from "@/lib/printer-providers";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
+import { userMessage } from "@/lib/errors";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { FieldErrors } from "@/components/ui/field-errors";
@@ -137,7 +139,6 @@ export function PrintersPage() {
   const printersQuery = usePrinters({ refetchInterval: 15_000 });
   const printers = useMemo(() => printersQuery.data ?? [], [printersQuery.data]);
   const loading = printersQuery.isLoading;
-  const error = printersQuery.error instanceof Error ? printersQuery.error.message : null;
   const [addOpen, setAddOpen] = useState(false);
   const [addJobOpen, setAddJobOpen] = useState(false);
   const settingsFormId = useId();
@@ -348,9 +349,9 @@ export function PrintersPage() {
             {activeView === "fleet" && printers.length > 0 && (
               <section
                 aria-label={uiText("Fleet summary")}
-                className="flex flex-wrap items-center justify-between gap-3"
+                className="@container/fleet flex flex-wrap items-center justify-between gap-3"
               >
-                <div className="grid w-full grid-cols-2 overflow-hidden rounded-lg border border-border bg-card sm:flex sm:w-auto sm:divide-x sm:divide-border max-sm:[&>*:nth-child(even)]:border-l max-sm:[&>*:nth-child(n+3)]:border-t max-sm:[&>*]:border-border">
+                <div className="grid w-full grid-cols-2 overflow-hidden rounded-lg border border-border bg-card @md/fleet:flex @md/fleet:w-auto [&>*]:border-border [&>*:nth-child(even)]:border-l [&>*:nth-child(n+3)]:border-t @md/fleet:[&>*]:border-t-0 @md/fleet:[&>*]:border-l @md/fleet:[&>*:first-child]:border-l-0">
                   <FleetMetric
                     label={uiText("Ready")}
                     tone="ready"
@@ -414,15 +415,6 @@ export function PrintersPage() {
             )}
           </div>
 
-          {activeView === "fleet" && error && (
-            <div
-              role="alert"
-              className="animate-panel-in rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
-            >
-              {error}
-            </div>
-          )}
-
           {activeView === "fleet" && (
             <>
               {summaryQuery.isError && (
@@ -441,6 +433,15 @@ export function PrintersPage() {
                     </div>
                   ))}
                 </div>
+              ) : printersQuery.isError ? (
+                <ErrorState
+                  layout="block"
+                  className="animate-panel-in rounded-lg border border-border bg-card"
+                  message={uiText("Printers could not be loaded.")}
+                  retryLabel={uiText("Retry")}
+                  retrying={printersQuery.isFetching}
+                  onRetry={() => void printersQuery.refetch()}
+                />
               ) : printers.length === 0 ? (
                 <EmptyState
                   icon={Printer3D}
@@ -1285,8 +1286,7 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
       toast.success(uiText('Printer "{value1}" added', { value1: String(name.trim()) }));
       onCreated();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : uiText("Could not add printer"));
-      toast.error(e);
+      setErr(userMessage(e));
     } finally {
       submittingRef.current = false;
       setSubmitting(false);

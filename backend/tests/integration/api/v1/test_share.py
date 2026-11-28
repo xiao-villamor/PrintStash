@@ -489,6 +489,18 @@ class TestCreateShare:
         assert created["token"]
         assert created["url"] == f"/share/{created['token']}"
 
+    @pytest.mark.parametrize("days", [0, -1, 366])
+    def test_rejects_an_expiry_outside_one_to_365_days(
+        self, client: TestClient, auth_headers: dict[str, str], days: int
+    ) -> None:
+        response = client.post(
+            "/api/v1/models/1/shares",
+            json={"expires_in_days": days, "allow_download": False},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 422, response.text
+
     def test_reports_an_unknown_model_as_not_found(
         self, client: TestClient, auth_headers: dict[str, str]
     ) -> None:

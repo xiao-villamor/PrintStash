@@ -43,6 +43,7 @@ export function ShareDialog({
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [expiresInDays, setExpiresInDays] = useState(7);
+  const [expiresError, setExpiresError] = useState<string | null>(null);
   const [allowDownload, setAllowDownload] = useState(false);
   const gcodeFiles = useMemo(() => files.filter((f) => f.file_type === "gcode"), [files]);
   const initialRevision = gcodeFiles.find((file) => file.is_recommended) ?? gcodeFiles.at(-1);
@@ -79,6 +80,12 @@ export function ShareDialog({
   }, [open, modelId]);
 
   async function doCreate() {
+    if (!Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > 365) {
+      setExpiresError(uiText("Enter a whole number of days from 1 to 365."));
+      document.getElementById("share-expires-days")?.focus();
+      return;
+    }
+    setExpiresError(null);
     setCreating(true);
     try {
       const created = await createModelShare(modelId, {
@@ -158,14 +165,24 @@ export function ShareDialog({
           <div className="space-y-4">
             <h3 className="text-sm font-semibold">{uiText("Link access")}</h3>
             <div className="space-y-4">
-              <FormField label={uiText("Expires (days)")} htmlFor="share-expires-days">
+              <FormField
+                label={uiText("Expires (days)")}
+                htmlFor="share-expires-days"
+                error={expiresError}
+                errorId="share-expires-days-error"
+              >
                 <Input
                   id="share-expires-days"
                   type="number"
                   min={1}
                   max={365}
                   value={expiresInDays}
-                  onChange={(e) => setExpiresInDays(Number(e.target.value))}
+                  onChange={(e) => {
+                    setExpiresInDays(Number(e.target.value));
+                    setExpiresError(null);
+                  }}
+                  aria-invalid={expiresError ? true : undefined}
+                  aria-describedby={expiresError ? "share-expires-days-error" : undefined}
                   className="w-40"
                 />
               </FormField>

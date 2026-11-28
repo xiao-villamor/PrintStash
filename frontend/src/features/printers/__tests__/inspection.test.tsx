@@ -39,11 +39,13 @@ const access: PrinterRead["access"] = {
 function HeaterTimeline({
   id,
   provider = "moonraker",
+  status = "ready",
 }: {
   id: number;
   provider?: PrinterRead["provider"];
+  status?: PrinterRead["status"];
 }) {
-  const { history } = usePrinterHeaterHistory({ id, provider, access }, emptyHeaterHistory);
+  const { history } = usePrinterHeaterHistory({ id, provider, access, status }, emptyHeaterHistory);
   return <output>{history.extruder.at(-1)?.degrees ?? "Empty"}</output>;
 }
 
@@ -116,6 +118,12 @@ describe("recorded heater history", () => {
 
   it("does not ask a Bambu printer for Moonraker history", () => {
     const app = renderApp(<HeaterTimeline id={1} provider="bambu_lan" />);
+    expect(screen.getByRole("status")).toHaveTextContent("Empty");
+    expect(app.requests().some(({ url }) => url.endsWith("/heater-history"))).toBe(false);
+  });
+
+  it("does not ask an offline printer for its history", () => {
+    const app = renderApp(<HeaterTimeline id={1} status="offline" />);
     expect(screen.getByRole("status")).toHaveTextContent("Empty");
     expect(app.requests().some(({ url }) => url.endsWith("/heater-history"))).toBe(false);
   });
