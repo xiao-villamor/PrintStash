@@ -144,6 +144,7 @@ export function UploadModal({
   // ingest task. No mesh+G-code linking (that stays on the "Files" tab).
   // Picking/dropping a folder mirrors its subfolders into nested collections.
   const [bulkSelection, setBulkSelection] = useState<BulkSelection>(EMPTY_BULK);
+  const [archiveInFiles, setArchiveInFiles] = useState(false);
   const bulkFiles = bulkSelection.kind === "bulk" ? bulkSelection.items : [];
   const zipFile = bulkSelection.kind === "zip" ? bulkSelection.file : null;
   const submissionKind = mode === "files" ? "files" : bulkSelection.kind;
@@ -545,7 +546,7 @@ export function UploadModal({
       open={open}
       onClose={close}
       labelledBy="upload-modal-title"
-      className={`upload-dialog border border-border bg-card shadow-lg ${onboarding ? "upload-dialog-onboarding" : "upload-dialog-standard"}`}
+      className={`upload-dialog overflow-hidden rounded-lg border border-border bg-card shadow-dialog ${onboarding ? "upload-dialog-onboarding" : "upload-dialog-standard"}`}
     >
       <>
         <div className="upload-dialog-heading flex items-start justify-between gap-4 border-b border-border px-6 py-6">
@@ -581,7 +582,7 @@ export function UploadModal({
         </div>
 
         {!auth.isAuthenticated && (
-          <div className="mx-6 mt-4 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-200 font-mono">
+          <div className="mx-6 mt-4 rounded border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning font-mono">
             {uiText("Sign in before uploading.")}{" "}
             <a href="/login" className="underline">
               {uiText("Open login")}
@@ -663,6 +664,12 @@ export function UploadModal({
                     accept={SOURCE_ACCEPT}
                     file={meshFile}
                     setFile={(f) => {
+                      if (f && isArchiveFile(f.name)) {
+                        setMeshFile(null);
+                        setArchiveInFiles(true);
+                        return;
+                      }
+                      setArchiveInFiles(false);
                       setMeshFile(f);
                       if (f) autoName(f);
                     }}
@@ -684,6 +691,27 @@ export function UploadModal({
                     dropLabel={uiText("Drop G-code or")}
                     inputRef={gcodeRef}
                   />
+                  {archiveInFiles && (
+                    <div
+                      role="alert"
+                      className="col-span-full flex flex-wrap items-center gap-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                    >
+                      <span className="min-w-0 flex-1">
+                        {uiText("ZIP archives are uploaded from the Bulk tab.")}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        onClick={() => {
+                          setArchiveInFiles(false);
+                          setMode("bulk");
+                        }}
+                      >
+                        {uiText("Open Bulk tab")}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <>
@@ -771,7 +799,7 @@ export function UploadModal({
                     onChange={(e) => setModelName(e.target.value)}
                     className={
                       onboarding
-                        ? "upload-field h-10 w-full border border-input bg-field-surface px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                        ? "upload-field h-10 w-full rounded-md border border-input bg-field-surface px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                         : "upload-field"
                     }
                     placeholder={
@@ -1361,7 +1389,7 @@ export function BulkFiles({
       {archive && (
         <div
           key={`${archive.name}:${archive.size}:${archive.lastModified}`}
-          className={`flex items-center gap-2 border border-border bg-muted px-3 py-2 ${archive === initialQueue.archive ? "" : "animate-card-arrive"}`}
+          className={`flex items-center gap-2 rounded-md border border-border bg-muted px-3 py-2 ${archive === initialQueue.archive ? "" : "animate-card-arrive"}`}
         >
           <FileIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1 truncate text-xs">{archive.name}</span>

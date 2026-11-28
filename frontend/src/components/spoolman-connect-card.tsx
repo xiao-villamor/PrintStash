@@ -385,7 +385,7 @@ export function SpoolmanConnectCard({
                     />
                   </div>
                   {status?.native_hook_detected && (
-                    <div className="space-y-2 border border-border p-3 text-xs text-foreground">
+                    <div className="space-y-2 rounded-lg border border-border p-3 text-xs text-foreground">
                       <div className="flex items-start gap-2">
                         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-warning" />
                         <span>
@@ -411,7 +411,7 @@ export function SpoolmanConnectCard({
               {/* Inventory */}
               {enabled && connected && spools && spools.length > 0 && (
                 <div className="pt-1 border-t border-border">
-                  <h4 className="pb-2 pt-3 text-[13px] font-medium text-foreground">
+                  <h4 className="pb-2 pt-3 text-field font-medium text-foreground">
                     {uiText("Inventory")}
                   </h4>
                   <ul className="space-y-1">

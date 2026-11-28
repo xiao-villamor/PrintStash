@@ -312,5 +312,19 @@ describe("TopBar", () => {
 
       expect(screen.getByRole("dialog")).toBeInTheDocument();
     });
+
+    it("closes the task list when focus leaves it", async () => {
+      const user = userEvent.setup();
+      renderTopBar();
+      await user.click(screen.getByRole("button", { name: "Notifications" }));
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+      const outside = document.createElement("button");
+      document.body.append(outside);
+      outside.focus();
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      outside.remove();
+    });
   });
 });

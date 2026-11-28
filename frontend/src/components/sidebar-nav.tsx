@@ -7,7 +7,7 @@ import {
   Keyboard,
   LogIn,
   Search,
-  SlidersHorizontal,
+  FileSliders,
   Trash2,
   type LucideIcon,
 } from "lucide-react";
@@ -39,14 +39,14 @@ type NavItem = {
 };
 
 const mainItems: NavItem[] = [
-  { id: "library", href: "/", labelKey: "Collections", icon: FolderClosed },
+  { id: "library", href: "/", labelKey: "Library", icon: FolderClosed },
   { id: "search", href: "/search", labelKey: "Search", icon: Search },
   { id: "inbox", href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
 ];
 
 const utilityItems: NavItem[] = [
   { id: "printers", href: "/printers", labelKey: "nav.printers", icon: Printer3D, adminOnly: true },
-  { id: "profiles", href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
+  { id: "profiles", href: "/profiles", labelKey: "nav.profiles", icon: FileSliders },
   {
     id: "trash",
     href: "/settings?section=trash",
@@ -111,7 +111,7 @@ export function SidebarNav() {
     `relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
       active
         ? "bg-accent text-accent-foreground before:absolute before:-left-1.5 before:bottom-[9px] before:top-[9px] before:w-[3px] before:bg-primary"
-        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+        : "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground"
     }`;
 
   function itemLink(item: NavItem) {

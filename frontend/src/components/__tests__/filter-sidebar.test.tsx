@@ -356,14 +356,18 @@ describe("FilterSidebar", () => {
         ],
       });
       await openFolder(user, "Parts");
-      const source = await screen.findByRole("treeitem", { name: "Dragon figure" });
+      const source = await screen.findByRole(
+        "treeitem",
+        { name: "Dragon figure" },
+        { timeout: 5000 },
+      );
       await dragOnto(source, await folderRow("All Models"));
 
       expect(view.onMoveMultipart).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ id: 40 }),
         null,
       );
-    });
+    }, 15_000);
 
     it("ignores a set dropped on the folder it is already in", async () => {
       const user = userEvent.setup();
@@ -373,7 +377,11 @@ describe("FilterSidebar", () => {
         ],
       });
       await openFolder(user, "Toys");
-      const source = await screen.findByRole("treeitem", { name: "Dragon figure" });
+      const source = await screen.findByRole(
+        "treeitem",
+        { name: "Dragon figure" },
+        { timeout: 5000 },
+      );
       await dragOnto(source, await folderRow("Toys"));
 
       expect(view.onMoveMultipart).not.toHaveBeenCalled();

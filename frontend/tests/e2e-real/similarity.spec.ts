@@ -70,7 +70,6 @@ test.describe("Standalone similarity", () => {
     await page.goto("/library/similar");
     await page.getByRole("tab", { name: "Analysis settings", exact: true }).click();
     const form = page.getByRole("form", { name: "Similar models" });
-    await form.getByText("Advanced settings", { exact: true }).click();
     const budget = form.getByRole("spinbutton", { name: "Triangle limit per mesh" });
     await budget.fill("150000");
     const remote = await page.request.patch(`${API}/api/v1/similarity/settings`, {
@@ -116,7 +115,7 @@ test.describe("Standalone similarity", () => {
     });
     await page.getByRole("tab", { name: "Analysis settings", exact: true }).click();
     const settings = page.getByRole("form", { name: "Similar models" });
-    const enabled = settings.getByRole("checkbox", { name: "Enable similarity analysis" });
+    const enabled = settings.getByRole("switch", { name: "Enable similarity analysis" });
     if (!(await enabled.isChecked())) await enabled.click();
     await settings.getByRole("button", { name: "Save settings" }).click();
     await expect(page.getByText("Similarity settings saved")).toBeVisible();

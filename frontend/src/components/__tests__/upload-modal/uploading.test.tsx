@@ -334,6 +334,19 @@ describe("UploadModal ingestion", () => {
           .filter((row) => ["/api/v1/config", "/api/v1/libraries"].includes(row.url)),
       ).toHaveLength(0);
     });
+    it("sends a ZIP chosen in the Files tab to the Bulk tab", async () => {
+      const user = userEvent.setup({ applyAccept: false });
+      const result = renderUpload();
+      await user.upload(
+        fileInputs(result.container)[0],
+        new File(["x"], "pair.zip", { type: "application/zip" }),
+      );
+
+      expect(await screen.findByText("ZIP archives are uploaded from the Bulk tab.")).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "Open Bulk tab" }));
+
+      expect(screen.queryByText("ZIP archives are uploaded from the Bulk tab.")).toBeNull();
+    });
     it("recovers a failed destination catalog", async () => {
       const result = renderUpload({
         routes: {

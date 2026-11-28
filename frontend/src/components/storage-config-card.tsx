@@ -435,7 +435,10 @@ export function StorageConfigCard({
             )}
 
           {storageHealth && !storageHealth.ok && (
-            <div role="alert" className="flex items-start gap-3 border border-border bg-card p-3">
+            <div
+              role="alert"
+              className="flex items-start gap-3 rounded-lg border border-border bg-card p-3"
+            >
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
               <div>
                 <p className="text-sm font-semibold text-foreground">
@@ -449,7 +452,7 @@ export function StorageConfigCard({
           )}
           <ImportCopyWarning storageHealth={storageHealth} />
           {invalidRoots.length > 0 && (
-            <div role="alert" className="space-y-2 border border-border bg-card p-3">
+            <div role="alert" className="space-y-2 rounded-lg border border-border bg-card p-3">
               <p className="text-sm font-semibold text-foreground">
                 {t("settings.storageRootIdentityTitle")}
               </p>
@@ -468,7 +471,7 @@ export function StorageConfigCard({
             </div>
           )}
           {enrollableRoots.length > 0 && (
-            <div className="space-y-3 border border-border bg-card p-3">
+            <div className="space-y-3 rounded-lg border border-border bg-card p-3">
               <div>
                 <p className="text-sm font-semibold text-foreground">
                   {t("settings.storageEnrollTitle")}
@@ -481,7 +484,7 @@ export function StorageConfigCard({
                 {enrollableRoots.map(([role, path]) => (
                   <div
                     key={role}
-                    className="flex flex-wrap items-center justify-between gap-2 border border-border px-3 py-2"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2"
                   >
                     <span className="font-mono text-xs text-foreground">
                       {t("settings.storageRootPath", {

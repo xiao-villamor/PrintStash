@@ -1,6 +1,5 @@
 import { useState } from "react";
 
-import { Package, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { useMachineSetup } from "@/features/printers/materials";
 import { formatNumber } from "@/lib/format";
@@ -78,7 +77,6 @@ export function MachineIdentity({
         </div>
         {summary?.openSettings && (
           <Button size="xs" variant="ghost" onClick={summary.openSettings}>
-            <Settings className="size-3.5" aria-hidden="true" />
             {uiText("Printer settings")}
           </Button>
         )}
@@ -162,7 +160,6 @@ export function MachineMaterials({
         <h2>{heading ?? uiText("Materials & tools")}</h2>
         {openMaterials && (
           <Button size="xs" variant="outline" onClick={openMaterials}>
-            <Package className="size-3.5" aria-hidden="true" />
             {uiText("Open materials")}
           </Button>
         )}

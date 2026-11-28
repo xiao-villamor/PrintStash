@@ -109,10 +109,12 @@ describe("InboxPage", () => {
     }
 
     it("waits for a URL before capture", async () => {
-      const { field } = await openCapture();
+      const { field, user } = await openCapture();
 
       expect(field).toHaveAttribute("type", "url");
-      expect(screen.getByRole("button", { name: "Capture for review" })).toBeDisabled();
+      await user.click(screen.getByRole("button", { name: "Capture for review" }));
+
+      expect(await screen.findByText("This field is required.")).toBeVisible();
     });
 
     it("rejects malformed URL syntax before sending a request", async () => {

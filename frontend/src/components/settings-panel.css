@@ -560,6 +560,14 @@ div:has(> .settings-page) {
   transform-origin: center top;
 }
 
+/* Phones have overlay scrollbars: reserving a gutter only shifts the cards left. */
+@media (max-width: 767px) {
+  .settings-main {
+    padding-inline-end: 0;
+    scrollbar-gutter: auto;
+  }
+}
+
 .settings-main:has(> .settings-ai-subpage) {
   display: flex;
   flex-direction: column;

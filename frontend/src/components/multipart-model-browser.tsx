@@ -17,16 +17,13 @@ import {
   CircleX,
   Layers,
   type LucideIcon,
-  History,
   Boxes,
   CheckSquare,
   Square,
   ArrowDown,
   ArrowUp,
   FileText,
-  Plus,
   Trash2,
-  Upload,
 } from "lucide-react";
 
 import { Chip } from "@/components/ui/chip";
@@ -276,7 +273,7 @@ function ModelPicker({
                           <Square className="h-5 w-5" />
                         )}
                       </span>
-                      <span className="h-10 w-10 shrink-0 overflow-hidden border border-border">
+                      <span className="h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-border">
                         <Cover src={candidate.thumbnail_url} alt="" />
                       </span>
                       <span className="min-w-0 flex-1">
@@ -349,7 +346,7 @@ function MemberRow({ model }: { model: MultipartModelCandidate }) {
   const legacyLabel = model.available ? model.legacy_label : null;
   const content = (
     <div className="flex min-w-0 items-center gap-3">
-      <span className="library-preview h-14 w-14 shrink-0 overflow-hidden border border-border">
+      <span className="library-preview h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border">
         <Cover src={model.thumbnail_url} alt="" />
       </span>
       <span className="min-w-0">
@@ -456,10 +453,10 @@ function MultipartOverview({
       )}
       <section
         aria-label={t("multipart.detailsHeading")}
-        className="mb-4 flex min-w-0 flex-wrap gap-5 border border-border bg-card p-5"
+        className="mb-4 flex min-w-0 flex-wrap gap-5 rounded-lg border border-border bg-card p-5"
       >
         <div
-          className="library-preview relative h-40 w-full shrink-0 overflow-hidden border border-border sm:w-64"
+          className="library-preview relative h-40 w-full shrink-0 overflow-hidden rounded-lg border border-border sm:w-64"
           title={
             model.cover_image_uploaded
               ? t("multipart.uploadedCover")
@@ -525,7 +522,7 @@ function MultipartOverview({
       </section>
       <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <section
-          className="min-w-0 overflow-hidden border border-border bg-card"
+          className="min-w-0 overflow-hidden rounded-lg border border-border bg-card"
           aria-labelledby="multipart-overview-parts"
         >
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
@@ -553,7 +550,7 @@ function MultipartOverview({
               action={
                 onAddFirst ? (
                   <Button type="button" size="sm" onClick={onAddFirst}>
-                    <Plus className="h-4 w-4" /> {t("multipart.addFirst")}
+                    {t("multipart.addFirst")}
                   </Button>
                 ) : undefined
               }
@@ -601,7 +598,7 @@ function MultipartOverview({
         </section>
 
         <aside className="min-w-0 space-y-4">
-          <section className="overflow-hidden border border-border bg-card">
+          <section className="overflow-hidden rounded-lg border border-border bg-card">
             <dl className="grid grid-cols-2 gap-x-5 gap-y-3 px-5 py-4 text-xs">
               <div>
                 <dt className="text-muted-foreground">{t("multipart.collectionLabel")}</dt>
@@ -615,7 +612,7 @@ function MultipartOverview({
               </div>
             </dl>
           </section>
-          <section className="border border-border bg-card">
+          <section className="rounded-lg border border-border bg-card">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-5 py-4">
               <h2 className="text-sm font-semibold">{t("multipart.guidesHeading")}</h2>
               {onUploadGuide && (
@@ -668,16 +665,14 @@ function MultipartOverview({
               </ul>
             )}
           </section>
-          <section className="flex items-center justify-between gap-3 border border-border bg-card p-5">
+          <section className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-5">
             <h2 className="text-sm font-semibold">{t("build.title")}</h2>
             <Button asChild variant="outline" size="sm">
-              <Link href="/builds">
-                <History className="h-4 w-4" /> {t("build.history")}
-              </Link>
+              <Link href="/builds">{t("build.history")}</Link>
             </Button>
           </section>
           {onDelete && (
-            <section className="space-y-2 border border-border bg-card p-5">
+            <section className="space-y-2 rounded-lg border border-border bg-card p-5">
               <h2 className="text-sm font-semibold">{t("multipart.delete")}</h2>
               <p className="text-xs text-muted-foreground">{t("multipart.deleteDescription")}</p>
               <Button
@@ -687,7 +682,7 @@ function MultipartOverview({
                 disabled={deleteBusy}
                 onClick={onDelete}
               >
-                <Trash2 className="h-4 w-4" /> {t("multipart.deleteConfirm")}
+                {t("multipart.deleteConfirm")}
               </Button>
             </section>
           )}
@@ -724,7 +719,7 @@ function PartEditorRow({
   const { t } = useI18n();
   return (
     <fieldset
-      className="min-w-0 overflow-hidden rounded-none border border-border bg-card"
+      className="min-w-0 overflow-hidden rounded-lg border border-border bg-card"
       aria-labelledby={`multipart-part-${part.id}`}
     >
       <legend className="sr-only">{part.name}</legend>
@@ -732,8 +727,11 @@ function PartEditorRow({
         <span className="mb-2 flex h-6 w-6 shrink-0 items-center justify-center bg-muted text-xs font-semibold text-foreground">
           {index + 1}
         </span>
-        <div className="min-w-0 flex-1">
-          <label htmlFor={`multipart-part-${part.id}`} className="text-xs text-muted-foreground">
+        <div className="min-w-0 flex-1 space-y-1">
+          <label
+            htmlFor={`multipart-part-${part.id}`}
+            className="block text-xs leading-4 text-muted-foreground"
+          >
             {t("multipart.partName")}
           </label>
           <Input
@@ -741,10 +739,9 @@ function PartEditorRow({
             value={part.name}
             onChange={(event) => onName(event.target.value)}
             placeholder={t("multipart.partNamePlaceholder")}
-            className="mt-1"
           />
         </div>
-        <label className="col-start-2 space-y-1 text-xs text-muted-foreground sm:col-start-3 sm:row-start-1">
+        <label className="col-start-2 block space-y-1 text-xs leading-4 text-muted-foreground sm:col-start-3 sm:row-start-1">
           {t("build.quantity")}
           <Input
             type="number"
@@ -779,7 +776,7 @@ function PartEditorRow({
           </Button>
           <Button
             type="button"
-            variant="ghost"
+            variant="danger"
             size="sm"
             onClick={onRemovePart}
             aria-label={`${t("multipart.removePart")}: ${index + 1}`}
@@ -798,7 +795,7 @@ function PartEditorRow({
             <MemberRow model={model} />
             <Button
               type="button"
-              variant="ghost"
+              variant="danger"
               size="sm"
               onClick={() => onRemoveModel(model.choice_id, model.id)}
               aria-label={`${t("multipart.removeModel")}: ${model.available ? modelLabel(model, t("multipart.unavailable")) : t("multipart.unavailable")}`}
@@ -1440,7 +1437,7 @@ function MultipartDetail({ id }: { id: number }) {
       {isEditing ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 pb-24 sm:px-6 md:pb-6">
           <div className="grid min-w-0 items-start gap-5">
-            <section className="min-w-0 overflow-hidden border border-border bg-card [&>fieldset]:border-x-0 [&>fieldset]:border-t-0">
+            <section className="min-w-0 overflow-hidden rounded-lg border border-border bg-card [&>fieldset]:border-x-0 [&>fieldset]:border-t-0">
               <div className="border-b border-border px-5 py-4">
                 <div>
                   <h2 className="text-sm font-semibold">{t("multipart.contents")}</h2>
@@ -1512,7 +1509,7 @@ function MultipartDetail({ id }: { id: number }) {
               </div>
             </section>
             <aside className="grid min-w-0 gap-5 lg:grid-cols-2">
-              <section className="space-y-3 rounded-none border border-border bg-card p-4">
+              <section className="space-y-3 rounded-lg border border-border bg-card p-4">
                 <div>
                   <h2 className="font-semibold">{t("multipart.detailsHeading")}</h2>
                   <p className="mt-1 text-xs text-muted-foreground">
@@ -1613,7 +1610,6 @@ function MultipartDetail({ id }: { id: number }) {
                       disabled={!canEdit || busy || coverBusy || editProblem !== null}
                       loading={coverBusy}
                     >
-                      <Upload className="h-4 w-4" />
                       {model.cover_image_uploaded
                         ? t("multipart.replaceCover")
                         : t("multipart.uploadCover")}
@@ -1627,7 +1623,7 @@ function MultipartDetail({ id }: { id: number }) {
                         disabled={!canEdit || busy || coverBusy || editProblem !== null}
                         aria-label={t("multipart.removeUploadedCover")}
                       >
-                        <Trash2 className="h-4 w-4" /> {t("multipart.removeCover")}
+                        {t("multipart.removeCover")}
                       </Button>
                     )}
                     <input
@@ -1677,7 +1673,7 @@ function MultipartDetail({ id }: { id: number }) {
                   </div>
                 </div>
               </section>
-              <section className="space-y-3 rounded-none border border-border bg-card p-4">
+              <section className="space-y-3 rounded-lg border border-border bg-card p-4">
                 <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <h2 className="font-semibold">{t("multipart.guidesHeading")}</h2>
@@ -1693,7 +1689,7 @@ function MultipartDetail({ id }: { id: number }) {
                     disabled={!canEdit || guideBusy}
                     loading={guideBusy}
                   >
-                    <Upload className="h-4 w-4" /> {t("multipart.uploadGuide")}
+                    {t("multipart.uploadGuide")}
                   </Button>
                   <input
                     ref={guideInput}

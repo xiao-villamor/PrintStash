@@ -94,10 +94,7 @@ import {
   Database,
   Download,
   Eraser,
-  Eye,
-  EyeOff,
   Gpu,
-  Hourglass,
   Files,
   FolderSync,
   HardDrive,
@@ -105,7 +102,6 @@ import {
   Activity,
   Info,
   Images,
-  KeyRound,
   Copy,
   Loader2,
   Palette,
@@ -118,9 +114,9 @@ import {
   Users,
   Clock,
   CircleDollarSign,
-  RefreshCw,
   Globe,
   Folder,
+  RefreshCw,
 } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { FilamentSpool } from "@/components/ui/filament-spool";
@@ -129,6 +125,10 @@ import { Modal } from "@/components/ui/modal";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/ui/page-header";
 import { Badge } from "@/components/ui/badge";
+import { ErrorState } from "@/components/ui/error-state";
+import { FieldErrors } from "@/components/ui/field-errors";
+import { useFormValidation } from "@/lib/form-validation";
+import { PasswordToggle } from "@/components/ui/password-toggle";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { TabBar } from "@/components/ui/tabs";
 import { FormField } from "@/components/ui/form-field";
@@ -623,6 +623,7 @@ export function SettingsPanel() {
     : null;
   const [createUserDraft, setCreateUserDraft] = useState(EMPTY_CREATE_USER);
   const [showNewUserPasswords, setShowNewUserPasswords] = useState(false);
+  const createUserValidation = useFormValidation();
   const [deleteUserTarget, setDeleteUserTarget] = useState<number | null>(null);
   const [deleteUserError, setDeleteUserError] = useState<string | null>(null);
   const [createUserOpen, setCreateUserOpen] = useState(false);
@@ -1506,6 +1507,7 @@ export function SettingsPanel() {
   function setupBrowserExtension() {
     return issueApiKey(true);
   }
+  const [revokeKeyId, setRevokeKeyId] = useState<number | null>(null);
   async function deleteApiKey(id: number) {
     if (!user || keyBusy || apiKeysQuery.isError || apiKeysQuery.isPending) return;
     const session = getSessionVersion();
@@ -2167,7 +2169,6 @@ export function SettingsPanel() {
         (gcPlan !== null && ["preview", "quarantined", "finalizing"].includes(gcPlan.state))
       }
     >
-      <Hourglass className="size-3.5" aria-hidden="true" />
       {trashBusy === "gc" ? uiText("Preparing") : uiText("Review expired")}
     </Button>
   );
@@ -2590,7 +2591,21 @@ export function SettingsPanel() {
 
   return (
     <Localized>
-      <div className={cn("settings-frame", !trashPage && "mx-auto max-w-7xl")}>
+      <div className="settings-frame">
+        <ConfirmModal
+          open={revokeKeyId !== null}
+          onClose={() => setRevokeKeyId(null)}
+          onConfirm={() => {
+            const id = revokeKeyId;
+            setRevokeKeyId(null);
+            if (id !== null) void deleteApiKey(id);
+          }}
+          title={uiText("Revoke this API key?")}
+          description={uiText(
+            "Anything using this key stops working immediately. This cannot be undone.",
+          )}
+          confirmLabel={uiText("Revoke API key")}
+        />
         <ConfirmModal
           open={restartConfirmOpen}
           variant="default"
@@ -2790,10 +2805,7 @@ export function SettingsPanel() {
             trashPage ? (
               <>
                 <Button size="sm" variant="outline" onClick={loadTrash} disabled={trashLoading}>
-                  <RefreshCw
-                    className={cn("size-3.5", trashLoading && "animate-spin")}
-                    aria-hidden="true"
-                  />
+                  <RefreshCw className="h-4 w-4" aria-hidden />
                   {t("Refresh")}
                 </Button>
                 {user?.is_superuser && reviewExpiredButton}
@@ -2917,20 +2929,18 @@ export function SettingsPanel() {
               )}
 
             {activeSection !== "trash" && user?.is_superuser && healthRead.isError && (
-              <div role="alert" className="flex items-center gap-2 text-sm">
-                <p>{uiText("settings.healthLoadFailed")}</p>
-                <Button size="sm" variant="outline" onClick={() => void healthRead.refetch()}>
-                  {uiText("Retry health check")}
-                </Button>
-              </div>
+              <ErrorState
+                message={uiText("settings.healthLoadFailed")}
+                retryLabel={uiText("Retry health check")}
+                onRetry={() => void healthRead.refetch()}
+              />
             )}
             {activeSection !== "trash" && user?.is_superuser && releaseRead.isError && (
-              <div role="alert" className="flex items-center gap-2 text-sm">
-                <p>{uiText("settings.releaseLoadFailed")}</p>
-                <Button size="sm" variant="outline" onClick={() => void checkForUpdates(true)}>
-                  {uiText("Retry update check")}
-                </Button>
-              </div>
+              <ErrorState
+                message={uiText("settings.releaseLoadFailed")}
+                retryLabel={uiText("Retry update check")}
+                onRetry={() => void checkForUpdates(true)}
+              />
             )}
             {activeSection === "overview" &&
               releaseStatus?.update_available &&
@@ -2938,7 +2948,7 @@ export function SettingsPanel() {
                 <div
                   role="status"
                   aria-live="polite"
-                  className="mb-6 flex flex-col gap-4 border border-border bg-card p-4 sm:flex-row sm:items-center"
+                  className="mb-6 flex flex-col gap-4 rounded-lg border border-border bg-card p-4 sm:flex-row sm:items-center"
                 >
                   <div className="flex min-w-0 flex-1 items-start gap-3">
                     <CircleArrowUp className="mt-0.5 h-4 w-4 shrink-0 text-foreground" />
@@ -3007,7 +3017,7 @@ export function SettingsPanel() {
                     {kpiItems.map((item) => (
                       <div
                         key={item.label}
-                        className="min-w-0 border-l border-border px-4 first:border-l-0 first:pl-0"
+                        className="min-w-0 border-l border-border px-4 first:border-l-0 first:pl-0 max-lg:odd:border-l-0 max-lg:odd:pl-0"
                       >
                         <p className="flex items-center justify-between gap-2 text-xs font-medium text-muted-foreground">
                           {item.label}
@@ -3121,7 +3131,6 @@ export function SettingsPanel() {
                             size="sm"
                             onClick={() => setRestartConfirmOpen(true)}
                           >
-                            <RotateCcw className="h-3.5 w-3.5" aria-hidden />
                             {t("settings.restartAction")}
                           </Button>
                         ) : undefined
@@ -3307,13 +3316,7 @@ export function SettingsPanel() {
                               type="submit"
                               form="create-user-form"
                               loading={usersBusy === "create"}
-                              disabled={
-                                usersBusy !== null ||
-                                !usersQuery.isSuccess ||
-                                newUsername.trim().length < 3 ||
-                                newUserPassword.length < 8 ||
-                                !passwordsMatch
-                              }
+                              disabled={usersBusy !== null || !usersQuery.isSuccess}
                             >
                               {uiText("Create")}
                             </Button>
@@ -3323,128 +3326,112 @@ export function SettingsPanel() {
                         <form
                           id="create-user-form"
                           className="grid gap-4"
-                          onSubmit={(event) => {
-                            event.preventDefault();
-                            void createUser();
-                          }}
+                          {...createUserValidation.formProps}
+                          onSubmit={(event) =>
+                            createUserValidation.handle(event, () => {
+                              event.preventDefault();
+                              void createUser();
+                            })
+                          }
                         >
-                          <FormField htmlFor="new-user-username" label={uiText("Username")}>
-                            <Input
-                              id="new-user-username"
-                              value={newUsername}
-                              onChange={(event) =>
-                                setCreateUserDraft((current) => ({
-                                  ...current,
-                                  username: event.target.value,
-                                }))
-                              }
-                              minLength={3}
-                              maxLength={128}
-                              autoComplete="off"
-                              required
-                            />
-                          </FormField>
-                          <FormField
-                            htmlFor="new-user-email"
-                            label={
-                              <>
-                                {uiText("Email")}{" "}
-                                <span className="font-normal text-muted-foreground">
-                                  {uiText("(optional)")}
-                                </span>
-                              </>
-                            }
-                          >
-                            <Input
-                              id="new-user-email"
-                              value={newUserEmail}
-                              onChange={(event) =>
-                                setCreateUserDraft((current) => ({
-                                  ...current,
-                                  email: event.target.value,
-                                }))
-                              }
-                              type="email"
-                              maxLength={255}
-                              autoComplete="off"
-                            />
-                          </FormField>
-                          <FormField
-                            htmlFor="new-user-password"
-                            label={uiText("Initial password")}
-                            hint={uiText("Initial password: at least 8 characters.")}
-                            hintId="new-user-password-help"
-                          >
-                            <div className="relative">
+                          <FieldErrors errors={createUserValidation.errors}>
+                            <FormField htmlFor="new-user-username" label={uiText("Username")}>
                               <Input
-                                id="new-user-password"
-                                value={newUserPassword}
+                                id="new-user-username"
+                                value={newUsername}
                                 onChange={(event) =>
                                   setCreateUserDraft((current) => ({
                                     ...current,
-                                    password: event.target.value,
+                                    username: event.target.value,
                                   }))
                                 }
-                                className="pe-11"
-                                type={showNewUserPasswords ? "text" : "password"}
-                                minLength={8}
-                                maxLength={256}
-                                autoComplete="new-password"
-                                aria-describedby="new-user-password-help"
+                                minLength={3}
+                                maxLength={128}
+                                autoComplete="off"
                                 required
                               />
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon-sm"
-                                className="absolute end-0 top-0"
-                                aria-controls="new-user-password new-user-confirmation"
-                                aria-label={uiText(
-                                  showNewUserPasswords ? "Hide passwords" : "Show passwords",
-                                )}
-                                onClick={() => setShowNewUserPasswords((visible) => !visible)}
-                              >
-                                {showNewUserPasswords ? (
-                                  <EyeOff aria-hidden />
-                                ) : (
-                                  <Eye aria-hidden />
-                                )}
-                              </Button>
-                            </div>
-                          </FormField>
-                          <FormField
-                            htmlFor="new-user-confirmation"
-                            label={uiText("Confirm password")}
-                          >
-                            <Input
-                              id="new-user-confirmation"
-                              value={confirmation}
-                              onChange={(event) =>
-                                setCreateUserDraft((current) => ({
-                                  ...current,
-                                  confirmation: event.target.value,
-                                }))
-                              }
-                              type={showNewUserPasswords ? "text" : "password"}
-                              maxLength={256}
-                              autoComplete="new-password"
-                              aria-invalid={confirmation !== "" && !passwordsMatch}
-                              aria-describedby={
+                            </FormField>
+                            <FormField htmlFor="new-user-email" label={uiText("Email")} optional>
+                              <Input
+                                id="new-user-email"
+                                value={newUserEmail}
+                                onChange={(event) =>
+                                  setCreateUserDraft((current) => ({
+                                    ...current,
+                                    email: event.target.value,
+                                  }))
+                                }
+                                type="email"
+                                maxLength={255}
+                                autoComplete="off"
+                              />
+                            </FormField>
+                            <FormField
+                              htmlFor="new-user-password"
+                              label={uiText("Initial password")}
+                              hint={uiText("Initial password: at least 8 characters.")}
+                              hintId="new-user-password-help"
+                            >
+                              <div className="relative">
+                                <Input
+                                  id="new-user-password"
+                                  value={newUserPassword}
+                                  onChange={(event) =>
+                                    setCreateUserDraft((current) => ({
+                                      ...current,
+                                      password: event.target.value,
+                                    }))
+                                  }
+                                  className="pe-10"
+                                  type={showNewUserPasswords ? "text" : "password"}
+                                  minLength={8}
+                                  maxLength={256}
+                                  autoComplete="new-password"
+                                  aria-describedby="new-user-password-help"
+                                  required
+                                />
+                                <PasswordToggle
+                                  visible={showNewUserPasswords}
+                                  onToggle={() => setShowNewUserPasswords((visible) => !visible)}
+                                  controls="new-user-password new-user-confirmation"
+                                  label={uiText(
+                                    showNewUserPasswords ? "Hide passwords" : "Show passwords",
+                                  )}
+                                />
+                              </div>
+                            </FormField>
+                            <FormField
+                              htmlFor="new-user-confirmation"
+                              label={uiText("Confirm password")}
+                              errorId="new-user-password-mismatch"
+                              error={
                                 confirmation !== "" && !passwordsMatch
-                                  ? "new-user-password-mismatch"
+                                  ? uiText("Passwords do not match.")
                                   : undefined
                               }
-                              required
-                            />
-                            {confirmation !== "" && !passwordsMatch && (
-                              <p
-                                id="new-user-password-mismatch"
-                                className="mt-1 text-xs text-destructive"
-                              >
-                                {uiText("Passwords do not match.")}
-                              </p>
-                            )}
-                          </FormField>
+                            >
+                              <Input
+                                id="new-user-confirmation"
+                                value={confirmation}
+                                onChange={(event) =>
+                                  setCreateUserDraft((current) => ({
+                                    ...current,
+                                    confirmation: event.target.value,
+                                  }))
+                                }
+                                type={showNewUserPasswords ? "text" : "password"}
+                                maxLength={256}
+                                autoComplete="new-password"
+                                aria-invalid={confirmation !== "" && !passwordsMatch}
+                                aria-describedby={
+                                  confirmation !== "" && !passwordsMatch
+                                    ? "new-user-password-mismatch"
+                                    : undefined
+                                }
+                                required
+                              />
+                            </FormField>
+                          </FieldErrors>
                         </form>
                       </Modal>
 
@@ -3657,7 +3644,7 @@ export function SettingsPanel() {
                     <div className="space-y-4 py-4">
                       <div className="settings-access-fields">
                         <label className="settings-preference-row">
-                          <span className="text-[13px] font-medium text-foreground">
+                          <span className="text-field font-medium text-foreground">
                             {uiText("User")}
                           </span>
                           <select
@@ -3677,7 +3664,7 @@ export function SettingsPanel() {
                           </select>
                         </label>
                         <div className="settings-preference-row">
-                          <span className="text-[13px] font-medium text-foreground">
+                          <span className="text-field font-medium text-foreground">
                             {uiText("Collection")}
                           </span>
                           <DropdownMenu
@@ -3687,7 +3674,7 @@ export function SettingsPanel() {
                             aria-label={uiText("Collection access")}
                             align="start"
                             portal
-                            contentClassName="w-80 max-w-[90vw] rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-lg"
+                            contentClassName="w-80 max-w-[90vw] border border-border bg-popover p-2 text-popover-foreground shadow-lg"
                             trigger={
                               <button
                                 type="button"
@@ -3713,7 +3700,7 @@ export function SettingsPanel() {
                           </DropdownMenu>
                         </div>
                         <label className="settings-preference-row">
-                          <span className="text-[13px] font-medium text-foreground">
+                          <span className="text-field font-medium text-foreground">
                             {uiText("Role")}
                           </span>
                           <select
@@ -3853,7 +3840,7 @@ export function SettingsPanel() {
                     <div className="space-y-4 py-4">
                       <div className="settings-access-fields">
                         <label className="settings-preference-row">
-                          <span className="text-[13px] font-medium text-foreground">
+                          <span className="text-field font-medium text-foreground">
                             {uiText("User")}
                           </span>
                           <select
@@ -3876,7 +3863,7 @@ export function SettingsPanel() {
                           </select>
                         </label>
                         <label className="settings-preference-row">
-                          <span className="text-[13px] font-medium text-foreground">
+                          <span className="text-field font-medium text-foreground">
                             {uiText("Printer")}
                           </span>
                           <select
@@ -4142,7 +4129,6 @@ export function SettingsPanel() {
                               apiKeysQuery.isPending
                             }
                           >
-                            <KeyRound className="h-3.5 w-3.5" />
                             {uiText("Generate")}
                           </Button>
                         </div>
@@ -4230,7 +4216,7 @@ export function SettingsPanel() {
                                 </p>
                                 <button
                                   type="button"
-                                  onClick={() => deleteApiKey(key.id)}
+                                  onClick={() => setRevokeKeyId(key.id)}
                                   disabled={
                                     keyBusy || apiKeysQuery.isError || apiKeysQuery.isPending
                                   }
@@ -4265,6 +4251,7 @@ export function SettingsPanel() {
             {activeSection === "storage" && (
               <div className="settings-storage space-y-5">
                 <TabBar
+                  variant="framed"
                   tabs={[
                     { key: "location", label: t("Location") },
                     ...(user?.is_superuser
@@ -4276,10 +4263,6 @@ export function SettingsPanel() {
                   ]}
                   active={storageTab}
                   onChange={setStorageTab}
-                  className="inline-flex gap-0.5 rounded-lg border border-border bg-card p-0.75"
-                  tabClassName="h-7.5 rounded-md px-3 text-sm font-medium text-muted-foreground hover:text-foreground"
-                  activeTabClassName="bg-accent text-accent-foreground"
-                  showIndicator={false}
                 />
                 <div className="settings-storage-pane" hidden={storageTab !== "location"}>
                   <StorageConfigCard storageHealth={storageHealth} migrationManaged />
@@ -4837,7 +4820,7 @@ export function SettingsPanel() {
                             {unownedBackups.map((candidate) => (
                               <div
                                 key={candidate.filename}
-                                className="grid gap-3 border border-border p-3 lg:grid-cols-[1fr_auto] lg:items-center"
+                                className="grid gap-3 rounded-lg border border-border p-3 lg:grid-cols-[1fr_auto] lg:items-center"
                               >
                                 <div className="min-w-0">
                                   <p className="truncate font-mono text-xs text-foreground">
@@ -4877,7 +4860,7 @@ export function SettingsPanel() {
                             {unownedS3Backups.map((candidate) => (
                               <div
                                 key={candidate.source_ref ?? `${candidate.prefix}:${candidate.key}`}
-                                className="grid gap-3 border border-border p-3 lg:grid-cols-[1fr_auto] lg:items-center"
+                                className="grid gap-3 rounded-lg border border-border p-3 lg:grid-cols-[1fr_auto] lg:items-center"
                               >
                                 <div className="min-w-0">
                                   <p className="truncate font-mono text-xs text-foreground">
@@ -4949,7 +4932,7 @@ export function SettingsPanel() {
                             {unownedRemoteBackups.map((candidate) => (
                               <div
                                 key={`${candidate.connection_id}:${candidate.key}`}
-                                className="grid gap-3 border border-border p-3 lg:grid-cols-[1fr_auto] lg:items-center"
+                                className="grid gap-3 rounded-lg border border-border p-3 lg:grid-cols-[1fr_auto] lg:items-center"
                               >
                                 <div className="min-w-0">
                                   <p className="truncate font-mono text-xs text-foreground">
@@ -5411,12 +5394,11 @@ export function SettingsPanel() {
             {activeSection === "design" && (
               <div className="settings-grouped">
                 {user?.is_superuser && remoteConfig.isError && (
-                  <div role="alert" className="flex items-center gap-2 text-sm">
-                    <p>{t("settings.configLoadFailed")}</p>
-                    <Button variant="outline" size="sm" onClick={() => void remoteConfig.refetch()}>
-                      {t("Retry")}
-                    </Button>
-                  </div>
+                  <ErrorState
+                    message={t("settings.configLoadFailed")}
+                    retryLabel={t("Retry")}
+                    onRetry={() => void remoteConfig.refetch()}
+                  />
                 )}
                 {user?.is_superuser && remoteConfig.isPending && (
                   <p role="status">{t("Loading…")}</p>
@@ -5507,7 +5489,7 @@ export function SettingsPanel() {
                 >
                   <div className="settings-preference-fields">
                     <div className="settings-preference-row">
-                      <label htmlFor="display-currency" className="text-[13px] text-foreground">
+                      <label htmlFor="display-currency" className="text-field text-foreground">
                         {uiText("Display currency")}
                       </label>
                       <select
@@ -5677,12 +5659,11 @@ export function SettingsPanel() {
             {activeSection === "previews" && (
               <div className="settings-grouped">
                 {user?.is_superuser && remoteConfig.isError && (
-                  <div role="alert" className="flex items-center gap-2 text-sm">
-                    <p>{t("settings.configLoadFailed")}</p>
-                    <Button variant="outline" size="sm" onClick={() => void remoteConfig.refetch()}>
-                      {t("Retry")}
-                    </Button>
-                  </div>
+                  <ErrorState
+                    message={t("settings.configLoadFailed")}
+                    retryLabel={t("Retry")}
+                    onRetry={() => void remoteConfig.refetch()}
+                  />
                 )}
                 {user?.is_superuser && remoteConfig.isPending && (
                   <p role="status">{t("Loading…")}</p>
@@ -5893,12 +5874,11 @@ export function SettingsPanel() {
                   </div>
                 )}
                 {user?.is_superuser && remoteConfig.isError && (
-                  <div role="alert" className="flex items-center gap-2 text-sm">
-                    <p>{t("settings.configLoadFailed")}</p>
-                    <Button variant="outline" size="sm" onClick={() => void remoteConfig.refetch()}>
-                      {t("Retry")}
-                    </Button>
-                  </div>
+                  <ErrorState
+                    message={t("settings.configLoadFailed")}
+                    retryLabel={t("Retry")}
+                    onRetry={() => void remoteConfig.refetch()}
+                  />
                 )}
                 {trashRetentionBar}
                 {trashCleanupDetails}
@@ -5946,7 +5926,7 @@ export function SettingsPanel() {
                               aria-hidden
                             />
                             <div>
-                              <p className="text-[13px] font-semibold text-foreground">
+                              <p className="text-field font-semibold text-foreground">
                                 {uiText("Update available: v")}
                                 {releaseStatus.latest_version}
                               </p>
@@ -5973,7 +5953,7 @@ export function SettingsPanel() {
                       )}
                     <div className="settings-readonly-row">
                       <div>
-                        <p className="text-[13px] font-medium text-foreground">
+                        <p className="text-field font-medium text-foreground">
                           {uiText("Installed")}
                         </p>
                         <p className="settings-row-hint">
@@ -5984,15 +5964,15 @@ export function SettingsPanel() {
                               : uiText("API server status and version")}
                         </p>
                       </div>
-                      <span className="font-mono text-[13px] text-foreground">
+                      <span className="font-mono text-field text-foreground">
                         {health?.version
                           ? uiText("v{value1}", { value1: health.version })
                           : uiText("Loading…")}
                       </span>
                     </div>
                     <div className="settings-readonly-row">
-                      <p className="text-[13px] font-medium text-foreground">{uiText("Source")}</p>
-                      <span className="font-mono text-[13px] text-foreground">
+                      <p className="text-field font-medium text-foreground">{uiText("Source")}</p>
+                      <span className="font-mono text-field text-foreground">
                         {GITHUB_REPO_LABEL}
                       </span>
                     </div>
@@ -6012,7 +5992,7 @@ export function SettingsPanel() {
                           {knownUiText(latestRelease.date)}
                         </span>
                       </p>
-                      <ul className="mt-2 list-disc space-y-1.5 pl-5 text-[13px] text-foreground marker:text-muted-foreground">
+                      <ul className="mt-2 list-disc space-y-1.5 pl-5 text-field text-foreground marker:text-muted-foreground">
                         {latestRelease.changes.map((change, i) => (
                           <li key={i}>{knownUiText(change)}</li>
                         ))}

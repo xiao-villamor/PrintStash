@@ -229,7 +229,7 @@ test.describe("Similarity desktop review", () => {
     await page.getByRole("tab", { name: "Analysis settings", exact: true }).click();
     const settings = page.getByRole("form", { name: "Similar models", exact: true });
     await expect(
-      settings.getByRole("checkbox", { name: "Enable similarity analysis" }),
+      settings.getByRole("switch", { name: "Enable similarity analysis" }),
     ).toBeVisible();
     await expect(page.getByRole("link", { name: "Compare", exact: true })).toBeHidden();
     await page.getByRole("tab", { name: "Analysis history", exact: true }).click();

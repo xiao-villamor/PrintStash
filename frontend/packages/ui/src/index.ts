@@ -7,6 +7,7 @@ export * from "./components/confirm-modal";
 export * from "./components/drawer";
 export * from "./components/dropdown-menu";
 export * from "./components/empty-state";
+export * from "./components/error-state";
 export * from "./components/input";
 export * from "./components/modal";
 export * from "./components/page-container";

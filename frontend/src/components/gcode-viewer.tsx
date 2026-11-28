@@ -610,7 +610,7 @@ export function GcodeViewer({
       onClick={() => change(!checked)}
       className={
         checked
-          ? "toolpath-toggle bg-accent text-accent-foreground hover:bg-accent"
+          ? "toolpath-toggle bg-accent text-accent-foreground hover:bg-muted"
           : "toolpath-toggle hover:bg-muted hover:text-foreground"
       }
     >

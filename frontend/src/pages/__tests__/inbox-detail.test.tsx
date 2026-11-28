@@ -495,11 +495,7 @@ describe("InboxDetailPage", () => {
     }
 
     expect(document.activeElement).toBe(destination);
-    expect(destination).toHaveClass(
-      "focus-visible:ring-ring",
-      "focus-visible:ring-offset-2",
-      "ring-offset-background",
-    );
+    expect(destination).toHaveClass("focus:ring-2", "focus:ring-inset", "focus:ring-ring");
   });
   describe("what the capture is doing", () => {
     it.each([

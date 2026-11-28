@@ -3,10 +3,10 @@
 import { ImportReadiness } from "./import-readiness";
 
 import { SettingsCard } from "@/components/settings-card";
-import { currentLocale } from "@/lib/locale";
+import { currentLocale, uiText } from "@/lib/locale";
 
 import { useEffect, useRef, useState } from "react";
-import {} from "lucide-react";
+import { Copy } from "lucide-react";
 
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Modal } from "@/components/ui/modal";
@@ -22,6 +22,7 @@ import {
   renameBrowserDevice,
   revokeBrowserDevice,
 } from "@/lib/api";
+import { toast } from "@/lib/toast";
 import { useQuery } from "@tanstack/react-query";
 import {
   browserDevicesOptions,
@@ -215,6 +216,7 @@ export function ProviderConnectionsPanel({
     <div className="space-y-3">
       <p role="alert">{t("settings.providerConnections.loadFailed")}</p>
       <Button
+        variant="outline"
         size="sm"
         onClick={() => {
           void connectionsQuery.refetch();
@@ -251,15 +253,31 @@ export function ProviderConnectionsPanel({
             </Button>
           }
         >
-          <div className="space-y-4 px-4 pb-4 sm:px-5">
+          <div className="space-y-4 py-3">
             {pairing && (
-              <div className="border border-border bg-card p-3" role="status">
+              <div className="rounded-lg border border-border bg-card p-3" role="status">
                 <p className="text-xs text-muted-foreground">
                   {t("settings.pairedBrowsers.codeHelp")}
                 </p>
-                <code className="mt-2 block select-all break-all border border-border bg-background px-3 py-2 font-mono text-sm text-foreground">
-                  {pairing.code}
-                </code>
+                <div className="mt-2 flex items-center gap-2">
+                  <code className="block min-w-0 flex-1 select-all break-all rounded-md border border-border bg-background px-3 py-2 font-mono text-sm text-foreground">
+                    {pairing.code}
+                  </code>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(pairing.code).then(
+                        () => toast.success(uiText("Copied")),
+                        () => toast.error(uiText("Could not copy.")),
+                      );
+                    }}
+                  >
+                    <Copy className="h-4 w-4" aria-hidden />
+                    {uiText("Copy")}
+                  </Button>
+                </div>
                 <p className="mt-2 text-xs text-muted-foreground">
                   {t("settings.pairedBrowsers.expiresAt", {
                     expiresAt: formatDate(pairing.expires_at),
@@ -300,7 +318,7 @@ export function ProviderConnectionsPanel({
           title={t("settings.providerConnections.title")}
           description={t("settings.providerConnections.description")}
         >
-          <div className="space-y-0 px-4 pb-4 sm:px-5">
+          <div className="space-y-0 py-1">
             {error && (
               <p role="alert" className="text-sm text-destructive">
                 {error}

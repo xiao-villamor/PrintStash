@@ -23008,6 +23008,8 @@
           },
           "expires_in_days": {
             "default": 7,
+            "maximum": 365.0,
+            "minimum": 1.0,
             "title": "Expires In Days",
             "type": "integer"
           },

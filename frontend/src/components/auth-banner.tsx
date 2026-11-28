@@ -55,7 +55,7 @@ export function AuthBanner() {
   if (!show) return null;
 
   return (
-    <div className="bg-amber-500/10 border-b border-amber-500/30 px-6 py-2 flex items-center gap-3 text-xs font-mono text-amber-800 dark:text-amber-200">
+    <div className="bg-warning/10 border-b border-warning/30 px-6 py-2 flex items-center gap-3 text-xs font-mono text-warning">
       <AlertTriangle className="h-4 w-4 flex-shrink-0" />
       <span className="flex-1">{knownUiText(BANNER_MESSAGES[reason])}</span>
       {!isLoggedIn() && (
@@ -77,7 +77,7 @@ export function AuthBanner() {
       <button
         type="button"
         onClick={() => setShow(false)}
-        className="p-1 rounded hover:bg-amber-500/20 transition-colors"
+        className="p-1 rounded hover:bg-warning/20 transition-colors"
         aria-label={uiText("Dismiss")}
       >
         <X className="h-3.5 w-3.5" />

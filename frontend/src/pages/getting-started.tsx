@@ -189,6 +189,7 @@ export default function GettingStartedPage() {
                 <p>{t(storage === "checking" ? "setup.checking" : "setup.pending")}</p>
                 {storage === "pending" && (
                   <Button
+                    variant="outline"
                     onClick={() => {
                       setStorage("checking");
                       void prepare().then(handlePrepared, handleUnprepared);
@@ -222,7 +223,7 @@ export default function GettingStartedPage() {
                           {models.map((model) => (
                             <li key={model.id}>
                               <Link
-                                className="flex min-h-16 items-center gap-3 px-4 py-3 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                className="flex min-h-16 items-center gap-3 px-4 py-3 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                 href={`/models/${model.id}`}
                               >
                                 <Box

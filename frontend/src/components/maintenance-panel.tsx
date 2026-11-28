@@ -2,7 +2,7 @@ import { currentLocale, type MessageKey } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, HardDrive, HeartPulse } from "lucide-react";
+import { AlertTriangle, CheckCircle2, HardDrive } from "lucide-react";
 
 import { AuditSchedulePanel } from "@/components/audit-schedule-panel";
 
@@ -203,7 +203,6 @@ export function MaintenancePanel() {
                 loading={busy}
                 disabled={busy || history.isPending || history.isError || denied || isActive(run)}
               >
-                <HeartPulse className="size-3.5" aria-hidden />
                 {t("maintenance.runQuick")}
               </Button>
             </div>
@@ -515,10 +514,10 @@ export function MaintenancePanel() {
                               })
                           : uiText("Not verified this session")}
                       </p>
-                      <details className="mt-2 text-xs text-muted-foreground">
-                        <summary className="cursor-action font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                      <section className="mt-2 text-xs text-muted-foreground">
+                        <h4 className="text-sm font-medium text-foreground">
                           {t("maintenance.backupDetails")}
-                        </summary>
+                        </h4>
                         <div className="mt-2 space-y-1 break-all font-mono text-2xs">
                           <p>
                             {t("settings.backupSourceLocator", {
@@ -542,7 +541,7 @@ export function MaintenancePanel() {
                             </p>
                           )}
                         </div>
-                      </details>
+                      </section>
                     </div>
                   </div>
                   <div>

@@ -343,14 +343,8 @@
   }
 }
 
+/* Hover is a neutral lift; the accent ring is reserved for the open (inspected) card. */
 .library-model-card:not([data-inspected]):hover {
-  border-color: color-mix(in srgb, var(--primary) 80%, var(--border-strong));
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent),
-    0 12px 28px -12px rgb(0 0 0 / 0.6);
-}
-
-:where(.dark) .library-model-card:not([data-inspected]):hover {
   border-color: var(--border-strong);
   box-shadow:
     0 8px 20px -10px var(--dialog-shadow),
@@ -407,10 +401,10 @@
 
 /* A collection card answers the pointer like a model card does, in rounded rings. */
 .library-collection-card:not(:has(> button:disabled)):hover {
-  border-color: color-mix(in srgb, var(--primary) 80%, var(--border-strong));
+  border-color: var(--border-strong);
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent),
-    0 12px 28px -12px rgb(0 0 0 / 0.6);
+    0 8px 20px -10px var(--dialog-shadow),
+    0 2px 5px var(--dialog-shadow);
 }
 .library-collection-card:has(> button:focus-visible) {
   border-color: var(--ring);

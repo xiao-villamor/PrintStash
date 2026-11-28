@@ -38,10 +38,12 @@ export function StagedInputRecovery({
   return (
     <div className="mt-2 space-y-2 text-xs text-muted-foreground">
       <p>
-        {uiText("Retained input: {size} · {count} staged files", {
-          size: formatBytes(staging.retained_bytes),
-          count: staging.lease_count,
-        })}
+        {uiText(
+          staging.lease_count === 1
+            ? "Retained input: {size} · {count} staged file"
+            : "Retained input: {size} · {count} staged files",
+          { size: formatBytes(staging.retained_bytes), count: staging.lease_count },
+        )}
       </p>
       <p>
         {uiText("Earliest expiry: {date}", {
@@ -52,7 +54,7 @@ export function StagedInputRecovery({
         })}
       </p>
       {staging.discard_available && (
-        <Button size="sm" variant="outline" disabled={busy} onClick={() => setConfirm(true)}>
+        <Button size="xs" variant="ghost" disabled={busy} onClick={() => setConfirm(true)}>
           {uiText("Discard staged input")}
         </Button>
       )}

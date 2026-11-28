@@ -94,8 +94,8 @@
   scale: none;
 }
 .library-inspector-tabs button[aria-selected="true"] {
-  background: var(--muted);
-  color: var(--foreground);
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 .library-inspector-workspace select {
   width: 100%;
@@ -201,6 +201,7 @@
   min-height: 32px;
   resize: vertical;
   border: 1px solid var(--input);
+  border-radius: var(--radius);
   padding: 6px 8px;
   background: var(--card);
   font-size: 13px;
@@ -251,15 +252,7 @@
   width: 100%;
   overflow: hidden;
   border: 1px solid var(--border);
-}
-.library-inspector-section summary {
-  list-style: none;
-}
-.library-inspector-section summary::-webkit-details-marker {
-  display: none;
-}
-.library-inspector-section[open] > summary > svg {
-  transform: rotate(90deg);
+  border-radius: var(--radius-popover);
 }
 .library-inspector-files {
   list-style: none;
@@ -280,6 +273,7 @@
   width: 34px;
   height: 22px;
   border: 1px solid var(--border);
+  border-radius: var(--radius);
   background: var(--muted);
   font: 500 12px var(--font-mono);
 }
@@ -380,13 +374,13 @@
 }
 .library-inspector-stats dt {
   color: var(--muted-foreground);
-  font-size: 0.6875rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: 0.875rem;
 }
 .library-inspector-stats dd {
   margin: 0;
-  font: 500 13px/1.2 var(--font-mono);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.2;
   overflow-wrap: anywhere;
 }
 
@@ -428,10 +422,8 @@ details.library-inspector-section > summary {
 .library-inspector-eyebrow {
   margin: 0 0 4px;
   color: var(--muted-foreground);
-  font-size: 0.6875rem;
+  font-size: 0.875rem;
   font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 /* The block's head: its label on the left, the revision on the right. */
@@ -448,9 +440,8 @@ details.library-inspector-section > summary {
 .library-inspector-block-head select {
   width: auto;
   max-width: 60%;
-  height: 28px;
-  font-family: var(--font-mono);
-  font-size: 12px;
+  height: 32px;
+  font-size: 0.875rem;
   font-weight: 500;
 }
 .library-inspector-rev-chip {

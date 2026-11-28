@@ -1,7 +1,7 @@
 import { useState } from "react";
+import { SettingsSwitch } from "@/components/settings-card";
 import { Button } from "@/components/ui/button";
 import { SettingsCard } from "@/components/settings-card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Localized } from "@/components/ui/localized";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -291,17 +291,17 @@ export function ArtifactCacheCard({ api = artifactCacheApi }: { api?: typeof art
                 void perform("save");
               }}
             >
-              <label className="flex min-h-11 items-center gap-3 font-medium">
-                <Checkbox
+              <div className="flex min-h-11 items-center justify-between gap-3 font-medium">
+                <span>{uiText("Enable remote Artifact cache")}</span>
+                <SettingsSwitch
                   checked={policy.enabled}
                   disabled={busy}
-                  ariaLabel={uiText("Enable remote Artifact cache")}
+                  label={uiText("Enable remote Artifact cache")}
                   onChange={(checked) =>
                     setValue({ ...value, policy: { ...policy, enabled: checked === true } })
                   }
                 />
-                <span>{uiText("Enable remote Artifact cache")}</span>
-              </label>
+              </div>
               <p className="text-sm tabular-nums text-muted-foreground">
                 {readableCacheSize(usage.bytes ?? 0)} {uiText("cached")} · {usage.entries ?? 0}{" "}
                 {uiText("files")}
@@ -314,6 +314,7 @@ export function ArtifactCacheCard({ api = artifactCacheApi }: { api?: typeof art
               </p>
               <div className="border-t border-border pt-4">
                 <TabBar
+                  variant="framed"
                   tabs={[
                     { key: "overview", label: uiText("Overview") },
                     { key: "limits", label: uiText("Cache limits") },
@@ -321,10 +322,6 @@ export function ArtifactCacheCard({ api = artifactCacheApi }: { api?: typeof art
                   ]}
                   active={detailView}
                   onChange={setDetailView}
-                  className="inline-flex rounded-md bg-muted/40 p-1"
-                  tabClassName="rounded-sm px-3 py-2 text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  activeTabClassName="bg-accent text-accent-foreground"
-                  showIndicator={false}
                 />
               </div>
               {detailView === "overview" && (

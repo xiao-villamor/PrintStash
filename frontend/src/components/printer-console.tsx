@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { RefreshCw, SendHorizontal } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getJson, sendJson } from "@/lib/api/request";
@@ -83,10 +83,10 @@ export function PrinterConsole({
           />
           <Button
             type="submit"
+            variant="outline"
             size="sm"
             disabled={!live || busy || send.isPending || !draft.trim()}
           >
-            <SendHorizontal className="size-3.5" aria-hidden="true" />
             {uiText("Send")}
           </Button>
         </form>
@@ -148,7 +148,6 @@ export function PrinterConsole({
             disabled={!live || macros.isFetching}
             onClick={() => void macros.refetch()}
           >
-            <RefreshCw className="size-3.5" aria-hidden="true" />
             {uiText("Refresh macros")}
           </Button>
         </div>

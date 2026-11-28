@@ -9,9 +9,6 @@ import {
   CirclePlay,
   Clock,
   Folder,
-  Play,
-  RefreshCcw,
-  Trash2,
   type LucideIcon,
 } from "lucide-react";
 import { lazy, Suspense, useId, useMemo, useState, type ReactNode } from "react";
@@ -410,7 +407,6 @@ export function PrinterFiles({
               disabled={!printer.access.can_admin}
               title={authBlockReason ?? uiText("Sync printer files")}
             >
-              <RefreshCcw aria-hidden="true" className="h-3.5 w-3.5" />
               {uiText("Sync printer files")}
             </Button>
             {uploadAction}
@@ -544,7 +540,6 @@ export function PrinterFiles({
                         }
                         title={authBlockReason ?? uiText("Start this printer file")}
                       >
-                        <Play aria-hidden="true" className="h-3.5 w-3.5" />
                         {uiText("Start")}
                       </Button>
                     )}
@@ -556,7 +551,7 @@ export function PrinterFiles({
                     {printer.provider !== "bambu_lan" && (
                       <Button
                         size="sm"
-                        variant="outline"
+                        variant="danger"
                         onClick={() => onDelete(selected)}
                         loading={deletingId === selected.id}
                         disabled={
@@ -571,7 +566,6 @@ export function PrinterFiles({
                             : (authBlockReason ?? uiText("Delete this printer file"))
                         }
                       >
-                        <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
                         {uiText("Delete")}
                       </Button>
                     )}

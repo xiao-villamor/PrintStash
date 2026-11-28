@@ -162,7 +162,7 @@ describe("ShareDialog", () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderShare();
       await screen.findByRole("dialog");
-      await user.click(screen.getByRole("radio", { name: "On" }));
+      await user.click(screen.getByRole("switch", { name: "Allow file download" }));
 
       await user.click(screen.getByRole("button", { name: /Create link|Create/ }));
 
@@ -187,6 +187,21 @@ describe("ShareDialog", () => {
           expires_in_days: 7,
         }),
       );
+    });
+
+    it("refuses an expiry outside one to 365 days", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderShare();
+      await screen.findByRole("dialog");
+      const days = screen.getByLabelText("Expires (days)");
+      await user.clear(days);
+      await user.type(days, "0");
+
+      await user.click(screen.getByRole("button", { name: /Create link|Create/ }));
+
+      expect(await screen.findByText("Enter a whole number of days from 1 to 365.")).toBeVisible();
+      expect(days).toBeInvalid();
+      expect(requestsWithMethod("POST")).toEqual([]);
     });
 
     it("shows the created link so it can be sent", async () => {
@@ -230,7 +245,7 @@ describe("ShareDialog", () => {
       const { onClose } = renderShare();
       await screen.findByRole("dialog");
 
-      await user.click(screen.getAllByRole("button", { name: "Close" }).at(-1)!);
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
 
       expect(onClose).toHaveBeenCalled();
     });

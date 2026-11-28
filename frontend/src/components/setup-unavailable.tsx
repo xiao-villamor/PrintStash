@@ -87,7 +87,7 @@ export function SetupUnavailable({
     <div className="space-y-5">
       <div>
         <h2 className="text-base font-semibold">{t(screen.title)}</h2>
-        <p role="alert" className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+        <p role="alert" className="mt-1.5 text-field leading-relaxed text-muted-foreground">
           {t(screen.help, { host, variables: variables.join(", ") })}
         </p>
       </div>

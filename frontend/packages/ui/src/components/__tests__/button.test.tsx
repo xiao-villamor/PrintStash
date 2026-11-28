@@ -32,7 +32,7 @@ describe("Button", () => {
 
     expect(screen.getByRole("button", { name: "Delete" })).toHaveClass(
       "bg-destructive-action",
-      "h-[34px]",
+      "h-8",
     );
   });
 

@@ -63,7 +63,7 @@ export function LibraryFindBar({
     <div
       role="search"
       aria-label={uiText("Find in collection")}
-      className="animate-panel-in fixed right-6 top-16 z-30 flex items-center gap-1 rounded-lg border border-border bg-card p-1.5 shadow-lg"
+      className="animate-panel-in fixed right-6 top-16 z-floating flex items-center gap-1 rounded-lg border border-border bg-card p-1.5 shadow-lg"
     >
       <input
         ref={input}

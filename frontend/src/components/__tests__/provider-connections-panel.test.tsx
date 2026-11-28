@@ -440,6 +440,21 @@ describe("ProviderConnectionsPanel", () => {
     expect(screen.queryByRole("button", { name: "Create pairing code" })).not.toBeInTheDocument();
   });
 
+  it("copies the pairing code to the clipboard", async () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue();
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    vi.mocked(api.createBrowserPairing).mockResolvedValue({
+      code: "PAIR-1234",
+      expires_at: "2026-08-24T02:00:00Z",
+    });
+    renderPanel();
+    await userEvent.click(await screen.findByRole("button", { name: "Create pairing code" }));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Copy" }));
+
+    expect(writeText).toHaveBeenCalledWith("PAIR-1234");
+  });
+
   it("refuses pairing receipts from an earlier session", async () => {
     const pending = Promise.withResolvers<{ code: string; expires_at: string }>();
     vi.mocked(api.createBrowserPairing).mockReturnValue(pending.promise);

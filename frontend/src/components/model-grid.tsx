@@ -8,7 +8,7 @@ import { LibraryFilterControl } from "@/components/library-filter-control";
 import { LibraryFindBar } from "@/components/library-find-bar";
 import { LibraryCollectionsRegion } from "@/components/library-collections-region";
 import { ModelGalleryDrag } from "@/components/model-gallery-drag";
-import { NewCollectionCard } from "@/components/new-collection-card";
+import { NewCollectionCard, type CollectionCreateOutcome } from "@/components/new-collection-card";
 
 import { arrivingKeys, entryKeys } from "@/lib/library-arrivals";
 import { FOLDER_ENTRANCE_MS } from "@/lib/folder-transition";
@@ -153,6 +153,7 @@ import type { LibraryFilterField } from "@/components/library-filter-picker";
 import type { UploadMode } from "@/components/upload-modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorState } from "@/components/ui/error-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FormField } from "@/components/ui/form-field";
@@ -175,6 +176,7 @@ import {
   ListChecks,
   ScanSearch,
   FolderTree,
+  FolderPlus,
   Boxes,
   Upload,
 } from "lucide-react";
@@ -678,6 +680,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }
 
   const collectionFormId = useId();
+  const collectionNameId = useId();
+  const [collectionNameError, setCollectionNameError] = useState<string | null>(null);
   const [isCreatingCollection, setIsCreatingCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
   const createCollectionRequested = searchParams.get("newCollection") === "1";
@@ -2626,30 +2630,49 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     router,
   ]);
 
-  async function saveNewCollection(name: string) {
+  async function saveNewCollection(name: string, inline = false): Promise<CollectionCreateOutcome> {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
-      return false;
+      return { status: "reported" };
     }
     if (!canAdminSelectedCollection) {
       toast.warning(uiText("Admin access required"));
-      return false;
+      return { status: "reported" };
     }
     // Until the open folder has loaded, a new folder would land at the root.
-    if (selectedCollection !== null && selectedCollectionRow === null) return false;
+    if (selectedCollection !== null && selectedCollectionRow === null)
+      return { status: "reported" };
     try {
       await createCollection({ name, parent_id: selectedCollectionRow?.id ?? null });
       toast.success(uiText('Collection "{value1}" created', { value1: String(name) }));
-      return true;
+      return { status: "saved" };
     } catch (e: any) {
+      if (inline && parseApiError(e).status === 409) {
+        return {
+          status: "invalid",
+          message: uiText('A collection named "{value1}" already exists here.', {
+            value1: String(name),
+          }),
+        };
+      }
       toast.error(e);
-      return false;
+      return { status: "reported" };
     }
   }
 
   async function handleCreateCollection() {
     const name = newCollectionName.trim();
-    if (name && (await saveNewCollection(name))) {
+    if (!name) {
+      setCollectionNameError(uiText("Enter a collection name."));
+      return;
+    }
+    setCollectionNameError(null);
+    const saved = await saveNewCollection(name, true);
+    if (saved.status === "invalid") {
+      setCollectionNameError(saved.message);
+      return;
+    }
+    if (saved.status === "saved") {
       setNewCollectionName("");
       setIsCreatingCollection(false);
     }
@@ -2900,7 +2923,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       <Button
         variant="ghost"
         size="xs"
-        className="h-8 aria-pressed:bg-accent aria-pressed:text-accent-foreground"
+        className="aria-pressed:bg-accent aria-pressed:text-accent-foreground"
         aria-pressed={selectMode}
         aria-label={uiText("Select")}
         onClick={() => (selectMode ? clearSelection() : setKeyboardSelection(true))}
@@ -2925,7 +2948,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       }
       onClick={handleOpenCreateCollection}
     >
-      <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      <FolderPlus className="h-4 w-4" aria-hidden />
       {uiText("New collection")}
     </Button>
   );
@@ -2943,7 +2966,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         setMultipartCreateOpen(true);
       }}
     >
-      <Boxes className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      <Boxes className="h-4 w-4" aria-hidden />
       {t("multipart.new")}
     </Button>
   ) : null;
@@ -3097,7 +3120,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 aria-label={uiText("Include subfolders")}
                 disabled={loading}
                 onClick={() => setModelScope(includeSubfolders ? "here" : "all")}
-                className="aria-pressed:bg-accent aria-pressed:text-accent-foreground aria-pressed:hover:bg-accent dark:hover:bg-surface-container-highest dark:aria-pressed:bg-surface-bright dark:aria-pressed:hover:bg-surface-bright"
+                className="aria-pressed:bg-accent aria-pressed:text-accent-foreground aria-pressed:hover:bg-muted dark:hover:bg-surface-container-highest dark:aria-pressed:bg-surface-bright dark:aria-pressed:hover:bg-surface-bright"
               >
                 <SubfolderScopeIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 <span className="library-toolbar-label">{uiText("Include subfolders")}</span>
@@ -3317,7 +3340,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     aria-pressed={favoritesOnly}
                     onClick={toggleFavorites}
                     className={cn(
-                      "h-8 w-full justify-start px-3 text-sm",
+                      " w-full justify-start px-3 text-sm",
                       favoritesOnly && "bg-accent text-accent-foreground",
                     )}
                   >
@@ -3410,7 +3433,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           )}
           {isDragging && canUploadToVault && (
-            <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center border-2 border-dashed border-primary bg-primary/5">
+            <div className="pointer-events-none absolute inset-0 z-floating flex items-center justify-center border-2 border-dashed border-primary bg-primary/5">
               <span className="bg-background border border-border rounded px-4 py-2 font-mono text-xs uppercase tracking-widest shadow">
                 {uiText("Drop to upload")}
               </span>
@@ -3441,7 +3464,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       <span className="hidden @xl/trail:inline">{ui("Recent")}</span>
                     </Button>
                   }
-                  contentClassName="w-64 max-w-[calc(100vw-2rem)] rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+                  contentClassName="w-64 max-w-[calc(100vw-2rem)] border border-border bg-popover p-1 text-popover-foreground shadow-lg"
                 >
                   <p className="px-2.5 py-1.5 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                     {uiText("Recent folders")}
@@ -3485,7 +3508,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           {/* The pane owns breakpoints: an open outliner also consumes horizontal room. */}
           <div className="library-collection-header px-4 sm:px-6">
             <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-1">
-              <div className="library-collection-identity min-w-0 flex-1">
+              <div className="library-collection-identity min-w-0 flex-[1_1_100%] @2xl/library:flex-1">
                 <InlineTitleEditor
                   fieldLabel={uiText("inbox.collectionName")}
                   maxLength={COLLECTION_NAME_LIMIT}
@@ -3570,7 +3593,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 }
                 className="shrink-0 @3xl/library:h-8 @3xl/library:text-xs"
               >
-                <Upload className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <Upload className="h-4 w-4" aria-hidden />
                 {uiText("Upload")}
               </Button>
             </div>
@@ -3618,6 +3641,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   onClick={() => {
                     setIsCreatingCollection(false);
                     setNewCollectionName("");
+                    setCollectionNameError(null);
                   }}
                 >
                   {uiText("Cancel")}
@@ -3625,9 +3649,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 <Button
                   type="submit"
                   form={collectionFormId}
-                  disabled={
-                    !newCollectionName.trim() || !auth.isAuthenticated || !canCreateCollection
-                  }
+                  disabled={!auth.isAuthenticated || !canCreateCollection}
                 >
                   {uiText("Create collection")}
                 </Button>
@@ -3636,16 +3658,28 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           >
             <form
               id={collectionFormId}
+              noValidate
               onSubmit={(event) => {
                 event.preventDefault();
-                handleCreateCollection();
+                void handleCreateCollection();
               }}
             >
-              <FormField label={uiText("Name")}>
+              <FormField
+                label={uiText("Name")}
+                htmlFor={collectionNameId}
+                error={collectionNameError}
+                errorId={`${collectionNameId}-error`}
+              >
                 <Input
+                  id={collectionNameId}
                   autoFocus
                   value={newCollectionName}
-                  onChange={(event) => setNewCollectionName(event.target.value)}
+                  aria-invalid={collectionNameError ? true : undefined}
+                  aria-describedby={collectionNameError ? `${collectionNameId}-error` : undefined}
+                  onChange={(event) => {
+                    setNewCollectionName(event.target.value);
+                    setCollectionNameError(null);
+                  }}
                   disabled={!auth.isAuthenticated}
                   maxLength={100}
                 />
@@ -3714,48 +3748,43 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </div>
               )}
               {error && (
-                <div
-                  role="alert"
-                  className="mx-4 mt-4 flex items-center justify-between gap-3 border border-destructive/40 bg-destructive/10 p-3 text-sm sm:mx-6"
-                >
-                  <p className="min-w-0 break-words text-foreground">
-                    {unavailableCollection ? (
+                <ErrorState
+                  className="mx-4 mt-4 sm:mx-6"
+                  message={
+                    unavailableCollection ? (
                       uiText("library.collectionUnavailableHelp")
                     ) : (
                       <>
                         {uiText("Could not load Models.")}{" "}
                         <span className="text-muted-foreground">{error}</span>
                       </>
-                    )}
-                  </p>
-                  {unavailableCollection && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="shrink-0"
-                      onClick={() => handleCollectionChange(null)}
-                    >
-                      {uiText("aiSearch.backToLibrary")}
-                    </Button>
-                  )}
-                  {(currentRefresh ||
-                    (!unavailableCollection &&
-                      modelReadError &&
-                      !modelQuery.isFetchNextPageError)) && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="shrink-0"
-                      disabled={currentRefresh?.status === "pending" || modelQuery.isFetching}
-                      onClick={() => {
-                        if (currentRefresh) void (snapshot ? reading.refresh(refresh) : refresh());
-                        else void modelQuery.refetch();
-                      }}
-                    >
-                      {uiText("Retry")}
-                    </Button>
-                  )}
-                </div>
+                    )
+                  }
+                  actions={
+                    unavailableCollection ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={() => handleCollectionChange(null)}
+                      >
+                        {uiText("aiSearch.backToLibrary")}
+                      </Button>
+                    ) : undefined
+                  }
+                  retryLabel={uiText("Retry")}
+                  retrying={currentRefresh?.status === "pending" || modelQuery.isFetching}
+                  onRetry={
+                    currentRefresh ||
+                    (!unavailableCollection && modelReadError && !modelQuery.isFetchNextPageError)
+                      ? () => {
+                          if (currentRefresh)
+                            void (snapshot ? reading.refresh(refresh) : refresh());
+                          else void modelQuery.refetch();
+                        }
+                      : undefined
+                  }
+                />
               )}
 
               {collectionOverview && (
@@ -3827,7 +3856,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                             collection === "create" ? (
                               <NewCollectionCard
                                 maxLength={COLLECTION_NAME_LIMIT}
-                                onCreate={saveNewCollection}
+                                onCreate={(name) => saveNewCollection(name, true)}
                               />
                             ) : (
                               <LibraryCardFill
@@ -4505,7 +4534,7 @@ export function ModelGridSkeleton({
           virtualize={false}
           renderItem={() => (
             <div
-              className="library-model-card flex h-full flex-col overflow-hidden border border-border bg-card"
+              className="library-model-card flex h-full flex-col overflow-hidden rounded-md border border-border bg-card"
               aria-hidden
             >
               <div className="library-preview">

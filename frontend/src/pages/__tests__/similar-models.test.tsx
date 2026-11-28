@@ -43,7 +43,7 @@ describe("SimilarModelsPage", () => {
     expect(await screen.findByRole("link", { name: "Compare" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Start analysis" })).toBeVisible();
     expect(
-      screen.queryByRole("checkbox", { name: "Enable similarity analysis" }),
+      screen.queryByRole("switch", { name: "Enable similarity analysis" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Analysis history" })).not.toBeInTheDocument();
   });
@@ -62,7 +62,7 @@ describe("SimilarModelsPage", () => {
       "aria-selected",
       "true",
     );
-    expect(screen.getByRole("checkbox", { name: "Enable similarity analysis" })).toBeVisible();
+    expect(screen.getByRole("switch", { name: "Enable similarity analysis" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Start analysis" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Compare" })).not.toBeInTheDocument();
   });
@@ -73,13 +73,13 @@ describe("SimilarModelsPage", () => {
     await user.click(screen.getByRole("tab", { name: "Analysis settings" }));
     const threshold = await screen.findByRole("slider");
     fireEvent.change(threshold, { target: { value: "92" } });
-    await user.click(screen.getByRole("checkbox", { name: "Enable similarity analysis" }));
+    await user.click(screen.getByRole("switch", { name: "Enable similarity analysis" }));
     await user.click(screen.getByRole("tab", { name: "Analysis history" }));
     expect(await screen.findByText("No analysis runs yet")).toBeVisible();
     await user.click(screen.getByRole("tab", { name: "Matches" }));
     await user.click(screen.getByRole("tab", { name: "Analysis settings" }));
     expect(screen.getByRole("slider")).toHaveValue("92");
-    expect(screen.getByRole("checkbox", { name: "Enable similarity analysis" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Enable similarity analysis" })).not.toBeChecked();
     expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
   });
 
@@ -105,7 +105,7 @@ describe("SimilarModelsPage", () => {
     expect(screen.queryByRole("tab", { name: "Analysis history" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start analysis" })).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("checkbox", { name: "Enable similarity analysis" }),
+      screen.queryByRole("switch", { name: "Enable similarity analysis" }),
     ).not.toBeInTheDocument();
     expect(
       app.requestsWithMethod("GET").some((request) => request.url === "/api/v1/similarity/runs"),

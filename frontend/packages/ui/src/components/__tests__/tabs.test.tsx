@@ -358,4 +358,58 @@ describe("TabBar", () => {
       expect(resizeObservers.at(-1)?.disconnected).toBe(true);
     });
   });
+
+  describe("overflow fade", () => {
+    function strip(scrollWidth: number, clientWidth: number) {
+      render(
+        <TabBar
+          variant="framed"
+          tabs={TABS}
+          active="files"
+          onChange={vi.fn<(key: string) => void>()}
+        />,
+      );
+      const list = screen.getByRole("tablist");
+      Object.defineProperty(list, "scrollWidth", { configurable: true, value: scrollWidth });
+      Object.defineProperty(list, "clientWidth", { configurable: true, value: clientWidth });
+      return list;
+    }
+
+    it("fades the right edge while more tabs wait beyond it", () => {
+      const list = strip(600, 300);
+
+      act(() => resizeObservers.at(-1)?.reflow());
+
+      expect(list).toHaveAttribute("data-more-after", "true");
+      expect(list).not.toHaveAttribute("data-more-before");
+    });
+
+    it("fades the left edge once the strip is scrolled, then both edges mid-way", () => {
+      const list = strip(600, 300);
+      act(() => resizeObservers.at(-1)?.reflow());
+
+      list.scrollLeft = 100;
+      act(() => {
+        fireEvent.scroll(list);
+      });
+      expect(list).toHaveAttribute("data-more-before", "true");
+      expect(list).toHaveAttribute("data-more-after", "true");
+
+      list.scrollLeft = 300;
+      act(() => {
+        fireEvent.scroll(list);
+      });
+      expect(list).toHaveAttribute("data-more-before", "true");
+      expect(list).not.toHaveAttribute("data-more-after");
+    });
+
+    it("does not fade a strip that fits", () => {
+      const list = strip(300, 300);
+
+      act(() => resizeObservers.at(-1)?.reflow());
+
+      expect(list).not.toHaveAttribute("data-more-after");
+      expect(list).not.toHaveAttribute("data-more-before");
+    });
+  });
 });

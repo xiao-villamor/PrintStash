@@ -5,7 +5,7 @@ import { CHROME_EXTENSION_URL } from "@/lib/browser-extension-setup";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { Download, ExternalLink } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Localized } from "@/components/ui/localized";
 
@@ -33,7 +33,6 @@ export function MakerWorldConnectCard() {
             </Button>
             <Button asChild size="sm">
               <a href={CHROME_EXTENSION_URL} target="_blank" rel="noopener noreferrer">
-                <Download className="h-3.5 w-3.5" aria-hidden />
                 {uiText("Install Chrome extension")}
               </a>
             </Button>

@@ -1,3 +1,5 @@
+import { FieldErrors } from "@/components/ui/field-errors";
+import { useFormValidation } from "@/lib/form-validation";
 import { inboxFiles, inboxProviderLabel, inboxCanImport } from "./inbox-summary";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -8,12 +10,12 @@ import {
   Clock3,
   FileCheck2,
   Inbox,
+  Link2,
   RefreshCw,
-  Trash2,
   type LucideIcon,
 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
+import { ErrorState } from "@/components/ui/error-state";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -168,7 +170,6 @@ function ImportList({
                         });
                     }}
                   >
-                    <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
                     {t("inbox.retry")}
                   </Button>
                 )}
@@ -190,12 +191,11 @@ function ImportList({
                   <Button
                     type="button"
                     size="xs"
-                    variant="outline"
+                    variant="danger"
                     aria-label={t("inbox.delete")}
                     title={t("inbox.delete")}
                     loading={deletingId === item.id}
                     onClick={() => onDelete(item)}
-                    className="text-muted-foreground hover:text-destructive"
                   >
                     {uiText("Dismiss…")}
                   </Button>
@@ -256,6 +256,7 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
   const router = useRouter();
   const sourceUrlId = useId();
   const captureFormId = useId();
+  const captureValidation = useFormValidation();
   const captureInFlight = useRef(false);
   const [addUrlOpen, setAddUrlOpen] = useState(false);
   const [sourceUrl, setSourceUrl] = useState("");
@@ -369,8 +370,6 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
   }
 
   const visibleItems = activeTab === "queue" ? groups.queue : groups.done;
-  const tabClass =
-    "flex items-center justify-center gap-1 border-b-2 border-transparent pb-3 pt-4 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
   return (
     <PageContainer>
@@ -385,29 +384,31 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
               loading={snapshot.isFetching}
               onClick={() => void snapshot.refetch()}
             >
+              <RefreshCw className="h-4 w-4" aria-hidden />
               {uiText("Refresh")}
             </Button>
-            <Button size="sm" onClick={() => setAddUrlOpen(true)}>
+            <Button
+              size="sm"
+              variant={selectedReady.length > 0 ? "outline" : "default"}
+              onClick={() => setAddUrlOpen(true)}
+            >
+              <Link2 className="h-4 w-4" aria-hidden />
               {t("inbox.addUrl")}
             </Button>
           </>
         }
       />
       <Card className="overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-border px-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 border-b border-border px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
           <TabBar
+            variant="framed"
             tabs={[
               {
                 key: "queue",
                 label: (
                   <>
                     {t("inbox.queue")} ·
-                    <Badge
-                      variant="secondary"
-                      className="border-0 bg-transparent px-0 text-muted-foreground"
-                    >
-                      {groups.queue.length}
-                    </Badge>
+                    <span className="font-normal text-muted-foreground">{groups.queue.length}</span>
                   </>
                 ),
               },
@@ -416,22 +417,13 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
                 label: (
                   <>
                     {t("inbox.completed")} ·
-                    <Badge
-                      variant="secondary"
-                      className="border-0 bg-transparent px-0 text-muted-foreground"
-                    >
-                      {groups.done.length}
-                    </Badge>
+                    <span className="font-normal text-muted-foreground">{groups.done.length}</span>
                   </>
                 ),
               },
             ]}
             active={activeTab}
             onChange={setActiveTab}
-            showIndicator={false}
-            className="gap-6"
-            tabClassName={tabClass}
-            activeTabClassName="border-foreground font-semibold"
           />
           {activeTab === "queue" && selectedReady.length > 0 && (
             <Button
@@ -445,10 +437,9 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
             <Button
               type="button"
               size="xs"
-              variant="outline"
+              variant="danger"
               onClick={() => setClearCompletedOpen(true)}
             >
-              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
               {t("inbox.clearCompleted")}
             </Button>
           )}
@@ -462,12 +453,12 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
             </div>
           </div>
           {snapshot.isError ? (
-            <div role="alert" className="p-5 text-sm text-destructive">
-              <p>{userMessage(snapshot.error)}</p>
-              <Button variant="outline" onClick={() => void snapshot.refetch()}>
-                {t("inbox.retry")}
-              </Button>
-            </div>
+            <ErrorState
+              layout="block"
+              message={userMessage(snapshot.error)}
+              retryLabel={t("inbox.retry")}
+              onRetry={() => void snapshot.refetch()}
+            />
           ) : loading ? (
             <div aria-label={t("inbox.loading")} className="space-y-3 p-5">
               <Skeleton className="h-14 w-full" />
@@ -522,7 +513,7 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
             <Button
               type="submit"
               form={captureFormId}
-              disabled={!sourceUrl.trim() || commands.capture.isPending}
+              disabled={commands.capture.isPending}
               loading={commands.capture.isPending}
             >
               {uiText("Capture for review")}
@@ -530,26 +521,33 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
           </>
         }
       >
-        <form id={captureFormId} onSubmit={(event) => void submitCapture(event)}>
-          <FormField
-            label={uiText("Source URL")}
-            htmlFor={sourceUrlId}
-            hintId={`${sourceUrlId}-hint`}
-            hint={uiText(
-              "Create a durable capture, then review its files and confirm or change the collection and tags.",
-            )}
-          >
-            <Input
-              id={sourceUrlId}
-              type="url"
-              inputMode="url"
-              value={sourceUrl}
-              readOnly={commands.capture.isPending}
-              onChange={(event) => setSourceUrl(event.target.value)}
-              placeholder={uiText("Model page, collection, or direct .stl/.zip link")}
-              aria-describedby={`${sourceUrlId}-hint`}
-            />
-          </FormField>
+        <form
+          id={captureFormId}
+          {...captureValidation.formProps}
+          onSubmit={(event) => captureValidation.handle(event, submitCapture)}
+        >
+          <FieldErrors errors={captureValidation.errors}>
+            <FormField
+              label={uiText("Source URL")}
+              htmlFor={sourceUrlId}
+              hintId={`${sourceUrlId}-hint`}
+              hint={uiText(
+                "Create a durable capture, then review its files and confirm or change the collection and tags.",
+              )}
+            >
+              <Input
+                id={sourceUrlId}
+                type="url"
+                inputMode="url"
+                required
+                value={sourceUrl}
+                readOnly={commands.capture.isPending}
+                onChange={(event) => setSourceUrl(event.target.value)}
+                placeholder={uiText("Model page, collection, or direct .stl/.zip link")}
+                aria-describedby={`${sourceUrlId}-hint`}
+              />
+            </FormField>
+          </FieldErrors>
         </form>
       </Modal>
       <ConfirmModal

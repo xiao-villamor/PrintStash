@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { StagedInputRecovery } from "@/components/staged-input-recovery";
 
 import { ApiError, getErrorMessage } from "@/lib/errors";
@@ -15,7 +16,7 @@ import {
   type ArtifactUploadProgress,
 } from "@/lib/artifact-upload";
 
-import { CheckCircle2, ChevronDown, Loader2, XCircle, MinusCircle } from "lucide-react";
+import { CheckCircle2, Loader2, XCircle, MinusCircle } from "lucide-react";
 import { Link } from "@/lib/link";
 import { useAuth } from "@/lib/auth-context";
 
@@ -44,16 +45,15 @@ export function TaskList({
   useUiLocale();
   return (
     <div
+      data-task-panel
       className={
         compact
           ? "w-full"
-          : "w-[360px] max-w-[calc(100vw-2rem)] rounded border border-border bg-popover shadow-lg"
+          : "w-[360px] max-w-[calc(100vw-2rem)] rounded-lg border border-border bg-popover shadow-lg"
       }
     >
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <span className="font-mono text-2xs uppercase tracking-wider text-muted-foreground">
-          {uiText("Tasks")}
-        </span>
+        <span className="text-sm font-semibold text-foreground">{uiText("Notifications")}</span>
         {tasks.some(
           (task) =>
             (task.status === "completed" || task.status === "failed") && !needsArchiveReview(task),
@@ -61,14 +61,14 @@ export function TaskList({
           <button
             type="button"
             onClick={onClear}
-            className="rounded font-mono text-3xs uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="rounded px-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {uiText("Clear done")}
           </button>
         )}
       </div>
       {tasks.length === 0 ? (
-        <div className="px-4 py-8 text-center font-mono text-xs text-muted-foreground">
+        <div className="px-4 py-8 text-center text-sm text-muted-foreground">
           {uiText("No active tasks")}
         </div>
       ) : (
@@ -107,7 +107,7 @@ function TaskRow({ task, onNavigate }: { task: TaskItem; onNavigate?: () => void
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
             <p className="truncate text-sm font-medium text-foreground">{taskTitle(task)}</p>
-            <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+            <span className="shrink-0 text-xs capitalize text-muted-foreground">
               {task.jobReason === "derivative_group_disabled"
                 ? uiText("Processing disabled")
                 : task.uploadPaused
@@ -230,11 +230,8 @@ function TaskRow({ task, onNavigate }: { task: TaskItem; onNavigate?: () => void
               </div>
             )}
           {!!task.failedItems?.length && (
-            <details className="mt-2 text-xs text-muted-foreground">
-              <summary className="flex cursor-action list-none items-center gap-1 font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                <ChevronDown className="h-3.5 w-3.5" />
-                {uiText(" Failed item details")}
-              </summary>
+            <section className="mt-2 text-xs text-muted-foreground">
+              <h4 className="font-medium text-foreground">{uiText("Failed item details")}</h4>
               <ul className="mt-2 space-y-1">
                 {task.failedItems.map((item, index) => (
                   <li key={`${item.name}-${index}`} className="break-words">
@@ -243,7 +240,7 @@ function TaskRow({ task, onNavigate }: { task: TaskItem; onNavigate?: () => void
                   </li>
                 ))}
               </ul>
-            </details>
+            </section>
           )}
           {task.jobId && task.staging && (
             <StagedInputRecovery
@@ -272,15 +269,16 @@ function TaskRow({ task, onNavigate }: { task: TaskItem; onNavigate?: () => void
             </button>
           )}
           {needsArchiveReview(task) && (
-            <button
+            <Button
               type="button"
+              size="xs"
+              className="mt-2"
               onClick={() => {
                 if (task.jobId) requestArchiveReview(task.jobId);
               }}
-              className="mt-2 rounded border border-border px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {uiText("Choose ZIP files")}
-            </button>
+            </Button>
           )}
           {task.similarityRunId !== undefined && (
             <Link

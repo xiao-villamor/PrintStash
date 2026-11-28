@@ -45,7 +45,7 @@ export const Switch = forwardRef<
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={cn(
-          "relative inline-flex h-5.5 w-9.5 shrink-0 items-center rounded-full transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:cursor-disabled disabled:opacity-50",
+          "relative inline-flex h-6 w-10 shrink-0 items-center rounded-full after:absolute after:-inset-y-[2px] after:inset-x-0 after:content-[''] pointer-coarse:after:-inset-y-[9px] transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:cursor-disabled disabled:opacity-50",
           checked ? "bg-primary" : "bg-input",
         )}
       >

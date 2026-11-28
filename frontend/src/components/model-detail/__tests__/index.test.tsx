@@ -154,7 +154,7 @@ async function openEdit(user: ReturnType<typeof userEvent.setup>) {
   await user.click(
     await within(screen.getByRole("banner")).findByRole("button", { name: "Edit details" }),
   );
-  await screen.findByRole("textbox", { name: "Name (required)" });
+  await screen.findByRole("textbox", { name: "Name" });
 }
 
 beforeEach(() => {
@@ -533,8 +533,8 @@ describe("ModelDetail", () => {
         },
       });
       await openEdit(user);
-      await user.clear(screen.getByRole("textbox", { name: "Name (required)" }));
-      await user.type(screen.getByRole("textbox", { name: "Name (required)" }), "My draft");
+      await user.clear(screen.getByRole("textbox", { name: "Name" }));
+      await user.type(screen.getByRole("textbox", { name: "Name" }), "My draft");
 
       act(() =>
         client.setQueryData(
@@ -549,7 +549,7 @@ describe("ModelDetail", () => {
       await user.click(screen.getByRole("button", { name: "Save changes" }));
 
       expect(headers).toEqual(['"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"']);
-      expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("My draft");
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("My draft");
     });
 
     it("keeps a confirmed edit after an older read finishes", async () => {
@@ -565,8 +565,8 @@ describe("ModelDetail", () => {
         },
       });
       await openEdit(user);
-      await user.clear(screen.getByRole("textbox", { name: "Name (required)" }));
-      await user.type(screen.getByRole("textbox", { name: "Name (required)" }), "Confirmed edit");
+      await user.clear(screen.getByRole("textbox", { name: "Name" }));
+      await user.type(screen.getByRole("textbox", { name: "Name" }), "Confirmed edit");
       void client.invalidateQueries({ queryKey: queryKeys.model(1) });
       await waitFor(() =>
         expect(requests().some((r) => r.url === "/api/v1/models/1" && r.method === "GET")).toBe(
@@ -1021,8 +1021,8 @@ describe("ModelDetail", () => {
         },
       });
       await openEdit(user);
-      await user.clear(screen.getByRole("textbox", { name: "Name (required)" }));
-      await user.type(screen.getByRole("textbox", { name: "Name (required)" }), "My draft");
+      await user.clear(screen.getByRole("textbox", { name: "Name" }));
+      await user.type(screen.getByRole("textbox", { name: "Name" }), "My draft");
 
       await user.click(screen.getByRole("button", { name: "Save changes" }));
 
@@ -1031,7 +1031,7 @@ describe("ModelDetail", () => {
           "This item changed elsewhere. Your draft has been kept. Review the latest version before saving again.",
         ),
       ).toBeVisible();
-      expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("My draft");
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("My draft");
       expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
       await user.click(screen.getByRole("button", { name: "Review latest version" }));
       expect(await screen.findByRole("dialog", { name: "Latest saved version" })).toHaveTextContent(
@@ -1055,8 +1055,8 @@ describe("ModelDetail", () => {
         },
       });
       await openEdit(user);
-      await user.clear(screen.getByRole("textbox", { name: "Name (required)" }));
-      await user.type(screen.getByRole("textbox", { name: "Name (required)" }), "My draft");
+      await user.clear(screen.getByRole("textbox", { name: "Name" }));
+      await user.type(screen.getByRole("textbox", { name: "Name" }), "My draft");
       await user.click(screen.getByRole("button", { name: "Save changes" }));
       await user.click(await screen.findByRole("button", { name: "Review latest version" }));
       await screen.findByRole("dialog", { name: "Latest saved version" });
@@ -1096,7 +1096,7 @@ describe("ModelDetail", () => {
 
       await user.click(screen.getByRole("button", { name: "Use latest version" }));
 
-      expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("Other editor");
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Other editor");
       expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
       expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
     });
@@ -1116,7 +1116,7 @@ describe("ModelDetail", () => {
 
       await user.click(screen.getByRole("button", { name: "Keep my draft" }));
 
-      expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("Benchy");
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Benchy");
       expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
     });
 
@@ -1140,7 +1140,7 @@ describe("ModelDetail", () => {
           screen.queryByRole("dialog", { name: "Latest saved version" }),
         ).not.toBeInTheDocument(),
       );
-      expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("Benchy");
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Benchy");
       expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
       expect(app.requestsWithMethod("PATCH")).toHaveLength(2);
     });
@@ -1191,7 +1191,7 @@ describe("ModelDetail", () => {
       renderDetail();
       await openEdit(user);
 
-      expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("Benchy");
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Benchy");
     });
 
     it("saves the name the user typed", async () => {
@@ -1200,7 +1200,7 @@ describe("ModelDetail", () => {
         routes: { "PATCH /api/v1/models/1": json(aModel({ name: "Benchy v2", edit_version: 2 })) },
       });
       await openEdit(user);
-      const name = screen.getByRole("textbox", { name: "Name (required)" });
+      const name = screen.getByRole("textbox", { name: "Name" });
       await user.clear(name);
       await user.type(name, "Benchy v2");
 
@@ -1218,12 +1218,9 @@ describe("ModelDetail", () => {
       const { requestsWithMethod } = renderDetail();
       await openEdit(user);
 
-      await user.clear(screen.getByRole("textbox", { name: "Name (required)" }));
+      await user.clear(screen.getByRole("textbox", { name: "Name" }));
 
-      expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveAttribute(
-        "aria-invalid",
-        "true",
-      );
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveAttribute("aria-invalid", "true");
       expect(screen.getByText("Model name is required.")).toBeVisible();
       expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
       expect(requestsWithMethod("PATCH")).toHaveLength(0);
@@ -1237,7 +1234,7 @@ describe("ModelDetail", () => {
         routes: { "PATCH /api/v1/models/1": json(aModel({ name: "Benchy v2", edit_version: 2 })) },
       });
       await openEdit(user);
-      const name = screen.getByRole("textbox", { name: "Name (required)" });
+      const name = screen.getByRole("textbox", { name: "Name" });
       await user.clear(name);
       await user.type(name, "Benchy v2");
 
@@ -1303,7 +1300,7 @@ describe("ModelDetail", () => {
           ),
         ).toBeVisible();
         expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
-        expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("Benchy");
+        expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Benchy");
         expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
       },
     );
@@ -1325,7 +1322,7 @@ describe("ModelDetail", () => {
       );
 
       expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
-      expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("Benchy");
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Benchy");
       expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
     });
 
@@ -1338,8 +1335,8 @@ describe("ModelDetail", () => {
         },
       });
       await openEdit(user);
-      await user.clear(screen.getByRole("textbox", { name: "Name (required)" }));
-      await user.type(screen.getByRole("textbox", { name: "Name (required)" }), "Saved draft");
+      await user.clear(screen.getByRole("textbox", { name: "Name" }));
+      await user.type(screen.getByRole("textbox", { name: "Name" }), "Saved draft");
       await user.click(screen.getByRole("button", { name: "Save changes" }));
       await user.click(await screen.findByRole("button", { name: "Review latest version" }));
       await screen.findByRole("dialog", { name: "Latest saved version" });
@@ -1352,7 +1349,7 @@ describe("ModelDetail", () => {
         edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         edit_version: 7,
       });
-      expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("Saved draft");
+      expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Saved draft");
     });
 
     it("clears a source URL the user emptied", async () => {
@@ -1419,7 +1416,7 @@ describe("ModelDetail", () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderDetail();
       await openEdit(user);
-      const name = screen.getByRole("textbox", { name: "Name (required)" });
+      const name = screen.getByRole("textbox", { name: "Name" });
       await user.clear(name);
       await user.type(name, "Something else");
 
@@ -1438,7 +1435,7 @@ describe("ModelDetail", () => {
 
       await user.click(screen.getByRole("button", { name: "Save changes" }));
 
-      expect(await screen.findByRole("textbox", { name: "Name (required)" })).toBeInTheDocument();
+      expect(await screen.findByRole("textbox", { name: "Name" })).toBeInTheDocument();
     });
   });
 
@@ -1666,14 +1663,14 @@ describe("ModelDetail", () => {
       const user = userEvent.setup();
       renderDetail();
       await openEdit(user);
-      fireEvent.keyDown(screen.getByRole("textbox", { name: "Name (required)" }), {
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Name" }), {
         key: "b",
         code: "KeyB",
         ctrlKey: true,
         altKey: true,
       });
       expect(screen.getByTestId("model-detail-sidebar")).toBeVisible();
-      expect(screen.getByRole("textbox", { name: "Name (required)" })).toBeVisible();
+      expect(screen.getByRole("textbox", { name: "Name" })).toBeVisible();
     });
   });
 

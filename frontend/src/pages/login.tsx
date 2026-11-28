@@ -9,7 +9,9 @@ import { useQuery } from "@tanstack/react-query";
 import { loginProvidersOptions } from "@/features/auth/entry";
 import { Navigate } from "@tanstack/react-router";
 import { useRouter } from "@/lib/navigation";
-import { AlertCircle, Eye, EyeOff, Info } from "lucide-react";
+import { Info } from "lucide-react";
+import { PasswordToggle } from "@/components/ui/password-toggle";
+import { ErrorState } from "@/components/ui/error-state";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -45,6 +47,7 @@ export default function LoginPage() {
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [remember_me, setremember_me] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [missing, setMissing] = useState({ username: false, password: false });
   const providerRead = useQuery(loginProvidersOptions());
   const providers = providerRead.data;
   const view = useRef<AbortController | null>(null);
@@ -61,8 +64,9 @@ export default function LoginPage() {
   // Kept out of state so the message follows the locale toggle on this page.
   const error = formError ?? (ssoFailed ? t("auth.ssoFailed") : null);
   const fieldDescription =
-    [sessionExpired && "login-session-expired", error && "login-error"].filter(Boolean).join(" ") ||
-    undefined;
+    [sessionExpired && !error && "login-session-expired", error && "login-error"]
+      .filter(Boolean)
+      .join(" ") || undefined;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -94,6 +98,14 @@ export default function LoginPage() {
     e.preventDefault();
     const controller = view.current;
     if (!controller || controller.signal.aborted || submitting.current || busy) return;
+    const nextMissing = { username: !username.trim(), password: !password };
+    setMissing(nextMissing);
+    if (nextMissing.username || nextMissing.password) {
+      // A new field problem replaces the previous server answer instead of sitting beside it.
+      setFormError(null);
+      document.getElementById(nextMissing.username ? "username" : "password")?.focus();
+      return;
+    }
     submitting.current = true;
     setFormError(null);
     setSsoFailed(false);
@@ -121,8 +133,8 @@ export default function LoginPage() {
         {t("auth.description")}
       </p>
 
-      <form onSubmit={handleSubmit} className="mt-6 grid gap-4">
-        {sessionExpired && (
+      <form onSubmit={handleSubmit} noValidate className="mt-6 grid gap-4">
+        {sessionExpired && !error && (
           <div
             id="login-session-expired"
             role="status"
@@ -134,13 +146,8 @@ export default function LoginPage() {
         )}
 
         {error && (
-          <div
-            id="login-error"
-            role="alert"
-            className="flex items-start gap-2.5 rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2.5 text-sm font-medium text-foreground"
-          >
-            <AlertCircle className="mt-px h-4 w-4 shrink-0 text-destructive" aria-hidden />
-            <p>{error}</p>
+          <div id="login-error">
+            <ErrorState message={error} />
           </div>
         )}
 
@@ -152,8 +159,16 @@ export default function LoginPage() {
             id="username"
             type="text"
             value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            aria-describedby={fieldDescription}
+            onChange={(e) => {
+              setUsername(e.target.value);
+              setMissing((current) => ({ ...current, username: false }));
+            }}
+            aria-invalid={missing.username ? true : undefined}
+            aria-describedby={
+              [fieldDescription, missing.username && "login-username-error"]
+                .filter(Boolean)
+                .join(" ") || undefined
+            }
             autoComplete="username"
             autoCapitalize="none"
             spellCheck={false}
@@ -161,6 +176,11 @@ export default function LoginPage() {
             required
             className={authFieldInput}
           />
+          {missing.username && (
+            <p id="login-username-error" role="alert" className="text-xs text-destructive">
+              {t("auth.usernameRequired")}
+            </p>
+          )}
         </div>
 
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5">
@@ -172,30 +192,28 @@ export default function LoginPage() {
               id="password"
               type={passwordVisible ? "text" : "password"}
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              aria-describedby={fieldDescription}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setMissing((current) => ({ ...current, password: false }));
+              }}
+              aria-invalid={missing.password ? true : undefined}
+              aria-describedby={
+                [fieldDescription, missing.password && "login-password-error"]
+                  .filter(Boolean)
+                  .join(" ") || undefined
+              }
               autoComplete="current-password"
               required
               className={`${authFieldInput} pr-10`}
             />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="absolute inset-y-0 right-0 h-full w-10 text-muted-foreground"
-              aria-label={t(passwordVisible ? "setup.hideField" : "setup.showField", {
+            <PasswordToggle
+              visible={passwordVisible}
+              onToggle={() => setPasswordVisible((visible) => !visible)}
+              label={t(passwordVisible ? "setup.hideField" : "setup.showField", {
                 field: t("auth.password"),
               })}
-              aria-controls="password"
-              aria-pressed={passwordVisible}
-              onClick={() => setPasswordVisible((visible) => !visible)}
-            >
-              {passwordVisible ? (
-                <EyeOff className="h-4 w-4" aria-hidden />
-              ) : (
-                <Eye className="h-4 w-4" aria-hidden />
-              )}
-            </Button>
+              controls="password"
+            />
           </div>
           <Button
             type="button"
@@ -207,6 +225,15 @@ export default function LoginPage() {
           >
             {t("auth.forgotAction")}
           </Button>
+          {missing.password && (
+            <p
+              id="login-password-error"
+              role="alert"
+              className="col-span-2 text-xs text-destructive"
+            >
+              {t("auth.passwordRequired")}
+            </p>
+          )}
           <p
             id="login-password-recovery"
             hidden={!recoveryOpen}
@@ -225,7 +252,7 @@ export default function LoginPage() {
         </div>
 
         {/* The whole row toggles the box, as a native checkbox label would. */}
-        <label className="flex min-h-6 w-fit cursor-action items-center gap-2.5 text-[13px] text-on-surface-variant">
+        <label className="flex min-h-6 w-fit cursor-action items-center gap-2.5 text-field text-on-surface-variant">
           <Checkbox
             checked={remember_me}
             onChange={setremember_me}
@@ -239,16 +266,6 @@ export default function LoginPage() {
         </Button>
       </form>
 
-      {providerRead.error && (
-        <div className="mt-5 space-y-3">
-          <p role="alert" className="text-sm text-destructive">
-            {userMessage(providerRead.error)}
-          </p>
-          <Button type="button" variant="outline" onClick={() => void providerRead.refetch()}>
-            {uiText("Retry")}
-          </Button>
-        </div>
-      )}
       {providers?.oidc_enabled && (
         <>
           <div

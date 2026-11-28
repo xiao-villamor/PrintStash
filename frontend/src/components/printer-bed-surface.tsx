@@ -93,7 +93,7 @@ function BedMeshReadout({ mesh }: { mesh: Extract<BedMesh, { state: "active" }> 
                       };
                       return (
                         <td
-                          className="printer-bed-cell border border-border p-2 text-center font-mono"
+                          className="printer-bed-cell rounded-lg border border-border p-2 text-center font-mono"
                           key={column}
                           style={tint}
                         >

@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import {} from "lucide-react";
 import { SettingsCard, SettingsSwitch } from "@/components/settings-card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
+import { Input, inputClasses } from "@/components/ui/input";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   auditHistoryOptions,
@@ -127,7 +127,7 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
                 <label className="space-y-1 text-sm">
                   {t("auditSchedule.cadence")}
                   <select
-                    className="w-full rounded-md border border-input bg-field-surface p-2"
+                    className={inputClasses}
                     value={policy.cadence}
                     onChange={(event) =>
                       setPolicy({
@@ -144,7 +144,7 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
                   <label className="space-y-1 text-sm">
                     {t("auditSchedule.weekday")}
                     <select
-                      className="w-full rounded-md border border-input bg-field-surface p-2"
+                      className={inputClasses}
                       value={policy.weekday}
                       onChange={(event) =>
                         setPolicy({ ...policy, weekday: Number(event.target.value) })
@@ -214,18 +214,17 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
                 {t("auditSchedule.fullCost")}
               </label>
             )}
-            <details className="border-t border-border pt-3">
-              <summary className="cursor-action text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                {t("auditSchedule.advanced")}
-              </summary>
+            <section className="border-t border-border pt-3">
+              <h4 className="text-sm font-medium text-foreground">{t("auditSchedule.advanced")}</h4>
               <div className="mt-4 space-y-3">
-                <label className="flex items-center gap-2 text-sm">
-                  <Checkbox
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span>{t("auditSchedule.paused")}</span>
+                  <SettingsSwitch
+                    label={t("auditSchedule.paused")}
                     checked={policy.paused}
                     onChange={(paused) => setPolicy({ ...policy, paused })}
                   />
-                  {t("auditSchedule.paused")}
-                </label>
+                </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1 text-sm">
                     {t("auditSchedule.jitter")}
@@ -254,7 +253,7 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
                   <label className="space-y-1 text-sm">
                     {t("auditSchedule.notifications")}
                     <select
-                      className="w-full rounded-md border border-input bg-field-surface p-2"
+                      className={inputClasses}
                       value={policy.notification_threshold ?? "warning"}
                       onChange={(event) => {
                         const value = event.target.value;
@@ -352,7 +351,7 @@ function PolicyForm({ initial, blocked }: { initial: AuditPolicy; blocked: boole
                   </p>
                 )}
               </div>
-            </details>
+            </section>
             {(initial.next_due_at || initial.last_success_at) && (
               <p className="text-xs text-muted-foreground">
                 {initial.next_due_at &&

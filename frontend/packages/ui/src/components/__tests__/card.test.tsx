@@ -34,9 +34,10 @@ describe("Card", () => {
     expect(screen.getByText("Updated today")).toBeInTheDocument();
   });
 
-  it("keeps card corners square by default", () => {
+  it("rounds card corners like every other panel by default", () => {
     render(<Card>Body</Card>);
-    expect(screen.getByText("Body")).toHaveClass("rounded-none");
+    expect(screen.getByText("Body")).toHaveClass("rounded-lg");
+    expect(screen.getByText("Body")).not.toHaveClass("rounded-none");
   });
 
   it("lets a caller's class override the shell's own", () => {

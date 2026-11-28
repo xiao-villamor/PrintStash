@@ -733,7 +733,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
             {connectionReview}
             <div className="space-y-5">
               <fieldset className="space-y-2">
-                <legend className="text-[13px] font-medium text-foreground">
+                <legend className="text-field font-medium text-foreground">
                   {uiText("Storage category")}
                 </legend>
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -756,7 +756,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         className={cn(
                           "h-auto min-h-9 justify-start gap-2 whitespace-normal px-3 py-2 text-left text-sm",
                           category === choice.id &&
-                            "border-transparent bg-accent text-accent-foreground hover:bg-accent",
+                            "border-transparent bg-accent text-accent-foreground hover:bg-muted",
                         )}
                       >
                         <Icon className="h-4 w-4 shrink-0" aria-hidden />
@@ -767,7 +767,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                 </div>
               </fieldset>
               <fieldset className="space-y-2">
-                <legend className="text-[13px] font-medium text-foreground">
+                <legend className="text-field font-medium text-foreground">
                   {uiText("Provider")}
                 </legend>
                 <div className="grid gap-2 sm:grid-cols-3">
@@ -790,7 +790,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         className={cn(
                           "h-auto min-h-9 justify-start whitespace-normal px-3 py-2 text-left",
                           provider.id === providerId &&
-                            "border-transparent bg-accent text-accent-foreground hover:bg-accent",
+                            "border-transparent bg-accent text-accent-foreground hover:bg-muted",
                         )}
                       >
                         <span>
@@ -842,7 +842,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         className={cn(
                           "h-9 text-sm",
                           purpose === value &&
-                            "border-transparent bg-accent text-accent-foreground hover:bg-accent",
+                            "border-transparent bg-accent text-accent-foreground hover:bg-muted",
                         )}
                       >
                         {purposeLabel(value)}

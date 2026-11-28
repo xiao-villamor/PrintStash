@@ -1,3 +1,4 @@
+import { SettingsSwitch } from "@/components/settings-card";
 import { useEffect, useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { History, ScanSearch, SlidersHorizontal } from "lucide-react";
@@ -7,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
+import { Input, inputClasses } from "@/components/ui/input";
 import { currentLocale, uiText } from "@/lib/locale";
 import {
   similarityHistoryOptions,
@@ -75,25 +76,25 @@ function SettingsForm({ initial, readOnly }: { initial: SimilaritySettings; read
       <fieldset disabled={save.isPending || readOnly} className="space-y-4">
         <div className="grid gap-4 lg:grid-cols-2 lg:gap-8">
           <div className="space-y-3">
-            <label className="flex items-center gap-2 text-sm font-medium">
-              <Checkbox
-                ariaLabel={t("similarity.enable")}
+            <div className="flex items-center justify-between gap-3 text-sm font-medium">
+              <span>{t("similarity.enable")}</span>
+              <SettingsSwitch
+                label={t("similarity.enable")}
                 checked={draft.enabled}
                 onChange={(enabled) => setDraft({ ...draft, enabled })}
               />
-              {t("similarity.enable")}
-            </label>
+            </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
               {t("similarity.localHelp")}
             </p>
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox
-                ariaLabel={t("similarity.onIngest")}
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span>{t("similarity.onIngest")}</span>
+              <SettingsSwitch
+                label={t("similarity.onIngest")}
                 checked={draft.fingerprint_on_ingest}
                 onChange={(fingerprint_on_ingest) => setDraft({ ...draft, fingerprint_on_ingest })}
               />
-              {t("similarity.onIngest")}
-            </label>
+            </div>
           </div>
           <div className="space-y-2">
             <label className="block space-y-2 text-sm">
@@ -123,7 +124,7 @@ function SettingsForm({ initial, readOnly }: { initial: SimilaritySettings; read
                 {t("similarity.previewError")}
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
                   onClick={() => void preview.refetch()}
                 >
@@ -133,10 +134,8 @@ function SettingsForm({ initial, readOnly }: { initial: SimilaritySettings; read
             )}
           </div>
         </div>
-        <details className="border-t border-border pt-3">
-          <summary className="cursor-action text-sm font-medium">
-            {t("similarity.advanced")}
-          </summary>
+        <section className="border-t border-border pt-3">
+          <h4 className="text-sm font-medium text-foreground">{t("similarity.advanced")}</h4>
           <div className="mt-3 grid gap-x-6 gap-y-3 sm:grid-cols-2">
             <label className="flex items-center justify-between gap-3 text-sm">
               {t("similarity.triangleCap")}
@@ -237,7 +236,7 @@ function SettingsForm({ initial, readOnly }: { initial: SimilaritySettings; read
             />
             {t("similarity.embeddings")}
           </label>
-        </details>
+        </section>
       </fieldset>
       <Button size="sm" type="submit" loading={save.isPending} disabled={readOnly}>
         {t("similarity.save")}
@@ -339,7 +338,7 @@ export function SimilaritySettingsPanel({
           <EmptyState
             title={t("similarity.loadError")}
             action={
-              <Button size="sm" onClick={() => void status.refetch()}>
+              <Button variant="outline" size="sm" onClick={() => void status.refetch()}>
                 {t("similarity.retry")}
               </Button>
             }
@@ -364,7 +363,7 @@ export function SimilaritySettingsPanel({
           <div className="min-w-0 basis-full space-y-1 text-xs sm:basis-72">
             {t("similarity.scope")}
             <select
-              className="block w-full rounded-md border border-input bg-field-surface p-2 text-sm"
+              className={inputClasses}
               value={scopeValue}
               onChange={(event) => {
                 const value = event.target.value;
@@ -416,7 +415,6 @@ export function SimilaritySettingsPanel({
             )}
           </div>
           <Button
-            size="sm"
             loading={start.isPending}
             disabled={
               status.isError ||
@@ -454,7 +452,7 @@ export function SimilaritySettingsPanel({
         {sources.isError && (
           <div role="alert" className="p-3 text-sm text-destructive">
             {t("similarity.loadError")}{" "}
-            <Button variant="ghost" size="sm" onClick={() => void sources.refetch()}>
+            <Button variant="outline" size="sm" onClick={() => void sources.refetch()}>
               {t("similarity.retry")}
             </Button>
           </div>
@@ -476,7 +474,7 @@ export function SimilaritySettingsPanel({
             {modelChoices.isError && (
               <p role="alert" className="text-xs text-destructive">
                 {t("similarity.loadError")}
-                <Button variant="ghost" size="sm" onClick={() => void modelChoices.refetch()}>
+                <Button variant="outline" size="sm" onClick={() => void modelChoices.refetch()}>
                   {t("similarity.retry")}
                 </Button>
               </p>
@@ -543,7 +541,7 @@ export function SimilaritySettingsPanel({
           <EmptyState
             title={t("similarity.loadError")}
             action={
-              <Button size="sm" onClick={() => void status.refetch()}>
+              <Button variant="outline" size="sm" onClick={() => void status.refetch()}>
                 {t("similarity.retry")}
               </Button>
             }
@@ -586,7 +584,7 @@ export function SimilaritySettingsPanel({
           <p role="alert" className="px-4 pb-4 text-sm text-destructive">
             {t("similarity.loadError")}
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
               onClick={() =>
                 void (history.isFetchNextPageError ? history.fetchNextPage() : history.refetch())

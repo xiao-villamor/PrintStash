@@ -61,7 +61,7 @@ export function SavedRevisionPicker({
   );
   return (
     <div className="grid grid-cols-1 gap-2">
-      <label className="text-[13px]" htmlFor={revisionId}>
+      <label className="text-field" htmlFor={revisionId}>
         {uiText("Revision")}
       </label>
       <DropdownMenu
@@ -81,7 +81,7 @@ export function SavedRevisionPicker({
             id={revisionId}
             type="button"
             variant="outline"
-            className="dropdown-field h-[38px] w-full min-w-0 justify-between text-left text-[13px] font-normal"
+            className="dropdown-field w-full min-w-0 justify-between text-left text-field font-normal"
             aria-haspopup="dialog"
             aria-expanded={pickerOpen}
             onClick={() => onOpenChange(!pickerOpen)}

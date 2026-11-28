@@ -281,7 +281,7 @@ export function KeyboardShortcuts() {
                   key={labelKey}
                   className="flex min-h-8 items-center gap-3 border-b border-border py-1.25"
                 >
-                  <dt className="min-w-0 flex-1 text-[13px] leading-[1.4]">{uiText(labelKey)}</dt>
+                  <dt className="min-w-0 flex-1 text-field leading-[1.4]">{uiText(labelKey)}</dt>
                   <dd className="m-0 flex shrink-0 gap-1">
                     {keys.map((key, index) => (
                       <kbd

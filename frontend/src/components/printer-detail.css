@@ -263,6 +263,8 @@
 .printer-workbench:is([data-layout="klipper"], [data-layout="bambu"]) .printer-workbench-column {
   gap: 0;
   border: 1px solid var(--border);
+  border-radius: var(--radius-popover);
+  overflow: hidden;
   background: var(--card);
 }
 

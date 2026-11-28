@@ -12,6 +12,10 @@ import { toast } from "@/lib/toast";
 import { FileRead, ShareLinkRead } from "@/types";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { FormField } from "@/components/ui/form-field";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { ChoiceField } from "./choice-field";
 import { Localized } from "@/components/ui/localized";
 
@@ -39,6 +43,7 @@ export function ShareDialog({
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [expiresInDays, setExpiresInDays] = useState(7);
+  const [expiresError, setExpiresError] = useState<string | null>(null);
   const [allowDownload, setAllowDownload] = useState(false);
   const gcodeFiles = useMemo(() => files.filter((f) => f.file_type === "gcode"), [files]);
   const initialRevision = gcodeFiles.find((file) => file.is_recommended) ?? gcodeFiles.at(-1);
@@ -75,6 +80,12 @@ export function ShareDialog({
   }, [open, modelId]);
 
   async function doCreate() {
+    if (!Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > 365) {
+      setExpiresError(uiText("Enter a whole number of days from 1 to 365."));
+      document.getElementById("share-expires-days")?.focus();
+      return;
+    }
+    setExpiresError(null);
     setCreating(true);
     try {
       const created = await createModelShare(modelId, {
@@ -132,7 +143,7 @@ export function ShareDialog({
         footer={
           <>
             <Button variant="outline" onClick={onClose}>
-              {uiText("Close")}
+              {uiText("Cancel")}
             </Button>
             <Button type="button" onClick={doCreate} disabled={createDisabled} loading={creating}>
               {uiText("Create link")}
@@ -141,12 +152,12 @@ export function ShareDialog({
         }
       >
         {modelName && (
-          <div className="mb-5 grid grid-cols-[1fr_2fr] gap-4 bg-plate p-4 text-[13px]">
+          <div className="mb-5 grid grid-cols-[1fr_2fr] gap-4 bg-plate p-4 text-field">
             <span className="text-muted-foreground">{uiText("Model")}</span>
             <span className="break-words">{modelName}</span>
           </div>
         )}
-        <p className="mb-4 text-[13px] text-muted-foreground">
+        <p className="mb-4 text-field text-muted-foreground">
           {uiText("Copy the new link after creating it. You can revoke access at any time.")}
         </p>
         <div className="space-y-5">
@@ -154,29 +165,38 @@ export function ShareDialog({
           <div className="space-y-4">
             <h3 className="text-sm font-semibold">{uiText("Link access")}</h3>
             <div className="space-y-4">
-              <label className="block">
-                <span className="mb-2 block text-sm text-foreground">
-                  {uiText("Expires (days)")}
-                </span>
-                <input
+              <FormField
+                label={uiText("Expires (days)")}
+                htmlFor="share-expires-days"
+                error={expiresError}
+                errorId="share-expires-days-error"
+              >
+                <Input
+                  id="share-expires-days"
                   type="number"
                   min={1}
                   max={365}
                   value={expiresInDays}
-                  onChange={(e) => setExpiresInDays(Number(e.target.value))}
-                  className="w-40 h-9 bg-field-surface text-foreground font-mono text-sm border border-outline-variant rounded px-3"
+                  onChange={(e) => {
+                    setExpiresInDays(Number(e.target.value));
+                    setExpiresError(null);
+                  }}
+                  aria-invalid={expiresError ? true : undefined}
+                  aria-describedby={expiresError ? "share-expires-days-error" : undefined}
+                  className="w-40"
                 />
-              </label>
-              <ChoiceField<"off" | "on">
-                label={uiText("Allow file download")}
-                value={allowDownload ? "on" : "off"}
-                onChange={(value) => setAllowDownload(value === "on")}
-                inline
-                options={[
-                  { value: "off", label: uiText("Off") },
-                  { value: "on", label: uiText("On") },
-                ]}
-              />
+              </FormField>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-field font-medium text-foreground">
+                  {uiText("Allow file download")}
+                </span>
+                <Switch
+                  checked={allowDownload}
+                  onChange={setAllowDownload}
+                  label={uiText("Allow file download")}
+                  stateLabels={{ on: uiText("On"), off: uiText("Off") }}
+                />
+              </div>
             </div>
             {gcodeFiles.length > 0 && (
               <div className="space-y-4 border-t border-border pt-5">
@@ -213,11 +233,10 @@ export function ShareDialog({
                         key={f.id}
                         className="flex items-start gap-3 py-4 hover:bg-surface-container-low"
                       >
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           checked={selectedRevisionIds.includes(f.id)}
                           onChange={() => toggleRevision(f.id)}
-                          className="mt-0.5 h-5 w-5 shrink-0 accent-primary"
+                          className="mt-0.5 shrink-0"
                         />
                         <span className="min-w-0">
                           <span className="block text-sm font-semibold text-on-surface">
@@ -226,7 +245,7 @@ export function ShareDialog({
                             {f.revision_label ? ` · ${f.revision_label}` : ""}
                             {f.is_recommended ? uiText(" · Recommended") : ""}
                           </span>
-                          <span className="mt-1 block break-all text-[13px] text-on-surface-variant">
+                          <span className="mt-1 block break-all text-field text-on-surface-variant">
                             {f.original_filename}
                           </span>
                         </span>
@@ -239,27 +258,30 @@ export function ShareDialog({
           </div>
 
           {lastToken && (
-            <div className="rounded border border-primary/40 bg-primary/5 p-3">
+            <div className="rounded-md border border-border bg-muted/30 p-3">
               <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
                 {uiText("New link (copy it now)")}
               </p>
               <div className="flex items-center gap-2">
-                <input
+                <Input
                   readOnly
                   value={lastToken}
-                  className="flex-1 h-8 bg-field-surface text-foreground font-mono text-2xs border border-outline-variant rounded px-2"
+                  aria-label={uiText("New link (copy it now)")}
+                  className="flex-1 font-mono text-2xs"
                 />
-                <button
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
                   aria-label={uiText("Copy link")}
                   onClick={copyLast}
-                  className="h-8 w-8 rounded border border-outline-variant flex items-center justify-center hover:bg-surface-container-low"
                 >
                   {copied ? (
-                    <Check className="h-4 w-4 text-emerald-600" />
+                    <Check className="h-4 w-4 text-success" aria-hidden />
                   ) : (
-                    <Copy className="h-4 w-4" />
+                    <Copy className="h-4 w-4" aria-hidden />
                   )}
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -270,7 +292,7 @@ export function ShareDialog({
             {loading ? (
               <Loader2 className="h-4 w-4 animate-spin text-on-surface-variant" />
             ) : links.length === 0 ? (
-              <p className="text-[13px] text-muted-foreground">{uiText("No share links yet.")}</p>
+              <p className="text-field text-muted-foreground">{uiText("No share links yet.")}</p>
             ) : (
               <div className="divide-y divide-border border-y border-border">
                 {links.map((l) => (
@@ -299,12 +321,15 @@ export function ShareDialog({
                       </p>
                     </div>
                     {l.is_active && (
-                      <button
+                      <Button
+                        type="button"
+                        variant="danger"
+                        size="sm"
+                        className="shrink-0"
                         onClick={() => doRevoke(l.id)}
-                        className="shrink-0 border border-border px-3 py-2 text-[13px] text-foreground hover:bg-accent"
                       >
                         {uiText("Revoke")}
-                      </button>
+                      </Button>
                     )}
                   </div>
                 ))}

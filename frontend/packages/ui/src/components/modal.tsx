@@ -107,7 +107,7 @@ export function Modal({
       type="button"
       onClick={dismiss}
       disabled={!dismissible}
-      className="-mr-1.5 -mt-1 flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+      className="-mr-1.5 -mt-1 flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
       aria-label={closeLabel}
     >
       <X className="h-4 w-4" />
@@ -148,7 +148,7 @@ export function Modal({
                   "max-w-[65ch] wrap-anywhere",
                   confirmation
                     ? "mt-2 text-sm leading-relaxed text-card-foreground"
-                    : "mt-1.5 text-[13px] leading-normal text-muted-foreground",
+                    : "mt-1.5 text-field leading-normal text-muted-foreground",
                 )}
               >
                 {description}

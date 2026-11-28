@@ -5,17 +5,25 @@ import { Input } from "@/components/ui/input";
 import { useUiLocale } from "@/lib/i18n";
 import { uiText } from "@/lib/locale";
 
+export type CollectionCreateOutcome =
+  | { status: "saved" }
+  | { status: "reported" }
+  | { status: "invalid"; message: string };
+
 export function NewCollectionCard({
   maxLength,
   onCreate,
 }: {
   maxLength: number;
-  onCreate: (name: string) => Promise<boolean>;
+  /** Resolves true when saved, false when the failure was already reported, or the
+   * message to show beside the field. */
+  onCreate: (name: string) => Promise<CollectionCreateOutcome>;
 }) {
   useUiLocale();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
   const restoreFocus = useRef(false);
   const errorId = useId();
   const name = draft.trim();
@@ -23,6 +31,7 @@ export function NewCollectionCard({
 
   function close() {
     restoreFocus.current = true;
+    setProblem(null);
     setDraft("");
     setEditing(false);
   }
@@ -59,10 +68,17 @@ export function NewCollectionCard({
       }}
       onSubmit={async (event) => {
         event.preventDefault();
-        if (!name || tooLong || saving) return;
+        if (saving) return;
+        if (!name) {
+          setProblem(uiText("Enter a collection name."));
+          return;
+        }
+        if (tooLong) return;
         setSaving(true);
         try {
-          if (await onCreate(name)) close();
+          const saved = await onCreate(name);
+          if (saved.status === "invalid") setProblem(saved.message);
+          else if (saved.status === "saved") close();
         } finally {
           setSaving(false);
         }
@@ -73,12 +89,15 @@ export function NewCollectionCard({
           autoFocus
           aria-label={uiText("collection.newName")}
           placeholder={uiText("collection.newName")}
-          aria-invalid={tooLong || undefined}
-          aria-describedby={tooLong ? errorId : undefined}
+          aria-invalid={tooLong || problem !== null || undefined}
+          aria-describedby={tooLong || problem ? errorId : undefined}
           className="library-collection-name min-w-0 flex-1"
           value={draft}
           readOnly={saving}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            setProblem(null);
+          }}
         />
         <Button
           type="submit"
@@ -86,7 +105,7 @@ export function NewCollectionCard({
           size="icon-sm"
           aria-label={uiText("Create collection")}
           title={uiText("Create collection")}
-          disabled={!name || tooLong || saving}
+          disabled={tooLong || saving}
         >
           <Check className="size-4" aria-hidden />
         </Button>
@@ -102,9 +121,9 @@ export function NewCollectionCard({
           <X className="size-4" aria-hidden />
         </Button>
       </div>
-      {tooLong && (
+      {(tooLong || problem) && (
         <p id={errorId} role="alert" className="text-xs text-destructive">
-          {uiText("collection.nameTooLong", { limit: maxLength })}
+          {tooLong ? uiText("collection.nameTooLong", { limit: maxLength }) : problem}
         </p>
       )}
     </form>

@@ -1,4 +1,3 @@
-import { Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useUiLocale } from "@/lib/i18n";
 import { uiText } from "@/lib/locale";
@@ -99,7 +98,6 @@ export function LibraryEmptyCollection({
           </p>
         </div>
         <Button type="button" disabled={disabled} onClick={onUpload}>
-          <Upload className="size-4" aria-hidden="true" />
           {uiText("Upload files")}
         </Button>
         <p className="text-xs text-muted-foreground">{uiText("library.collectionEmptyDrop")}</p>

@@ -444,7 +444,7 @@ describe("SettingsPanel", () => {
       await openCreateUser();
       await user.click(screen.getByLabelText("Username"));
       await user.paste("maker");
-      await user.click(screen.getByLabelText("Email (optional)"));
+      await user.click(screen.getByLabelText(/^Email\s*\(optional\)/));
       await user.paste("maker@example.test");
       await user.click(screen.getByLabelText("Initial password"));
       await user.paste("Password123");
@@ -472,8 +472,10 @@ describe("SettingsPanel", () => {
       await user.click(screen.getByLabelText("Initial password"));
       await user.paste("short");
       await user.type(screen.getByLabelText("Confirm password"), "short");
+      await user.click(screen.getByRole("button", { name: "Create" }));
 
-      expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+      expect(screen.getByRole("dialog", { name: "Create user" })).toBeVisible();
+      expect(screen.queryByText("Passwords do not match.")).toBeNull();
     });
 
     it("blocks a password confirmation that does not match", async () => {
@@ -484,7 +486,7 @@ describe("SettingsPanel", () => {
       await userEvent.type(screen.getByLabelText("Confirm password"), "Password124");
 
       expect(screen.getByText("Passwords do not match.")).toBeVisible();
-      expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+      expect(screen.getByLabelText("Confirm password")).toBeInvalid();
     });
 
     it("keeps the account when deletion fails", async () => {
@@ -977,6 +979,9 @@ describe("SettingsPanel", () => {
       });
 
       await user.click(await screen.findByRole("button", { name: "Revoke API key" }));
+      expect(requestsWithMethod("DELETE")).toEqual([]);
+      const dialog = await screen.findByRole("dialog", { name: "Revoke this API key?" });
+      await user.click(within(dialog).getByRole("button", { name: "Revoke API key" }));
 
       await waitFor(() =>
         expect(

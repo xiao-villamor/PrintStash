@@ -492,6 +492,12 @@
 .model-detail-tabs [role="tab"] {
   line-height: 1.4;
 }
+/* One h1 scale at every width: the page title is 24px/600, never body text. */
+.model-detail-heading .library-collection-title h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
 /* Immediate press feedback; the filled segment marks the selection. */
 .model-detail-tabs [role="tab"] {
   transform-origin: center;

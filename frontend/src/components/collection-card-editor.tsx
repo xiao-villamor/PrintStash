@@ -37,7 +37,7 @@ interface EditorProps {
 
 function CoverPreviewCard({ name, children }: { name: string; children: ReactNode }) {
   return (
-    <div className="overflow-hidden border border-border bg-card">
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
       {children}
       <div className="flex min-w-0 items-center gap-2 border-t border-border px-3 py-2">
         <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden />
@@ -242,6 +242,7 @@ export function CollectionCardRename({
 
   return (
     <form
+      noValidate
       className="relative z-20 flex min-w-0 flex-1 items-center gap-1"
       onSubmit={submit}
       onKeyDown={(event) => {
@@ -444,12 +445,10 @@ function CoverForm({
     >
       <form id={formId} onSubmit={submit} className="space-y-4">
         <TabBar
+          variant="framed"
           tabs={[...tabs]}
           active={mode}
           onChange={(value) => !busy && setMode(value)}
-          className="flex-wrap border-b border-border"
-          tabClassName="px-2 py-2 text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          activeTabClassName="text-foreground"
         />
         <div role="tabpanel" aria-label={tabs.find((tab) => tab.key === mode)?.label}>
           {mode === "automatic" && (

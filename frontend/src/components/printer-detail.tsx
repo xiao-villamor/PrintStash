@@ -2,6 +2,7 @@
 
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
+import { ErrorState } from "@/components/ui/error-state";
 
 import { usePrinterSettingsCommand } from "@/features/printers/settings-edit";
 import { PrinterSettingsReview } from "@/features/printers/settings-review";
@@ -55,7 +56,9 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PageFailure } from "@/components/page-failure";
 import { PrinterConfigWorkspace } from "@/features/printers/config-workspace";
+import { FieldErrors } from "@/components/ui/field-errors";
 import { FormField } from "@/components/ui/form-field";
+import { useFieldError, useFormValidation } from "@/lib/form-validation";
 import { Input, inputClasses } from "@/components/ui/input";
 import { TabBar } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/ui/page-header";
@@ -104,17 +107,7 @@ import "./printer-detail-content.css";
 import "./printer-detail.css";
 import "./printer-sections.css";
 import { PRINTER_MODEL_OPTIONS, providerAddress, providerLabel } from "@/lib/printer-providers";
-import {
-  FolderOpen,
-  History,
-  ListOrdered,
-  OctagonAlert,
-  Pause,
-  Play,
-  Plus,
-  RefreshCcw,
-  Square,
-} from "lucide-react";
+import { ListOrdered, OctagonAlert, Pause, Play, RefreshCw, Square } from "lucide-react";
 
 const FleetAddJobDialog = lazy(() =>
   import("./fleet-add-job").then((module) => ({ default: module.FleetAddJobDialog })),
@@ -275,6 +268,7 @@ function PrinterDetailView({
   const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
   const [syncingFiles, setSyncingFiles] = useState(false);
   const [confirmEmergencyStop, setConfirmEmergencyStop] = useState(false);
+  const [confirmCancelPrint, setConfirmCancelPrint] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<PrinterFileRead | null>(null);
   const lifetime = useRef(0);
 
@@ -405,9 +399,14 @@ function PrinterDetailView({
       machineAction("job", () => pausePrinter(printerId), uiMessage("Pause command sent")),
     resume: () =>
       machineAction("job", () => resumePrinter(printerId), uiMessage("Resume command sent")),
-    cancel: () =>
-      machineAction("job", () => cancelPrinter(printerId), uiMessage("Cancel command sent")),
+    // Cancelling discards a running print for good, so it asks first, like Emergency stop.
+    cancel: () => setConfirmCancelPrint(true),
   };
+
+  async function confirmCancelPrintAction() {
+    await machineAction("job", () => cancelPrinter(printerId), uiMessage("Cancel command sent"));
+    setConfirmCancelPrint(false);
+  }
 
   async function machineAction<T>(
     key: PrinterCommandPanel,
@@ -720,13 +719,11 @@ function PrinterDetailView({
                 printer.capabilities.can_upload &&
                 printer.capabilities.can_start && (
                   <Button size="xs" onClick={() => setAddJobOpen(true)}>
-                    <Plus className="size-3.5" aria-hidden="true" />
                     {uiText("Add to queue")}
                   </Button>
                 )}
               {printer.capabilities.can_list_files && (
                 <Button variant="outline" size="xs" onClick={() => setActiveTab("files")}>
-                  <FolderOpen className="size-3.5" aria-hidden="true" />
                   {uiText("Browse files")}
                 </Button>
               )}
@@ -781,7 +778,6 @@ function PrinterDetailView({
         <div className="flex flex-wrap items-center gap-2">
           {activeState && printer.capabilities.can_list_files && (
             <Button variant="outline" size="xs" onClick={() => setActiveTab("files")}>
-              <FolderOpen className="size-3.5" aria-hidden="true" />
               {uiText("Browse files")}
             </Button>
           )}
@@ -796,7 +792,6 @@ function PrinterDetailView({
           )}
           {!bambu && (
             <Button size="xs" variant="outline" onClick={() => setActiveTab("jobs")}>
-              <History className="size-3.5" aria-hidden="true" />
               {uiText("Print history")}
             </Button>
           )}
@@ -861,6 +856,15 @@ function PrinterDetailView({
             />
           </Suspense>
         )}
+        <ConfirmModal
+          open={confirmCancelPrint}
+          onClose={() => setConfirmCancelPrint(false)}
+          onConfirm={confirmCancelPrintAction}
+          busy={machineBusy === "job"}
+          title={uiText("Cancel this print?")}
+          description={uiText("The running print stops and can't be resumed.")}
+          confirmLabel={uiText("Cancel print")}
+        />
         <ConfirmModal
           open={confirmEmergencyStop}
           onClose={() => {
@@ -942,7 +946,7 @@ function PrinterDetailView({
                         }}
                         disabled={activeTab === "config" && loadingConfig}
                       >
-                        <RefreshCcw className="h-3.5 w-3.5" />
+                        <RefreshCw className="h-4 w-4" aria-hidden />
                         {uiText("Refresh")}
                       </Button>
                     </>
@@ -953,18 +957,16 @@ function PrinterDetailView({
           </div>
 
           {(error || resources.error) && (
-            <div className="rounded border border-red-300/50 bg-red-50/30 p-3 font-mono text-sm text-red-600 dark:bg-red-950/20">
-              {error ?? userMessage(resources.error)}
-              {resources.error && (
-                <Button size="xs" onClick={() => void resources.refreshAll()}>
-                  {uiText("Retry")}
-                </Button>
-              )}
-            </div>
+            <ErrorState
+              message={error ?? userMessage(resources.error)}
+              onRetry={resources.error ? () => void resources.refreshAll() : undefined}
+              retryLabel={uiText("Retry")}
+            />
           )}
 
           <div>
             <TabBar
+              variant="framed"
               tabs={[
                 {
                   key: "status" as const,
@@ -1023,10 +1025,7 @@ function PrinterDetailView({
               ]}
               active={activeTab === "maintenance" ? "materials" : activeTab}
               onChange={setActiveTab}
-              showIndicator={false}
-              className="w-fit max-w-full gap-0.5 overflow-x-auto rounded-lg border border-border bg-card p-0.75"
-              tabClassName="h-7.5 shrink-0 rounded-md px-3 text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              activeTabClassName="bg-foreground/12 text-foreground"
+              className="w-fit"
             />
           </div>
 
@@ -1253,6 +1252,7 @@ export function PrinterSettings({
   const command = usePrinterSettingsCommand(printer.id);
   const active = useRef(true);
   const form = useRef<HTMLFormElement>(null);
+  const validation = useFormValidation();
   const hintId = useId();
   const compact = modalActions !== undefined;
   const Field = compact ? FormField : SettingsField;
@@ -1372,7 +1372,7 @@ export function PrinterSettings({
   async function save(e?: React.FormEvent, revised = false) {
     e?.preventDefault();
     if (!canEdit || saving || (!revised && (command.blocked || (!compact && !dirty)))) return;
-    if (form.current && !form.current.reportValidity()) return;
+    if (form.current && !validation.validate(form.current)) return;
     const session = getSessionVersion();
     const current = () => active.current && session === getSessionVersion();
     setError(null);
@@ -1479,7 +1479,7 @@ export function PrinterSettings({
       {onRemove && (
         <Button
           type="button"
-          variant="ghost"
+          variant="danger"
           className="mr-auto text-destructive"
           disabled={saving}
           onClick={onRemove}
@@ -1549,327 +1549,342 @@ export function PrinterSettings({
               ))}
           </nav>
         )}
-        <form
-          id={modalActions?.formId}
-          ref={form}
-          onSubmit={save}
-          className={compact ? "divide-y divide-border" : "min-w-0 space-y-4"}
-        >
-          <PrinterSettingsSection
-            compact={compact}
-            columns
-            id="identity"
-            title={uiText("Identity & routing")}
-            description={uiText("How this printer is named and grouped in the fleet.")}
+        <FieldErrors errors={validation.errors}>
+          <form
+            id={modalActions?.formId}
+            ref={form}
+            {...validation.formProps}
+            onSubmit={save}
+            className={compact ? "divide-y divide-border" : "min-w-0 space-y-4"}
           >
-            <Field label={uiText("Name")}>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                disabled={!canEdit || saving}
-              />
-            </Field>
-            <Field
-              label={uiText("Model")}
-              hint={uiText("Pick a known model or type your own")}
-              hintId={`${hintId}-model`}
-            >
-              {/* ponytail: native datalist — suggestions from the catalog, free text still allowed */}
-              <Input
-                list="printer-model-options"
-                aria-describedby={compact ? `${hintId}-model` : undefined}
-                value={modelName}
-                onChange={(e) => setModelName(e.target.value)}
-                placeholder={printer.detected_model ?? uiText("Auto-detected")}
-                disabled={!canEdit || saving}
-              />
-              <datalist id="printer-model-options">
-                {PRINTER_MODEL_OPTIONS.map((model) => (
-                  <option key={model} value={model} />
-                ))}
-              </datalist>
-            </Field>
-            <Field
-              label={uiText("Group")}
-              hint={uiText("Optional farm grouping")}
-              hintId={`${hintId}-group`}
-            >
-              <Input
-                value={group}
-                aria-describedby={compact ? `${hintId}-group` : undefined}
-                onChange={(e) => setGroup(e.target.value)}
-                placeholder={uiText("Workshop")}
-                disabled={!canEdit || saving}
-              />
-            </Field>
-          </PrinterSettingsSection>
-          {canEdit && (
             <PrinterSettingsSection
               compact={compact}
-              id="costing"
-              title={uiText("Print costing")}
-              description={uiText("Used to estimate production cost for prints on this machine.")}
+              columns
+              id="identity"
+              title={uiText("Identity & routing")}
+              description={uiText("How this printer is named and grouped in the fleet.")}
             >
-              <div className="col-span-full grid items-start gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-                <div className="min-w-0 space-y-2">
-                  <Field label={uiText("Cost profile")}>
-                    <select
-                      className={inputClasses}
-                      value={costProfile ?? ""}
-                      disabled={saving || profiles.isPending || profiles.isError}
-                      aria-describedby={`${hintId}-cost-profile`}
-                      onChange={(event) =>
-                        setCostProfile(event.target.value ? Number(event.target.value) : null)
-                      }
-                    >
-                      <option value="">{uiText("No cost profile")}</option>
-                      {costProfile != null && !assignedProfile && (
-                        <option value={costProfile}>
-                          {profiles.isSuccess
-                            ? uiText("Profile no longer available")
-                            : uiText("Checking…")}
-                        </option>
-                      )}
-                      {pricedProfiles.length > 0 && (
-                        <optgroup label={uiText("Operating costs configured")}>
-                          {pricedProfiles.map((profile) => (
-                            <option key={profile.id} value={profile.id}>
-                              {profile.name}
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                      {unpricedProfiles.length > 0 && (
-                        <optgroup label={uiText("Operating costs missing")}>
-                          {unpricedProfiles.map((profile) => (
-                            <option key={profile.id} value={profile.id}>
-                              {profile.name}
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                    </select>
-                  </Field>
-                  <p
-                    id={`${hintId}-cost-profile`}
-                    role={profiles.isError ? "alert" : undefined}
-                    className="max-w-prose text-xs text-muted-foreground"
-                  >
-                    {profiles.isError
-                      ? uiText("Could not load printer profiles.")
-                      : profiles.isPending
-                        ? uiText("Checking…")
-                        : catalog.length === 0
-                          ? uiText("Create a printer profile to assign it here.")
-                          : assignedProfile?.expenses
-                            ? uiText("This profile supplies machine costs for new prints.")
-                            : assignedProfile
-                              ? uiText(
-                                  "Add operating costs to this profile to start tracking machine costs.",
-                                )
-                              : uiText("Choose a saved printer profile for machine cost tracking.")}
-                  </p>
-                </div>
-                <Button
-                  asChild
-                  size="sm"
-                  variant="outline"
-                  className="h-9 justify-self-start sm:mt-6"
-                >
-                  <Link href={profilesHref} target="_blank" rel="noreferrer">
-                    {uiText("Manage profiles")}
-                  </Link>
-                </Button>
-              </div>
+              <Field label={uiText("Name")} htmlFor="printer-edit-name">
+                <Input
+                  id="printer-edit-name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                  disabled={!canEdit || saving}
+                />
+              </Field>
+              <Field
+                label={uiText("Model")}
+                hint={uiText("Pick a known model or type your own")}
+                hintId={`${hintId}-model`}
+              >
+                {/* ponytail: native datalist — suggestions from the catalog, free text still allowed */}
+                <Input
+                  list="printer-model-options"
+                  aria-describedby={compact ? `${hintId}-model` : undefined}
+                  value={modelName}
+                  onChange={(e) => setModelName(e.target.value)}
+                  placeholder={printer.detected_model ?? uiText("Auto-detected")}
+                  disabled={!canEdit || saving}
+                />
+                <datalist id="printer-model-options">
+                  {PRINTER_MODEL_OPTIONS.map((model) => (
+                    <option key={model} value={model} />
+                  ))}
+                </datalist>
+              </Field>
+              <Field
+                label={uiText("Group")}
+                hint={uiText("Optional farm grouping")}
+                hintId={`${hintId}-group`}
+              >
+                <Input
+                  value={group}
+                  aria-describedby={compact ? `${hintId}-group` : undefined}
+                  onChange={(e) => setGroup(e.target.value)}
+                  placeholder={uiText("Workshop")}
+                  disabled={!canEdit || saving}
+                />
+              </Field>
             </PrinterSettingsSection>
-          )}
-          <PrinterSettingsSection
-            compact={compact}
-            columns
-            id="connection"
-            title={uiText("Connection")}
-            description={providerLabel(printer)}
-            action={
-              !compact &&
-              onDiagnostics && (
-                <Button size="xs" variant="outline" type="button" onClick={onDiagnostics}>
-                  {uiText("Connection checks")}
-                </Button>
-              )
-            }
-          >
-            <Field
-              label={
-                printer.provider === "moonraker" ||
-                printer.provider === "prusalink" ||
-                printer.provider === "octoprint"
-                  ? "URL"
-                  : uiText("Host or IP")
+            {canEdit && (
+              <PrinterSettingsSection
+                compact={compact}
+                id="costing"
+                title={uiText("Print costing")}
+                description={uiText("Used to estimate production cost for prints on this machine.")}
+              >
+                <div className="col-span-full grid items-start gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                  <div className="min-w-0 space-y-2">
+                    <Field label={uiText("Cost profile")}>
+                      <select
+                        className={inputClasses}
+                        value={costProfile ?? ""}
+                        disabled={saving || profiles.isPending || profiles.isError}
+                        aria-describedby={`${hintId}-cost-profile`}
+                        onChange={(event) =>
+                          setCostProfile(event.target.value ? Number(event.target.value) : null)
+                        }
+                      >
+                        <option value="">{uiText("No cost profile")}</option>
+                        {costProfile != null && !assignedProfile && (
+                          <option value={costProfile}>
+                            {profiles.isSuccess
+                              ? uiText("Profile no longer available")
+                              : uiText("Checking…")}
+                          </option>
+                        )}
+                        {pricedProfiles.length > 0 && (
+                          <optgroup label={uiText("Operating costs configured")}>
+                            {pricedProfiles.map((profile) => (
+                              <option key={profile.id} value={profile.id}>
+                                {profile.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {unpricedProfiles.length > 0 && (
+                          <optgroup label={uiText("Operating costs missing")}>
+                            {unpricedProfiles.map((profile) => (
+                              <option key={profile.id} value={profile.id}>
+                                {profile.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
+                    </Field>
+                    <p
+                      id={`${hintId}-cost-profile`}
+                      role={profiles.isError ? "alert" : undefined}
+                      className="max-w-prose text-xs text-muted-foreground"
+                    >
+                      {profiles.isError
+                        ? uiText("Could not load printer profiles.")
+                        : profiles.isPending
+                          ? uiText("Checking…")
+                          : catalog.length === 0
+                            ? uiText("Create a printer profile to assign it here.")
+                            : assignedProfile?.expenses
+                              ? uiText("This profile supplies machine costs for new prints.")
+                              : assignedProfile
+                                ? uiText(
+                                    "Add operating costs to this profile to start tracking machine costs.",
+                                  )
+                                : uiText(
+                                    "Choose a saved printer profile for machine cost tracking.",
+                                  )}
+                    </p>
+                  </div>
+                  <Button
+                    asChild
+                    size="sm"
+                    variant="outline"
+                    className="h-9 justify-self-start sm:mt-6"
+                  >
+                    <Link href={profilesHref} target="_blank" rel="noreferrer">
+                      {uiText("Manage profiles")}
+                    </Link>
+                  </Button>
+                </div>
+              </PrinterSettingsSection>
+            )}
+            <PrinterSettingsSection
+              compact={compact}
+              columns
+              id="connection"
+              title={uiText("Connection")}
+              description={providerLabel(printer)}
+              action={
+                !compact &&
+                onDiagnostics && (
+                  <Button size="xs" variant="outline" type="button" onClick={onDiagnostics}>
+                    {uiText("Connection checks")}
+                  </Button>
+                )
               }
             >
-              <Input
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                required
-                disabled={!canEdit || saving}
-              />
-            </Field>
-            {printer.provider === "bambu_lan" && (
-              <Field label={uiText("Printer serial")}>
+              <Field
+                label={
+                  printer.provider === "moonraker" ||
+                  printer.provider === "prusalink" ||
+                  printer.provider === "octoprint"
+                    ? "URL"
+                    : uiText("Host or IP")
+                }
+                htmlFor="printer-edit-address"
+              >
                 <Input
-                  value={serial}
-                  onChange={(e) => setSerial(e.target.value)}
+                  id="printer-edit-address"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
                   required
                   disabled={!canEdit || saving}
                 />
               </Field>
-            )}
-            {printer.provider === "prusalink" && printer.prusalink_auth_mode !== "api_key" && (
-              <Field label={uiText("Username")}>
-                <Input
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  required
-                  disabled={!canEdit || saving}
-                />
-              </Field>
-            )}
-            {printer.provider === "elegoo_centauri" &&
-              printer.provider_variant === "elegoo_centauri_carbon" && (
-                <Field
-                  label={uiText("Mainboard ID")}
-                  hintId={`${hintId}-mainboard`}
-                  hint={uiText(
-                    "Needed for reliable printer commands while idle, paused, or errored.",
-                  )}
-                >
+              {printer.provider === "bambu_lan" && (
+                <Field label={uiText("Printer serial")} htmlFor="printer-edit-serial">
                   <Input
-                    value={mainboardId}
-                    aria-describedby={compact ? `${hintId}-mainboard` : undefined}
-                    onChange={(e) => setMainboardId(e.target.value)}
+                    id="printer-edit-serial"
+                    value={serial}
+                    onChange={(e) => setSerial(e.target.value)}
+                    required
                     disabled={!canEdit || saving}
                   />
                 </Field>
               )}
-            <Field
-              label={secretLabel}
-              hint={uiText("Leave blank to keep current value")}
-              hintId={`${hintId}-secret`}
-            >
-              <Input
-                type="password"
-                autoComplete="new-password"
-                value={secret}
-                aria-describedby={compact ? `${hintId}-secret` : undefined}
-                onChange={(e) => setSecret(e.target.value)}
-                placeholder={uiText("Unchanged")}
-                disabled={!canEdit || saving}
-              />
-            </Field>
-            {!compact &&
-              (printer.provider === "moonraker" ||
-                printer.provider === "bambu_lan" ||
-                printer.capabilities.can_report_material_state) &&
-              materialSyncField}
-          </PrinterSettingsSection>
-          <PrinterSettingsSection
-            compact={compact}
-            id="scheduling"
-            title={uiText("Scheduling & release")}
-            description={uiText("Control when the dispatcher may send new work here.")}
-            action={
-              !compact &&
-              onMaintenance && (
-                <Button size="xs" variant="outline" type="button" onClick={onMaintenance}>
-                  {uiText("Manage maintenance")}
-                </Button>
-              )
-            }
-          >
-            {compact && notesField}
-            {compact && materialSyncField}
-            {!compact ? (
-              <SettingsToggle
-                title={uiText("Require operator release")}
-                description={uiText(
-                  "After a managed print completes, block scheduling until an operator releases or holds the printer.",
+              {printer.provider === "prusalink" && printer.prusalink_auth_mode !== "api_key" && (
+                <Field label={uiText("Username")} htmlFor="printer-edit-username">
+                  <Input
+                    id="printer-edit-username"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    required
+                    disabled={!canEdit || saving}
+                  />
+                </Field>
+              )}
+              {printer.provider === "elegoo_centauri" &&
+                printer.provider_variant === "elegoo_centauri_carbon" && (
+                  <Field
+                    label={uiText("Mainboard ID")}
+                    hintId={`${hintId}-mainboard`}
+                    hint={uiText(
+                      "Needed for reliable printer commands while idle, paused, or errored.",
+                    )}
+                  >
+                    <Input
+                      value={mainboardId}
+                      aria-describedby={compact ? `${hintId}-mainboard` : undefined}
+                      onChange={(e) => setMainboardId(e.target.value)}
+                      disabled={!canEdit || saving}
+                    />
+                  </Field>
                 )}
-                checked={operatorReleaseRequired}
-                onChange={setOperatorReleaseRequired}
-                disabled={!canEdit || saving}
-              />
-            ) : (
-              <label className="flex items-start gap-3">
-                <Checkbox
+              <Field
+                label={secretLabel}
+                hint={uiText("Leave blank to keep current value")}
+                hintId={`${hintId}-secret`}
+              >
+                <Input
+                  type="password"
+                  autoComplete="new-password"
+                  value={secret}
+                  aria-describedby={compact ? `${hintId}-secret` : undefined}
+                  onChange={(e) => setSecret(e.target.value)}
+                  placeholder={uiText("Unchanged")}
+                  disabled={!canEdit || saving}
+                />
+              </Field>
+              {!compact &&
+                (printer.provider === "moonraker" ||
+                  printer.provider === "bambu_lan" ||
+                  printer.capabilities.can_report_material_state) &&
+                materialSyncField}
+            </PrinterSettingsSection>
+            <PrinterSettingsSection
+              compact={compact}
+              id="scheduling"
+              title={uiText("Scheduling & release")}
+              description={uiText("Control when the dispatcher may send new work here.")}
+              action={
+                !compact &&
+                onMaintenance && (
+                  <Button size="xs" variant="outline" type="button" onClick={onMaintenance}>
+                    {uiText("Manage maintenance")}
+                  </Button>
+                )
+              }
+            >
+              {compact && notesField}
+              {compact && materialSyncField}
+              {!compact ? (
+                <SettingsToggle
+                  title={uiText("Require operator release")}
+                  description={uiText(
+                    "After a managed print completes, block scheduling until an operator releases or holds the printer.",
+                  )}
                   checked={operatorReleaseRequired}
                   onChange={setOperatorReleaseRequired}
                   disabled={!canEdit || saving}
-                  className="mt-0.5 shrink-0"
                 />
-                <span>
-                  <span className="block text-field font-medium text-foreground">
-                    {uiText("Require operator release")}
+              ) : (
+                <label className="flex items-start gap-3">
+                  <Checkbox
+                    checked={operatorReleaseRequired}
+                    onChange={setOperatorReleaseRequired}
+                    disabled={!canEdit || saving}
+                    className="mt-0.5 shrink-0"
+                  />
+                  <span>
+                    <span className="block text-field font-medium text-foreground">
+                      {uiText("Require operator release")}
+                    </span>
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      {uiText(
+                        "After a managed print completes, block scheduling until an operator releases or holds the printer.",
+                      )}
+                    </span>
                   </span>
-                  <span className="mt-1 block text-xs text-muted-foreground">
-                    {uiText(
-                      "After a managed print completes, block scheduling until an operator releases or holds the printer.",
-                    )}
-                  </span>
-                </span>
-              </label>
-            )}
-            {!canEdit && (
-              <p className="text-xs text-warning">{uiText("Sign in to edit printer settings.")}</p>
-            )}
-            {error && (
-              <p role="alert" className="text-xs text-destructive">
-                {error}
-              </p>
-            )}
-          </PrinterSettingsSection>
-          {!compact && (
-            <PrinterSettingsSection
-              compact={false}
-              id="notes"
-              title={uiText("Operator notes")}
-              description={uiText("Visible to everyone who can see this printer.")}
-            >
-              {notesField}
+                </label>
+              )}
+              {!canEdit && (
+                <p className="text-xs text-warning">
+                  {uiText("Sign in to edit printer settings.")}
+                </p>
+              )}
+              {error && (
+                <p role="alert" className="text-xs text-destructive">
+                  {error}
+                </p>
+              )}
             </PrinterSettingsSection>
-          )}
-          {modalActions ? (
-            modalActions.target && createPortal(actions, modalActions.target)
-          ) : (
-            <div className="printer-settings-bar">
-              <span role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+            {!compact && (
+              <PrinterSettingsSection
+                compact={false}
+                id="notes"
+                title={uiText("Operator notes")}
+                description={uiText("Visible to everyone who can see this printer.")}
+              >
+                {notesField}
+              </PrinterSettingsSection>
+            )}
+            {modalActions ? (
+              modalActions.target && createPortal(actions, modalActions.target)
+            ) : (
+              <div className="printer-settings-bar">
                 <span
-                  aria-hidden="true"
-                  className={cn(
-                    "size-2 shrink-0 rounded-full",
-                    dirty ? "bg-primary" : "bg-muted-foreground/40",
-                  )}
-                />
-                {uiText(saveLabel)}
-              </span>
-              <div className="flex flex-wrap gap-2">{actions}</div>
-            </div>
-          )}
-          <PrinterSettingsReview
-            canSave={Boolean(name.trim())}
-            state={command.state}
-            original={printer}
-            onReview={() => {
-              void command.review().catch((err) => {
-                if (active.current) setError(userMessage(err));
-              });
-            }}
-            onAdopt={() => adopt(command.adopt())}
-            onSave={() => {
-              void save(undefined, true);
-            }}
-          />
-        </form>
+                  role="status"
+                  className="flex items-center gap-2 text-sm text-muted-foreground"
+                >
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "size-2 shrink-0 rounded-full",
+                      dirty ? "bg-primary" : "bg-muted-foreground/40",
+                    )}
+                  />
+                  {uiText(saveLabel)}
+                </span>
+                <div className="flex flex-wrap gap-2">{actions}</div>
+              </div>
+            )}
+            <PrinterSettingsReview
+              canSave={Boolean(name.trim())}
+              state={command.state}
+              original={printer}
+              onReview={() => {
+                void command.review().catch((err) => {
+                  if (active.current) setError(userMessage(err));
+                });
+              }}
+              onAdopt={() => adopt(command.adopt())}
+              onSave={() => {
+                void save(undefined, true);
+              }}
+            />
+          </form>
+        </FieldErrors>
       </div>
     </Localized>
   );
@@ -1957,20 +1972,28 @@ function SettingsToggle({
 function SettingsField({
   label,
   hint,
+  htmlFor,
   children,
 }: {
   label: string;
   hint?: string;
+  htmlFor?: string;
   children: React.ReactNode;
 }) {
   useUiLocale();
+  const error = useFieldError(htmlFor);
   return (
-    <label className="printer-settings-field block space-y-1.5">
+    <label className="printer-settings-field block space-y-1.5" htmlFor={htmlFor}>
       <span className="flex items-center justify-between gap-3 text-xs font-medium text-foreground">
         {label}
         {hint && <span className="font-normal text-muted-foreground">{hint}</span>}
       </span>
       {children}
+      {error && (
+        <span role="alert" className="block text-xs font-normal text-destructive">
+          {error}
+        </span>
+      )}
     </label>
   );
 }

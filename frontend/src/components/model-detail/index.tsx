@@ -250,6 +250,7 @@ function ModelDetailPresentation({
   }, [editing]);
   const [editDescription, setEditDescription] = useState(model.description || "");
   const [editSourceUrl, setEditSourceUrl] = useState(model.source_url || "");
+  const sourceUrlInvalid = editSourceUrl.trim() !== "" && !safeHttpUrl(editSourceUrl.trim());
   const [editCollection, setEditCollection] = useState(model.collection || "");
   const [editCollectionLabel, setEditCollectionLabel] = useState(model.collection_label);
   const [editTags, setEditTags] = useState<string[]>([...model.tags]);
@@ -1119,8 +1120,15 @@ function ModelDetailPresentation({
                     placeholder="https://www.printables.com/model/..."
                     onChange={(event) => setEditSourceUrl(event.target.value)}
                     disabled={saving}
+                    aria-invalid={sourceUrlInvalid ? true : undefined}
+                    aria-describedby={sourceUrlInvalid ? "source-link-error" : undefined}
                   />
                 </label>
+                {sourceUrlInvalid && (
+                  <p id="source-link-error" role="alert" className="text-xs text-destructive">
+                    {uiText("Enter a link starting with https://")}
+                  </p>
+                )}
                 <p className="text-sm text-muted-foreground">
                   {uiText(
                     "PrintStash reads the title, creator and license from the page. Nothing in this Model changes until you save.",
@@ -1130,7 +1138,7 @@ function ModelDetailPresentation({
             ) : (
               <>
                 <label className="block space-y-1.5 text-sm font-medium">
-                  {uiText("Name (required)")}
+                  {uiText("Name")}
                   <Input
                     ref={nameInput}
                     required
@@ -1503,9 +1511,9 @@ function ModelDetailPresentation({
                   meshFile?.metadata?.bbox_z_mm != null && (
                     <div className="absolute bottom-4 left-4 z-10">
                       <div className="bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded px-2 py-1 flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                        <span className="w-2 h-2 rounded-full bg-success" />
                         <span>{uiText("Whole source geometry")}: </span>
-                        <span className="font-mono text-[13px] text-on-surface">
+                        <span className="font-mono text-field text-on-surface">
                           {uiText("{value1}×{value2}×{value3} mm", {
                             value1: formatNumber(meshFile.metadata.bbox_x_mm, {
                               maximumFractionDigits: 1,
@@ -1609,7 +1617,7 @@ function ModelDetailPresentation({
                   showIndicator={false}
                   className="model-detail-tab-list w-full flex-wrap gap-0.5 rounded-lg border border-border bg-card p-0.75"
                   tabClassName="model-detail-tab-label relative h-7.5 rounded-md px-2 py-0 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                  activeTabClassName="bg-foreground/12 text-foreground"
+                  activeTabClassName="bg-accent text-accent-foreground"
                 />
               </div>
             </div>
@@ -1629,8 +1637,8 @@ function ModelDetailPresentation({
                         aria-current={section === activeTab ? "page" : undefined}
                         className={
                           section === activeTab
-                            ? "h-7.5 bg-foreground/12 px-2.5 text-foreground"
-                            : "h-7.5 px-2.5 text-muted-foreground"
+                            ? " bg-foreground/12 px-2.5 text-foreground"
+                            : " px-2.5 text-muted-foreground"
                         }
                         onClick={() => {
                           setCompareOrigin(null);

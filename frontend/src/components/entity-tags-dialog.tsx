@@ -70,7 +70,6 @@ export function EntityTagsDialog({
             aria-label={tags.length ? uiText("Edit tags") : uiText("Add tags")}
             className={triggerClassName}
           >
-            <Tags className="h-3.5 w-3.5" aria-hidden />
             {uiText("Tags")}
           </Button>
         ) : tags.length > 0 ? (
@@ -107,7 +106,6 @@ export function EntityTagsDialog({
           ))}
           {canEdit && (
             <Button type="button" variant="ghost" size="xs" onClick={openDialog}>
-              <Tags className="h-3.5 w-3.5" aria-hidden />
               {tags.length ? uiText("Edit tags") : uiText("Add tags")}
             </Button>
           )}

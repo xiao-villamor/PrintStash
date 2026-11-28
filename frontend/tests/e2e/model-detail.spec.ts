@@ -881,7 +881,7 @@ test.describe("model detail route", () => {
     await page
       .getByRole("button", { name: "Edit details", description: "Edit details", exact: true })
       .click();
-    await page.getByRole("textbox", { name: "Name (required)" }).fill("Saved draft");
+    await page.getByRole("textbox", { name: "Name" }).fill("Saved draft");
     await page.getByRole("button", { name: "Save changes", exact: true }).click();
     await expect(
       page.getByText("The save was not confirmed. Review the latest version before retrying."),
@@ -928,12 +928,10 @@ test.describe("model detail route", () => {
     await page
       .getByRole("button", { name: "Edit details", description: "Edit details", exact: true })
       .click();
-    await page.getByRole("textbox", { name: "Name (required)" }).fill("My browser draft");
+    await page.getByRole("textbox", { name: "Name" }).fill("My browser draft");
     await page.getByRole("button", { name: "Save changes", exact: true }).click();
 
-    await expect(page.getByRole("textbox", { name: "Name (required)" })).toHaveValue(
-      "My browser draft",
-    );
+    await expect(page.getByRole("textbox", { name: "Name" })).toHaveValue("My browser draft");
     await expect(page.getByRole("button", { name: "Save changes", exact: true })).toBeDisabled();
     await page.getByRole("button", { name: "Review latest version" }).click();
     await expect(page.getByRole("dialog", { name: "Latest saved version" })).toContainText(

@@ -555,7 +555,8 @@ describe("FleetMaintenancePanel", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Soft drain" }));
+    await userEvent.click(screen.getByRole("button", { name: /^More actions for/ }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Soft drain" }));
 
     await waitFor(() =>
       expect(updateRouting).toHaveBeenCalledWith(1, {
@@ -576,7 +577,8 @@ describe("FleetMaintenancePanel", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Resume routing" }));
+    await userEvent.click(screen.getByRole("button", { name: /^More actions for/ }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Resume routing" }));
 
     await waitFor(() =>
       expect(updateRouting).toHaveBeenCalledWith(1, {

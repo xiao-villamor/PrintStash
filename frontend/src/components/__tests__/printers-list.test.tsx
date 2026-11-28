@@ -95,15 +95,28 @@ function renderPrintersPage(
     summary?: FleetSummary;
     jobs?: PrintJobRead[];
     auth?: AuthState;
+    printersFailed?: boolean;
   } = {},
 ) {
   const client = new QueryClient({
     defaultOptions: {
       // Seeded data must stay put: nothing here may fall back to the network.
-      queries: { retry: false, staleTime: Infinity, refetchOnWindowFocus: false },
+      queries: {
+        retry: false,
+        retryOnMount: false,
+        staleTime: Infinity,
+        refetchOnWindowFocus: false,
+      },
     },
   });
-  client.setQueryData(queryKeys.printers, seed.printers ?? []);
+  if (seed.printersFailed) {
+    client
+      .getQueryCache()
+      .build(client, { queryKey: queryKeys.printers })
+      .setState({ status: "error", error: new Error("boom"), data: undefined });
+  } else {
+    client.setQueryData(queryKeys.printers, seed.printers ?? []);
+  }
   client.setQueryData([...queryKeys.fleetQueue, FLEET_QUEUE_HISTORY_LIMIT], seed.jobs ?? []);
   client.setQueryData(queryKeys.fleetSummary, seed.summary ?? EMPTY_FLEET_SUMMARY);
 
@@ -216,6 +229,20 @@ describe("PrinterSetupForm", () => {
       "placeholder",
       "http://192.168.1.50:7125",
     );
+  });
+
+  it("rejects an address that is only a scheme instead of saving it", async () => {
+    await openForm();
+    const dialog = screen.getByRole("dialog", { name: "Add printer" });
+    await userEvent.type(within(dialog).getByLabelText("Name"), "Ender");
+    await userEvent.type(screen.getByLabelText("Moonraker URL"), "://");
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Add printer" }));
+
+    expect(
+      await within(dialog).findByText("Enter an address like http://192.168.1.20:7125"),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Moonraker URL")).toHaveAttribute("aria-invalid", "true");
   });
 
   it("explains that .local names may not resolve from the container", async () => {
@@ -738,6 +765,16 @@ describe("PrintersPage", () => {
       renderPrintersPage();
 
       expect(screen.getByText("No printers configured yet.")).toBeVisible();
+    });
+  });
+
+  describe("when printers fail to load", () => {
+    it("shows one error with Retry instead of an empty fleet", async () => {
+      renderPrintersPage({ printersFailed: true });
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Printers could not be loaded.");
+      expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
+      expect(screen.queryByText("No printers configured yet.")).toBeNull();
     });
   });
 

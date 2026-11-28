@@ -487,7 +487,7 @@ export function AiSearchSettings() {
           tone="danger"
           title={t("aiSearch.settingsLoadError")}
           action={
-            <Button size="sm" onClick={refresh}>
+            <Button variant="outline" size="sm" onClick={refresh}>
               {t("aiSearch.retry")}
             </Button>
           }

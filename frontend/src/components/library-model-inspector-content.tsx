@@ -2,7 +2,7 @@
 
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowUpRight, Box, ChevronRight, Download, Loader2, MoreHorizontal } from "lucide-react";
+import { ArrowUpRight, Box, Download, Loader2, MoreHorizontal } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { modelPrinterFilesOptions, useModelDetail } from "@/features/library/model-detail";
 import { downloadAuthenticatedFile, getAssetUrl, getModel, updateModel } from "@/lib/api";
@@ -45,7 +45,7 @@ type PreviewMode = "model" | "images";
 const meshTypes = new Set(["stl", "3mf", "obj", "step", "glb", "gltf", "ply", "3dm", "fbx"]);
 
 const sectionAction = "px-0 text-muted-foreground hover:bg-transparent hover:text-foreground";
-const descriptionText = "text-[13px] leading-5 text-muted-foreground";
+const descriptionText = "text-field leading-5 text-muted-foreground";
 
 export function InspectorContent({
   model,
@@ -527,7 +527,10 @@ export function InspectorContent({
         {descriptionIntent ? (
           <div className="space-y-2">
             {descriptionProblem && (
-              <div role="alert" className="space-y-2 border border-border bg-muted p-3 text-xs">
+              <div
+                role="alert"
+                className="space-y-2 rounded-lg border border-border bg-muted p-3 text-xs"
+              >
                 <p>
                   {uiText(
                     descriptionProblem === "conflict"
@@ -676,14 +679,10 @@ export function InspectorContent({
         )}
       </dl>
       {sourceFile && (
-        <details className="library-inspector-section">
-          <summary className="library-inspector-section-heading">
+        <section className="library-inspector-section">
+          <header className="library-inspector-section-heading">
             <h3>{uiText("Geometry")}</h3>
-            <ChevronRight
-              aria-hidden="true"
-              className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-            />
-          </summary>
+          </header>
           {geometry.emptyMessage ? (
             <p className="text-xs text-muted-foreground">{geometry.emptyMessage}</p>
           ) : (
@@ -696,15 +695,14 @@ export function InspectorContent({
               ))}
             </dl>
           )}
-        </details>
+        </section>
       )}
-      <details className="library-inspector-section">
-        <summary className="library-inspector-section-heading">
+      <section className="library-inspector-section">
+        <header className="library-inspector-section-heading">
           <h3>
             {uiText("Files")} <span>{files.length}</span>
           </h3>
-          <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        </summary>
+        </header>
         <ul className="library-inspector-files divide-y divide-border">
           {files.map((item) => {
             const canPreview = meshFiles.includes(item);
@@ -782,7 +780,7 @@ export function InspectorContent({
             );
           })}
         </ul>
-      </details>
+      </section>
       {sendOpen && canEdit && administrator && (
         <div className="hidden">
           <SendToButtons

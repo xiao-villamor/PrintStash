@@ -252,7 +252,7 @@ describe("Audit schedules", () => {
     });
     const form = await screen.findByRole("form", { name: "Quick check schedule" });
     await user.click(within(form).getByText("Advanced settings"));
-    await user.click(within(form).getByRole("checkbox", { name: "Paused" }));
+    await user.click(within(form).getByRole("switch", { name: "Paused" }));
     await user.click(within(form).getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(view.requestsWithMethod("PUT")[0]?.body).toContain('"paused":true'));
   });

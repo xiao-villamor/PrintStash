@@ -236,7 +236,7 @@ function ModelCardInner({
         returnFocusRef={menuOpener}
         className="h-full min-w-0"
         aria-label={uiText("Model actions")}
-        contentClassName="w-60 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+        contentClassName="w-60 border border-border bg-popover p-1 text-popover-foreground shadow-lg"
         trigger={
           <article
             ref={attachCard}
@@ -267,7 +267,7 @@ function ModelCardInner({
               draggable ? "cursor-grab active:cursor-grabbing" : ""
             } ${dragging ? "opacity-40" : ""} ${
               selected
-                ? "border-border bg-accent text-accent-foreground"
+                ? "border-border-strong bg-accent text-accent-foreground"
                 : "border-border hover:border-border-strong"
             }`}
           >

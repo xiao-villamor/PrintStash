@@ -7,7 +7,7 @@ import {
   Inbox,
   MoreHorizontal,
   Search,
-  SlidersHorizontal,
+  FileSliders,
   type LucideIcon,
 } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
@@ -37,7 +37,7 @@ export function BottomNavBar() {
     { href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
     user?.is_superuser
       ? { href: "/printers", labelKey: "nav.printers", icon: Printer3D }
-      : { href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
+      : { href: "/profiles", labelKey: "nav.profiles", icon: FileSliders },
   ];
   const moreActive = [
     "/statistics",
@@ -53,7 +53,7 @@ export function BottomNavBar() {
   return (
     <nav
       aria-label={t("Navigation")}
-      className="shell-bottom-nav fixed bottom-0 left-0 z-40 flex min-h-16 w-full items-stretch border-t border-border bg-card px-1 pb-safe md:hidden"
+      className="shell-bottom-nav fixed bottom-0 left-0 z-nav flex min-h-16 w-full items-stretch border-t border-border bg-card px-1 pb-safe md:hidden"
     >
       {tabs.map((item) => {
         const active =

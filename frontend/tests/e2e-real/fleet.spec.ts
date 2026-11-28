@@ -78,9 +78,11 @@ test.describe("fleet queue", () => {
     await page.getByRole("tab", { name: "Maintenance" }).click();
     const maintenanceCard = page.locator("section").filter({ hasText: printerName });
     await expect(maintenanceCard).toBeVisible();
-    await maintenanceCard.getByRole("button", { name: "Soft drain" }).click();
+    await maintenanceCard.getByRole("button", { name: /^More actions for/ }).click();
+    await page.getByRole("menuitem", { name: "Soft drain" }).click();
     await expect(maintenanceCard.getByText("Manual soft drain", { exact: true })).toBeVisible();
-    await maintenanceCard.getByRole("button", { name: "Resume routing" }).click();
+    await maintenanceCard.getByRole("button", { name: /^More actions for/ }).click();
+    await page.getByRole("menuitem", { name: "Resume routing" }).click();
     await expect(maintenanceCard.getByText("Manual soft drain", { exact: true })).toHaveCount(0);
 
     // Cleanup: remove the printer so it doesn't linger as "offline" in later runs

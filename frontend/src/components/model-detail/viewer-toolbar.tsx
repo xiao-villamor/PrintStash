@@ -60,7 +60,7 @@ export function ViewerToolbar({
   }, [viewerReady, viewerMode, activeCamera, controls]);
   const buttonClass = (active: boolean) =>
     active
-      ? "bg-accent text-accent-foreground hover:bg-accent"
+      ? "bg-accent text-accent-foreground hover:bg-muted"
       : "text-foreground hover:bg-muted hover:text-foreground";
   return (
     <div className="detail-viewer-controls" data-viewer-mode={viewerMode}>

@@ -187,14 +187,12 @@ function SearchContent() {
               <LibrarySearch />
             </div>
           )}
-          <div
-            className="flex gap-6 overflow-x-auto border-b border-border"
-            role="group"
-            aria-label={t("aiSearch.resultTypes")}
-          >
-            <button
+          <div className="flex flex-wrap gap-2" role="group" aria-label={t("aiSearch.resultTypes")}>
+            <Button
               type="button"
-              className={`shrink-0 border-b-2 pb-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${types.length === 0 ? "border-foreground font-semibold" : "border-transparent"}`}
+              variant="outline"
+              size="sm"
+              className={types.length === 0 ? "bg-accent text-accent-foreground" : undefined}
               aria-pressed={types.length === 0}
               onClick={() => {
                 const next = new URLSearchParams(params);
@@ -203,17 +201,19 @@ function SearchContent() {
               }}
             >
               {uiText("All results")}
-            </button>
+            </Button>
             {subjectTypes.map((type) => (
-              <button
+              <Button
                 key={type}
                 type="button"
-                className={`shrink-0 border-b-2 pb-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${types.includes(type) ? "border-foreground font-semibold" : "border-transparent"}`}
+                variant="outline"
+                size="sm"
+                className={types.includes(type) ? "bg-accent text-accent-foreground" : undefined}
                 aria-pressed={types.includes(type)}
                 onClick={() => changeType(type)}
               >
                 {t(`aiSearch.type.${type}`)}
-              </button>
+              </Button>
             ))}
           </div>
           <div className="mt-2">
@@ -359,7 +359,11 @@ function SearchContent() {
                   ? "aiSearch.timeout"
                   : "aiSearch.loadError",
               )}
-              action={<Button onClick={() => void results.refetch()}>{t("aiSearch.retry")}</Button>}
+              action={
+                <Button variant="outline" onClick={() => void results.refetch()}>
+                  {t("aiSearch.retry")}
+                </Button>
+              }
             />
           ) : items.length ? (
             <section aria-label={t("aiSearch.resultsTitle")}>
@@ -424,7 +428,9 @@ function SearchContent() {
               )}
               action={
                 modelId ? (
-                  <Button onClick={() => void results.refetch()}>{t("aiSearch.retry")}</Button>
+                  <Button variant="outline" onClick={() => void results.refetch()}>
+                    {t("aiSearch.retry")}
+                  </Button>
                 ) : undefined
               }
             />

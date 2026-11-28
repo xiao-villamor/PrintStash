@@ -9,7 +9,7 @@ import {
   Layers,
   LogOut,
   Settings,
-  SlidersHorizontal,
+  FileSliders,
   Star,
   Trash2,
 } from "lucide-react";
@@ -54,7 +54,7 @@ export function WorkspaceMenu({
           { href: "/?favorites=true", text: uiText("Favorites"), icon: Star },
           ...(mobile && !printersInQuickAccess
             ? []
-            : [{ href: "/profiles", text: t("nav.profiles"), icon: SlidersHorizontal }]),
+            : [{ href: "/profiles", text: t("nav.profiles"), icon: FileSliders }]),
           { href: "/library/similar", text: t("similarity.title"), icon: Layers },
           ...(isAdmin
             ? [{ href: "/settings?section=trash", text: uiText("settings.trash"), icon: Trash2 }]
@@ -74,7 +74,7 @@ export function WorkspaceMenu({
           {username.charAt(0).toUpperCase()}
         </span>
         <div className="min-w-0">
-          <p className="truncate text-[13px] font-semibold" title={username}>
+          <p className="truncate text-field font-semibold" title={username}>
             {username}
           </p>
           <p className="text-xs text-muted-foreground">
@@ -113,7 +113,7 @@ export function WorkspaceMenu({
               onNavigate();
               if (item.href !== "/settings" || !active) router.push(item.href);
             }}
-            className={`flex min-h-9 items-center gap-2.5 rounded-md px-2.5 text-[13px] hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${active ? "bg-accent text-accent-foreground" : "text-foreground"}`}
+            className={`flex min-h-9 items-center gap-2.5 rounded-md px-2.5 text-field hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${active ? "bg-accent text-accent-foreground" : "text-foreground"}`}
           >
             <item.icon
               className="h-4 w-4 shrink-0 text-muted-foreground"
@@ -130,7 +130,7 @@ export function WorkspaceMenu({
         aria-label={uiText("Theme")}
         className="flex min-h-10 items-center justify-between gap-3 pl-2.5 pr-1"
       >
-        <span className="text-[13px]">{uiText("Theme")}</span>
+        <span className="text-field">{uiText("Theme")}</span>
         <div className="flex gap-0.5 rounded-md bg-muted p-0.5">
           {themeOptions.map(({ mode, text }) => (
             <button
@@ -151,7 +151,7 @@ export function WorkspaceMenu({
         aria-label={t("locale.label")}
         className="flex min-h-10 items-center justify-between gap-3 pl-2.5 pr-1"
       >
-        <span className="text-[13px]">{t("locale.label")}</span>
+        <span className="text-field">{t("locale.label")}</span>
         <div className="flex gap-0.5 rounded-md bg-muted p-0.5">
           {SUPPORTED_LOCALES.map((option) => (
             <button
@@ -175,7 +175,7 @@ export function WorkspaceMenu({
         target="_blank"
         rel="noopener noreferrer"
         onClick={onNavigate}
-        className="flex min-h-9 items-center gap-2.5 rounded-md px-2.5 text-[13px] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        className="flex min-h-9 items-center gap-2.5 rounded-md px-2.5 text-field hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <ExternalLink className="h-4 w-4 text-muted-foreground" strokeWidth={1.6} aria-hidden />
         <span className="flex-1">{uiText("Docs")}</span>
@@ -189,7 +189,7 @@ export function WorkspaceMenu({
             onNavigate();
             openKeyboardShortcuts();
           }}
-          className="flex min-h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[13px] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          className="flex min-h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-field hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >
           <Keyboard className="h-4 w-4 text-muted-foreground" strokeWidth={1.6} aria-hidden />
           {uiText("Keyboard shortcuts")}
@@ -200,7 +200,7 @@ export function WorkspaceMenu({
         type="button"
         role="menuitem"
         onClick={onLogout}
-        className="flex min-h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[13px] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        className="flex min-h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-field hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
         <LogOut className="h-4 w-4 text-muted-foreground" strokeWidth={1.6} aria-hidden />
         {t("nav.logOut")}

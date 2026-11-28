@@ -33,6 +33,7 @@ import { useRouter } from "@/lib/navigation";
 import { Link } from "@/lib/link";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { CollectionNodeRead, OutlinerModelRead, PrinterRead, TagRead } from "@/types";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ancestorPaths } from "@/lib/collection-tree";
 import {
@@ -383,7 +384,7 @@ function PageControls({
       <div role="status" className="py-1 text-xs text-muted-foreground">
         {uiText("Could not load this list.")}
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
           disabled={query.isFetchingNextPage}
           onClick={() =>
@@ -639,8 +640,8 @@ function CollectionTreeRow({
         data-tree-node={node.path}
       >
         {confirming ? (
-          <div className="my-0.5 rounded border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-2 py-1.5">
-            <p className="text-2xs font-medium text-red-700 dark:text-red-400 truncate mb-0.5">
+          <div className="my-0.5 rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5">
+            <p className="text-2xs font-medium text-destructive truncate mb-0.5">
               {uiText("Delete “{value1}”?", { value1: String(node.name ?? "") })}
             </p>
             {hasContent && (
@@ -675,7 +676,7 @@ function CollectionTreeRow({
                   onDelete?.(node.id, hasContent);
                   setConfirming(false);
                 }}
-                className="flex-1 rounded px-1.5 py-0.5 text-3xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors"
+                className="flex-1 rounded px-1.5 py-0.5 text-3xs font-medium bg-destructive-action text-destructive-action-foreground hover:bg-destructive-action-hover transition-colors"
               >
                 {uiText("Delete")}
               </button>
@@ -1200,12 +1201,12 @@ export function FilterSidebarContent({
     s === "printing"
       ? "bg-primary"
       : s === "ready"
-        ? "bg-green-500"
+        ? "bg-success"
         : s === "paused"
-          ? "bg-amber-500"
+          ? "bg-warning"
           : s === "error"
-            ? "bg-red-500"
-            : "bg-slate-400";
+            ? "bg-destructive"
+            : "bg-muted-foreground";
 
   const statusLabel = (status: string) =>
     knownUiText(status.charAt(0).toUpperCase() + status.slice(1), locale);
@@ -1214,11 +1215,11 @@ export function FilterSidebarContent({
     s === "printing"
       ? "text-primary"
       : s === "error"
-        ? "text-red-500"
+        ? "text-destructive"
         : s === "ready"
-          ? "text-green-500"
+          ? "text-success"
           : s === "paused"
-            ? "text-amber-500"
+            ? "text-warning"
             : "text-muted-foreground";
 
   return (
@@ -1386,7 +1387,7 @@ export function FilterSidebarContent({
                       <div role="status" className="py-1 text-xs text-muted-foreground">
                         {t("Could not load this list.")}
                         <Button
-                          variant="ghost"
+                          variant="outline"
                           size="sm"
                           disabled={restore.isFetching}
                           onClick={() => void restore.refetch()}
@@ -1556,7 +1557,7 @@ export function FilterSidebarContent({
                   </h3>
                   <div className="relative mb-2">
                     <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                    <input
+                    <Input
                       type="text"
                       placeholder={t("Filter tags...")}
                       value={tagFilter}
@@ -1564,7 +1565,7 @@ export function FilterSidebarContent({
                         setTagFilter(e.target.value);
                         setShowAllTags(false);
                       }}
-                      className="w-full pl-7 pr-2 py-1.5 text-sm border border-border rounded bg-field-surface text-foreground font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-primary transition-colors"
+                      className="pl-7 pr-2 font-mono"
                     />
                     {tagFilter && (
                       <button
@@ -1803,7 +1804,7 @@ export function FilterSidebar(props: FilterSidebarProps) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7"
+                className="w-7"
                 aria-label={uiText("New collection")}
                 onClick={props.onCreateCollection}
               >
@@ -1812,7 +1813,7 @@ export function FilterSidebar(props: FilterSidebarProps) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7"
+                className="w-7"
                 aria-label={uiText(
                   treeModelsVisible ? "Hide models in tree" : "Show models in tree",
                 )}
@@ -1829,7 +1830,7 @@ export function FilterSidebar(props: FilterSidebarProps) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7"
+                className="w-7"
                 aria-label={uiText("Collapse")}
                 onClick={() => setCollapseVersion((version) => version + 1)}
               >
@@ -1847,9 +1848,9 @@ export function FilterSidebar(props: FilterSidebarProps) {
             <span className="absolute inset-y-0 left-0 pl-2 flex items-center text-muted-foreground">
               <Search className="h-3.5 w-3.5" />
             </span>
-            <input
+            <Input
               data-tree-filter
-              className={`block w-full min-w-0 pl-7 pr-6 border border-border rounded text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring ${props.collectionsOnly ? "h-[34px] bg-field-surface text-xs" : "py-1.5 text-sm bg-field-surface"}`}
+              className={`pl-7 pr-6 ${props.collectionsOnly ? "h-8 text-xs" : ""}`}
               placeholder={
                 props.collectionsOnly ? uiText("Filter collections") : uiText("Filter outliner...")
               }
@@ -1954,7 +1955,7 @@ export function FilterSidebar(props: FilterSidebarProps) {
             event.preventDefault();
             setSidebarWidth(Math.min(520, Math.max(minimumWidth, width)));
           }}
-          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/50 transition-colors z-50"
+          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/50 transition-colors z-dropdown"
         />
       </aside>
     </Localized>

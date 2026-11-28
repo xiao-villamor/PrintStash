@@ -11,15 +11,12 @@ import {
   FileBox,
   Layers3,
   ListOrdered,
-  Plus,
   GitFork,
   Network,
   Table2,
   ArrowDown,
   ArrowUp,
-  CalendarClock,
   Pencil,
-  RotateCcw,
   Trash2,
   Wrench,
 } from "lucide-react";
@@ -56,6 +53,7 @@ import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
+import { SettingsRowMenu } from "@/components/settings-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Localized } from "@/components/ui/localized";
 import { FleetRoutingCanvas } from "./fleet-routing-canvas";
@@ -357,7 +355,6 @@ export function FleetQueuePanel({
     </Button>
   ) : queueView === "queued" && onAdd ? (
     <Button variant="outline" size="sm" onClick={onAdd}>
-      <Plus size={15} />
       {uiText("Add to queue")}
     </Button>
   ) : null;
@@ -541,13 +538,13 @@ export function FleetQueuePanel({
         >
           {editTarget && draft && (
             <div className="space-y-5">
-              <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-4 bg-plate p-4 text-[13px]">
+              <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-4 bg-plate p-4 text-field">
                 <dt className="text-muted-foreground">{uiText("Revision")}</dt>
                 <dd className="break-all font-medium">{editTarget.remote_filename}</dd>
               </dl>
               <fieldset className="space-y-4 border-t border-border pt-4">
                 <legend className="pr-3 text-sm font-semibold">{uiText("Routing")}</legend>
-                <label className="block space-y-2 text-[13px] font-medium">
+                <label className="block space-y-2 text-field font-medium">
                   {uiText("Routing")}
                   <select
                     className={inputClasses}
@@ -563,7 +560,7 @@ export function FleetQueuePanel({
                   </select>
                 </label>
                 {draft.strategy === "manual" && (
-                  <label className="block space-y-2 text-[13px] font-medium">
+                  <label className="block space-y-2 text-field font-medium">
                     {uiText("Printer")}
                     <select
                       className={inputClasses}
@@ -580,7 +577,7 @@ export function FleetQueuePanel({
                     </select>
                   </label>
                 )}
-                <label className="block space-y-2 text-[13px] font-medium">
+                <label className="block space-y-2 text-field font-medium">
                   {uiText("Target group")}
                   <Input
                     value={draft.targetGroup}
@@ -593,7 +590,7 @@ export function FleetQueuePanel({
               <fieldset className="space-y-4 border-t border-border pt-4">
                 <legend className="pr-3 text-sm font-semibold">{uiText("Queue settings")}</legend>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="block space-y-2 text-[13px] font-medium">
+                  <label className="block space-y-2 text-field font-medium">
                     {uiText("Priority")}
                     <select
                       className={inputClasses}
@@ -608,7 +605,7 @@ export function FleetQueuePanel({
                       <option value="rush">{uiText("Rush")}</option>
                     </select>
                   </label>
-                  <label className="block space-y-2 text-[13px] font-medium">
+                  <label className="block space-y-2 text-field font-medium">
                     {uiText("Queue position")}
                     <Input
                       type="number"
@@ -621,7 +618,7 @@ export function FleetQueuePanel({
                     />
                   </label>
                 </div>
-                <label className="block space-y-2 text-[13px] font-medium">
+                <label className="block space-y-2 text-field font-medium">
                   {uiText("Material compatibility")}
                   <select
                     className={inputClasses}
@@ -718,7 +715,8 @@ export function FleetQueuePanel({
                   <Button
                     key={view}
                     size="sm"
-                    variant={queueView === view ? "secondary" : "ghost"}
+                    variant="ghost"
+                    className="aria-pressed:bg-accent aria-pressed:text-accent-foreground"
                     aria-label={label}
                     aria-pressed={queueView === view}
                     onClick={() => setQueueView(view)}
@@ -919,7 +917,6 @@ export function FleetQueuePanel({
                       disabled={busy === job.id}
                       onClick={() => void mutate(job.id, () => retryJob(job.id))}
                     >
-                      <RotateCcw className="h-3.5 w-3.5" />
                       {uiText("Retry")}
                     </Button>
                   )}
@@ -1057,15 +1054,15 @@ function QueueSection({
             entries[0].job.batch_id == null ? (
               row(entries[0].job, entries[0].index)
             ) : (
-              <details key={key} open className="border-b border-border last:border-b-0">
-                <summary className="cursor-action bg-muted/30 px-4 py-3 text-sm font-semibold text-foreground">
+              <section key={key} className="border-b border-border last:border-b-0">
+                <h4 className="bg-muted/30 px-4 py-3 text-sm font-semibold text-foreground">
                   {uiText("Batch #{value1} · {value2} copies", {
                     value1: String(entries[0].job.batch_id ?? ""),
                     value2: String(entries.length ?? ""),
                   })}
-                </summary>
+                </h4>
                 {entries.map(({ job, index }) => row(job, index))}
-              </details>
+              </section>
             ),
           )}
         </div>
@@ -1311,12 +1308,12 @@ export function FleetMaintenancePanel({
         >
           <div className="space-y-5">
             {compact ? (
-              <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-4 bg-plate p-4 text-[13px]">
+              <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-4 bg-plate p-4 text-field">
                 <dt className="text-muted-foreground">{uiText("Printer")}</dt>
                 <dd className="font-medium">{selected?.name}</dd>
               </dl>
             ) : (
-              <label className="block space-y-2 text-[13px] font-medium">
+              <label className="block space-y-2 text-field font-medium">
                 {uiText("Printer")}
                 <select
                   className={inputClasses}
@@ -1344,7 +1341,7 @@ export function FleetMaintenancePanel({
                   {uiText("Maintenance window")}
                 </legend>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="block space-y-2 text-[13px] font-medium">
+                  <label className="block space-y-2 text-field font-medium">
                     {uiText("Starts")}
                     <Input
                       type="datetime-local"
@@ -1352,7 +1349,7 @@ export function FleetMaintenancePanel({
                       onChange={(event) => setStartsAt(event.target.value)}
                     />
                   </label>
-                  <label className="block space-y-2 text-[13px] font-medium">
+                  <label className="block space-y-2 text-field font-medium">
                     {uiText("Ends")}
                     <Input
                       type="datetime-local"
@@ -1361,7 +1358,7 @@ export function FleetMaintenancePanel({
                     />
                   </label>
                 </div>
-                <label className="block space-y-2 text-[13px] font-medium">
+                <label className="block space-y-2 text-field font-medium">
                   {uiText("Reason")}
                   <textarea
                     rows={3}
@@ -1380,7 +1377,7 @@ export function FleetMaintenancePanel({
               <fieldset className="space-y-4 border-t border-border pt-4">
                 <legend className="pr-3 text-sm font-semibold">{uiText("Service record")}</legend>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="block space-y-2 text-[13px] font-medium">
+                  <label className="block space-y-2 text-field font-medium">
                     {uiText("Date")}
                     <Input
                       type="date"
@@ -1388,12 +1385,12 @@ export function FleetMaintenancePanel({
                       onChange={(event) => setPerformedAt(event.target.value)}
                     />
                   </label>
-                  <label className="block space-y-2 text-[13px] font-medium">
+                  <label className="block space-y-2 text-field font-medium">
                     {uiText("Category")}
                     <Input value={category} onChange={(event) => setCategory(event.target.value)} />
                   </label>
                 </div>
-                <label className="block space-y-2 text-[13px] font-medium">
+                <label className="block space-y-2 text-field font-medium">
                   {uiText("Service notes")}
                   <textarea
                     rows={4}
@@ -1429,7 +1426,7 @@ export function FleetMaintenancePanel({
           <EmptyState
             icon={Wrench}
             title={uiText("No printers to maintain")}
-            className="border border-border bg-card"
+            className="rounded-lg border border-border bg-card"
           />
         ) : (
           <section
@@ -1438,7 +1435,7 @@ export function FleetMaintenancePanel({
           >
             {!compact && <h2>{uiText("Routing & service")}</h2>}
             {visiblePrinters.length === 0 && (
-              <p className="p-5 text-[13px] text-muted-foreground">
+              <p className="p-5 text-field text-muted-foreground">
                 {uiText("No maintenance records match these filters.")}
               </p>
             )}
@@ -1457,7 +1454,7 @@ export function FleetMaintenancePanel({
                 <div key={printer.id} className="border-b border-border last:border-b-0">
                   <div className="fleet-plain-row">
                     <div>
-                      <h3 className="text-[13px] font-semibold">
+                      <h3 className="text-field font-semibold">
                         {compact ? uiText("Routing") : printer.name}
                       </h3>
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -1468,26 +1465,28 @@ export function FleetMaintenancePanel({
                           : uiText("Accepting scheduled work")}
                       </p>
                     </div>
-                    <div>
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        disabled={mutation.isPending}
-                        onClick={() => void toggleRouting(printer, "default")}
-                      >
-                        {uiText(printer.is_default ? "Unset default" : "Set default")}
-                      </Button>
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        disabled={mutation.isPending}
-                        onClick={() => void toggleRouting(printer, "drain")}
-                      >
-                        {uiText(printer.drain_mode ? "Resume routing" : "Soft drain")}
-                      </Button>
-                      {!compact && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {compact ? (
                         <>
-                          {" "}
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            disabled={mutation.isPending}
+                            onClick={() => void toggleRouting(printer, "default")}
+                          >
+                            {uiText(printer.is_default ? "Unset default" : "Set default")}
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            disabled={mutation.isPending}
+                            onClick={() => void toggleRouting(printer, "drain")}
+                          >
+                            {uiText(printer.drain_mode ? "Resume routing" : "Soft drain")}
+                          </Button>
+                        </>
+                      ) : (
+                        <>
                           <Button
                             size="xs"
                             variant="outline"
@@ -1496,7 +1495,6 @@ export function FleetMaintenancePanel({
                               setMode("window");
                             }}
                           >
-                            <CalendarClock className="h-3.5 w-3.5" aria-hidden />
                             {uiText("Schedule window")}
                           </Button>
                           <Button
@@ -1507,9 +1505,22 @@ export function FleetMaintenancePanel({
                               setMode("log");
                             }}
                           >
-                            <Wrench className="h-3.5 w-3.5" aria-hidden />
                             {uiText("Log service")}
                           </Button>
+                          <SettingsRowMenu
+                            label={uiText("More actions for {value1}", { value1: printer.name })}
+                            disabled={mutation.isPending}
+                            items={[
+                              {
+                                label: uiText(printer.is_default ? "Unset default" : "Set default"),
+                                onSelect: () => void toggleRouting(printer, "default"),
+                              },
+                              {
+                                label: uiText(printer.drain_mode ? "Resume routing" : "Soft drain"),
+                                onSelect: () => void toggleRouting(printer, "drain"),
+                              },
+                            ]}
+                          />
                         </>
                       )}
                     </div>
@@ -1531,7 +1542,7 @@ export function FleetMaintenancePanel({
                   {printerWindows.map((row) => (
                     <div key={`window-${row.id}`} className="fleet-plain-row">
                       <div>
-                        <h3 className="text-[13px] font-medium">
+                        <h3 className="text-field font-medium">
                           {compact
                             ? uiText("Maintenance window")
                             : `${printer.name} · ${uiText("Maintenance window")}`}
@@ -1548,7 +1559,7 @@ export function FleetMaintenancePanel({
                       <div>
                         <Button
                           size="xs"
-                          variant="ghost"
+                          variant="danger"
                           disabled={mutation.isPending}
                           aria-label={uiText("Delete maintenance window")}
                           onClick={() =>
@@ -1560,7 +1571,6 @@ export function FleetMaintenancePanel({
                             })
                           }
                         >
-                          <Trash2 className="h-3.5 w-3.5" aria-hidden />
                           {uiText("Delete")}
                         </Button>
                       </div>
@@ -1581,7 +1591,7 @@ export function FleetMaintenancePanel({
                   {printerLogs.map((row) => (
                     <div key={`log-${row.id}`} className="fleet-plain-row">
                       <div>
-                        <h3 className="text-[13px] font-medium">
+                        <h3 className="text-field font-medium">
                           {compact ? row.category : `${printer.name} · ${row.category}`}
                         </h3>
                         <p className="mt-1 text-xs text-muted-foreground">
@@ -1592,7 +1602,7 @@ export function FleetMaintenancePanel({
                       <div>
                         <Button
                           size="xs"
-                          variant="ghost"
+                          variant="danger"
                           disabled={mutation.isPending}
                           aria-label={uiText("Delete maintenance log")}
                           onClick={() =>
@@ -1604,7 +1614,6 @@ export function FleetMaintenancePanel({
                             })
                           }
                         >
-                          <Trash2 className="h-3.5 w-3.5" aria-hidden />
                           {uiText("Delete")}
                         </Button>
                       </div>

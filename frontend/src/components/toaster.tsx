@@ -10,7 +10,7 @@ export function Toaster() {
     <SonnerToaster
       position="bottom-right"
       dir={localeDefinitions[locale].direction}
-      containerAriaLabel={uiText("Notifications")}
+      containerAriaLabel={uiText("Messages")}
       closeButton
       gap={8}
       className="printstash-toaster !bottom-20 md:!bottom-4"
@@ -21,8 +21,8 @@ export function Toaster() {
           fontSize: "13px",
           borderRadius: "var(--radius-popover)",
           border: "1px solid var(--outline-variant)",
-          background: "var(--surface-container-lowest)",
-          color: "var(--on-surface)",
+          background: "var(--popover)",
+          color: "var(--popover-foreground)",
         },
       }}
     />

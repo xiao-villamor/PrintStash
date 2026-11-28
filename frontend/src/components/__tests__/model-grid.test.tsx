@@ -2227,7 +2227,9 @@ describe("ModelBrowser", () => {
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: "New collection" }));
 
-      expect(screen.getByRole("button", { name: "Create collection" })).toBeDisabled();
+      await user.click(screen.getByRole("button", { name: "Create collection" }));
+
+      expect(await screen.findByText("Enter a collection name.")).toBeVisible();
     });
 
     it("abandons the form on cancel", async () => {

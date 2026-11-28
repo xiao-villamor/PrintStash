@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
+import { Input, inputClasses } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
@@ -246,10 +246,8 @@ function CandidateReview({
                     {t("similarity.incompleteMeasurements")}
                   </p>
                 ) : null}
-                <details className="border-t border-border pt-3 text-xs">
-                  <summary className="cursor-action font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    {t("similarity.lineage")}
-                  </summary>
+                <section className="border-t border-border pt-3 text-xs">
+                  <h4 className="text-sm font-medium text-foreground">{t("similarity.lineage")}</h4>
                   <p className="mt-3 text-muted-foreground">{candidate.algorithm_version}</p>
                   <ul className="mt-2 space-y-2">
                     {candidate.observations?.map((item) => (
@@ -261,7 +259,7 @@ function CandidateReview({
                   {candidate.observations_truncated && (
                     <p className="mt-2 text-muted-foreground">{t("similarity.lineageTruncated")}</p>
                   )}
-                </details>
+                </section>
               </section>
             }
           />
@@ -366,7 +364,7 @@ function CandidateReview({
           <label className="block space-y-1 text-sm">
             {t("similarity.multipartTarget")}
             <select
-              className="block w-full rounded-md border border-input bg-field-surface p-2 text-sm"
+              className={inputClasses}
               disabled={decision.isPending || readOnly}
               value={targetId ?? ""}
               onChange={(event) => {
@@ -408,7 +406,7 @@ function CandidateReview({
               {t("similarity.destinationsFailed")}
               <Button
                 type="button"
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 onClick={() =>
                   void (targets.isFetchNextPageError ? targets.fetchNextPage() : targets.refetch())

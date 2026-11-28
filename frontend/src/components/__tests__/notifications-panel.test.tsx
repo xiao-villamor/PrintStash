@@ -184,7 +184,7 @@ describe("NotificationsPanel", () => {
       await openDraft(user);
 
       const control = screen.getByLabelText(label, { exact: true });
-      await user.click(screen.getByText(label, { selector: "label", exact: true }));
+      await user.click(screen.getByText(label, { selector: "label, label > span", exact: true }));
 
       expect(control).toHaveFocus();
       expect(control).toHaveAccessibleName(label);
@@ -199,7 +199,7 @@ describe("NotificationsPanel", () => {
         await user.selectOptions(screen.getByRole("combobox", { name: "Type" }), target);
 
         const control = screen.getByLabelText(label, { exact: true });
-        await user.click(screen.getByText(label, { selector: "label", exact: true }));
+        await user.click(screen.getByText(label, { selector: "label, label > span", exact: true }));
 
         expect(control).toHaveFocus();
         expect(control).toHaveAccessibleName(label);
@@ -287,7 +287,10 @@ describe("NotificationsPanel", () => {
       .mockReturnValue(pending.promise);
     const { client, deps } = renderPanel({ updateNotificationChannel: write });
     await userEvent.click(await screen.findByTitle("Edit channel"));
-    await userEvent.type(screen.getAllByPlaceholderText("•••••••• (unchanged)")[0]!, "fake-secret");
+    await userEvent.type(
+      screen.getAllByPlaceholderText("•••••••• (unchanged)")[0]!,
+      "https://fake-secret.test/hook",
+    );
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
 
@@ -298,7 +301,7 @@ describe("NotificationsPanel", () => {
     });
 
     expect(write.mock.calls[0]?.[2]?.signal?.aborted).toBe(true);
-    expect(screen.queryByDisplayValue("fake-secret")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("https://fake-secret.test/hook")).not.toBeInTheDocument();
     expect(JSON.stringify(client.getQueryData(notificationKeys.settings) ?? null)).not.toContain(
       "Old session receipt",
     );
@@ -331,13 +334,16 @@ describe("NotificationsPanel", () => {
       .mockReturnValue(pending.promise);
     const { client } = renderPanel({ updateNotificationChannel: write });
     await userEvent.click(await screen.findByTitle("Edit channel"));
-    await userEvent.type(screen.getAllByPlaceholderText("•••••••• (unchanged)")[0]!, "fake-secret");
+    await userEvent.type(
+      screen.getAllByPlaceholderText("•••••••• (unchanged)")[0]!,
+      "https://fake-secret.test/hook",
+    );
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
 
     expect(client.getMutationCache().getAll()).toEqual([]);
     expect(JSON.stringify(client.getQueryData(notificationKeys.settings))).not.toContain(
-      "fake-secret",
+      "https://fake-secret.test/hook",
     );
     await act(async () => {
       pending.resolve(aChannel());
@@ -1141,6 +1147,7 @@ describe("NotificationsPanel", () => {
       const { deps } = renderPanel();
       await openDraft(user);
       await user.type(screen.getByPlaceholderText(/Living-room/), "Alerts");
+      await user.type(screen.getByPlaceholderText("https://example.com/hook"), "https://x.test/h");
       await user.click(screen.getByRole("checkbox", { name: "All printers" }));
       await user.click(await screen.findByRole("checkbox", { name: "Voron" }));
 
@@ -1175,6 +1182,7 @@ describe("NotificationsPanel", () => {
       });
       await openDraft(user);
       await user.type(screen.getByPlaceholderText(/Living-room/), "Alerts");
+      await user.type(screen.getByPlaceholderText("https://example.com/hook"), "https://x.test/h");
 
       await user.click(screen.getByRole("button", { name: /Create channel/ }));
 

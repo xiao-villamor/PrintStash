@@ -64,7 +64,11 @@ export function AddGcodeRevisionModal({
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!file || submitting) return;
+    if (submitting) return;
+    if (!file) {
+      setError(uiText("Choose a G-code file first."));
+      return;
+    }
     const taskId = createTask({
       title: uiMessage("Upload revision {value1}", { value1: String(file.name) }),
       detail: uiMessage("Uploading G-code revision"),
@@ -120,15 +124,15 @@ export function AddGcodeRevisionModal({
             <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
               {uiText("Cancel")}
             </Button>
-            <Button type="submit" form={formId} loading={submitting} disabled={!file}>
+            <Button type="submit" form={formId} loading={submitting}>
               {submitting ? uiText("Adding revision…") : uiText("Add revision")}
             </Button>
           </>
         }
       >
-        <form id={formId} onSubmit={submit} className="space-y-4">
+        <form id={formId} noValidate onSubmit={submit} className="space-y-4">
           {modelName && (
-            <dl className="grid grid-cols-[1fr_2fr] gap-x-4 gap-y-2 bg-plate p-4 text-[13px]">
+            <dl className="grid grid-cols-[1fr_2fr] gap-x-4 gap-y-2 bg-plate p-4 text-field">
               <dt className="text-muted-foreground">{uiText("Model")}</dt>
               <dd className="min-w-0 wrap-anywhere">{modelName}</dd>
               <dt className="text-muted-foreground">{uiText("Current recommended Revision")}</dt>
@@ -204,7 +208,7 @@ export function AddGcodeRevisionModal({
                 onDragLeave={() => setDragActive(false)}
                 onDrop={onDrop}
                 className={cn(
-                  "flex items-start gap-3 border border-dashed border-input bg-plate p-3",
+                  "flex items-start gap-3 rounded-md border border-dashed border-input bg-plate p-3",
                   dragActive && "border-primary bg-accent",
                 )}
               >
@@ -290,7 +294,7 @@ export function AddGcodeRevisionModal({
           <p className="text-xs text-muted-foreground">
             {uiText("Making this Revision recommended is an explicit choice.")}
           </p>
-          <div className="flex items-center justify-between gap-4 border-t border-border pt-4 text-[13px]">
+          <div className="flex items-center justify-between gap-4 border-t border-border pt-4 text-field">
             <span>{uiText("New Revision status")}</span>
             <span className="text-xs text-warning">{uiText("Needs test")}</span>
           </div>

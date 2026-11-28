@@ -149,6 +149,9 @@ export function TopBar() {
   const activityEnabled = startup.canLoad("activity");
   const [tasks, setTasks] = useState<TaskItem[]>(() => listTasks());
   const [tasksOpen, setTasksOpen] = useState(false);
+  const activeTaskCount = tasks.filter(
+    (task) => task.status === "pending" || task.status === "running" || needsArchiveReview(task),
+  ).length;
   const [inspector, setInspector] = useState({ available: false, open: false });
   useEffect(() => {
     function update(event: Event) {
@@ -203,14 +206,14 @@ export function TopBar() {
       data-current-collection={
         recordRoute ? record?.collection : pathname === "/" ? searchParams.get("c") : undefined
       }
-      className="shell-topbar relative z-dropdown flex h-[57px] shrink-0 items-center gap-2 border-b border-border bg-card px-2 sm:gap-3 sm:px-3"
+      className="shell-topbar relative z-dropdown flex h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-2 sm:gap-3 sm:px-3"
     >
       {!desktop && recordRoute && (
         <LibraryBackLink
           data-shell-back
           href={modelBackHref}
           aria-label={uiText("Back")}
-          className="flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden />
         </LibraryBackLink>
@@ -219,12 +222,12 @@ export function TopBar() {
         <Link
           href="/printers"
           aria-label={uiText("Back")}
-          className="flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden />
         </Link>
       )}
-      <span className="min-w-0 flex-1 truncate text-[13px] font-semibold md:hidden">
+      <span className="min-w-0 flex-1 truncate text-field font-semibold md:hidden">
         {printerName
           ? printerName
           : recordRoute && record
@@ -250,7 +253,7 @@ export function TopBar() {
                 ? mobileCollections.closeDrawer
                 : mobileCollections.openDrawer
           }
-          className={`${pathname === "/" ? "flex" : "hidden md:flex"} order-first h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:order-none ${(desktop ? pane.open : mobileCollections.open) ? "bg-muted text-foreground" : ""}`}
+          className={`${pathname === "/" ? "flex" : "hidden md:flex"} order-first h-10 w-10 shrink-0 items-center justify-center rounded-md md:h-8 md:w-8 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:order-none ${(desktop ? pane.open : mobileCollections.open) ? "bg-muted text-foreground" : ""}`}
         >
           <PanelLeft className="h-4 w-4" aria-hidden />
         </button>
@@ -331,7 +334,7 @@ export function TopBar() {
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 text-muted-foreground"
+            className="w-8 text-muted-foreground"
             aria-label={t("Search")}
             onClick={() => (pane ? pane.showSearch() : router.push("/"))}
           >
@@ -343,7 +346,6 @@ export function TopBar() {
           <Button
             type="button"
             size="sm"
-            className="h-[34px]"
             onClick={openUpload}
             disabled={!canUpload}
             aria-label={uiText("Upload")}
@@ -359,47 +361,67 @@ export function TopBar() {
             <span className="hidden sm:inline">{uiText("Upload")}</span>
           </Button>
         )}
-        <DropdownMenu
-          open={tasksOpen}
-          onOpenChange={(open) => {
-            if (open) startup.request("activity");
-            setTasksOpen(open);
+        <div
+          className="contents"
+          onBlur={(event) => {
+            const next = event.relatedTarget;
+            if (!tasksOpen || !(next instanceof Element)) return;
+            if (event.currentTarget.contains(next) || next.closest("[data-task-panel]")) return;
+            setTasksOpen(false);
           }}
-          align="end"
-          role="dialog"
-          className="flex"
-          trigger={
-            <button
-              type="button"
-              data-menu-trigger
-              onClick={() => {
-                startup.request("activity");
-                setTasksOpen((v) => !v);
-              }}
-              className="relative flex h-8 w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label={t("nav.notifications")}
-              title={t("nav.notifications")}
-              aria-haspopup="dialog"
-              aria-expanded={tasksOpen}
-            >
-              <Bell className="h-4 w-4" />
-              {tasks.some(
-                (t) => t.status === "pending" || t.status === "running" || needsArchiveReview(t),
-              ) && (
-                <span className="absolute top-0.5 right-0.5 h-2 w-2 rounded-full bg-primary ring-2 ring-background" />
-              )}
-            </button>
-          }
         >
-          <TaskList
-            onNavigate={() => setTasksOpen(false)}
-            tasks={tasks}
-            onClear={() => {
-              clearCompletedTasks();
-              setTasks(listTasks());
+          <DropdownMenu
+            open={tasksOpen}
+            onOpenChange={(open) => {
+              if (open) startup.request("activity");
+              setTasksOpen(open);
             }}
-          />
-        </DropdownMenu>
+            align="end"
+            role="dialog"
+            aria-label={t("nav.notifications")}
+            className="flex"
+            trigger={
+              <button
+                type="button"
+                data-menu-trigger
+                onClick={() => {
+                  startup.request("activity");
+                  setTasksOpen((v) => !v);
+                }}
+                className="relative flex h-10 w-10 items-center justify-center rounded-md md:h-9 md:w-9 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={
+                  activeTaskCount > 0
+                    ? uiText("Notifications, {count} in progress", {
+                        count: String(activeTaskCount),
+                      })
+                    : t("nav.notifications")
+                }
+                title={t("nav.notifications")}
+                aria-haspopup="dialog"
+                aria-expanded={tasksOpen}
+              >
+                <Bell className="h-4 w-4" />
+                {activeTaskCount > 0 && (
+                  <span
+                    aria-hidden
+                    className="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-2xs font-semibold leading-none text-primary-foreground ring-2 ring-background"
+                  >
+                    {activeTaskCount > 9 ? "9+" : activeTaskCount}
+                  </span>
+                )}
+              </button>
+            }
+          >
+            <TaskList
+              onNavigate={() => setTasksOpen(false)}
+              tasks={tasks}
+              onClear={() => {
+                clearCompletedTasks();
+                setTasks(listTasks());
+              }}
+            />
+          </DropdownMenu>
+        </div>
         {pathname === "/" && inspector.available && (
           <button
             type="button"
@@ -408,7 +430,7 @@ export function TopBar() {
             aria-controls="model-drawer"
             aria-pressed={inspector.open}
             onClick={() => window.dispatchEvent(new Event("printstash:toggle-library-inspector"))}
-            className={`hidden h-8 w-8 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:inline-flex ${inspector.open ? "bg-muted text-foreground" : ""}`}
+            className={`hidden h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:inline-flex ${inspector.open ? "bg-muted text-foreground" : ""}`}
           >
             <PanelRight className="h-4 w-4" aria-hidden />
           </button>

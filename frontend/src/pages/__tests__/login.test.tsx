@@ -459,23 +459,15 @@ describe("Login entry lifetime", () => {
     expect(screen.getByText("Another entry")).toBeVisible();
   });
 
-  it("retries unavailable login providers while retaining local sign-in", async () => {
-    const user = userEvent.setup();
-    let available = false;
+  it("keeps local sign-in quiet when the provider list is unavailable", async () => {
     renderLogin({
       routes: {
-        "GET /api/v1/auth/providers": () =>
-          available ? json(WITH_SSO) : json({ detail: "unavailable" }, 503),
+        "GET /api/v1/auth/providers": () => json({ detail: "unavailable" }, 503),
       },
     });
-    expect(await screen.findByRole("alert")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled();
-    available = true;
-
-    await user.click(screen.getByRole("button", { name: "Retry" }));
-
-    expect(await screen.findByRole("button", { name: "Sign in with Authentik" })).toBeVisible();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Sign in" })).toBeEnabled();
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(screen.queryByText("Other sign-in options could not be loaded.")).toBeNull();
   });
 
   it("rejects duplicate credential submissions", async () => {
@@ -483,10 +475,30 @@ describe("Login entry lifetime", () => {
     renderLogin({ auth: signedOut({ login }) });
     const form = screen.getByLabelText("Username").closest("form");
     if (!form) throw new Error("Login form missing");
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret" } });
 
     fireEvent.submit(form);
     fireEvent.submit(form);
 
     expect(login).toHaveBeenCalledTimes(1);
+  });
+
+  it("explains each missing field under it instead of a browser bubble", () => {
+    const login = vi.fn<AuthState["login"]>();
+    renderLogin({ auth: signedOut({ login }) });
+    const form = screen.getByLabelText("Username").closest("form");
+    if (!form) throw new Error("Login form missing");
+    expect(form).toHaveAttribute("novalidate");
+
+    fireEvent.submit(form);
+
+    expect(login).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Username")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("Enter your username.")).toBeVisible();
+    expect(screen.getByText("Enter your password.")).toBeVisible();
+
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "admin" } });
+    expect(screen.queryByText("Enter your username.")).not.toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { ArrowDownToLine, ArrowUpFromLine, Flame, Snowflake } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { PrinterFeedRows } from "@/components/printer-machine";
 import type { useMachineSetup } from "@/features/printers/materials";
@@ -368,14 +368,14 @@ function TuningRow({
         step="any"
         value={value}
         placeholder="%"
-        className="h-7 w-full font-mono"
+        className="w-full font-mono"
         disabled={disabled}
         readOnly={busy}
         onChange={(event) => setValue(event.target.value)}
       />
       <Button
         size="xs"
-        className="h-7"
+
         variant="outline"
         type="submit"
         disabled={disabled || busy || !valid}
@@ -455,12 +455,12 @@ export function HeaterTarget({
           disabled={disabled}
           readOnly={busy}
           onChange={(event) => setDraft(event.target.value)}
-          className="h-7 w-20 font-mono"
+          className="w-20 font-mono"
         />
         <Button
           variant="outline"
           size="xs"
-          className="h-7"
+
           type="submit"
           disabled={disabled || busy || !valid}
           aria-label={uiText("Set {value1}", { value1: label })}
@@ -512,12 +512,10 @@ export function ThermalPresets({
         </div>
       </fieldset>
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="xs" disabled={disabled} onClick={() => preheat(selected)}>
-          <Flame className="size-3.5" aria-hidden="true" />
+        <Button variant="outline" size="xs" disabled={disabled} onClick={() => preheat(selected)}>
           {uiText("Preheat")}
         </Button>
         <Button variant="outline" size="xs" disabled={disabled} onClick={cooldown}>
-          <Snowflake className="size-3.5" aria-hidden="true" />
           {uiText("Cooldown")}
         </Button>
       </div>

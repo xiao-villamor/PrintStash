@@ -255,12 +255,12 @@ describe("BackgroundWorkPanel", () => {
     expect(await screen.findByText("Nothing is running or waiting right now.")).toBeVisible();
   });
 
-  it("starts with advanced controls closed", async () => {
+  it("shows advanced controls as a visible section, not a disclosure", async () => {
     renderPanel(stubApi());
 
     expect(await screen.findByText("Advanced controls")).toBeVisible();
+    expect(screen.getByText("Advanced controls").closest("details")).toBeNull();
     expect(screen.queryByLabelText("Concurrency for derive.native")).not.toBeInTheDocument();
-    expect(screen.getByText("Advanced controls").closest("details")).not.toHaveAttribute("open");
   });
 
   it("explains when no work has failed", async () => {

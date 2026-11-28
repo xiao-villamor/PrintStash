@@ -302,7 +302,7 @@ export function ModelTagsDialog({
           <div>
             <label
               htmlFor={`model-tags-${model.id}`}
-              className="mb-1.5 block text-[13px] font-medium text-foreground"
+              className="mb-1.5 block text-field font-medium text-foreground"
             >
               {uiText("Find or create tag")}
             </label>
@@ -324,7 +324,7 @@ export function ModelTagsDialog({
                 <div
                   id={nav.listboxId}
                   role="listbox"
-                  className="mt-1 max-h-40 divide-y divide-border overflow-y-auto border border-border"
+                  className="mt-1 max-h-40 divide-y divide-border overflow-y-auto rounded-md border border-border"
                 >
                   {matching.map((tag, index) => (
                     <button

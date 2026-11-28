@@ -21,6 +21,7 @@ export default function SimilarModelsPage() {
       {user?.is_superuser && (
         <>
           <TabBar
+            variant="framed"
             tabs={[
               { key: "scan", label: t("similarity.matchesTab") },
               { key: "settings", label: t("similarity.settingsTab") },
@@ -28,10 +29,7 @@ export default function SimilarModelsPage() {
             ]}
             active={activeView}
             onChange={setView}
-            className="mb-4 gap-1 overflow-x-auto rounded-md bg-muted p-1"
-            tabClassName="shrink-0 rounded px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            activeTabClassName="bg-accent text-accent-foreground"
-            showIndicator={false}
+            className="mb-4"
           />
           <div className={activeView === "scan" ? "mb-4" : undefined}>
             <SimilaritySettingsPanel view={activeView} onOpenSettings={() => setView("settings")} />

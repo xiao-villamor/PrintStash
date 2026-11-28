@@ -422,17 +422,15 @@ test.describe("settings", () => {
 
       await page.getByRole("tab", { name: "Location", exact: true }).click();
       await move.screenshot({ path: testInfo.outputPath(`move-${width}.png`) });
-      await move.getByText("Migration policy · Advanced settings").click();
       await move.screenshot({ path: testInfo.outputPath(`move-advanced-${width}.png`) });
-      await move.getByText("Migration policy · Advanced settings").click();
       await move.getByRole("button", { name: "S3-compatible object storage" }).click();
       await move.screenshot({ path: testInfo.outputPath(`move-s3-${width}.png`) });
       await move.getByRole("button", { name: "This machine" }).click();
 
       await page.getByRole("tab", { name: "Remote cache", exact: true }).click();
-      await expect(
-        page.getByRole("checkbox", { name: "Enable remote Artifact cache" }),
-      ).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByRole("switch", { name: "Enable remote Artifact cache" })).toBeVisible({
+        timeout: 30_000,
+      });
       await cacheTabs.getByRole("tab", { name: "Overview" }).click();
       await expect(page.getByRole("tabpanel", { name: "Overview" })).toBeVisible();
       await cache.scrollIntoViewIfNeeded();
@@ -778,7 +776,6 @@ test.describe("settings", () => {
       await expect(form.getByLabel("Time zone")).toBeVisible();
       await form.scrollIntoViewIfNeeded();
       await form.screenshot({ path: testInfo.outputPath(`maintenance-schedule-${width}.png`) });
-      await form.getByText("Advanced settings").click();
       await expect(form.getByLabel("Start delay maximum (seconds)")).toBeVisible();
       await form.screenshot({ path: testInfo.outputPath(`maintenance-advanced-${width}.png`) });
       await full.getByRole("checkbox", { name: "Run automatically" }).click();
@@ -834,11 +831,9 @@ test.describe("settings", () => {
       await page.getByRole("tab", { name: "Analysis settings", exact: true }).click();
       const settings = page.getByRole("form", { name: "Similar models" });
       await expect(
-        settings.getByRole("checkbox", { name: "Enable similarity analysis" }),
+        settings.getByRole("switch", { name: "Enable similarity analysis" }),
       ).toBeVisible();
-      await settings.getByText("Advanced settings", { exact: true }).click();
       await settings.screenshot({ path: testInfo.outputPath(`similar-settings-${width}.png`) });
-      await settings.getByText("Advanced settings", { exact: true }).click();
       await page.getByRole("tab", { name: "Analysis history", exact: true }).click();
       await expect(settings).toBeHidden();
       await page.screenshot({ path: testInfo.outputPath(`similar-analysis-${width}.png`) });
@@ -1627,10 +1622,9 @@ test.describe("settings", () => {
     await expect(form).toBeVisible({ timeout: 45_000 });
     if ((await enabled.getAttribute("aria-checked")) !== "true") await enabled.click();
     await form.getByLabel("Frequency").selectOption("monthly");
-    await form.getByText("Advanced settings").click();
     await form.getByLabel("Issue notification threshold").selectOption("critical");
     await form.getByLabel("Overdue after (minutes)").fill("45");
-    const paused = form.getByRole("checkbox", { name: "Paused" });
+    const paused = form.getByRole("switch", { name: "Paused" });
     if ((await paused.getAttribute("aria-checked")) !== "true") await paused.click();
     await Promise.all([
       page.waitForResponse(
@@ -1646,12 +1640,11 @@ test.describe("settings", () => {
       timeout: 45_000,
     });
     expect(policyStatuses.at(-1), "audit policy API response after reload").toBe(200);
-    await form.getByText("Advanced settings").click();
     await expect(form.getByRole("checkbox", { name: "Run automatically" })).toHaveAttribute(
       "aria-checked",
       "true",
     );
-    await expect(form.getByRole("checkbox", { name: "Paused" })).toHaveAttribute(
+    await expect(form.getByRole("switch", { name: "Paused" })).toHaveAttribute(
       "aria-checked",
       "true",
     );

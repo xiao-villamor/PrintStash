@@ -1,5 +1,6 @@
 "use client";
 
+import { ApiError } from "@/lib/errors";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   getUser,
@@ -20,6 +21,16 @@ import {
 import { markStartup } from "@/lib/startup-timing";
 
 const SERVER_AUTH_API: AuthApi = { login: apiLogin, logout: apiLogout, getMe };
+
+/**
+ * A server error or a dropped connection says nothing about the session: keep the
+ * person signed in and let the caller offer a retry, instead of throwing them to
+ * the login page. Only a definite 401/403-style answer ends the session.
+ */
+function isTransientAuthFailure(error: Error): boolean {
+  if (error instanceof ApiError) return error.status >= 500;
+  return error instanceof TypeError;
+}
 
 export function AuthProvider({
   children,
@@ -90,8 +101,14 @@ export function AuthProvider({
         markStartup("session-validated");
         setUser(stored);
       })
-      .catch(() => {
+      .catch((error: Error) => {
         if (!alive || !checking) return;
+        if (isTransientAuthFailure(error)) {
+          // The server is unwell, not the session: stay signed in on the stored user.
+          checking = false;
+          setUser(getUser());
+          return;
+        }
         clearLogin();
       })
       .finally(() => {
@@ -184,7 +201,8 @@ export function AuthProvider({
           version === getSessionVersion() &&
           !signal?.aborted &&
           started === epoch.current &&
-          !(error instanceof Error && error.name === "AbortError")
+          !(error instanceof Error && error.name === "AbortError") &&
+          !(error instanceof Error && isTransientAuthFailure(error))
         ) {
           clearLogin();
           setUser(null);

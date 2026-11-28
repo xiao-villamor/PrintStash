@@ -22,6 +22,7 @@ import { PRINT_JOB_PRESENTATION } from "./presentation";
 import { Modal } from "@/components/ui/modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { FormField } from "@/components/ui/form-field";
 import { Input, inputClasses } from "@/components/ui/input";
 import { OptionPicker } from "@/components/ui/option-picker";
 import { Localized } from "@/components/ui/localized";
@@ -445,28 +446,22 @@ export function PrintHistorySection({
                   </div>
                 )}
                 <div className="grid gap-3 md:grid-cols-2">
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium" htmlFor={`${formId}-6`}>
-                      {uiText("Started (opt.)")}
-                    </label>
+                  <FormField label={uiText("Started")} htmlFor={`${formId}-6`} optional>
                     <Input
                       id={`${formId}-6`}
                       type="datetime-local"
                       value={startedAt}
                       onChange={(e) => setStartedAt(e.target.value)}
                     />
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium" htmlFor={`${formId}-7`}>
-                      {uiText("Finished (opt.)")}
-                    </label>
+                  </FormField>
+                  <FormField label={uiText("Finished")} htmlFor={`${formId}-7`} optional>
                     <Input
                       id={`${formId}-7`}
                       type="datetime-local"
                       value={finishedAt}
                       onChange={(e) => setFinishedAt(e.target.value)}
                     />
-                  </div>
+                  </FormField>
                 </div>
                 {estimatedFilament != null && (
                   <p className="text-sm text-muted-foreground">
@@ -477,7 +472,7 @@ export function PrintHistorySection({
                 )}
                 {spoolmanEnabled && spools.length > 0 && (
                   <OptionPicker<number | "none">
-                    label={uiText("Spool (opt.)")}
+                    label={`${uiText("Spool")} ${uiText("(optional)")}`}
                     value={selectedSpoolId ?? "none"}
                     onChange={(value) => setSelectedSpoolId(value === "none" ? null : value)}
                     options={[
@@ -576,7 +571,7 @@ export function PrintHistorySection({
                     {importResults.map((r) => (
                       <div key={r.filename} className="flex items-center gap-2 text-xs">
                         {r.imported ? (
-                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                          <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" />
                         ) : (
                           <XCircle className="h-3.5 w-3.5 text-on-surface-variant shrink-0" />
                         )}

@@ -34,9 +34,7 @@ test.describe("remote Artifact cache", () => {
     await page.getByRole("button", { name: "Storage", exact: true }).click();
     await page.getByRole("tab", { name: "Remote cache", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Remote file cache" })).toBeVisible();
-    await expect(
-      page.getByRole("checkbox", { name: "Enable remote Artifact cache" }),
-    ).toBeVisible();
+    await expect(page.getByRole("switch", { name: "Enable remote Artifact cache" })).toBeVisible();
     await page.getByRole("tab", { name: "Cache limits" }).click();
     await page.getByRole("spinbutton", { name: "Maximum cached files" }).fill("125");
     await page.getByRole("spinbutton", { name: "Maximum cache size (GB)" }).fill("2.5");

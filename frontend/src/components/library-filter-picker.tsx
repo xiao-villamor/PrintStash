@@ -339,7 +339,7 @@ export function LibraryFilterPicker({
         <div
           role="group"
           aria-label={group.label}
-          className="flex shrink-0 divide-x divide-border border border-border"
+          className="flex shrink-0 divide-x divide-border rounded-md border border-border"
         >
           {[null, ...group.choices].map((choice) => {
             const pressed = choice ? choice.checked : !group.choices.some((item) => item.checked);
@@ -415,7 +415,7 @@ export function LibraryFilterPicker({
         {error && (
           <div role="alert" className="px-3 py-2 text-xs">
             <p>{t("Filter values could not be loaded.")}</p>
-            <Button variant="ghost" size="xs" onClick={onRetry}>
+            <Button variant="outline" size="xs" onClick={onRetry}>
               {t("Retry")}
             </Button>
           </div>

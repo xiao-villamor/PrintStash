@@ -134,10 +134,13 @@ describe("AddGcodeRevisionModal", () => {
       );
     });
 
-    it("cannot be submitted before a file is chosen", () => {
+    it("asks for a file when submitted without one", async () => {
+      const user = userEvent.setup();
       renderModal();
 
-      expect(screen.getByRole("button", { name: /Add revision/ })).toBeDisabled();
+      await user.click(screen.getByRole("button", { name: /Add revision/ }));
+
+      expect(await screen.findByText("Choose a G-code file first.")).toBeVisible();
     });
   });
 
@@ -164,13 +167,15 @@ describe("AddGcodeRevisionModal", () => {
       );
     });
 
-    it("keeps the form unsubmittable after a rejected file", async () => {
+    it("sends nothing after a rejected file", async () => {
+      const user = userEvent.setup();
       renderModal();
 
       drop(new File(["solid"], "benchy.stl", { type: "model/stl" }));
 
       await screen.findByRole("alert");
-      expect(screen.getByRole("button", { name: /Add revision/ })).toBeDisabled();
+      await user.click(screen.getByRole("button", { name: /Add revision/ }));
+      expect(await screen.findByText("Choose a G-code file first.")).toBeVisible();
     });
 
     it("accepts the short .g extension too", async () => {

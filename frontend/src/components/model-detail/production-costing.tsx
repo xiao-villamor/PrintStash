@@ -445,7 +445,7 @@ function ArtifactEstimate({
                 </p>
               )}
               {reviewRequired && (
-                <div role="status" className="space-y-2 border p-3 text-sm">
+                <div role="status" className="space-y-2 rounded-lg border p-3 text-sm">
                   <p>
                     {uiText(
                       "Review the current estimate before saving again. Your draft is preserved.",
@@ -908,7 +908,7 @@ function EstimateForm({
                     key={line.key}
                     className={
                       draft.materials.length > 1
-                        ? "col-span-2 grid grid-cols-2 gap-3 border p-3"
+                        ? "col-span-2 grid grid-cols-2 gap-3 rounded-lg border p-3"
                         : "col-span-2 grid grid-cols-2 gap-3"
                     }
                   >

@@ -17,7 +17,7 @@ import {
   useState,
 } from "react";
 import { useParams } from "@tanstack/react-router";
-import { ArrowLeft, Download, Eye, FileText, Loader2, Pencil, Printer, Save } from "lucide-react";
+import { ArrowLeft, Download, Eye, FileText, Loader2, Pencil } from "lucide-react";
 
 import { printMarkdown } from "@/lib/print-markdown";
 import { MarkdownView } from "@/components/markdown-view";
@@ -489,17 +489,14 @@ export default function DocumentDetailPage({
               className="min-w-40 flex-1 rounded-md border border-transparent bg-field-surface px-2.5 py-1.5 text-base font-semibold text-foreground hover:border-border focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           ) : (
-            <h1 className="min-w-0 flex-1 break-words text-base font-semibold text-foreground">
+            <h1 className="min-w-0 flex-1 break-words text-2xl font-semibold leading-tight text-foreground">
               {doc.name}
             </h1>
           )}
 
           {embedded && isMarkdown && canEdit && (
             <Button variant="outline" size="sm" asChild>
-              <Link href={`/documents/${doc.id}?edit=1`}>
-                <Pencil className="size-4" aria-hidden />
-                {uiText(" Edit")}
-              </Link>
+              <Link href={`/documents/${doc.id}?edit=1`}>{uiText(" Edit")}</Link>
             </Button>
           )}
           {!embedded && isMarkdown && (canEdit || mode === "edit") && (
@@ -546,7 +543,6 @@ export default function DocumentDetailPage({
               loading={saving}
               disabled={saving || uploading || !canEdit || !!activeRecovery}
             >
-              <Save className="size-3.5" aria-hidden />
               {uiText("Save")}
             </Button>
           )}
@@ -558,7 +554,7 @@ export default function DocumentDetailPage({
               loading={printing}
               disabled={printing || !draftBody}
             >
-              <Printer className="size-4" aria-hidden />
+              <Download className="h-4 w-4" aria-hidden />
               {uiText("Export as PDF")}
             </Button>
           )}

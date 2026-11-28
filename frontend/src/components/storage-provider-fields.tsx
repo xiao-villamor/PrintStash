@@ -49,7 +49,7 @@ export function StorageProviderFields({
               <label
                 htmlFor={id}
                 className={cn(
-                  "flex items-center justify-between gap-2 text-[13px] font-medium",
+                  "flex items-center justify-between gap-2 text-field font-medium",
                   onboarding ? "text-foreground" : "text-on-surface-variant",
                 )}
               >

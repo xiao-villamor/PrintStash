@@ -66,19 +66,21 @@ export function PageFailure({
       aria-labelledby={heading}
       className={`flex w-full flex-col overflow-y-auto bg-background text-foreground ${fullScreen ? "min-h-dvh" : "h-full min-h-full"}`}
     >
-      <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-6 sm:px-8">
-        <a
-          href="/"
-          className="text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          PrintStash
-        </a>
-        {presentation.code && (
-          <span className="font-mono text-xs tabular-nums text-muted-foreground">
-            {presentation.code}
-          </span>
-        )}
-      </div>
+      {fullScreen && (
+        <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-6 sm:px-8">
+          <a
+            href="/"
+            className="text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            PrintStash
+          </a>
+          {presentation.code && (
+            <span className="font-mono text-xs tabular-nums text-muted-foreground">
+              {presentation.code}
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex flex-1 items-center justify-center px-6 py-12 sm:px-8">
         <div className="w-full max-w-lg text-center">
           <div
@@ -87,10 +89,12 @@ export function PageFailure({
           >
             <Icon className="h-7 w-7" strokeWidth={1.5} />
           </div>
-          <h1
-            id={heading}
-            className="text-balance text-3xl font-semibold tracking-tight sm:text-4xl"
-          >
+          {!fullScreen && presentation.code && (
+            <p className="mb-2 font-mono text-xs tabular-nums text-muted-foreground">
+              {presentation.code}
+            </p>
+          )}
+          <h1 id={heading} className="text-balance text-2xl font-semibold tracking-tight">
             {title ?? uiText(presentation.titleKey)}
           </h1>
           <p className="mx-auto mt-4 max-w-md text-pretty text-sm leading-relaxed text-muted-foreground sm:text-base">

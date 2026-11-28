@@ -17,7 +17,7 @@ export function LocaleToggle({ menuItem = false }: { menuItem?: boolean }) {
       open={open}
       onOpenChange={setOpen}
       aria-label={t("locale.label")}
-      contentClassName="min-w-40 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+      contentClassName="min-w-40 border border-border bg-popover p-1 text-popover-foreground shadow-lg"
       trigger={
         <Button
           ref={triggerRef}

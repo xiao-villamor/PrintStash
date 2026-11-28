@@ -2,13 +2,12 @@
 
 import { SettingsCard, SettingsEmptyRow, SettingsSwitch } from "@/components/settings-card";
 import { SETTINGS_FIELD } from "@/components/settings-controls";
-import { cn } from "@/lib/utils";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Loader2, Plus, Send, Trash2 } from "lucide-react";
+import { Loader2, Send, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   createNotificationChannel,
@@ -41,6 +40,9 @@ import {
 } from "@/lib/queries/settings-notifications";
 import { getSessionVersion } from "@/lib/session-transport";
 import { onAuthChange } from "@/lib/auth-store";
+import { FieldErrors } from "@/components/ui/field-errors";
+import { FormField } from "@/components/ui/form-field";
+import { useFormValidation } from "@/lib/form-validation";
 import { ApiError, parseApiError, userMessage } from "@/lib/errors";
 import { captureEditingBase } from "@/lib/api/editing";
 import type { EditingBase } from "@/types/editing";
@@ -711,20 +713,17 @@ export function NotificationsPanel({
               action={
                 canEdit ? (
                   <Button size="sm" onClick={() => setDraft(emptyDraft())}>
-                    <Plus className="size-3.5" aria-hidden />
                     {uiText("Add channel")}
                   </Button>
                 ) : undefined
               }
             >
               {channels.length === 0 && (
-                <div className={cn(!enabled && "opacity-50")}>
-                  <SettingsEmptyRow>
-                    {uiText("No notification channels yet")}
-                    {". "}
-                    {uiText("Add a channel to start receiving print and printer alerts.")}
-                  </SettingsEmptyRow>
-                </div>
+                <SettingsEmptyRow>
+                  {uiText("No notification channels yet")}
+                  {". "}
+                  {uiText("Add a channel to start receiving print and printer alerts.")}
+                </SettingsEmptyRow>
               )}
               {channels.map((ch) => {
                 const badge = statusBadge(ch.last_status);
@@ -972,6 +971,7 @@ function ChannelForm({
   onSave: () => void;
 }) {
   useUiLocale();
+  const validation = useFormValidation();
   const fields: TargetField[] = TARGET_FIELDS[draft.target];
   const scoped = draft.printerIds !== null;
 
@@ -979,160 +979,163 @@ function ChannelForm({
     <Localized>
       <form
         id={formId}
+        {...validation.formProps}
         className="space-y-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          onSave();
-        }}
+        onSubmit={(e) =>
+          validation.handle(e, () => {
+            e.preventDefault();
+            onSave();
+          })
+        }
       >
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className={LABEL} htmlFor={formId + "-name"}>
-              {uiText("Name")}
-            </label>
-            <input
-              id={formId + "-name"}
-              value={draft.name}
-              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-              placeholder={uiText("Living-room printer alerts")}
-              className={INPUT}
-            />
-          </div>
-          <div>
-            <label className={LABEL} htmlFor={formId + "-type"}>
-              {uiText("Type")}
-            </label>
-            <select
-              id={formId + "-type"}
-              value={draft.target}
-              disabled={draft.id !== null}
-              onChange={(e) => {
-                const target = parseNotificationTarget(e.target.value);
-                if (target) setDraft({ ...draft, target, config: {} });
-              }}
-              className={`${INPUT} disabled:opacity-60`}
-            >
-              {TARGETS.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {fields.map((f) => (
-          <div key={f.key}>
-            <label className={LABEL} htmlFor={formId + "-config-" + f.key}>
-              {f.label}
-            </label>
-            <input
-              id={formId + "-config-" + f.key}
-              type={f.secret ? "password" : "text"}
-              value={draft.config[f.key] ?? ""}
-              onChange={(e) =>
-                setDraft({ ...draft, config: { ...draft.config, [f.key]: e.target.value } })
-              }
-              placeholder={
-                draft.id !== null && f.secret ? uiText("•••••••• (unchanged)") : f.placeholder
-              }
-              className={INPUT}
-              autoComplete="off"
-            />
-          </div>
-        ))}
-
-        <fieldset>
-          <legend className={LABEL}>{uiText("Events")}</legend>
-          <div className="flex flex-wrap gap-3">
-            {EVENTS.map((ev) => (
-              <label
-                key={ev.value}
-                className="inline-flex items-center gap-1.5 text-sm text-foreground"
-              >
-                <Checkbox
-                  checked={draft.events.includes(ev.value)}
-                  onChange={(checked) =>
-                    setDraft({
-                      ...draft,
-                      events: checked
-                        ? [...draft.events, ev.value]
-                        : draft.events.filter((x) => x !== ev.value),
-                    })
-                  }
-                  className="shrink-0"
-                />
-                {ev.label}
+        <FieldErrors errors={validation.errors}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <FormField label={uiText("Name")} htmlFor={formId + "-name"}>
+              <input
+                id={formId + "-name"}
+                value={draft.name}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                placeholder={uiText("Living-room printer alerts")}
+                className={INPUT}
+                required
+              />
+            </FormField>
+            <div>
+              <label className={LABEL} htmlFor={formId + "-type"}>
+                {uiText("Type")}
               </label>
-            ))}
-          </div>
-        </fieldset>
-
-        <fieldset>
-          <legend className={LABEL}>{uiText("Printers")}</legend>
-          <label className="inline-flex items-center gap-1.5 text-sm text-foreground mb-2">
-            <Checkbox
-              checked={!scoped}
-              onChange={(checked) => setDraft({ ...draft, printerIds: checked ? null : [] })}
-              className="shrink-0"
-            />
-            {uiText("All printers")}
-          </label>
-          {scoped && draft.printerIds?.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              {uiText("Select at least one printer, or choose All printers.")}
-            </p>
-          )}
-          {scoped && (
-            <div className="flex flex-wrap gap-3">
-              {printersError ? (
-                <div role="alert">
-                  <p>{uiText("Printer choices could not be loaded.")}</p>
-                  <Button size="sm" type="button" onClick={retryPrinters}>
-                    {uiText("Retry printer choices")}
-                  </Button>
-                </div>
-              ) : !printers ? (
-                <p role="status">{uiText("Loading printer choices…")}</p>
-              ) : null}
-              {!printersError && printers?.length === 0 && (
-                <span className="text-2xs text-muted-foreground italic">
-                  {uiText("No printers configured.")}
-                </span>
-              )}
-              {!printersError &&
-                printers?.map((p) => (
-                  <label
-                    key={p.id}
-                    className="inline-flex items-center gap-1.5 text-sm text-foreground"
-                  >
-                    <Checkbox
-                      checked={(draft.printerIds ?? []).includes(p.id)}
-                      onChange={(checked) =>
-                        setDraft({
-                          ...draft,
-                          printerIds: checked
-                            ? [...(draft.printerIds ?? []), p.id]
-                            : (draft.printerIds ?? []).filter((x) => x !== p.id),
-                        })
-                      }
-                      className="shrink-0"
-                    />
-                    {p.name}
-                  </label>
+              <select
+                id={formId + "-type"}
+                value={draft.target}
+                disabled={draft.id !== null}
+                onChange={(e) => {
+                  const target = parseNotificationTarget(e.target.value);
+                  if (target) setDraft({ ...draft, target, config: {} });
+                }}
+                className={`${INPUT} disabled:opacity-60`}
+              >
+                {TARGETS.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
                 ))}
+              </select>
             </div>
-          )}
-        </fieldset>
+          </div>
 
-        <label className="inline-flex items-center gap-1.5 text-sm text-foreground">
-          <Checkbox
-            checked={draft.enabled}
-            onChange={(checked) => setDraft({ ...draft, enabled: checked })}
-            className="shrink-0"
-          />
-          {uiText("Enabled")}
-        </label>
+          {fields.map((f) => (
+            <FormField key={f.key} label={f.label} htmlFor={formId + "-config-" + f.key}>
+              <input
+                id={formId + "-config-" + f.key}
+                type={
+                  f.key === "url" || f.key === "server_url" ? "url" : f.secret ? "password" : "text"
+                }
+                required={f.key === "url" && draft.id === null}
+                value={draft.config[f.key] ?? ""}
+                onChange={(e) =>
+                  setDraft({ ...draft, config: { ...draft.config, [f.key]: e.target.value } })
+                }
+                placeholder={
+                  draft.id !== null && f.secret ? uiText("•••••••• (unchanged)") : f.placeholder
+                }
+                className={INPUT}
+                autoComplete="off"
+              />
+            </FormField>
+          ))}
+
+          <fieldset>
+            <legend className={LABEL}>{uiText("Events")}</legend>
+            <div className="flex flex-wrap gap-3">
+              {EVENTS.map((ev) => (
+                <label
+                  key={ev.value}
+                  className="inline-flex items-center gap-1.5 text-sm text-foreground"
+                >
+                  <Checkbox
+                    checked={draft.events.includes(ev.value)}
+                    onChange={(checked) =>
+                      setDraft({
+                        ...draft,
+                        events: checked
+                          ? [...draft.events, ev.value]
+                          : draft.events.filter((x) => x !== ev.value),
+                      })
+                    }
+                    className="shrink-0"
+                  />
+                  {ev.label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend className={LABEL}>{uiText("Printers")}</legend>
+            <label className="inline-flex items-center gap-1.5 text-sm text-foreground mb-2">
+              <Checkbox
+                checked={!scoped}
+                onChange={(checked) => setDraft({ ...draft, printerIds: checked ? null : [] })}
+                className="shrink-0"
+              />
+              {uiText("All printers")}
+            </label>
+            {scoped && draft.printerIds?.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                {uiText("Select at least one printer, or choose All printers.")}
+              </p>
+            )}
+            {scoped && (
+              <div className="flex flex-wrap gap-3">
+                {printersError ? (
+                  <div role="alert">
+                    <p>{uiText("Printer choices could not be loaded.")}</p>
+                    <Button size="sm" type="button" onClick={retryPrinters}>
+                      {uiText("Retry printer choices")}
+                    </Button>
+                  </div>
+                ) : !printers ? (
+                  <p role="status">{uiText("Loading printer choices…")}</p>
+                ) : null}
+                {!printersError && printers?.length === 0 && (
+                  <span className="text-2xs text-muted-foreground italic">
+                    {uiText("No printers configured.")}
+                  </span>
+                )}
+                {!printersError &&
+                  printers?.map((p) => (
+                    <label
+                      key={p.id}
+                      className="inline-flex items-center gap-1.5 text-sm text-foreground"
+                    >
+                      <Checkbox
+                        checked={(draft.printerIds ?? []).includes(p.id)}
+                        onChange={(checked) =>
+                          setDraft({
+                            ...draft,
+                            printerIds: checked
+                              ? [...(draft.printerIds ?? []), p.id]
+                              : (draft.printerIds ?? []).filter((x) => x !== p.id),
+                          })
+                        }
+                        className="shrink-0"
+                      />
+                      {p.name}
+                    </label>
+                  ))}
+              </div>
+            )}
+          </fieldset>
+
+          <div className="flex items-center justify-between gap-3 text-sm text-foreground">
+            <span>{uiText("Enabled")}</span>
+            <SettingsSwitch
+              label={uiText("Enabled")}
+              checked={draft.enabled}
+              onChange={(checked) => setDraft({ ...draft, enabled: checked })}
+            />
+          </div>
+        </FieldErrors>
       </form>
     </Localized>
   );

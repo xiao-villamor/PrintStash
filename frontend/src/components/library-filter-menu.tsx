@@ -22,14 +22,14 @@ export function LibraryFilterMenu({
       aria-label={label}
       portal
       align="start"
-      contentClassName="w-64 max-h-80 overflow-y-auto rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-lg"
+      contentClassName="w-64 max-h-80 overflow-y-auto border border-border bg-popover p-2 text-popover-foreground shadow-lg"
       trigger={
         <Button
           data-menu-trigger
           type="button"
           variant="outline"
           size="xs"
-          className="h-8"
+
           aria-label={label}
           aria-haspopup="dialog"
           aria-expanded={open}

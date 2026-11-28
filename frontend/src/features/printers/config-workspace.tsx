@@ -12,10 +12,6 @@ import type { MoonrakerConfigRead, ProviderJsonObject, ProviderJsonValue } from 
 import { PrinterConfigEditor } from "./config-editor";
 import "./config-editor.css";
 
-const tabClassName =
-  "h-7.5 shrink-0 rounded-md px-3 text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors duration-press motion-reduce:transition-none";
-const activeTabClassName = "bg-foreground/12 text-foreground";
-
 type ConfigView = "files" | "reported";
 type ConfigSource = "klipper_config" | "moonraker_config" | "server_info" | "printer_info";
 
@@ -211,6 +207,7 @@ function ReportedConfiguration({
     <Card className="overflow-hidden">
       <header className="flex flex-wrap items-center justify-between gap-2 border-b p-3">
         <TabBar
+          variant="framed"
           tabs={[
             { key: "klipper_config", label: uiText("Klipper config") },
             { key: "moonraker_config", label: uiText("Moonraker config") },
@@ -219,10 +216,6 @@ function ReportedConfiguration({
           ]}
           active={source}
           onChange={setSource}
-          className="max-w-full gap-0.5 overflow-x-auto rounded-lg border border-border bg-card p-0.75"
-          tabClassName={tabClassName}
-          activeTabClassName={activeTabClassName}
-          showIndicator={false}
         />
         <Button
           variant="outline"
@@ -268,16 +261,14 @@ export function PrinterConfigWorkspace({
   return (
     <div className="space-y-3">
       <TabBar
+        variant="framed"
         tabs={[
           { key: "files", label: uiText("Configuration files") },
           { key: "reported", label: uiText("Reported configuration") },
         ]}
         active={view}
         onChange={setView}
-        className="w-fit max-w-full gap-0.5 overflow-x-auto rounded-lg border border-border bg-card p-0.75"
-        tabClassName={tabClassName}
-        activeTabClassName={activeTabClassName}
-        showIndicator={false}
+        className="w-fit"
       />
       <div hidden={view !== "files"} role="tabpanel" aria-label={uiText("Configuration files")}>
         <PrinterConfigEditor printerId={printerId} />

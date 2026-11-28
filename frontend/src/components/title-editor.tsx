@@ -60,7 +60,7 @@ export function TitleEditor({
       portal
       align="start"
       className="min-w-0"
-      contentClassName="w-96 rounded-md border border-border bg-popover p-3 text-popover-foreground shadow-lg"
+      contentClassName="w-96 border border-border bg-popover p-3 text-popover-foreground shadow-lg"
     >
       <form
         className="space-y-3"

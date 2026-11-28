@@ -6,8 +6,8 @@ import { useUiLocale } from "@/lib/i18n";
 import { Link } from "@/lib/link";
 import { usePathname } from "@/lib/navigation";
 import {
-  Box,
-  SlidersHorizontal,
+  FileSliders,
+  FolderClosed,
   LogIn,
   LogOut,
   Settings,
@@ -34,9 +34,9 @@ type NavItem = {
 };
 
 const mainItems: NavItem[] = [
-  { href: "/", labelKey: "nav.vault", icon: Box },
+  { href: "/", labelKey: "Library", icon: FolderClosed },
   { href: "/printers", labelKey: "nav.printers", icon: Printer3D, adminOnly: true },
-  { href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
+  { href: "/profiles", labelKey: "nav.profiles", icon: FileSliders },
 ];
 
 const bottomItems: NavItem[] = [{ href: "/settings", labelKey: "nav.settings", icon: Settings }];

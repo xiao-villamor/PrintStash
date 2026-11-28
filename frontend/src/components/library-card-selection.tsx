@@ -31,7 +31,7 @@ export function LibraryCardSelection({
         onChange={onChange}
         ariaLabel={label}
         className={cn(
-          "relative before:absolute before:-inset-1.5",
+          "relative before:absolute before:-inset-1.5 [@media(pointer:coarse)]:before:-inset-2.5",
           // Unchecked, it sits over any image: a chip, not a hole in the card.
           !checked && "border-input bg-card shadow-md",
         )}

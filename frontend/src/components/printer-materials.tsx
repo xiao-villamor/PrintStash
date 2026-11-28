@@ -16,12 +16,11 @@ import { useSpoolmanStatus, useSpools } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import type { MaterialSlotRead, PrinterMaterialStateRead, PrinterRead } from "@/types";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, inputClasses } from "@/components/ui/input";
 import { MachineMaterials } from "@/components/printer-machine";
 import { Skeleton } from "@/components/ui/skeleton";
 
-const selectClassName =
-  "h-10 w-full rounded-md border border-input bg-field-surface px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-disabled disabled:opacity-50";
+const selectClassName = inputClasses;
 
 /** Whether a manual feed is loaded with filament, known empty, or unreported. */
 type SlotState = "loaded" | "empty" | "unknown";
@@ -207,7 +206,9 @@ function MaterialEditor({
     return (
       <div role="alert" className="space-y-3">
         <p>{uiText("materials.loadFailed")}</p>
-        <Button onClick={() => void owner.query.refetch()}>{uiText("Retry")}</Button>
+        <Button variant="outline" onClick={() => void owner.query.refetch()}>
+          {uiText("Retry")}
+        </Button>
       </div>
     );
   if (!state)
@@ -298,7 +299,7 @@ function MaterialEditor({
         : !inWorkspace && <div className="flex justify-end">{actions}</div>}
       {!editing && !loadedTarget && reviewContent}
       <div className="printer-materials-nozzle">
-        <label htmlFor={nozzleId} className="space-y-2 text-[13px] font-medium text-foreground">
+        <label htmlFor={nozzleId} className="space-y-2 text-field font-medium text-foreground">
           {uiText("Tool 0 nozzle diameter (mm)")}
           {state.tools.some((tool) => tool.tool_key === "tool0" && tool.source !== "manual") && (
             <span className="block text-xs font-normal leading-relaxed text-muted-foreground">
@@ -310,7 +311,7 @@ function MaterialEditor({
         </label>
         <Input
           id={nozzleId}
-          className="h-[34px] text-[13px]"
+          className="text-field"
           type="number"
           min="0.1"
           max="5"
@@ -327,7 +328,7 @@ function MaterialEditor({
             {(owner.query.data ?? state).tools
               .filter((tool) => tool.tool_key !== "tool0")
               .map((tool) => (
-                <div key={tool.tool_key}>
+                <div key={`${tool.tool_key}:${tool.label}`}>
                   <dt>{tool.label}</dt>
                   <dd>
                     {!tool.stale && tool.nozzle_diameter_mm !== null
@@ -371,8 +372,8 @@ function MaterialEditor({
               </div>
             </div>
           ))}
-        {slots.map((slot) => (
-          <div key={slot.slot_key} className="printer-reference-row">
+        {slots.map((slot, index) => (
+          <div key={`${slot.slot_key}:${index}`} className="printer-reference-row">
             <div>
               <h3 className="flex items-center gap-2">
                 {inWorkspace &&
@@ -381,7 +382,7 @@ function MaterialEditor({
                   /^#[\da-f]{6}$/i.test(slot.color_hex) && (
                     <span
                       aria-hidden="true"
-                      className="size-3 border border-border"
+                      className="size-3 rounded-md border border-border"
                       style={{ backgroundColor: slot.color_hex }}
                     />
                   )}
@@ -417,7 +418,7 @@ function MaterialEditor({
               )}
               <Button
                 size="xs"
-                variant="ghost"
+                variant="danger"
                 disabled={disabled}
                 onClick={() =>
                   setSlots((current) => current.filter((row) => row.slot_key !== slot.slot_key))
@@ -473,7 +474,7 @@ function MaterialEditor({
             {reviewContent}
             <fieldset className="space-y-4 border-t border-border pt-4">
               <legend className="pr-3 text-sm font-semibold">{uiText("Feed state")}</legend>
-              <label className="block space-y-2 text-[13px] font-medium">
+              <label className="block space-y-2 text-field font-medium">
                 {uiText("Feed label")}
                 <Input
                   value={editing.label}
@@ -481,7 +482,7 @@ function MaterialEditor({
                   onChange={(event) => setEditing({ ...editing, label: event.target.value })}
                 />
               </label>
-              <label className="block space-y-2 text-[13px] font-medium">
+              <label className="block space-y-2 text-field font-medium">
                 {uiText("State")}
                 <select
                   className={selectClassName}
@@ -500,7 +501,7 @@ function MaterialEditor({
             <fieldset className="space-y-4 border-t border-border pt-4">
               <legend className="pr-3 text-sm font-semibold">{uiText("Material")}</legend>
               <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block space-y-2 text-[13px] font-medium">
+                <label className="block space-y-2 text-field font-medium">
                   {uiText("Material type")}
                   <Input
                     value={editing.material_type}
@@ -510,7 +511,7 @@ function MaterialEditor({
                     }
                   />
                 </label>
-                <label className="block space-y-2 text-[13px] font-medium">
+                <label className="block space-y-2 text-field font-medium">
                   {uiText("Brand")}
                   <Input
                     value={editing.material_brand}
@@ -520,9 +521,9 @@ function MaterialEditor({
                     }
                   />
                 </label>
-                <label className="block space-y-2 text-[13px] font-medium">
+                <label className="block space-y-2 text-field font-medium">
                   {uiText("Color")}
-                  <div className="flex h-10 items-center gap-3 border border-input bg-field-surface px-3">
+                  <div className="flex h-10 items-center gap-3 rounded-md border border-input bg-field-surface px-3">
                     <input
                       type="color"
                       aria-label={uiText("Color")}
@@ -538,7 +539,7 @@ function MaterialEditor({
                   </div>
                 </label>
                 {spoolmanEnabled && (
-                  <label className="block space-y-2 text-[13px] font-medium">
+                  <label className="block space-y-2 text-field font-medium">
                     {uiText("Tracked spool")}
                     <select
                       className={selectClassName}

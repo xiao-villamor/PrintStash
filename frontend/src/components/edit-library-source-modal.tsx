@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, inputClasses } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { useUiLocale } from "@/lib/i18n";
 import { Link } from "@/lib/link";
@@ -113,7 +113,7 @@ export function EditLibrarySourceModal({
         <label className="flex flex-col gap-1 text-xs text-muted-foreground">
           {uiText("Collection layout")}
           <select
-            className="w-full rounded border border-border bg-field-surface px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            className={inputClasses}
             aria-label={uiText("Collection layout")}
             value={layout}
             onChange={(event) => setLayout(parseLayout(event.target.value))}
