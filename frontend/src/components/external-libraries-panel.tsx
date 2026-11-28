@@ -1225,9 +1225,7 @@ function AdminLibrarySourcesPanel({
             </Modal>
           </div>
         ) : (
-          <div className="opacity-50">
-            <SettingsEmptyRow>{uiText("Turn on Library sources to add one.")}</SettingsEmptyRow>
-          </div>
+          <SettingsEmptyRow>{uiText("Turn on Library sources to add one.")}</SettingsEmptyRow>
         )}
       </SettingsCard>
 

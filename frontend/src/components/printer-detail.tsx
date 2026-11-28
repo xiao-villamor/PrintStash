@@ -107,7 +107,7 @@ import "./printer-detail-content.css";
 import "./printer-detail.css";
 import "./printer-sections.css";
 import { PRINTER_MODEL_OPTIONS, providerAddress, providerLabel } from "@/lib/printer-providers";
-import { ListOrdered, OctagonAlert, Pause, Play, Square } from "lucide-react";
+import { ListOrdered, OctagonAlert, Pause, Play, RefreshCw, Square } from "lucide-react";
 
 const FleetAddJobDialog = lazy(() =>
   import("./fleet-add-job").then((module) => ({ default: module.FleetAddJobDialog })),
@@ -946,6 +946,7 @@ function PrinterDetailView({
                         }}
                         disabled={activeTab === "config" && loadingConfig}
                       >
+                        <RefreshCw className="h-4 w-4" aria-hidden />
                         {uiText("Refresh")}
                       </Button>
                     </>

@@ -101,8 +101,14 @@ export function AuthProvider({
         markStartup("session-validated");
         setUser(stored);
       })
-      .catch(() => {
+      .catch((error: Error) => {
         if (!alive || !checking) return;
+        if (isTransientAuthFailure(error)) {
+          // The server is unwell, not the session: stay signed in on the stored user.
+          checking = false;
+          setUser(getUser());
+          return;
+        }
         clearLogin();
       })
       .finally(() => {

@@ -64,7 +64,11 @@ export function AddGcodeRevisionModal({
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!file || submitting) return;
+    if (submitting) return;
+    if (!file) {
+      setError(uiText("Choose a G-code file first."));
+      return;
+    }
     const taskId = createTask({
       title: uiMessage("Upload revision {value1}", { value1: String(file.name) }),
       detail: uiMessage("Uploading G-code revision"),
@@ -120,13 +124,13 @@ export function AddGcodeRevisionModal({
             <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
               {uiText("Cancel")}
             </Button>
-            <Button type="submit" form={formId} loading={submitting} disabled={!file}>
+            <Button type="submit" form={formId} loading={submitting}>
               {submitting ? uiText("Adding revision…") : uiText("Add revision")}
             </Button>
           </>
         }
       >
-        <form id={formId} onSubmit={submit} className="space-y-4">
+        <form id={formId} noValidate onSubmit={submit} className="space-y-4">
           {modelName && (
             <dl className="grid grid-cols-[1fr_2fr] gap-x-4 gap-y-2 bg-plate p-4 text-field">
               <dt className="text-muted-foreground">{uiText("Model")}</dt>

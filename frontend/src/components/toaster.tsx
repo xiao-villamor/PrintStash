@@ -21,8 +21,8 @@ export function Toaster() {
           fontSize: "13px",
           borderRadius: "var(--radius-popover)",
           border: "1px solid var(--outline-variant)",
-          background: "var(--surface-container-lowest)",
-          color: "var(--on-surface)",
+          background: "var(--popover)",
+          color: "var(--popover-foreground)",
         },
       }}
     />

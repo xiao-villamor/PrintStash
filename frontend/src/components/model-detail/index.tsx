@@ -250,6 +250,7 @@ function ModelDetailPresentation({
   }, [editing]);
   const [editDescription, setEditDescription] = useState(model.description || "");
   const [editSourceUrl, setEditSourceUrl] = useState(model.source_url || "");
+  const sourceUrlInvalid = editSourceUrl.trim() !== "" && !safeHttpUrl(editSourceUrl.trim());
   const [editCollection, setEditCollection] = useState(model.collection || "");
   const [editCollectionLabel, setEditCollectionLabel] = useState(model.collection_label);
   const [editTags, setEditTags] = useState<string[]>([...model.tags]);
@@ -1119,8 +1120,15 @@ function ModelDetailPresentation({
                     placeholder="https://www.printables.com/model/..."
                     onChange={(event) => setEditSourceUrl(event.target.value)}
                     disabled={saving}
+                    aria-invalid={sourceUrlInvalid ? true : undefined}
+                    aria-describedby={sourceUrlInvalid ? "source-link-error" : undefined}
                   />
                 </label>
+                {sourceUrlInvalid && (
+                  <p id="source-link-error" role="alert" className="text-xs text-destructive">
+                    {uiText("Enter a link starting with https://")}
+                  </p>
+                )}
                 <p className="text-sm text-muted-foreground">
                   {uiText(
                     "PrintStash reads the title, creator and license from the page. Nothing in this Model changes until you save.",

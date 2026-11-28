@@ -23,6 +23,8 @@ function messageFor(control: HTMLInputElement | HTMLSelectElement | HTMLTextArea
   if (validity.patternMismatch && control.title) return control.title;
   if (validity.typeMismatch || validity.patternMismatch) return uiText("Enter a valid value.");
   if (validity.tooShort || validity.tooLong) return uiText("Check the length of this value.");
+  if (validity.rangeUnderflow && control instanceof HTMLInputElement && control.min === "0")
+    return uiText("Enter zero or a positive number.");
   if (validity.rangeUnderflow || validity.rangeOverflow || validity.stepMismatch)
     return uiText("Enter a value within the allowed range.");
   return uiText("Enter a valid value.");

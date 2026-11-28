@@ -2,7 +2,6 @@
 
 import { SettingsCard, SettingsEmptyRow, SettingsSwitch } from "@/components/settings-card";
 import { SETTINGS_FIELD } from "@/components/settings-controls";
-import { cn } from "@/lib/utils";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
@@ -720,13 +719,11 @@ export function NotificationsPanel({
               }
             >
               {channels.length === 0 && (
-                <div className={cn(!enabled && "opacity-50")}>
-                  <SettingsEmptyRow>
-                    {uiText("No notification channels yet")}
-                    {". "}
-                    {uiText("Add a channel to start receiving print and printer alerts.")}
-                  </SettingsEmptyRow>
-                </div>
+                <SettingsEmptyRow>
+                  {uiText("No notification channels yet")}
+                  {". "}
+                  {uiText("Add a channel to start receiving print and printer alerts.")}
+                </SettingsEmptyRow>
               )}
               {channels.map((ch) => {
                 const badge = statusBadge(ch.last_status);

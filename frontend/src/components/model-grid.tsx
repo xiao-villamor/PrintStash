@@ -8,7 +8,7 @@ import { LibraryFilterControl } from "@/components/library-filter-control";
 import { LibraryFindBar } from "@/components/library-find-bar";
 import { LibraryCollectionsRegion } from "@/components/library-collections-region";
 import { ModelGalleryDrag } from "@/components/model-gallery-drag";
-import { NewCollectionCard } from "@/components/new-collection-card";
+import { NewCollectionCard, type CollectionCreateOutcome } from "@/components/new-collection-card";
 
 import { arrivingKeys, entryKeys } from "@/lib/library-arrivals";
 import { FOLDER_ENTRANCE_MS } from "@/lib/folder-transition";
@@ -680,6 +680,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }
 
   const collectionFormId = useId();
+  const collectionNameId = useId();
+  const [collectionNameError, setCollectionNameError] = useState<string | null>(null);
   const [isCreatingCollection, setIsCreatingCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
   const createCollectionRequested = searchParams.get("newCollection") === "1";
@@ -2628,30 +2630,49 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     router,
   ]);
 
-  async function saveNewCollection(name: string) {
+  async function saveNewCollection(name: string, inline = false): Promise<CollectionCreateOutcome> {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
-      return false;
+      return { status: "reported" };
     }
     if (!canAdminSelectedCollection) {
       toast.warning(uiText("Admin access required"));
-      return false;
+      return { status: "reported" };
     }
     // Until the open folder has loaded, a new folder would land at the root.
-    if (selectedCollection !== null && selectedCollectionRow === null) return false;
+    if (selectedCollection !== null && selectedCollectionRow === null)
+      return { status: "reported" };
     try {
       await createCollection({ name, parent_id: selectedCollectionRow?.id ?? null });
       toast.success(uiText('Collection "{value1}" created', { value1: String(name) }));
-      return true;
+      return { status: "saved" };
     } catch (e: any) {
+      if (inline && parseApiError(e).status === 409) {
+        return {
+          status: "invalid",
+          message: uiText('A collection named "{value1}" already exists here.', {
+            value1: String(name),
+          }),
+        };
+      }
       toast.error(e);
-      return false;
+      return { status: "reported" };
     }
   }
 
   async function handleCreateCollection() {
     const name = newCollectionName.trim();
-    if (name && (await saveNewCollection(name))) {
+    if (!name) {
+      setCollectionNameError(uiText("Enter a collection name."));
+      return;
+    }
+    setCollectionNameError(null);
+    const saved = await saveNewCollection(name, true);
+    if (saved.status === "invalid") {
+      setCollectionNameError(saved.message);
+      return;
+    }
+    if (saved.status === "saved") {
       setNewCollectionName("");
       setIsCreatingCollection(false);
     }
@@ -3620,6 +3641,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   onClick={() => {
                     setIsCreatingCollection(false);
                     setNewCollectionName("");
+                    setCollectionNameError(null);
                   }}
                 >
                   {uiText("Cancel")}
@@ -3627,9 +3649,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 <Button
                   type="submit"
                   form={collectionFormId}
-                  disabled={
-                    !newCollectionName.trim() || !auth.isAuthenticated || !canCreateCollection
-                  }
+                  disabled={!auth.isAuthenticated || !canCreateCollection}
                 >
                   {uiText("Create collection")}
                 </Button>
@@ -3638,16 +3658,28 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           >
             <form
               id={collectionFormId}
+              noValidate
               onSubmit={(event) => {
                 event.preventDefault();
-                handleCreateCollection();
+                void handleCreateCollection();
               }}
             >
-              <FormField label={uiText("Name")}>
+              <FormField
+                label={uiText("Name")}
+                htmlFor={collectionNameId}
+                error={collectionNameError}
+                errorId={`${collectionNameId}-error`}
+              >
                 <Input
+                  id={collectionNameId}
                   autoFocus
                   value={newCollectionName}
-                  onChange={(event) => setNewCollectionName(event.target.value)}
+                  aria-invalid={collectionNameError ? true : undefined}
+                  aria-describedby={collectionNameError ? `${collectionNameId}-error` : undefined}
+                  onChange={(event) => {
+                    setNewCollectionName(event.target.value);
+                    setCollectionNameError(null);
+                  }}
                   disabled={!auth.isAuthenticated}
                   maxLength={100}
                 />
@@ -3824,7 +3856,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                             collection === "create" ? (
                               <NewCollectionCard
                                 maxLength={COLLECTION_NAME_LIMIT}
-                                onCreate={saveNewCollection}
+                                onCreate={(name) => saveNewCollection(name, true)}
                               />
                             ) : (
                               <LibraryCardFill

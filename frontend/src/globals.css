@@ -31,7 +31,7 @@
     --secondary: #344054;
     --secondary-foreground: #ffffff;
     --muted: #f1f3f6;
-    --muted-foreground: #536175;
+    --muted-foreground: #4b586b;
     --accent: #d3dbe7;
     --accent-foreground: #101828;
     --destructive: #b42318;
@@ -145,7 +145,7 @@
 
     /* Muted */
     --muted: #1a2029;
-    --muted-foreground: #8c97a8;
+    --muted-foreground: #a3adbc;
 
     /* Selected controls use a quiet neutral fill. */
     --accent: rgb(255 255 255 / 0.18);
@@ -550,6 +550,10 @@
 
 .printstash-toaster [data-sonner-toast] [data-content] {
   min-width: 0;
+}
+
+.printstash-toaster [data-sonner-toast] [data-description] {
+  color: var(--muted-foreground);
 }
 
 .printstash-toaster [data-sonner-toast][data-styled="true"] [data-close-button] {

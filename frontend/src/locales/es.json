@@ -6297,6 +6297,13 @@
   "Copied": "Copiado",
   "Copy": "Copiar",
   "Could not copy.": "No se pudo copiar.",
+  "Enter a collection name.": "Introduce un nombre de colección.",
+  "A collection named \"{value1}\" already exists here.": "Ya existe una colección llamada \"{value1}\" aquí.",
+  "Enter zero or a positive number.": "Introduce cero o un número positivo.",
+  "Enter a link starting with https://": "Introduce un enlace que empiece por https://",
+  "Choose a G-code file first.": "Elige primero un archivo G-code.",
+  "ZIP archives are uploaded from the Bulk tab.": "Los archivos ZIP se suben desde la pestaña Bulk.",
+  "Open Bulk tab": "Abrir pestaña Bulk",
   "Enter a valid value.": "Introduce un valor válido.",
   "Check the length of this value.": "Revisa la longitud de este valor.",
   "Enter a value within the allowed range.": "Introduce un valor dentro del rango permitido."

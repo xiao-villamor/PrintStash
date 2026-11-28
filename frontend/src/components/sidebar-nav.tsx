@@ -111,7 +111,7 @@ export function SidebarNav() {
     `relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
       active
         ? "bg-accent text-accent-foreground before:absolute before:-left-1.5 before:bottom-[9px] before:top-[9px] before:w-[3px] before:bg-primary"
-        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+        : "text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground"
     }`;
 
   function itemLink(item: NavItem) {

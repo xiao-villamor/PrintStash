@@ -30,7 +30,16 @@ import { useFleetSummary, usePrinters, useSpoolmanStatus, useVaultConfig } from 
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
-import { Check, ChevronRight, Loader2, RefreshCw, X, Pencil, type LucideIcon } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  Loader2,
+  Plus,
+  RefreshCw,
+  X,
+  Pencil,
+  type LucideIcon,
+} from "lucide-react";
 import { FilamentSpool } from "@/components/ui/filament-spool";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { FilamentSpoolPrice } from "@/components/filament-spool-price";
@@ -1132,6 +1141,7 @@ export function FilamentProfilesCard() {
           else setShowAddPrinter((value) => !value);
         }}
       >
+        <Plus className="h-4 w-4" aria-hidden />
         {translateUiText(
           locale,
           activeTab === "filaments" ? uiText("New filament preset") : uiText("New printer preset"),

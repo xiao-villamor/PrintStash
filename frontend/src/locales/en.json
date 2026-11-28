@@ -6297,6 +6297,13 @@
   "Copied": "Copied",
   "Copy": "Copy",
   "Could not copy.": "Could not copy.",
+  "Enter a collection name.": "Enter a collection name.",
+  "A collection named \"{value1}\" already exists here.": "A collection named \"{value1}\" already exists here.",
+  "Enter zero or a positive number.": "Enter zero or a positive number.",
+  "Enter a link starting with https://": "Enter a link starting with https://",
+  "Choose a G-code file first.": "Choose a G-code file first.",
+  "ZIP archives are uploaded from the Bulk tab.": "ZIP archives are uploaded from the Bulk tab.",
+  "Open Bulk tab": "Open Bulk tab",
   "Enter a valid value.": "Enter a valid value.",
   "Check the length of this value.": "Check the length of this value.",
   "Enter a value within the allowed range.": "Enter a value within the allowed range."

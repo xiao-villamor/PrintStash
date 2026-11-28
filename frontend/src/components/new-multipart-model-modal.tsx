@@ -145,8 +145,10 @@ export function NewMultipartModelModal({
                 className={`${inputClasses} h-auto min-h-9 max-h-32 resize-none [field-sizing:content]`}
               />
             </FormField>
-            <div className="min-w-0 space-y-1.5">
-              <span className="text-sm font-medium">{t("multipart.collectionLabel")}</span>
+            <div className="min-w-0">
+              <span className="mb-1.5 block text-field font-medium text-foreground">
+                {t("multipart.collectionLabel")}
+              </span>
               <DropdownMenu
                 open={pickerOpen}
                 onOpenChange={setPickerOpen}

@@ -132,4 +132,46 @@ describe("design consistency", () => {
     const globals = fs.readFileSync(path.resolve(root, "globals.css"), "utf8");
     expect(globals).toMatch(/\.dark \.text-primary\s*\{[^}]*color:\s*#7896bc/);
   });
+
+  describe("token contrast", () => {
+    const globals = fs.readFileSync(path.resolve(root, "globals.css"), "utf8");
+    const block = (selector: RegExp) =>
+      [...globals.matchAll(selector)].map((m) => m[0]).find((css) => css.includes("--accent:")) ??
+      "";
+    const light = block(/:root,\s*\[data-preview-theme="light"\]\s*\{[^}]*\}/g);
+    const dark = block(/\.dark,\s*\[data-preview-theme="dark"\]\s*\{[^}]*\}/g);
+    const token = (css: string, name: string) =>
+      css.match(new RegExp(`${name}:\\s*([^;]+);`))?.[1].trim() ?? "";
+    const rgb = (value: string, under?: number[]): number[] => {
+      const hex = value.match(/^#([0-9a-f]{6})$/i);
+      if (hex) return [0, 2, 4].map((i) => parseInt(hex[1].slice(i, i + 2), 16));
+      const rgba = value.match(/rgb\((\d+) (\d+) (\d+) \/ ([\d.]+)\)/);
+      if (!rgba || !under) throw new Error(`unreadable colour: ${value}`);
+      const alpha = Number(rgba[4]);
+      return [1, 2, 3].map((i) => Math.round(Number(rgba[i]) * alpha + under[i - 1] * (1 - alpha)));
+    };
+    const luminance = (c: number[]) => {
+      const [r, g, b] = c.map((v) => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const ratio = (a: number[], b: number[]) => {
+      const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+      return (hi + 0.05) / (lo + 0.05);
+    };
+
+    for (const [name, css] of [
+      ["light", light],
+      ["dark", dark],
+    ] as const) {
+      it(`keeps secondary text readable on the selected fill in the ${name} theme`, () => {
+        const under = rgb(token(css, "--card"));
+        const text = rgb(token(css, "--muted-foreground"));
+        expect(ratio(text, rgb(token(css, "--accent"), under))).toBeGreaterThanOrEqual(4.5);
+        expect(ratio(text, rgb(token(css, "--background"), under))).toBeGreaterThanOrEqual(4.5);
+      });
+    }
+  });
 });

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,8 @@ export function FilamentSpoolPrice({
   disabled: boolean;
   onApply: (cost: string) => void;
 }) {
+  const priceId = useId();
+  const weightId = useId();
   const [price, setPrice] = useState("");
   const [weight, setWeight] = useState("");
   const cost = (Number(price) / Number(weight)) * 1000;
@@ -24,9 +26,11 @@ export function FilamentSpoolPrice({
       <legend className="pr-2 text-sm font-medium">{uiText("Calculate from spool price")}</legend>
       <div className="grid gap-3 sm:grid-cols-2">
         <FormField
+          htmlFor={priceId}
           label={currency ? `${uiText("Spool price")} (${currency})` : uiText("Spool price")}
         >
           <Input
+            id={priceId}
             type="number"
             min="0"
             step="any"
@@ -36,10 +40,12 @@ export function FilamentSpoolPrice({
           />
         </FormField>
         <FormField
+          htmlFor={weightId}
           label={uiText("Net filament weight (g)")}
           hint={uiText("Exclude the empty spool.")}
         >
           <Input
+            id={weightId}
             type="number"
             min="0"
             step="any"

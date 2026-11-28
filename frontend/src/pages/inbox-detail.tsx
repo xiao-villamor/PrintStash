@@ -6,7 +6,7 @@ import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { getErrorMessage, userMessage } from "@/lib/errors";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { ArrowLeft, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
 import { useParams } from "@tanstack/react-router";
 
 import { Badge } from "@/components/ui/badge";
@@ -315,12 +315,15 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
         </div>
       )}
       <PageHeader
-        title={t("inbox.title")}
+        title={title}
         description={t("inbox.detailDescription")}
         actions={
           <>
             <Button variant="outline" size="sm" asChild>
-              <Link href="/inbox">{t("inbox.back")}</Link>
+              <Link href="/inbox">
+                <ArrowLeft className="h-4 w-4" aria-hidden />
+                {t("inbox.back")}
+              </Link>
             </Button>
             {item.state === "completed" && item.resulting_model_id && (
               <Button size="sm" asChild>
@@ -330,6 +333,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
             {sourceUrl && (
               <Button variant="outline" size="sm" asChild>
                 <a href={sourceUrl} target="_blank" rel="noreferrer">
+                  <ExternalLink className="h-4 w-4" aria-hidden />
                   {uiText("Open source")}
                 </a>
               </Button>
@@ -340,8 +344,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
       <div className="overflow-hidden rounded-lg border border-border bg-card">
         <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-5">
           <div className="min-w-0">
-            <h2 className="break-words text-sm font-semibold">{title}</h2>
-            <p className="mt-2 text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               {inboxProviderLabel(item) || t("inbox.sourcePreparing")} ·{" "}
               <time
                 dateTime={item.created_at}
@@ -356,15 +359,19 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
             )}
           </div>
           <div className="flex items-center gap-2">
-            <span
-              className={
+            <Badge
+              variant={
                 item.state === "failed"
-                  ? "text-xs text-destructive"
-                  : "text-xs text-muted-foreground"
+                  ? "destructive"
+                  : item.state === "completed"
+                    ? "success"
+                    : item.state === "review"
+                      ? "warning"
+                      : "secondary"
               }
             >
               {statusLabel(item, t)}
-            </span>
+            </Badge>
             <Button
               variant="ghost"
               size="icon-sm"
@@ -379,13 +386,21 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
         {item.error_code && (
           <div
             role="alert"
-            className="m-4 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            className="mx-5 mb-5 flex flex-wrap items-center gap-3 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
           >
-            {getErrorMessage(item.error_code)}
-            {item.error_code === "staging_expired" && sourceUrl && (
-              <a className="ml-2 underline" href={sourceUrl} target="_blank" rel="noreferrer">
-                {uiText("Return to the source and capture the files again")}
-              </a>
+            <span className="min-w-0 flex-1">
+              {getErrorMessage(item.error_code)}
+              {item.error_code === "staging_expired" && sourceUrl && (
+                <a className="ml-2 underline" href={sourceUrl} target="_blank" rel="noreferrer">
+                  {uiText("Return to the source and capture the files again")}
+                </a>
+              )}
+            </span>
+            {item.state === "failed" && item.retryable && item.error_code !== "staging_expired" && (
+              <Button variant="outline" size="xs" onClick={() => void retry()}>
+                <RefreshCw className="h-4 w-4" aria-hidden />
+                {t("inbox.retry")}
+              </Button>
             )}
           </div>
         )}
@@ -621,11 +636,17 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
             </CardContent>
           </Card>
         )}
-        {item.state === "failed" && item.retryable && item.error_code !== "staging_expired" && (
-          <Button variant="outline" onClick={() => void retry()}>
-            {t("inbox.retry")}
-          </Button>
-        )}
+        {item.state === "failed" &&
+          item.retryable &&
+          item.error_code !== "staging_expired" &&
+          !item.error_code && (
+            <div className="px-5 pb-5">
+              <Button variant="outline" size="xs" onClick={() => void retry()}>
+                <RefreshCw className="h-4 w-4" aria-hidden />
+                {t("inbox.retry")}
+              </Button>
+            </div>
+          )}
       </div>
       <ConfirmModal
         open={confirmDelete}

@@ -144,6 +144,7 @@ export function UploadModal({
   // ingest task. No mesh+G-code linking (that stays on the "Files" tab).
   // Picking/dropping a folder mirrors its subfolders into nested collections.
   const [bulkSelection, setBulkSelection] = useState<BulkSelection>(EMPTY_BULK);
+  const [archiveInFiles, setArchiveInFiles] = useState(false);
   const bulkFiles = bulkSelection.kind === "bulk" ? bulkSelection.items : [];
   const zipFile = bulkSelection.kind === "zip" ? bulkSelection.file : null;
   const submissionKind = mode === "files" ? "files" : bulkSelection.kind;
@@ -663,6 +664,12 @@ export function UploadModal({
                     accept={SOURCE_ACCEPT}
                     file={meshFile}
                     setFile={(f) => {
+                      if (f && isArchiveFile(f.name)) {
+                        setMeshFile(null);
+                        setArchiveInFiles(true);
+                        return;
+                      }
+                      setArchiveInFiles(false);
                       setMeshFile(f);
                       if (f) autoName(f);
                     }}
@@ -684,6 +691,27 @@ export function UploadModal({
                     dropLabel={uiText("Drop G-code or")}
                     inputRef={gcodeRef}
                   />
+                  {archiveInFiles && (
+                    <div
+                      role="alert"
+                      className="col-span-full flex flex-wrap items-center gap-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                    >
+                      <span className="min-w-0 flex-1">
+                        {uiText("ZIP archives are uploaded from the Bulk tab.")}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        onClick={() => {
+                          setArchiveInFiles(false);
+                          setMode("bulk");
+                        }}
+                      >
+                        {uiText("Open Bulk tab")}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <>

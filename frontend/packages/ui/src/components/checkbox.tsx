@@ -31,7 +31,7 @@ export const Checkbox = forwardRef<
         onChange(!checked);
       }}
       className={cn(
-        "flex h-5 w-5 items-center justify-center rounded border border-input transition-[background-color,border-color,transform] duration-press hover:border-ring active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-card disabled:pointer-events-none disabled:opacity-50 motion-reduce:transition-none motion-reduce:active:scale-100",
+        "relative flex h-5 w-5 items-center justify-center rounded border after:absolute after:-inset-[3px] after:content-[''] pointer-coarse:after:-inset-[10px] border-input transition-[background-color,border-color,transform] duration-press hover:border-ring active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-card disabled:pointer-events-none disabled:opacity-50 motion-reduce:transition-none motion-reduce:active:scale-100",
         checked ? "bg-accent text-accent-foreground" : "bg-card",
         className,
       )}

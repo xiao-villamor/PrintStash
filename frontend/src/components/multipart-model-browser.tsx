@@ -730,7 +730,7 @@ function PartEditorRow({
         <div className="min-w-0 flex-1 space-y-1">
           <label
             htmlFor={`multipart-part-${part.id}`}
-            className="block text-xs text-muted-foreground"
+            className="block text-xs leading-4 text-muted-foreground"
           >
             {t("multipart.partName")}
           </label>
@@ -741,7 +741,7 @@ function PartEditorRow({
             placeholder={t("multipart.partNamePlaceholder")}
           />
         </div>
-        <label className="col-start-2 block space-y-1 text-xs text-muted-foreground sm:col-start-3 sm:row-start-1">
+        <label className="col-start-2 block space-y-1 text-xs leading-4 text-muted-foreground sm:col-start-3 sm:row-start-1">
           {t("build.quantity")}
           <Input
             type="number"

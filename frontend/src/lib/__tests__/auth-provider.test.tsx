@@ -350,6 +350,17 @@ describe("AuthProvider", () => {
       await waitFor(() => expect(screen.getByText("signed out")).toBeInTheDocument());
     });
 
+    it("keeps the stored user when the first check meets a server error", async () => {
+      withStoredSession();
+      renderProvider({
+        getMe: vi
+          .fn<AuthApi["getMe"]>()
+          .mockRejectedValue(new ApiError(503, "unavailable", "unavailable")),
+      });
+
+      expect(await screen.findByText("signed in as maker")).toBeInTheDocument();
+    });
+
     it("keeps the user signed in when the server errors during a refresh", async () => {
       withStoredSession();
       renderProvider({

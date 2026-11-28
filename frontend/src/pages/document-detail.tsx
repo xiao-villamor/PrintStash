@@ -554,6 +554,7 @@ export default function DocumentDetailPage({
               loading={printing}
               disabled={printing || !draftBody}
             >
+              <Download className="h-4 w-4" aria-hidden />
               {uiText("Export as PDF")}
             </Button>
           )}

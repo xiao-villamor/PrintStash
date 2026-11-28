@@ -116,6 +116,7 @@ import {
   CircleDollarSign,
   Globe,
   Folder,
+  RefreshCw,
 } from "lucide-react";
 import { Printer3D } from "@/components/ui/printer-3d";
 import { FilamentSpool } from "@/components/ui/filament-spool";
@@ -2789,6 +2790,7 @@ export function SettingsPanel() {
             trashPage ? (
               <>
                 <Button size="sm" variant="outline" onClick={loadTrash} disabled={trashLoading}>
+                  <RefreshCw className="h-4 w-4" aria-hidden />
                   {t("Refresh")}
                 </Button>
                 {user?.is_superuser && reviewExpiredButton}

@@ -162,7 +162,9 @@ export function CollectionOverviewCard({
           }
           className={compact ? "collection-card-collage shrink-0" : "collection-card-collage"}
         />
-        <div className={`flex min-w-0 flex-1 items-center gap-3 ${compact ? "" : "px-3 py-3"}`}>
+        <div
+          className={`flex min-w-0 flex-1 items-center gap-3 ${compact ? "" : "px-3 py-3"} ${selectable ? "pr-10" : ""}`}
+        >
           <div className="min-w-0 flex-1">
             <div
               className={`collection-card-name flex min-w-0 items-start gap-1.5 text-sm font-semibold leading-5 text-foreground ${compact ? "" : "min-h-10"}`}
