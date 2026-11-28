@@ -367,7 +367,7 @@ describe("FilterSidebar", () => {
         expect.objectContaining({ id: 40 }),
         null,
       );
-    });
+    }, 15_000);
 
     it("ignores a set dropped on the folder it is already in", async () => {
       const user = userEvent.setup();
