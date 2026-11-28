@@ -100,6 +100,8 @@ export default function LoginPage() {
     const nextMissing = { username: !username.trim(), password: !password };
     setMissing(nextMissing);
     if (nextMissing.username || nextMissing.password) {
+      // A new field problem replaces the previous server answer instead of sitting beside it.
+      setFormError(null);
       document.getElementById(nextMissing.username ? "username" : "password")?.focus();
       return;
     }

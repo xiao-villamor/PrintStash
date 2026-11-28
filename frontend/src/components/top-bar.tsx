@@ -369,6 +369,7 @@ export function TopBar() {
           }}
           align="end"
           role="dialog"
+          aria-label={t("nav.notifications")}
           className="flex"
           trigger={
             <button

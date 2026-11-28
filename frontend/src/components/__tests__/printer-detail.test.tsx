@@ -723,7 +723,7 @@ describe("PrinterDetailPage", () => {
       expect(job.getByRole("button", { name: "Pause" })).toBeEnabled();
     });
 
-    it("asks the printer to cancel", async () => {
+    it("asks the printer to cancel only after the person confirms", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderPrinter({
         routes: { "POST /api/v1/printers/4/cancel": json({ ok: true }) },
@@ -732,6 +732,9 @@ describe("PrinterDetailPage", () => {
       await pushSnapshot(PRINTING);
 
       await user.click(await screen.findByRole("button", { name: /Cancel/ }));
+      const dialog = await screen.findByRole("dialog", { name: "Cancel this print?" });
+      expect(requestsWithMethod("POST").some((call) => call.url.includes("/cancel"))).toBe(false);
+      await user.click(within(dialog).getByRole("button", { name: "Cancel print" }));
 
       await waitFor(() =>
         expect(requestsWithMethod("POST").some((call) => call.url.includes("/cancel"))).toBe(true),

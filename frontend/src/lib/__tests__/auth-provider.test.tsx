@@ -23,6 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useState } from "react";
 
+import { ApiError } from "@/lib/errors";
 import { AuthProvider } from "@/lib/auth-provider";
 import { useAuth, type AuthApi } from "@/lib/auth-context";
 import { clearLogin, getUser, storeLogin } from "@/lib/auth-store";
@@ -347,6 +348,38 @@ describe("AuthProvider", () => {
       screen.getByRole("button", { name: "refresh" }).click();
 
       await waitFor(() => expect(screen.getByText("signed out")).toBeInTheDocument());
+    });
+
+    it("keeps the user signed in when the server errors during a refresh", async () => {
+      withStoredSession();
+      renderProvider({
+        getMe: vi
+          .fn<AuthApi["getMe"]>()
+          .mockResolvedValueOnce(aUser())
+          .mockRejectedValue(new ApiError(503, "unavailable", "unavailable")),
+      });
+      await screen.findByText("signed in as maker");
+
+      screen.getByRole("button", { name: "refresh" }).click();
+
+      await act(async () => {});
+      expect(screen.getByText("signed in as maker")).toBeInTheDocument();
+    });
+
+    it("keeps the user signed in when the connection drops during a refresh", async () => {
+      withStoredSession();
+      renderProvider({
+        getMe: vi
+          .fn<AuthApi["getMe"]>()
+          .mockResolvedValueOnce(aUser())
+          .mockRejectedValue(new TypeError("Failed to fetch")),
+      });
+      await screen.findByText("signed in as maker");
+
+      screen.getByRole("button", { name: "refresh" }).click();
+
+      await act(async () => {});
+      expect(screen.getByText("signed in as maker")).toBeInTheDocument();
     });
   });
 });

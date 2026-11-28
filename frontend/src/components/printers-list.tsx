@@ -8,7 +8,7 @@ import { PrinterSettingsReview } from "@/features/printers/settings-review";
 import { knownUiText, uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { lazy, Suspense, useId, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "@/lib/link";
 import {
   PrinterRead,
@@ -118,6 +118,12 @@ function groupPrinters(printers: PrinterRead[]) {
 /** Resolve a <select> value back to the setup kind it was rendered from. */
 function parseSetupKind(value: string): PrinterSetupKind | null {
   return PRINTER_SETUP_OPTIONS.find((option) => option.value === value)?.value ?? null;
+}
+
+/** A host or IP, optionally with a scheme, port and path; `://` or `http://` alone is not one. */
+function looksLikePrinterAddress(value: string): boolean {
+  const rest = value.trim().replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+  return /^[a-z0-9]([a-z0-9._-]*[a-z0-9])?(:\d{1,5})?(\/\S*)?$/i.test(rest);
 }
 
 export function PrintersPage() {
@@ -1207,6 +1213,14 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
   const [modelName, setModelName] = useState("");
   const [setupKind, setSetupKind] = useState<PrinterSetupKind>("moonraker");
   const [url, setUrl] = useState("");
+  const addressInput = useRef<HTMLInputElement>(null);
+  const addressProblem =
+    url.trim() !== "" && !looksLikePrinterAddress(url)
+      ? uiText("Enter an address like http://192.168.1.20:7125")
+      : "";
+  useEffect(() => {
+    addressInput.current?.setCustomValidity(addressProblem);
+  }, [addressProblem]);
   const [moonrakerKey, setMoonrakerKey] = useState("");
   const [bambuSerial, setBambuSerial] = useState("");
   const [bambuAccessCode, setBambuAccessCode] = useState("");
@@ -1293,12 +1307,7 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
             <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
               {uiText("Cancel")}
             </Button>
-            <Button
-              type="submit"
-              form={formId}
-              loading={submitting}
-              disabled={!name.trim() || !url.trim()}
-            >
+            <Button type="submit" form={formId} loading={submitting}>
               {uiText("Add printer")}
             </Button>
           </>
@@ -1367,6 +1376,7 @@ function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreate
               >
                 <Input
                   id="printer-address"
+                  ref={addressInput}
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   aria-describedby="printer-address-hint"

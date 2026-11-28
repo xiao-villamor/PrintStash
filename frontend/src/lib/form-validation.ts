@@ -15,6 +15,7 @@ export function useFieldError(id: string | undefined): string | undefined {
 function messageFor(control: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement): string {
   const { validity } = control;
   if (validity.valueMissing) return uiText("This field is required.");
+  if (validity.customError && control.validationMessage) return control.validationMessage;
   if (validity.typeMismatch && control instanceof HTMLInputElement) {
     if (control.type === "email") return uiText("Enter a valid email address.");
     if (control.type === "url") return uiText("Enter a valid URL.");

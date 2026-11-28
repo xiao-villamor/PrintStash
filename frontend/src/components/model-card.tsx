@@ -267,7 +267,7 @@ function ModelCardInner({
               draggable ? "cursor-grab active:cursor-grabbing" : ""
             } ${dragging ? "opacity-40" : ""} ${
               selected
-                ? "border-border bg-accent text-accent-foreground"
+                ? "border-border-strong bg-accent text-accent-foreground"
                 : "border-border hover:border-border-strong"
             }`}
           >

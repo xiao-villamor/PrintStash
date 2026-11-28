@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/components/ui/button";
 import { StagedInputRecovery } from "@/components/staged-input-recovery";
 
 import { ApiError, getErrorMessage } from "@/lib/errors";
@@ -51,7 +52,7 @@ export function TaskList({
       }
     >
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <span className="text-sm font-semibold text-foreground">{uiText("Tasks")}</span>
+        <span className="text-sm font-semibold text-foreground">{uiText("Notifications")}</span>
         {tasks.some(
           (task) =>
             (task.status === "completed" || task.status === "failed") && !needsArchiveReview(task),
@@ -267,15 +268,16 @@ function TaskRow({ task, onNavigate }: { task: TaskItem; onNavigate?: () => void
             </button>
           )}
           {needsArchiveReview(task) && (
-            <button
+            <Button
               type="button"
+              size="xs"
+              className="mt-2"
               onClick={() => {
                 if (task.jobId) requestArchiveReview(task.jobId);
               }}
-              className="mt-2 rounded border border-border px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {uiText("Choose ZIP files")}
-            </button>
+            </Button>
           )}
           {task.similarityRunId !== undefined && (
             <Link

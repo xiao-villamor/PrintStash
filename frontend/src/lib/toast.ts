@@ -125,7 +125,7 @@ export const toast = {
 
   /** Show a neutral info toast. */
   info(message: string, description?: string): void {
-    sonner(message, { description, duration: 4000 });
+    sonner.info(message, { description, duration: 4000 });
   },
 };
 

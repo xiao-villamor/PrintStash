@@ -6287,6 +6287,12 @@
   "Other sign-in options could not be loaded.": "Other sign-in options could not be loaded.",
   "Notifications, {count} in progress": "Notifications, {count} in progress",
   "Save and close": "Save and close",
+  "Enter an address like http://192.168.1.20:7125": "Enter an address like http://192.168.1.20:7125",
+  "Cancel this print?": "Cancel this print?",
+  "The running print stops and can't be resumed.": "The running print stops and can't be resumed.",
+  "Cancel print": "Cancel print",
+  "Retained input: {size} · {count} staged file": "Retained input: {size} · {count} staged file",
+  "Messages": "Messages",
   "Enter a valid value.": "Enter a valid value.",
   "Check the length of this value.": "Check the length of this value.",
   "Enter a value within the allowed range.": "Enter a value within the allowed range."

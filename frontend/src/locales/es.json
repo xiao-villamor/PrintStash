@@ -6287,6 +6287,12 @@
   "Other sign-in options could not be loaded.": "No se pudieron cargar otras opciones de inicio de sesión.",
   "Notifications, {count} in progress": "Notificaciones, {count} en curso",
   "Save and close": "Guardar y cerrar",
+  "Enter an address like http://192.168.1.20:7125": "Introduce una dirección como http://192.168.1.20:7125",
+  "Cancel this print?": "¿Cancelar esta impresión?",
+  "The running print stops and can't be resumed.": "La impresión en curso se detiene y no se puede reanudar.",
+  "Cancel print": "Cancelar impresión",
+  "Retained input: {size} · {count} staged file": "Entrada conservada: {size} · {count} archivo temporal",
+  "Messages": "Mensajes",
   "Enter a valid value.": "Introduce un valor válido.",
   "Check the length of this value.": "Revisa la longitud de este valor.",
   "Enter a value within the allowed range.": "Introduce un valor dentro del rango permitido."

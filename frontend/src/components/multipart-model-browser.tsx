@@ -1435,7 +1435,7 @@ function MultipartDetail({ id }: { id: number }) {
       {isEditing ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 pb-24 sm:px-6 md:pb-6">
           <div className="grid min-w-0 items-start gap-5">
-            <section className="min-w-0 overflow-hidden border border-border bg-card [&>fieldset]:border-x-0 [&>fieldset]:border-t-0">
+            <section className="min-w-0 overflow-hidden rounded-lg border border-border bg-card [&>fieldset]:border-x-0 [&>fieldset]:border-t-0">
               <div className="border-b border-border px-5 py-4">
                 <div>
                   <h2 className="text-sm font-semibold">{t("multipart.contents")}</h2>

@@ -65,7 +65,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         if (archiveJobId === job.job_id) return;
         toast.successAction(
           uiText("ZIP ready. Choose which files to add."),
-          uiText("Choose files"),
+          uiText("Choose ZIP files"),
           () => setArchiveJobId(job.job_id),
           `archive-review:${job.job_id}`,
         );

@@ -379,7 +379,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
         {item.error_code && (
           <div
             role="alert"
-            className="rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            className="m-4 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
           >
             {getErrorMessage(item.error_code)}
             {item.error_code === "staging_expired" && sourceUrl && (

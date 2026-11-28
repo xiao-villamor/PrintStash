@@ -218,6 +218,20 @@ describe("PrinterSetupForm", () => {
     );
   });
 
+  it("rejects an address that is only a scheme instead of saving it", async () => {
+    await openForm();
+    const dialog = screen.getByRole("dialog", { name: "Add printer" });
+    await userEvent.type(within(dialog).getByLabelText("Name"), "Ender");
+    await userEvent.type(screen.getByLabelText("Moonraker URL"), "://");
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Add printer" }));
+
+    expect(
+      await within(dialog).findByText("Enter an address like http://192.168.1.20:7125"),
+    ).toBeVisible();
+    expect(screen.getByLabelText("Moonraker URL")).toHaveAttribute("aria-invalid", "true");
+  });
+
   it("explains that .local names may not resolve from the container", async () => {
     await openForm();
     expect(screen.getByLabelText("Moonraker URL")).toHaveAccessibleDescription(

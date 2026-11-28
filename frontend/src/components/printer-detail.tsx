@@ -267,6 +267,7 @@ function PrinterDetailView({
   const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
   const [syncingFiles, setSyncingFiles] = useState(false);
   const [confirmEmergencyStop, setConfirmEmergencyStop] = useState(false);
+  const [confirmCancelPrint, setConfirmCancelPrint] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<PrinterFileRead | null>(null);
   const lifetime = useRef(0);
 
@@ -397,9 +398,14 @@ function PrinterDetailView({
       machineAction("job", () => pausePrinter(printerId), uiMessage("Pause command sent")),
     resume: () =>
       machineAction("job", () => resumePrinter(printerId), uiMessage("Resume command sent")),
-    cancel: () =>
-      machineAction("job", () => cancelPrinter(printerId), uiMessage("Cancel command sent")),
+    // Cancelling discards a running print for good, so it asks first, like Emergency stop.
+    cancel: () => setConfirmCancelPrint(true),
   };
+
+  async function confirmCancelPrintAction() {
+    await machineAction("job", () => cancelPrinter(printerId), uiMessage("Cancel command sent"));
+    setConfirmCancelPrint(false);
+  }
 
   async function machineAction<T>(
     key: PrinterCommandPanel,
@@ -849,6 +855,15 @@ function PrinterDetailView({
             />
           </Suspense>
         )}
+        <ConfirmModal
+          open={confirmCancelPrint}
+          onClose={() => setConfirmCancelPrint(false)}
+          onConfirm={confirmCancelPrintAction}
+          busy={machineBusy === "job"}
+          title={uiText("Cancel this print?")}
+          description={uiText("The running print stops and can't be resumed.")}
+          confirmLabel={uiText("Cancel print")}
+        />
         <ConfirmModal
           open={confirmEmergencyStop}
           onClose={() => {

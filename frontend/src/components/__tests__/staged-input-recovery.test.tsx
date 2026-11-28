@@ -27,7 +27,7 @@ describe("StagedInputRecovery", () => {
 
   it("shows retained capacity", () => {
     render(<StagedInputRecovery jobId="job-1" staging={staging} onDiscard={() => {}} />);
-    expect(screen.getByText(/Retained input:.*1.*staged files/)).toBeVisible();
+    expect(screen.getByText(/Retained input:.*1.*staged file/)).toBeVisible();
   });
 
   it("waits for confirmation before releasing input", async () => {
