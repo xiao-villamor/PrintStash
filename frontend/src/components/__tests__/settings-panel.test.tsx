@@ -979,6 +979,9 @@ describe("SettingsPanel", () => {
       });
 
       await user.click(await screen.findByRole("button", { name: "Revoke API key" }));
+      expect(requestsWithMethod("DELETE")).toEqual([]);
+      const dialog = await screen.findByRole("dialog", { name: "Revoke this API key?" });
+      await user.click(within(dialog).getByRole("button", { name: "Revoke API key" }));
 
       await waitFor(() =>
         expect(

@@ -6304,6 +6304,8 @@
   "Choose a G-code file first.": "Elige primero un archivo G-code.",
   "ZIP archives are uploaded from the Bulk tab.": "Los archivos ZIP se suben desde la pestaña Bulk.",
   "Open Bulk tab": "Abrir pestaña Bulk",
+  "Revoke this API key?": "¿Revocar esta clave de API?",
+  "Anything using this key stops working immediately. This cannot be undone.": "Todo lo que use esta clave dejará de funcionar de inmediato. No se puede deshacer.",
   "Enter a valid value.": "Introduce un valor válido.",
   "Check the length of this value.": "Revisa la longitud de este valor.",
   "Enter a value within the allowed range.": "Introduce un valor dentro del rango permitido."

@@ -32,7 +32,7 @@
     --secondary-foreground: #ffffff;
     --muted: #f1f3f6;
     --muted-foreground: #4b586b;
-    --accent: #d3dbe7;
+    --accent: #c8d2e1;
     --accent-foreground: #101828;
     --destructive: #b42318;
     --destructive-foreground: #ffffff;
@@ -552,8 +552,8 @@
   min-width: 0;
 }
 
-.printstash-toaster [data-sonner-toast] [data-description] {
-  color: var(--muted-foreground);
+.printstash-toaster [data-sonner-toast][data-styled="true"] [data-description] {
+  color: var(--muted-foreground) !important;
 }
 
 .printstash-toaster [data-sonner-toast][data-styled="true"] [data-close-button] {

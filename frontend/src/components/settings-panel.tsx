@@ -1507,6 +1507,7 @@ export function SettingsPanel() {
   function setupBrowserExtension() {
     return issueApiKey(true);
   }
+  const [revokeKeyId, setRevokeKeyId] = useState<number | null>(null);
   async function deleteApiKey(id: number) {
     if (!user || keyBusy || apiKeysQuery.isError || apiKeysQuery.isPending) return;
     const session = getSessionVersion();
@@ -2591,6 +2592,20 @@ export function SettingsPanel() {
   return (
     <Localized>
       <div className="settings-frame">
+        <ConfirmModal
+          open={revokeKeyId !== null}
+          onClose={() => setRevokeKeyId(null)}
+          onConfirm={() => {
+            const id = revokeKeyId;
+            setRevokeKeyId(null);
+            if (id !== null) void deleteApiKey(id);
+          }}
+          title={uiText("Revoke this API key?")}
+          description={uiText(
+            "Anything using this key stops working immediately. This cannot be undone.",
+          )}
+          confirmLabel={uiText("Revoke API key")}
+        />
         <ConfirmModal
           open={restartConfirmOpen}
           variant="default"
@@ -4201,7 +4216,7 @@ export function SettingsPanel() {
                                 </p>
                                 <button
                                   type="button"
-                                  onClick={() => deleteApiKey(key.id)}
+                                  onClick={() => setRevokeKeyId(key.id)}
                                   disabled={
                                     keyBusy || apiKeysQuery.isError || apiKeysQuery.isPending
                                   }
